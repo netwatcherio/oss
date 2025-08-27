@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, reactive, toRefs } from "vue";
-import siteService from "@/services/siteService";
+import siteService from "@/services/workspaceService";
 import agentService from "@/services/agentService";
 import type { Site, Agent } from "@/types";
 import core from "@/core";

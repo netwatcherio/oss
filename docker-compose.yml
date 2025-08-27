@@ -20,7 +20,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     # pass envs through to let Caddyfile use {$VARS} if you do that
     env_file:
-      - .env
+      - .env.example
     healthcheck:
       # simple HTTP check on :80; change to https://127.0.0.1 if you prefer TLS probe
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
@@ -110,5 +110,5 @@ services:
     depends_on:
       caddy:
         condition: service_healthy
-      nw-guardian:
+      controller:
         condition: service_healthy

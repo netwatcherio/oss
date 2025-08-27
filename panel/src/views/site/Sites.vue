@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { Site } from "@/types";
 import { onMounted, reactive, computed } from "vue";
-import siteService from "@/services/siteService";
+import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
 import Element from "@/components/Element.vue";
 

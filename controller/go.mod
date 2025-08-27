@@ -3,7 +3,7 @@ module netwatcher-controller
 go 1.21.1
 
 require (
-	github.com/golang-jwt/jwt/v5 v5.0.0
+	github.com/golang-jwt/jwt/v5 v5.2.0
 	github.com/iris-contrib/middleware/jwt v0.0.0-20230925171251-c76f4baec331
 	github.com/joho/godotenv v1.5.1
 	github.com/kataras/iris/v12 v12.2.7
@@ -12,7 +12,10 @@ require (
 	go.mongodb.org/mongo-driver v1.12.1
 	golang.org/x/crypto v0.31.0
 	gorm.io/datatypes v1.2.6
+	gorm.io/driver/mysql v1.5.6
 	gorm.io/driver/postgres v1.6.0
+	gorm.io/driver/sqlite v1.4.3
+	gorm.io/driver/sqlserver v1.6.0
 	gorm.io/gorm v1.30.1
 )
 
@@ -32,6 +35,8 @@ require (
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.3.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/gomarkdown/markdown v0.0.0-20230922112808-5421fefb8386 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -57,9 +62,11 @@ require (
 	github.com/mailgun/raymond/v2 v2.0.48 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-sqlite3 v1.14.15 // indirect
 	github.com/mediocregopher/radix/v3 v3.8.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe // indirect
+	github.com/microsoft/go-mssqldb v1.7.2 // indirect
+	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/nats-io/nats.go v1.28.0 // indirect
 	github.com/nats-io/nkeys v0.4.4 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
@@ -85,5 +92,4 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/mysql v1.5.6 // indirect
 )

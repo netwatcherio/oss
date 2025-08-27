@@ -49,9 +49,9 @@ func (r *Router) Init() {
 	r.App.Use(ProxyIPMiddleware)
 
 	// Register routes (now that services are available on Router)
-	r.Routes = append(r.Routes, addRouteAuth(r)...)
+	addRouteAuth(r)
 	r.Routes = append(r.Routes, addRouteAgents(r)...)
-	r.Routes = append(r.Routes, addRouteSites(r)...)
+	r.Routes = append(r.Routes, addRouteWorkspaces(r)...)
 	r.Routes = append(r.Routes, addRouteAgentAPI(r)...)
 	// r.Routes = append(r.Routes, addRouteProbes(r)...)
 
@@ -101,6 +101,12 @@ func (r *Router) LoadRoutes(JWT bool) {
 			})
 		case RouteType_DELETE:
 			r.App.Delete(v.Path, func(ctx iris.Context) {
+				if err := v.Func(ctx); err != nil {
+					log.Error(err)
+				}
+			})
+		case RouteType_PATCH:
+			r.App.Patch(v.Path, func(ctx iris.Context) {
 				if err := v.Func(ctx); err != nil {
 					log.Error(err)
 				}

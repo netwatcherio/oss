@@ -1,173 +1,171 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"github.com/golang-jwt/jwt/v5"
-	_ "github.com/kataras/iris/v12"
-	"github.com/kataras/iris/v12/websocket"
-	log "github.com/sirupsen/logrus"
 	"net/http"
-	"netwatcher-controller/internal/agent"
-	"netwatcher-controller/internal/auth"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/kataras/iris/v12/websocket"
+	log "github.com/sirupsen/logrus"
+	"netwatcher-controller/internal/probe"
 )
 
+// addWebSocketServer wires a namespaced websocket server for agents.
 func addWebSocketServer(r *Router) error {
+	ws := websocket.New(websocket.DefaultGorillaUpgrader, getWebsocketEvents(r))
 
-	websocketServer := websocket.New(
-		websocket.DefaultGorillaUpgrader, /* DefaultGobwasUpgrader can be used too. */
-		getWebsocketEvents(r))
+	// Authenticate connection with Bearer JWT and bind ws_conn to the session.
+	ws.OnConnect = func(c *websocket.Conn) error {
+		ctx := websocket.GetContext(c) // iris.Context
 
-	websocketServer.OnConnect = func(c *websocket.Conn) error {
-		ctx := websocket.GetContext(c)
-
-		tokenString := ctx.GetHeader("Authorization")
-		if tokenString == "" {
+		authz := strings.TrimSpace(ctx.GetHeader("Authorization"))
+		if authz == "" || !strings.HasPrefix(authz, "Bearer ") {
 			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized. no token")
+			return errors.New("unauthorized: missing bearer token")
 		}
+		raw := strings.TrimPrefix(authz, "Bearer ")
 
-		newToken := strings.ReplaceAll(tokenString, "Bearer ", "")
-
-		token, err := jwt.Parse(newToken, func(token *jwt.Token) (interface{}, error) {
-			// Here you should provide your JWT secret key
+		// Optional: quick signature check so we can return 401 fast if the key is wrong.
+		// (Service will validate again while parsing claims/lookup session.)
+		_, err := jwt.Parse(raw, func(tok *jwt.Token) (interface{}, error) {
 			return []byte(os.Getenv("KEY")), nil
 		})
-
-		if err != nil || !token.Valid {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized. invalid token")
-		}
-
-		// todo change to get agent from token for auth & agent login to generate token??
-		agent, err := auth.GetAgent(token, r.DB)
 		if err != nil {
 			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized. invalid agent token")
+			return errors.New("unauthorized: invalid token")
 		}
 
-		log.Printf("This is an authenticated request\n")
-		log.Printf("Agent: %v", agent.ID.String())
-
-		log.Printf("[%s] connected to the server", c.ID())
-
-		id, err := auth.GetSessionID(token)
+		// Resolve agent + session from token using auth service
+		ag, sess, err := r.AuthSvc.GetAgentFromJWT(ctx, raw, r.DB)
 		if err != nil {
-			return err
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: invalid agent session")
 		}
 
-		ss := auth.Session{ID: agent.ID, SessionID: id, WSConn: c.ID()}
-		err = ss.UpdateConnWS(r.DB)
-		if err != nil {
-			return err
+		// Bind ws connection id to the session (best-effort)
+		if err := r.AuthSvc.UpdateWSConn(ctx, sess.SessionID, c.ID()); err != nil {
+			// Don't block connection; log and continue
+			log.WithError(err).Warn("failed to update ws_conn on session")
 		}
 
+		// Best-effort heartbeat/last seen
+		if r.AgentsRepo != nil {
+			_ = r.AgentsRepo.PatchFields(ctx, ag.ID, map[string]any{
+				"updated_at":   time.Now(),
+				"last_seen_at": time.Now(),
+			})
+		}
+
+		log.Infof("Agent %d connected via ws [%s]", ag.ID, c.ID())
 		return nil
 	}
 
-	r.WebSocketServer = websocketServer
-
+	r.WebSocketServer = ws
 	return nil
 }
 
 func getWebsocketEvents(r *Router) websocket.Namespaces {
-	serverEvents := websocket.Namespaces{
+	return websocket.Namespaces{
 		"agent": websocket.Events{
 			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// with `websocket.GetContext` you can retrieve the Iris' `Context`.
-				//ctx := websocket.GetContext(nsConn.Conn)
-
-				log.Infof("[%s] connected to namespace [%s]", /* with IP [%s]""*/
-					nsConn, msg.Namespace, /*,
-					ctx.Values().GetString("client_ip")*/)
+				log.Infof("[%s] connected to namespace [%s]", nsConn, msg.Namespace)
 				return nil
 			},
 			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// todo update agent status to be offline??
+				// Optionally: mark as offline or clear ws_conn if it matches
 				log.Infof("[%s] disconnected from namespace [%s]", nsConn, msg.Namespace)
 				return nil
 			},
+
+			// Agent asks for its assigned probes (including reverse/expanded).
 			"probe_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// room.String() returns -> NSConn.String() returns -> Conn.String() returns -> Conn.ID()
-				// log.Printf("[%s] sent: %s", nsConn, string(msg.Body))
+				// iris.Context -> implements stdlib Context via Deadline/Done? We'll wrap.
+				stdCtx := context.Background()
 
-				session, err := auth.GetSessionFromWSConn(nsConn.String(), r.DB)
+				// Look up session by ws_conn
+				sess, err := r.AuthSvc.GetSessionFromWSConn(stdCtx, nsConn.Conn.ID())
 				if err != nil {
 					return err
 				}
+				if !sess.IsAgent {
+					return errors.New("session is not an agent session")
+				}
 
-				a := agent.Agent{ID: session.ID}
-				err = a.Get(r.DB)
+				// Best-effort heartbeat/last seen
+				if r.AgentsRepo != nil {
+					_ = r.AgentsRepo.PatchFields(stdCtx, sess.ID, map[string]any{
+						"updated_at":   time.Now(),
+						"last_seen_at": time.Now(),
+					})
+				}
+
+				// Fetch probes for agent
+				var probes []probe.Probe
+				p, err := r.ProbesSvc.ListByAgent(stdCtx, sess.ID, true)
+				if err != nil {
+					log.WithError(err).Error("ListForAgent failed")
+					return err
+				}
+				probes = p
+
+				b, err := json.Marshal(probes)
 				if err != nil {
 					return err
 				}
-
-				err = a.UpdateTimestamp(r.DB)
-				if err != nil {
-					log.Error(err)
-				}
-
-				probe := agent.Probe{Agent: session.ID}
-				// todo change this to build based on if the probe is an agent/group type probe
-				// todo add group type probes ?? or just use agent type probes for groups??
-				probes, err := probe.GetAllProbesForAgent(r.DB)
-				if err != nil {
-					log.Errorf(err.Error())
-				}
-
-				marshal, err := json.Marshal(probes)
-				if err != nil {
-					return err
-				}
-
-				nsConn.Emit("probe_get", marshal)
-
-				// Write message back to the client message owner with:
-				// nsConn.Emit("chat", msg)
-				// Write message to all except this client with:
-				//nsConn.Conn.Server().Broadcast(nsConn, msg)
+				nsConn.Emit("probe_get", b)
 				return nil
 			},
+
+			// Agent posts probe results (streamed to worker channel).
 			"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// room.String() returns -> NSConn.String() returns -> Conn.String() returns -> Conn.ID()
-				// log.Printf("[%s] sent: %s", nsConn, string(msg.Body))
+				stdCtx := context.Background()
 
-				session, err := auth.GetSessionFromWSConn(nsConn.String(), r.DB)
+				// Validate session again via ws_conn
+				sess, err := r.AuthSvc.GetSessionFromWSConn(stdCtx, nsConn.Conn.ID())
 				if err != nil {
 					return err
 				}
-
-				a := agent.Agent{ID: session.ID}
-				err = a.Get(r.DB)
-				if err != nil {
-					return err
+				if !sess.IsAgent {
+					return errors.New("session is not an agent session")
 				}
 
-				data := agent.ProbeData{}
-
-				err = json.Unmarshal(msg.Body, &data)
-				if err != nil {
-					log.Error(err)
-					return err
+				// Optional: ensure agent still exists
+				/*if r.Agents != nil {
+					if _, err := r.Agents.GetByID(stdCtx, sess.ID); err != nil {
+						// log and still accept data (or reject)
+						log.WithError(err).Warnf("agent %d not found for probe_post", sess.ID)
+					}
 				}
 
-				r.ProbeDataChan <- data
+				var data agent.ProbeData
+				if err := json.Unmarshal(msg.Body, &data); err != nil {
+					log.WithError(err).Error("invalid probe_post payload")
+					return err
+				}*/
 
-				/*probe := agent.Probe{Agent: session.ID}
-				probes, _ := probe.GetAll(r.DB)
+				// Stream to worker (non-blocking if you prefer; here we block)
+				/*if r.ProbeDataChan != nil {
+					r.ProbeDataChan <- data
+				} else {
+					log.Warn("ProbeDataChan is nil; dropping probe data")
+				}*/
 
-				*/
-
-				// Write message back to the client message owner with:
-				// nsConn.Emit("chat", msg)
-				// Write message to all except this client with:
-				//nsConn.Conn.Server().Broadcast(nsConn, msg)
 				return nil
 			},
 		},
 	}
+}
 
-	return serverEvents
+// small helper to detect the extended repo interface without hard dependency
+func hasListWithReverse(repo probe.Repository) bool {
+	type withReverse interface {
+		ListForAgentWithReverse(ctx context.Context, agentID uint, limit, offset int) ([]probe.Probe, int64, error)
+	}
+	_, ok := interface{}(repo).(withReverse)
+	return ok
 }

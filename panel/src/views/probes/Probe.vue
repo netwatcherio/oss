@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { onMounted, reactive, watch, ref, nextTick } from "vue";
 import core from "@/core";
-import siteService from "@/services/siteService";
+import siteService from "@/services/workspaceService";
 import agentService from "@/services/agentService";
 import probeService from "@/services/probeService";
 import type {

@@ -1,9 +1,9 @@
 
 import SiteView from "@/views/site/Index.vue";
 // @ts-ignore
-import Site from "@/views/site/SiteDashboard.vue";
+import Site from "@/views/site/WorkspaceDashboard.vue";
 import Sites from "@/views/site/Sites.vue";
-import SiteNew from "@/views/site/NewSite.vue";
+import SiteNew from "@/views/site/NewWorkspace.vue";
 import Invite from "@/views/site/InviteMember.vue";
 import AgentGroups from "@/views/site/AgentGroups.vue";
 import AgentGroupsNew from "@/views/site/NewAgentGroup.vue";

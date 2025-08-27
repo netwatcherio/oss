@@ -19,4 +19,5 @@ const (
 	RouteType_POST      RouteType = "POST"
 	RouteType_WEBSOCKET RouteType = "WEBSOCKET"
 	RouteType_DELETE    RouteType = "DELETE"
+	RouteType_PATCH     RouteType = "PATCH"
 )

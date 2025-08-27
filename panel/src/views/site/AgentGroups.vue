@@ -2,7 +2,7 @@
 
 import type {AgentGroup, Site} from "@/types";
 import {onMounted, reactive} from "vue";
-import siteService from "@/services/siteService";
+import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
 import core from "@/core";
 import {Agent} from "@/types";

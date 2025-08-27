@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import {onMounted, reactive, computed} from "vue";
-import siteService from "@/services/siteService";
+import siteService from "@/services/workspaceService";
 import core from "@/core";
 import type {Agent, Site} from "@/types";
 import Title from "@/components/Title.vue";
