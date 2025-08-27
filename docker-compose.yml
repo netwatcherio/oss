@@ -1,0 +1,114 @@
+version: "3.9"
+
+volumes:
+  clickhouse_data: {}
+  postgres_data: {}
+
+networks:
+  netwatcher:
+    driver: bridge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks: [netwatcher]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    # pass envs through to let Caddyfile use {$VARS} if you do that
+    env_file:
+      - .env
+    healthcheck:
+      # simple HTTP check on :80; change to https://127.0.0.1 if you prefer TLS probe
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  postgres:
+    image: ghcr.io/ferretdb/postgres-documentdb:${POSTGRES_IMAGE_TAG}
+    restart: on-failure
+    networks: [netwatcher]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG}
+    restart: unless-stopped
+    networks: [netwatcher]
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT}:9000"
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', '127.0.0.1:8123/ping']
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # === New services ===
+
+  controller:
+    image: netwatcher-controller
+    restart: unless-stopped
+    networks: [netwatcher]
+    # no host port mapping; Caddy (and other services) talk to it on the Docker network
+    environment:
+      DEBUG: ${NW_CONTROLLER__DEBUG:-true}
+      LISTEN: ${NW_CONTROLLER_LISTEN:-0.0.0.0:8080}
+      KEY: ${NW_GUARDIAN_KEY}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # If your app also needs CH/PG URLs, add them like:
+      # CLICKHOUSE_URL: ${CLICKHOUSE_URL}
+      # POSTGRES_URL: ${POSTGRES_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      # Change /health if your app exposes a different path or use a TCP check:
+      # ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q 127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  panel:
+    image: netwatcher-panel
+    restart: unless-stopped
+    networks: [netwatcher]
+    environment:
+      NW_GLOBAL_ENDPOINT: ${NW_GLOBAL_ENDPOINT}
+    ports:
+      - "3000:3000"   # keep for local dev access; optional if only behind Caddy
+    depends_on:
+      caddy:
+        condition: service_healthy
+      nw-guardian:
+        condition: service_healthy

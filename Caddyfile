@@ -1,0 +1,28 @@
+# You can keep a shared snippet for the proxy headers
+(common_cf_headers) {
+	# Trust Cloudflare-provided client IP if you’re truly behind CF
+	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+}
+
+# API site
+{$API_DOMAIN} {
+	@ws {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy {$CONTROLLER_UPSTREAM} {
+		import common_cf_headers
+	}
+}
+
+# App site
+{$APP_DOMAIN} {
+	@ws {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy {$CLIENT_UPSTREAM} {
+		import common_cf_headers
+	}
+}
