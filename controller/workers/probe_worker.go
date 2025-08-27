@@ -1,11 +1,5 @@
 package workers
 
-import (
-	log "github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/mongo"
-	"netwatcher-controller/internal/agent"
-)
-
 /*
 func Push2Loki(cd *agent.Data, db *mongo.Database) error {
 	// List of default labels which would be attached to every log message
@@ -56,7 +50,7 @@ func Push2Loki(cd *agent.Data, db *mongo.Database) error {
 		promtailClient.LogfWithLabels(promtail.Info, customLabels, "Still here")*/
 //}*/
 
-func CreateProbeDataWorker(c chan agent.ProbeData, db *mongo.Database) {
+/*func CreateProbeDataWorker(c chan agent.ProbeData, db *mongo.Database) {
 	go func(cc chan agent.ProbeData) {
 		for {
 			data := <-cc
@@ -67,7 +61,7 @@ func CreateProbeDataWorker(c chan agent.ProbeData, db *mongo.Database) {
 			}
 		}
 	}(c)
-}
+}*/
 
 /*func CreateCheckWorker(c chan agent.Data, db *mongo.Database) {
 	go func(cl chan agent.Data) {

@@ -6,6 +6,7 @@ import (
 	"github.com/kataras/neffos"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"netwatcher-controller/internal/workspace"
 
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/auth"
@@ -17,21 +18,23 @@ type Router struct {
 	DB              *gorm.DB
 	Routes          []*Route
 	WebSocketServer *neffos.Server
-	ProbeDataChan   chan agent.ProbeData
+	// ProbeDataChan   chan agent.ProbeData
 
 	// NEW: services/repos
-	AuthSvc    auth.Service
-	AgentsRepo agent.Repository
-	ProbesSvc  probe.Service
+	AuthSvc       auth.Service
+	AgentsRepo    agent.Repository
+	ProbesSvc     probe.Service
+	WorkspacesSvc workspace.Service
 }
 
-func NewRouter(db *gorm.DB, authSvc auth.Service, agentsRepo agent.Repository, probesSvc probe.Service) *Router {
+func NewRouter(db *gorm.DB, authSvc auth.Service, agentsRepo agent.Repository, probesSvc probe.Service, workspaceSvc workspace.Service) *Router {
 	return &Router{
-		App:        iris.New(),
-		DB:         db,
-		AuthSvc:    authSvc,
-		AgentsRepo: agentsRepo,
-		ProbesSvc:  probesSvc,
+		App:           iris.New(),
+		DB:            db,
+		AuthSvc:       authSvc,
+		AgentsRepo:    agentsRepo,
+		ProbesSvc:     probesSvc,
+		WorkspacesSvc: workspaceSvc,
 	}
 }
 
@@ -92,6 +95,12 @@ func (r *Router) LoadRoutes(JWT bool) {
 			})
 		case RouteType_POST:
 			r.App.Post(v.Path, func(ctx iris.Context) {
+				if err := v.Func(ctx); err != nil {
+					log.Error(err)
+				}
+			})
+		case RouteType_DELETE:
+			r.App.Delete(v.Path, func(ctx iris.Context) {
 				if err := v.Func(ctx); err != nil {
 					log.Error(err)
 				}

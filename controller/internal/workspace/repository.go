@@ -36,6 +36,12 @@ type Repository interface {
 	RemoveMember(ctx context.Context, workspaceID, memberID uint) error
 	TransferOwnership(ctx context.Context, workspaceID, newOwnerMemberID uint) error
 
+	// AuthZ helpers
+	GetMemberByUserID(ctx context.Context, workspaceID, userID uint) (*WorkspaceMember, error)
+	GetMemberRole(ctx context.Context, workspaceID, userID uint) (Role, error)
+	IsMember(ctx context.Context, workspaceID, userID uint) (bool, error)
+	ListMembershipsForUser(ctx context.Context, userID uint) ([]WorkspaceMember, error)
+
 	// Agents convenience
 	ListAgentsByWorkspace(ctx context.Context, workspaceID uint, limit, offset int) ([]agent.Agent, int64, error)
 }
@@ -48,25 +54,18 @@ func NewRepository(db *gorm.DB) Repository { return &gormRepo{db: db} }
 
 func (r *gormRepo) CreateWorkspace(ctx context.Context, ws *Workspace) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Basic defaults
 		if ws.Labels == nil {
 			ws.Labels = []byte(`{}`)
 		}
 		if ws.Metadata == nil {
 			ws.Metadata = []byte(`{}`)
 		}
-
-		// Enforce exactly one owner (OwnerUserID must be set)
 		if ws.OwnerUserID == 0 {
 			return ErrNoOwner
 		}
-
-		// Create WS
 		if err := tx.Create(ws).Error; err != nil {
 			return err
 		}
-
-		// Create OWNER member row
 		owner := &WorkspaceMember{
 			WorkspaceID: ws.ID,
 			UserID:      ws.OwnerUserID,
@@ -114,8 +113,6 @@ func (r *gormRepo) ListWorkspacesForUser(ctx context.Context, userID uint, limit
 		items []Workspace
 		total int64
 	)
-
-	// Join via workspace_members
 	sub := r.db.WithContext(ctx).Model(&WorkspaceMember{}).
 		Select("workspace_id").
 		Where("user_id = ? AND revoked_at IS NULL", userID)
@@ -146,7 +143,6 @@ func (r *gormRepo) AddMemberByUserID(ctx context.Context, workspaceID, userID ui
 		AcceptedAt:  ptrTime(time.Now()),
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// check duplicate by (workspace_id,user_id)
 		var cnt int64
 		if err := tx.Model(&WorkspaceMember{}).
 			Where("workspace_id = ? AND user_id = ? AND revoked_at IS NULL", workspaceID, userID).
@@ -177,7 +173,6 @@ func (r *gormRepo) InviteMemberByEmail(ctx context.Context, workspaceID uint, em
 		InvitedAt:   &now,
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Soft uniqueness on (workspace_id,email) where not revoked/accepted
 		var cnt int64
 		if err := tx.Model(&WorkspaceMember{}).
 			Where("workspace_id = ? AND email = ? AND revoked_at IS NULL AND accepted_at IS NULL", workspaceID, email).
@@ -213,9 +208,7 @@ func (r *gormRepo) UpdateMemberRole(ctx context.Context, workspaceID, memberID u
 			}
 			return err
 		}
-		// Prevent creating multiple owners accidentally
 		if role == RoleOwner {
-			// ensure no other owner
 			var cnt int64
 			if err := tx.Model(&WorkspaceMember{}).
 				Where("workspace_id = ? AND role = ? AND id <> ? AND revoked_at IS NULL", workspaceID, RoleOwner, memberID).
@@ -239,7 +232,6 @@ func (r *gormRepo) RemoveMember(ctx context.Context, workspaceID, memberID uint)
 			}
 			return err
 		}
-		// Can't remove the owner via plain removal; must transfer or delete workspace.
 		if m.Role == RoleOwner {
 			return ErrNotOwner
 		}
@@ -254,7 +246,6 @@ func (r *gormRepo) RemoveMember(ctx context.Context, workspaceID, memberID uint)
 
 func (r *gormRepo) TransferOwnership(ctx context.Context, workspaceID, newOwnerMemberID uint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Find current owner
 		var currentOwner WorkspaceMember
 		if err := tx.First(&currentOwner, "workspace_id = ? AND role = ? AND revoked_at IS NULL", workspaceID, RoleOwner).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -262,7 +253,6 @@ func (r *gormRepo) TransferOwnership(ctx context.Context, workspaceID, newOwnerM
 			}
 			return err
 		}
-		// Find target
 		var target WorkspaceMember
 		if err := tx.First(&target, "id = ? AND workspace_id = ? AND revoked_at IS NULL", newOwnerMemberID, workspaceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -270,14 +260,12 @@ func (r *gormRepo) TransferOwnership(ctx context.Context, workspaceID, newOwnerM
 			}
 			return err
 		}
-		// Update roles
 		if err := tx.Model(&WorkspaceMember{}).Where("id = ?", currentOwner.ID).Update("role", RoleAdmin).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&WorkspaceMember{}).Where("id = ?", target.ID).Update("role", RoleOwner).Error; err != nil {
 			return err
 		}
-		// Update denormalized OwnerUserID on workspace if target has UserID
 		if target.UserID != 0 {
 			if err := tx.Model(&Workspace{}).Where("id = ?", workspaceID).Update("owner_user_id", target.UserID).Error; err != nil {
 				return err
@@ -285,6 +273,45 @@ func (r *gormRepo) TransferOwnership(ctx context.Context, workspaceID, newOwnerM
 		}
 		return nil
 	})
+}
+
+// ---------- AuthZ helpers ----------
+
+func (r *gormRepo) GetMemberByUserID(ctx context.Context, workspaceID, userID uint) (*WorkspaceMember, error) {
+	var m WorkspaceMember
+	err := r.db.WithContext(ctx).
+		Where("workspace_id = ? AND user_id = ? AND revoked_at IS NULL", workspaceID, userID).
+		First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMemberNotFound
+	}
+	return &m, err
+}
+
+func (r *gormRepo) GetMemberRole(ctx context.Context, workspaceID, userID uint) (Role, error) {
+	m, err := r.GetMemberByUserID(ctx, workspaceID, userID)
+	if err != nil {
+		return "", err
+	}
+	return m.Role, nil
+}
+
+func (r *gormRepo) IsMember(ctx context.Context, workspaceID, userID uint) (bool, error) {
+	var cnt int64
+	err := r.db.WithContext(ctx).
+		Model(&WorkspaceMember{}).
+		Where("workspace_id = ? AND user_id = ? AND revoked_at IS NULL", workspaceID, userID).
+		Count(&cnt).Error
+	return cnt > 0, err
+}
+
+func (r *gormRepo) ListMembershipsForUser(ctx context.Context, userID uint) ([]WorkspaceMember, error) {
+	var out []WorkspaceMember
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Order("workspace_id ASC").
+		Find(&out).Error
+	return out, err
 }
 
 // ---------- Agents convenience ----------
@@ -320,11 +347,9 @@ func isValidRole(r Role) bool {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
-// Optional: ensure indexes you care about exist beyond AutoMigrate.
 func ensureIndexes(db *gorm.DB) error {
 	type idx struct{ name, sql string }
 	indexes := []idx{
-		// Composite for (workspace_id, user_id) uniqueness when user bound
 		{
 			name: "idx_members_ws_user",
 			sql:  "CREATE INDEX IF NOT EXISTS idx_members_ws_user ON workspace_members (workspace_id, user_id)",

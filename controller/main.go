@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"netwatcher-controller/internal/database"
+	"netwatcher-controller/internal/workspace"
 	"netwatcher-controller/web"
 	"os"
 	"os/signal"
@@ -48,11 +49,11 @@ func main() {
 	}
 
 	// ---- Build services ----
-	authSvc, agentsRepo, probesSvc := buildServices(db)
+	authSvc, agentsRepo, probesSvc, workspaceSvc := buildServices(db)
 
 	// ---- Router ----
-	r := web.NewRouter(db, authSvc, agentsRepo, probesSvc)
-	r.ProbeDataChan = make(chan agentpkg.ProbeData, 1024)
+	r := web.NewRouter(db, authSvc, agentsRepo, probesSvc, workspaceSvc)
+	// r.ProbeDataChan = make(chan agentpkg.ProbeData, 1024)
 
 	// Example CORS (unchanged)
 	crs := func(ctx iris.Context) {
@@ -81,7 +82,7 @@ func main() {
 
 // ---- wiring helpers ----
 
-func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Service) {
+func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Service, workspace.Service) {
 	// Users repo/svc
 	usersRepo := userspkg.NewRepository(db)
 	usersSvc := userspkg.NewService(usersRepo)
@@ -96,7 +97,9 @@ func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Ser
 	// Auth service
 	authSvc := auth.NewService(db, usersRepo, usersSvc, agentsRepo)
 
-	return authSvc, agentsRepo, probesSvc
+	workspaceSvc := workspace.NewService(workspace.NewRepository(db), usersRepo)
+
+	return authSvc, agentsRepo, probesSvc, workspaceSvc
 }
 
 func handleSignals() {
