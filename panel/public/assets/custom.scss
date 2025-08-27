@@ -1,0 +1,196 @@
+
+
+$body-bg: rgba(241,245,249,1);
+$border-color: rgb(230, 231, 233);
+$card-border-color: rgb(230, 231, 233);
+$card-border-radius: 0.7rem;
+$btn-border-radius: 4px;
+$primary: #206bc4;
+$card-box-shadow: 0 0 4px rgba(29,39,59, 0.04);
+
+.element {
+  .list {
+
+  }
+}
+
+.label-code {
+  font-family: "JetBrains Mono", monospace;
+}
+
+@import "../../node_modules/bootstrap/scss/bootstrap";
+
+$baseElevation: 24px;
+/* Label Sizes */
+$elevationNames: (
+        "0": 0,
+        "1": 0.05,
+        "2": 0.07,
+        "3": 0.08,
+        "4": 0.09,
+        "6": 0.11,
+        "8": 0.12,
+        "12": 0.14,
+        "16": 0.15,
+        "24": 0.16,
+);
+/* Label Sizes */
+@each $clr, $i in $elevationNames {
+  .dp-#{$clr} {
+    background-color: rgba(255, 255, 255, 1-$i);
+  }
+}
+
+$base: 24px;
+/* Label Sizes */
+$fontSizes: (
+        "cn3": $base + 6px,
+        "cn2": $base + 4px,
+        "cn1": $base + 2px,
+        "c0": $base,
+        "c1": $base - 2px,
+        "c2": $base - 4px,
+        "c3": $base - 6px,
+        "c4": $base - 8px,
+        "c5": $base - 10px,
+        "c6": $base - 12px,
+        "c7": $base - 14px,
+);
+
+@each $clr, $i in $fontSizes {
+  .label-#{$clr} {
+    font-size: $i;
+    line-height: $i;
+  }
+}
+
+/* Label Weights */
+$fontWeights: (
+        "100": 100,
+        "200": 200,
+        "300": 300,
+        "400": 400,
+        "500": 500,
+        "600": 600,
+        "700": 700,
+        "800": 800,
+        "900": 900,
+);
+
+@each $clr, $i in $fontWeights {
+  .label-w#{$clr} {
+    font-weight: $i;
+  }
+}
+
+/* Label Opacities */
+$fontColors: (
+        "0": 8,
+        "1": 7,
+        "2": 6,
+        "3": 5,
+        "4": 4,
+        "5": 3,
+        "6": 2,
+        "7": 1,
+        "8": 0,
+);
+
+
+@each $clr, $i in $fontColors {
+  .label-o#{$clr} {
+    color: rgba(0,0,0, $i * 0.125);
+
+  }
+}
+
+.label-underlined {
+  text-decoration: underline !important;
+}
+
+.label-title {
+  @extend .label-o0, .label-w600, .label-cn2;
+
+}
+
+.label-subtext {
+  @extend .label-o3, .label-w400, .label-c4;
+}
+
+.breadcrumb-item.active {
+  text-decoration: none !important;
+  font-weight: 600 !important;
+  font-size: 0.8rem;
+}
+.breadcrumb-item.router-link-active {
+  text-decoration: none !important;
+  font-weight: 600 !important;
+  font-size: 0.8rem;
+}
+
+.btn {
+  box-shadow: 0 1px 0 rgba(29,39,59, 0.04), inset 0 -1px 0 rgba(29,39,59, 0.2);
+  font-size: 14px;
+  padding-inline: 1.25rem;
+}
+
+.breadcrumb-item {
+
+}
+
+a:link { text-decoration: none; }
+
+
+
+.element {
+
+}
+
+
+.code-copy {
+  cursor: pointer;
+}
+
+code {
+  background-color: rgba(230, 231, 233, 0.5);
+  font-family: 'Roboto Mono', monospace;
+  box-shadow: 0 1px 0 rgba(29,39,59, 0.04), inset 0 -1px 0 rgba(29,39,59, 0.2);
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: $primary;
+}
+
+.nav-divider {
+  width: 2px; height: 1.6rem;
+  background-color: $border-color;
+}
+
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.nav-link.nav-link-static {
+  background-color: rgba($border-color, 0.5);
+}
+.logo {
+  font-family: 'Roboto Condensed', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.sidebar {
+  border-right: 1px solid $border-color !important;
+}
+
+.nav-link-static {
+  cursor: pointer !important;
+}
+
+.navbar {
+  border-bottom: 1px solid $border-color !important;
+}

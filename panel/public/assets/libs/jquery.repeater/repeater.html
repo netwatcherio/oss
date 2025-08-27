@@ -1,0 +1,59 @@
+<form action="echo.php" class="repeater" enctype="multipart/form-data">
+    <div data-repeater-list="group-a">
+        <div data-repeater-item>
+            <input name="untyped-input" value="A"/>
+
+            <input name="text-input" type="text" value="A"/>
+
+            <input name="date-input" type="date"/>
+
+            <textarea name="textarea-input">A</textarea>
+
+            <input checked name="radio-input" type="radio" value="A"/>
+            <input name="radio-input" type="radio" value="B"/>
+
+            <input checked name="checkbox-input" type="checkbox" value="A"/>
+            <input name="checkbox-input" type="checkbox" value="B"/>
+
+            <select name="select-input">
+                <option selected value="A">A</option>
+                <option value="B">B</option>
+            </select>
+
+            <select multiple name="multiple-select-input">
+                <option selected value="A">A</option>
+                <option selected value="B">B</option>
+            </select>
+
+            <input data-repeater-delete type="button" value="Delete"/>
+        </div>
+        <div data-repeater-item>
+            <input name="untyped-input" value="A"/>
+
+            <input name="text-input" type="text" value="B"/>
+
+            <input name="date-input" type="date"/>
+
+            <textarea name="textarea-input">B</textarea>
+
+            <input name="radio-input" type="radio" value="A"/>
+            <input checked name="radio-input" type="radio" value="B"/>
+
+            <input name="checkbox-input" type="checkbox" value="A"/>
+            <input checked name="checkbox-input" type="checkbox" value="B"/>
+
+            <select name="select-input">
+                <option value="A">A</option>
+                <option selected value="B">B</option>
+            </select>
+
+            <select multiple name="multiple-select-input">
+                <option selected value="A">A</option>
+                <option selected value="B">B</option>
+            </select>
+
+            <input data-repeater-delete type="button" value="Delete"/>
+        </div>
+    </div>
+    <input data-repeater-create type="button" value="Add"/>
+</form>

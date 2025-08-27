@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Jasmine Spec Runner</title>
+    <% css.forEach(function(style){ %>
+    <link href="<%= style %>" rel="stylesheet" type="text/css"/>
+    <% }) %> <% with (scripts) { %> <% [].concat(polyfills, jasmine, vendor,
+    helpers, src, specs, reporters, start).forEach(function(script){ %>
+    <script src="<%= script %>"></script>
+    <% }) %> <% }; %>
+</head>
+<body>
+<h3>Basic map</h3>
+<div id="basic-map" class="map"></div>
+<h3>Advanced map</h3>
+<div id="advanced-map" class="map"></div>
+<h3>Map with events</h3>
+<div id="map-with-events" class="map"></div>
+<h3>Map with markers</h3>
+<div id="map-with-markers" class="map"></div>
+<h3>Map with custom controls</h3>
+<div id="map-with-custom-controls" class="map"></div>
+<h3>Map with polygons</h3>
+<div id="map-with-polygons" class="map"></div>
+<h3>Map with layers</h3>
+<div id="map-with-layers" class="map"></div>
+<h3>Map with overlays</h3>
+<div id="map-with-overlays" class="map"></div>
+<h3>Map with routes</h3>
+<div id="map-with-routes" class="map"></div>
+<h3>Map with styles</h3>
+<div id="map-with-styles" class="map"></div>
+<h3>Street View Panorama</h3>
+<div id="streetview-standalone-panorama" class="panorama"></div>
+<h3>Map with Street View</h3>
+<div class="with-columns">
+    <div id="map-with-streetview" class="map"></div>
+    <div id="streetview-panorama" class="panorama"></div>
+</div>
+<h3>Street View Panorama with events</h3>
+<div id="streetview-with-events" class="panorama"></div>
+<h3>Events</h3>
+<div id="events" class="map"></div>
+</body>
+</html>

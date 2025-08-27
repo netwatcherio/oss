@@ -1,0 +1,792 @@
+<template>
+  <div class="latency-graph-container">
+    <!-- Statistics Summary -->
+    <div class="stats-row" v-if="statistics">
+      <div class="stat-card">
+        <div class="stat-label">Current Latency</div>
+        <div class="stat-value" :class="getLatencyClass(statistics.current)">
+          {{ statistics.current.toFixed(1) }} ms
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Average</div>
+        <div class="stat-value">{{ statistics.average.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Min / Max</div>
+        <div class="stat-value">{{ statistics.min.toFixed(1) }} / {{ statistics.max.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Packet Loss</div>
+        <div class="stat-value" :class="getPacketLossClass(statistics.avgPacketLoss)">
+          {{ statistics.avgPacketLoss.toFixed(1) }}%
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jitter</div>
+        <div class="stat-value">{{ statistics.jitter.toFixed(1) }} ms</div>
+      </div>
+    </div>
+
+    <!-- Chart Container -->
+    <div id="latencyGraph" ref="latencyGraph"></div>
+
+    <!-- Controls Row -->
+    <div class="controls-row">
+      <!-- Time Range Selector -->
+<!--      <div class="time-range-selector">
+        <button 
+          v-for="range in timeRanges" 
+          :key="range.value"
+          :class="['time-btn', { active: selectedRange === range.value }]"
+          @click="setTimeRange(range.value)">
+          {{ range.label }}
+        </button>tt
+      </div>-->
+      
+      <!-- Annotation Toggle -->
+      <div class="annotation-toggle">
+        <label class="toggle-label">
+          <input 
+            type="checkbox" 
+            v-model="showAnnotations" 
+            @change="toggleAnnotations"
+            class="toggle-input"
+          />
+          <span class="toggle-switch"></span>
+          <span class="toggle-text">Show All Annotations</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script lang="ts">
+import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
+import ApexCharts from 'apexcharts'
+import type { PingResult } from '@/types';
+
+export default {
+  name: 'LatencyGraph',
+  props: {
+    pingResults: Array as () => PingResult[],
+  },
+  setup(props: { pingResults: PingResult[]; }) {
+    const latencyGraph = ref(null);
+    const chart = ref<ApexCharts | null>(null);
+    const selectedRange = ref('all');
+    const showAnnotations = ref(true);
+    
+    const timeRanges = [
+      { label: '1H', value: '1h' },
+      { label: '6H', value: '6h' },
+      { label: '24H', value: '24h' },
+      { label: '7D', value: '7d' },
+      { label: 'All', value: 'all' }
+    ];
+
+    // Calculate statistics
+    const statistics = computed(() => {
+      if (!props.pingResults || props.pingResults.length === 0) return null;
+      
+      const avgRtts = props.pingResults.map(d => d.avgRtt / 1e6);
+      const minRtts = props.pingResults.map(d => d.minRtt / 1e6);
+      const maxRtts = props.pingResults.map(d => d.maxRtt / 1e6);
+      const packetLosses = props.pingResults.map(d => d.packetLoss);
+      
+      // Calculate jitter (average of std devs)
+      const jitter = props.pingResults.reduce((sum, d) => sum + (d.stdDevRtt / 1e6), 0) / props.pingResults.length;
+      
+      return {
+        current: avgRtts[avgRtts.length - 1] || 0,
+        average: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
+        min: Math.min(...minRtts),
+        max: Math.max(...maxRtts),
+        avgPacketLoss: packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length,
+        jitter: jitter
+      };
+    });
+
+    const getLatencyClass = (latency: number) => {
+      if (latency < 50) return 'good';
+      if (latency < 150) return 'fair';
+      if (latency < 300) return 'poor';
+      return 'critical';
+    };
+
+    const getPacketLossClass = (loss: number) => {
+      if (loss < 1) return 'good';
+      if (loss < 5) return 'fair';
+      if (loss < 10) return 'poor';
+      return 'critical';
+    };
+
+    const setTimeRange = (range: string) => {
+      selectedRange.value = range;
+      drawGraph();
+    };
+
+    const toggleAnnotations = () => {
+      if (chart.value) {
+        drawGraph();
+      }
+    };
+
+    const filterDataByTimeRange = (data: PingResult[]) => {
+      if (selectedRange.value === 'all') return data;
+      
+      const now = new Date().getTime();
+      const ranges: Record<string, number> = {
+        '1h': 60 * 60 * 1000,
+        '6h': 6 * 60 * 60 * 1000,
+        '24h': 24 * 60 * 60 * 1000,
+        '7d': 7 * 24 * 60 * 60 * 1000
+      };
+      
+      const cutoff = now - ranges[selectedRange.value];
+      return data.filter(d => d.stopTimestamp.getTime() > cutoff);
+    };
+
+    const drawGraph = () => {
+      if (!latencyGraph.value || !props.pingResults || props.pingResults.length === 0) {
+        return;
+      }
+
+      const filteredData = filterDataByTimeRange(props.pingResults);
+      
+      if (chart.value) {
+        chart.value.updateOptions(createChartOptions(filteredData, showAnnotations.value));
+      } else {
+        chart.value = new ApexCharts(latencyGraph.value, createChartOptions(filteredData, showAnnotations.value));
+        chart.value.render();
+      }
+    };
+
+    const resizeListener = () => {
+      if (chart.value && latencyGraph.value) {
+        chart.value.updateOptions({ 
+          chart: { width: (latencyGraph.value as HTMLElement).clientWidth } 
+        });
+      }
+    };
+
+    onMounted(() => {
+      drawGraph();
+      window.addEventListener('resize', resizeListener);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('resize', resizeListener);
+      if (chart.value) {
+        chart.value.destroy();
+        chart.value = null;
+      }
+    });
+
+    watch(() => props.pingResults, drawGraph, { deep: true });
+
+    return { 
+      latencyGraph, 
+      statistics, 
+      getLatencyClass, 
+      getPacketLossClass,
+      timeRanges,
+      selectedRange,
+      setTimeRange,
+      showAnnotations,
+      toggleAnnotations
+    };
+  },
+};
+
+const maxAllowedGap = 1000 * 90; // 90 seconds
+
+function createChartOptions(data: PingResult[], showAnnotations: boolean): ApexCharts.ApexOptions {
+  const sortedData = data.sort((a, b) => a.stopTimestamp.getTime() - b.stopTimestamp.getTime());
+
+  // Decimate data if too many points
+  const maxPoints = 500;
+  const decimationStep = Math.ceil(sortedData.length / maxPoints);
+  const decimatedData = sortedData.length > maxPoints 
+    ? sortedData.filter((_, i) => i % decimationStep === 0)
+    : sortedData;
+
+  // Create a separate series for packet loss areas
+  const packetLossAreas = [];
+  let currentLossArea = null;
+  
+  decimatedData.forEach((d, index) => {
+    if (d.packetLoss > 0) {
+      if (!currentLossArea) {
+        currentLossArea = {
+          data: [{
+            x: d.stopTimestamp.getTime(),
+            y: d.packetLoss
+          }]
+        };
+      } else {
+        currentLossArea.data.push({
+          x: d.stopTimestamp.getTime(),
+          y: d.packetLoss
+        });
+      }
+    } else {
+      if (currentLossArea) {
+        // Add a zero point at the end to close the area
+        currentLossArea.data.push({
+          x: d.stopTimestamp.getTime(),
+          y: 0
+        });
+        packetLossAreas.push(currentLossArea);
+        currentLossArea = null;
+      }
+    }
+  });
+  
+  if (currentLossArea) {
+    packetLossAreas.push(currentLossArea);
+  }
+
+  const series = [
+    {
+      name: 'Min RTT',
+      type: 'line',
+      data: decimatedData.map(d => ({ x: d.stopTimestamp.getTime(), y: d.minRtt / 1e6 }))
+    },
+    {
+      name: 'Avg RTT',
+      type: 'line',
+      data: decimatedData.map(d => ({ x: d.stopTimestamp.getTime(), y: d.avgRtt / 1e6 }))
+    },
+    {
+      name: 'Max RTT',
+      type: 'line',
+      data: decimatedData.map(d => ({ x: d.stopTimestamp.getTime(), y: d.maxRtt / 1e6 }))
+    },
+    {
+      name: 'Packet Loss',
+      type: 'area',
+      data: decimatedData.map(d => ({ x: d.stopTimestamp.getTime(), y: d.packetLoss }))
+    }
+  ];
+
+  const annotations: ApexAnnotations = {
+    xaxis: [],
+    yaxis: [],
+    points: []
+  };
+
+  // Gap annotations - always show these (check gaps in original data, not decimated data)
+  sortedData.forEach((current, index, array) => {
+    if (index > 0) {
+      const prev = array[index - 1];
+      const gap = current.stopTimestamp.getTime() - prev.stopTimestamp.getTime();
+      if (gap > maxAllowedGap) {
+        // Find the corresponding points in decimated data
+        const prevTime = prev.stopTimestamp.getTime();
+        const currentTime = current.stopTimestamp.getTime();
+        
+        // Only add annotation if both points exist in decimated data
+        const prevExists = decimatedData.some(d => d.stopTimestamp.getTime() === prevTime);
+        const currentExists = decimatedData.some(d => d.stopTimestamp.getTime() === currentTime);
+        
+        if (prevExists || currentExists) {
+          annotations.xaxis.push({
+            x: prevTime,
+            x2: currentTime,
+            strokeDashArray: 8,
+            fillColor: '#64748b',
+            opacity: 0.1,
+            label: {
+              style: {
+                fontSize: '11px',
+                color: '#64748b',
+                background: 'transparent',
+              },
+              text: 'Data Gap',
+              position: 'top',
+              orientation: 'horizontal'
+            }
+          });
+        }
+      }
+    }
+  });
+
+  // Calculate Y-axis with limited scale for better readability
+  const allRttValues = decimatedData.flatMap(d => [d.minRtt / 1e6, d.avgRtt / 1e6, d.maxRtt / 1e6]);
+  const avgRttValues = decimatedData.map(d => d.avgRtt / 1e6);
+  
+  // Calculate percentiles for determining normal range
+  const sortedAvgRtts = [...avgRttValues].sort((a, b) => a - b);
+  const p90Index = Math.floor(sortedAvgRtts.length * 0.90);
+  const p90Value = sortedAvgRtts[p90Index] || sortedAvgRtts[sortedAvgRtts.length - 1];
+  
+  // Set a reasonable Y-axis limit based on 90th percentile
+  const yMax = Math.min(Math.ceil(p90Value * 1.5 / 50) * 50, 500); // Cap at 500ms for readability
+
+  // Only add other annotations if showAnnotations is true
+  if (showAnnotations) {
+    // Add high latency anomaly annotations (>300ms)
+    const anomalyThreshold = 300; // 300ms threshold for anomalies
+    decimatedData.forEach((d, index) => {
+      const avgRtt = d.avgRtt / 1e6;
+      const maxRtt = d.maxRtt / 1e6;
+      
+      // Check if any RTT value exceeds the anomaly threshold
+      if (avgRtt > anomalyThreshold || maxRtt > anomalyThreshold) {
+        // Add annotation for the anomaly
+        annotations.points.push({
+          x: d.stopTimestamp.getTime(),
+          y: Math.min(avgRtt, yMax), // Cap at yMax for visibility
+          seriesIndex: 1, // Avg RTT series
+          marker: {
+            size: 8,
+            fillColor: '#ef4444',
+            strokeColor: '#fff',
+            strokeWidth: 2,
+            radius: 2
+          },
+          label: {
+            borderColor: '#ef4444',
+            style: {
+              color: '#fff',
+              background: '#ef4444',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            },
+            text: `Anomaly: ${avgRtt.toFixed(0)}ms`,
+            offsetY: -10
+          }
+        });
+        
+        // Also add a vertical line annotation for better visibility
+        annotations.xaxis.push({
+          x: d.stopTimestamp.getTime(),
+          strokeDashArray: 0,
+          borderColor: '#ef4444',
+          borderWidth: 2,
+          opacity: 0.3,
+          label: {
+            borderColor: '#ef4444',
+            style: {
+              color: '#fff',
+              background: '#ef4444'
+            },
+            text: 'High Latency',
+            position: 'top',
+            orientation: 'horizontal'
+          }
+        });
+      }
+    });
+  }
+
+  return {
+    series,
+    chart: {
+      height: 400,
+      type: 'line',
+      background: '#ffffff',
+      foreColor: '#374151',
+      animations: {
+        enabled: true,
+        easing: 'easeinout',
+        speed: 800,
+        animateGradually: {
+          enabled: true,
+          delay: 150
+        }
+      },
+      zoom: {
+        type: 'x',
+        enabled: true,
+        autoScaleYaxis: false // Keep Y-axis fixed to maintain scale
+      },
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: true,
+          zoom: true,
+          zoomin: true,
+          zoomout: true,
+          pan: true,
+          reset: true
+        }
+      }
+    },
+    colors: ['#10b981', '#3b82f6', '#ef4444', '#f59e0b'],
+    stroke: {
+      width: [2, 3, 2, 0],
+      curve: 'smooth',
+      dashArray: [5, 0, 5, 0]
+    },
+    fill: {
+      type: ['solid', 'solid', 'solid', 'gradient'],
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.5,
+        opacityTo: 0.2,
+        stops: [0, 90, 100]
+      }
+    },
+    markers: {
+      size: 0,
+      hover: {
+        sizeOffset: 6
+      }
+    },
+    xaxis: {
+      type: 'datetime',
+      labels: {
+        style: {
+          colors: '#6b7280',
+          fontSize: '12px'
+        },
+        datetimeUTC: false
+      },
+      axisBorder: {
+        color: '#e5e7eb'
+      },
+      axisTicks: {
+        color: '#e5e7eb'
+      }
+    },
+    yaxis: [
+      {
+        seriesName: ['Min RTT', 'Avg RTT', 'Max RTT'],
+        title: {
+          text: 'Round Trip Time (ms)',
+          style: {
+            color: '#374151',
+            fontSize: '14px',
+            fontWeight: 600
+          }
+        },
+        min: 0,
+        max: yMax,
+        tickAmount: 8,
+        labels: {
+          style: {
+            colors: '#6b7280',
+            fontSize: '12px'
+          },
+          formatter: (val) => val.toFixed(0)
+        }
+      },
+      {
+        seriesName: ['Packet Loss'],
+        opposite: true,
+        title: {
+          text: 'Packet Loss (%)',
+          style: {
+            color: '#374151',
+            fontSize: '14px',
+            fontWeight: 600
+          }
+        },
+        min: 0,
+        max: 100,
+        tickAmount: 5,
+        labels: {
+          style: {
+            colors: '#6b7280',
+            fontSize: '12px'
+          },
+          formatter: (val) => val.toFixed(0) + '%'
+        }
+      }
+    ],
+    tooltip: {
+      shared: true,
+      intersect: false,
+      theme: 'light',
+      x: {
+        format: 'dd MMM HH:mm:ss'
+      },
+      y: {
+        formatter: function (y, { seriesIndex }) {
+          if (typeof y !== "undefined") {
+            if (seriesIndex <= 2) {
+              return y.toFixed(1) + " ms";
+            } else {
+              return y.toFixed(1) + "%";
+            }
+          }
+          return y;
+        }
+      },
+      custom: function({ series, seriesIndex, dataPointIndex, w }: any) {
+        const timestamp = w.config.series[0].data[dataPointIndex].x;
+        const date = new Date(timestamp);
+        
+        let html = '<div class="custom-tooltip">';
+        html += `<div class="tooltip-title">${date.toLocaleString()}</div>`;
+        html += '<div class="tooltip-body">';
+        
+        w.config.series.forEach((s: any, idx: number) => {
+          const value = series[idx][dataPointIndex];
+          const color = w.config.colors[idx];
+          const name = s.name;
+          const formattedValue = idx <= 2 ? value.toFixed(1) + ' ms' : value.toFixed(1) + '%';
+          
+          html += `
+            <div class="tooltip-series">
+              <span class="tooltip-marker" style="background-color: ${color}"></span>
+              <span class="tooltip-label">${name}:</span>
+              <span class="tooltip-value">${formattedValue}</span>
+            </div>
+          `;
+        });
+        
+        html += '</div></div>';
+        return html;
+      }
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      floating: true,
+      offsetY: -25,
+      offsetX: -5,
+      markers: {
+        width: 12,
+        height: 12,
+        radius: 12
+      },
+      itemMargin: {
+        horizontal: 10
+      }
+    },
+    grid: {
+      borderColor: '#e5e7eb',
+      strokeDashArray: 0,
+      xaxis: {
+        lines: {
+          show: true
+        }
+      },
+      yaxis: {
+        lines: {
+          show: true
+        }
+      },
+      padding: {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0
+      }
+    },
+    annotations: annotations
+  };
+}
+</script>
+
+<style scoped>
+.latency-graph-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.stat-value.good {
+  color: #10b981;
+}
+
+.stat-value.fair {
+  color: #3b82f6;
+}
+
+.stat-value.poor {
+  color: #f59e0b;
+}
+
+.stat-value.critical {
+  color: #ef4444;
+}
+
+.controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.time-range-selector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.time-btn {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  background: white;
+  color: #6b7280;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.time-btn:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+
+.time-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+/* Annotation Toggle Styles */
+.annotation-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  background-color: #e5e7eb;
+  border-radius: 12px;
+  margin-right: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-input:checked + .toggle-switch {
+  background-color: #3b82f6;
+}
+
+.toggle-input:checked + .toggle-switch::after {
+  transform: translateX(20px);
+}
+
+.toggle-text {
+  font-size: 0.875rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+/* Custom tooltip styles */
+:deep(.custom-tooltip) {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.tooltip-title) {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+:deep(.tooltip-series) {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+}
+
+:deep(.tooltip-marker) {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+}
+
+:deep(.tooltip-label) {
+  color: #6b7280;
+  margin-right: 0.5rem;
+}
+
+:deep(.tooltip-value) {
+  color: #1f2937;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .controls-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .time-range-selector {
+    justify-content: center;
+  }
+  
+  .annotation-toggle {
+    justify-content: center;
+  }
+}
+</style>

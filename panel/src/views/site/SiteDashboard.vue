@@ -1,0 +1,535 @@
+<script lang="ts" setup>
+import {onMounted, reactive, computed} from "vue";
+import siteService from "@/services/siteService";
+import core from "@/core";
+import type {Agent, Site} from "@/types";
+import Title from "@/components/Title.vue";
+import Loader from "@/components/Loader.vue";
+import Code from "@/components/Code.vue";
+import agentService from "@/services/agentService";
+import Element from "@/components/Element.vue";
+import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
+import AgentCard from "@/components/AgentCard.vue";
+
+const state = reactive({
+  site: {} as Site,
+  agents: [] as Agent[],
+  ready: false,
+  loading: true,
+  searchQuery: '',
+  sortBy: 'status' as 'status' | 'name' | 'location' | 'updated'
+})
+
+let router = core.router()
+
+// Computed properties for filtering and sorting
+const filteredAgents = computed(() => {
+  let filtered = state.agents;
+  
+  // Apply search filter
+  if (state.searchQuery) {
+    const query = state.searchQuery.toLowerCase();
+    filtered = filtered.filter(agent => 
+      agent.name.toLowerCase().includes(query) ||
+      agent.location?.toLowerCase().includes(query) ||
+      agent.id.toLowerCase().includes(query)
+    );
+  }
+  
+  // Apply sorting
+  return filtered.sort((a, b) => {
+    switch (state.sortBy) {
+      case 'status':
+        return getOnlineStatus(b) - getOnlineStatus(a);
+      case 'name':
+        return a.name.localeCompare(b.name);
+      case 'location':
+        return (a.location || '').localeCompare(b.location || '');
+      case 'updated':
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      default:
+        return 0;
+    }
+  });
+});
+
+const onlineAgentsCount = computed(() => {
+  return state.agents.filter(agent => getOnlineStatus(agent)).length;
+});
+
+const offlineAgentsCount = computed(() => {
+  return state.agents.filter(agent => !getOnlineStatus(agent)).length;
+});
+
+onMounted(() => {
+  let id = router.currentRoute.value.params["siteId"] as string
+  if (!id) return
+
+  siteService.getSite(id).then(res => {
+    state.site = res.data as Site
+    agentService.getSiteAgents(id).then(res => {
+      state.agents = res.data as Agent[] || []
+      state.ready = state.agents.length > 0
+      state.loading = false
+    }).catch(() => {
+      state.loading = false
+    })
+  })
+})
+
+function getOnlineStatus(agent: Agent) {
+    let currentTime = new Date();
+    let agentTime = new Date(agent.updatedAt)
+    let timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000; // Convert to minutes
+    return timeDifference <= 1;
+}
+
+function getLastSeenText(agent: Agent) {
+    const now = new Date();
+    const lastSeen = new Date(agent.updatedAt);
+    const diffMs = now.getTime() - lastSeen.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+}
+</script>
+
+<template>
+  <div class="container-fluid">
+    <Title :title="state.site.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
+      <div class="d-flex flex-wrap gap-2">
+        <router-link :to="`/workspace/${state.site.id}/edit`" class="btn btn-outline-dark">
+          <i class="fa-solid fa-pencil-alt"></i>
+          <span class="d-none d-sm-inline">&nbsp;Edit</span>
+        </router-link>
+        <router-link :to="`/workspace/${state.site.id}/members`" class="btn btn-outline-dark">
+          <i class="fa-solid fa-users"></i>
+          <span class="d-none d-sm-inline">&nbsp;Members</span>
+        </router-link>
+        <router-link :to="`/agent/${state.site.id}/new`" class="btn btn-primary">
+          <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
+        </router-link>
+      </div>
+    </Title>
+
+    <!-- Stats Cards -->
+    <div class="stats-container mb-4" v-if="!state.loading">
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="fa-solid fa-server"></i>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ state.agents.length }}</div>
+          <div class="stat-label">Total Agents</div>
+        </div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-icon">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ onlineAgentsCount }}</div>
+          <div class="stat-label">Online</div>
+        </div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-icon">
+          <i class="fa-solid fa-circle-xmark"></i>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ offlineAgentsCount }}</div>
+          <div class="stat-label">Offline</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search and Filter Bar -->
+    <div class="filter-bar mb-3" v-if="state.agents.length > 0">
+      <div class="search-box">
+        <i class="fa-solid fa-search search-icon"></i>
+        <input 
+          v-model="state.searchQuery" 
+          type="text" 
+          class="form-control" 
+          placeholder="Search agents by name, location, or ID..."
+        >
+      </div>
+      <div class="sort-dropdown">
+        <label class="d-none d-md-inline me-2">Sort by:</label>
+        <select v-model="state.sortBy" class="form-select">
+          <option value="status">Status</option>
+          <option value="name">Name</option>
+          <option value="location">Location</option>
+          <option value="updated">Last Updated</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div v-if="state.loading" class="text-center py-5">
+      <Loader />
+      <p class="text-muted mt-3">Loading agents...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div v-else-if="state.agents.length === 0" class="empty-state card">
+      <div class="empty-state-icon">
+        <i class="fa-solid fa-server"></i>
+      </div>
+      <h5>No agents yet</h5>
+      <p class="text-muted">Create your first agent to start monitoring your network.</p>
+      <router-link :to="`/agents/${state.site.id}/new`" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>&nbsp;Create First Agent
+      </router-link>
+    </div>
+
+    <!-- No Results State -->
+    <div v-else-if="filteredAgents.length === 0" class="empty-state card">
+      <div class="empty-state-icon">
+        <i class="fa-solid fa-search"></i>
+      </div>
+      <h5>No agents found</h5>
+      <p class="text-muted">Try adjusting your search criteria.</p>
+      <button @click="state.searchQuery = ''" class="btn btn-outline-primary">
+        Clear Search
+      </button>
+    </div>
+
+    <!-- Agents Grid -->
+    <div class="agents-grid" v-else>
+      <div v-for="agent in filteredAgents" :key="agent.id" class="agent-card-wrapper">
+        <AgentCard
+          :title="agent.name"
+          :subtitle="(agent.version?' ':'') + agent.location"
+          :icon="getOnlineStatus(agent)?'fa-solid fa-circle-check text-success fa-fw':'fa-solid fa-circle-xmark text-danger fa-fw'"
+          class="h-100"
+        >
+
+          <template #secondary>
+            <div class="last-seen-badge">
+              {{ getLastSeenText(agent) }}
+            </div>
+          </template>
+          
+          <div class="agent-card-content">
+            <div v-if="!agent.initialized" class="credentials-section">
+              <Code title="ID" :code="agent.id" />
+              <Code title="PIN" :code="agent.pin" />
+            </div>
+            
+            <div class="agent-stats" v-else>
+              <div class="mini-stat">
+                <i class="fa-solid fa-clock"></i>
+                <span>{{ getLastSeenText(agent) }}</span>
+              </div>
+              <div class="mini-stat" v-if="agent.location">
+                <i class="fa-solid fa-location-dot"></i>
+                <span>{{ agent.location }}</span>
+              </div>
+              <div class="mini-stat">
+                <i class="fa-solid fa-hammer"></i>
+                <span>{{ agent.version }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="agent-actions">
+            <router-link 
+              v-if="agent.initialized" 
+              :to="`/agent/${agent.id}/deactivate`" 
+              class="btn btn-sm btn-outline-warning"
+              title="Deactivate agent"
+            >
+              <i class="fa-solid fa-bed"></i>
+              <span class="d-none d-lg-inline">&nbsp;Deactivate</span>
+            </router-link>
+            <router-link 
+              :to="`/agent/${agent.id}/edit`" 
+              class="btn btn-sm btn-outline-success"
+              title="Edit agent"
+            >
+              <i class="fa-solid fa-pencil-alt"></i>
+              <span class="d-none d-lg-inline">&nbsp;Edit</span>
+            </router-link>
+            <router-link 
+              :to="`/agent/${agent.id}`" 
+              class="btn btn-sm btn-primary"
+              title="View agent details"
+            >
+              View&nbsp;<i class="fa-solid fa-chevron-right"></i>
+            </router-link>
+          </div>
+        </AgentCard>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* Stats Container */
+.stats-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: all 0.2s;
+}
+
+.stat-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.stat-card.success {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+
+.stat-card.success .stat-icon {
+  color: #10b981;
+}
+
+.stat-card.danger {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.stat-card.danger .stat-icon {
+  color: #ef4444;
+}
+
+.stat-icon {
+  font-size: 2rem;
+  color: #6b7280;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 250px;
+  position: relative;
+}
+
+.search-icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+}
+
+.search-box input {
+  padding-left: 2.75rem;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.search-box input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.sort-dropdown {
+  display: flex;
+  align-items: center;
+  min-width: 200px;
+}
+
+.sort-dropdown .form-select {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+/* Empty States */
+.empty-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  background: white;
+  border-radius: 8px;
+}
+
+.empty-state-icon {
+  font-size: 4rem;
+  color: #e5e7eb;
+  margin-bottom: 1.5rem;
+}
+
+.empty-state h5 {
+  margin-bottom: 0.75rem;
+  color: #1f2937;
+}
+
+.empty-state p {
+  margin-bottom: 1.5rem;
+}
+
+/* Agents Grid */
+.agents-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+}
+
+@media (max-width: 767px) {
+  .agents-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.agent-card-wrapper {
+  display: flex;
+}
+
+.agent-card-wrapper :deep(.card) {
+  width: 100%;
+  transition: all 0.2s;
+  border: 1px solid #e5e7eb;
+}
+
+.agent-card-wrapper :deep(.card):hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+/* Agent Card Content */
+.last-seen-badge {
+  font-size: 0.75rem;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.agent-card-content {
+  padding: 1rem;
+  flex: 1;
+}
+
+.credentials-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mini-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.mini-stat i {
+  width: 1rem;
+  text-align: center;
+}
+
+.agent-actions {
+  padding: 1rem;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Button Improvements */
+.btn {
+  transition: all 0.2s;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 576px) {
+  .stats-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .filter-bar {
+    flex-direction: column;
+  }
+  
+  .search-box,
+  .sort-dropdown {
+    width: 100%;
+  }
+  
+  .agent-actions {
+    justify-content: stretch;
+  }
+  
+  .agent-actions .btn {
+    flex: 1;
+    text-align: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .agent-actions .btn-sm {
+    padding: 0.5rem;
+  }
+}
+
+/* Loading Animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.loading {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+</style>

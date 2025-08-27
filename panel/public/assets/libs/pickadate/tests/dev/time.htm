@@ -1,0 +1,71 @@
+<!doctype html>
+
+<meta charset="utf-8">
+
+<meta content="Amsul - http://amsul.ca" name="author">
+<meta content="width=device-width" name="viewport">
+<meta content="no-cache" http-equiv="cache-control">
+<meta content="no-cache" http-equiv="pragma">
+<meta content="IE=Edge" http-equiv="X-UA-Compatible">
+
+<title>Pickadate.js</title>
+
+<link href="../../lib/themes/default.css" rel="stylesheet">
+<link href="../../lib/themes/default.time.css" rel="stylesheet">
+
+<!--[if lt IE 9]>
+<script>document.createElement('section')</script>
+<style type="text/css">
+.holder {
+    position: relative;
+    z-index: 10000;
+}
+
+.datepicker {
+    display: block;
+}
+</style>
+<![endif]-->
+
+
+<body>
+
+<section class="section">
+
+    <form>
+        <fieldset>
+            <h3><label for="input_01">Pick a time. Go ahead...</label></h3>
+            <input
+                    id="input_from"
+                    autofocuss
+                    class="datepicker"
+                    name="time"
+                    type="time">
+            <!-- valuee="2:30 AM"
+            data-value="0:00" -->
+        </fieldset>
+    </form>
+
+    <br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+
+</section>
+
+
+<script src="../jquery.1.9.1.js"></script>
+<script src="../../lib/picker.js"></script>
+<script src="../../lib/picker.time.js"></script>
+<script src="../../lib/legacy.js"></script>
+
+<script type="text/javascript">
+
+    var $input = $('.datepicker').pickatime({})
+    var picker = $input.pickatime('picker')
+    picker.open()
+
+</script>
+
+
+</body>
+
+
+
