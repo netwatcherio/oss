@@ -6,7 +6,7 @@ import (
 	"github.com/kataras/neffos"
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
-	"nw-guardian/internal/agent"
+	"netwatcher-controller/internal/agent"
 )
 
 type Router struct {

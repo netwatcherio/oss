@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"io"
-	"nw-guardian/internal"
+	"netwatcher-controller/internal"
 	"regexp"
 	"strconv"
 	"time"

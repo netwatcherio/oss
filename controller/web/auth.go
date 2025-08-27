@@ -3,7 +3,7 @@ package web
 import (
 	"github.com/kataras/iris/v12"
 	"net/http"
-	"nw-guardian/internal/auth"
+	"netwatcher-controller/internal/auth"
 )
 
 func addRouteAuth(r *Router) []*Route {

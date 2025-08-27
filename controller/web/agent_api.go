@@ -5,8 +5,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"net/http"
-	"nw-guardian/internal/agent"
-	"nw-guardian/internal/auth"
+	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/auth"
 )
 
 func addRouteAgentAPI(r *Router) []*Route {

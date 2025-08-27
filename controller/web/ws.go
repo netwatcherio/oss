@@ -8,8 +8,8 @@ import (
 	"github.com/kataras/iris/v12/websocket"
 	log "github.com/sirupsen/logrus"
 	"net/http"
-	"nw-guardian/internal/agent"
-	"nw-guardian/internal/auth"
+	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/auth"
 	"os"
 	"strings"
 )

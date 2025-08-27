@@ -4,7 +4,7 @@ import (
 	jwt2 "github.com/iris-contrib/middleware/jwt"
 	"github.com/kataras/iris/v12"
 	"github.com/kataras/iris/v12/middleware/jwt"
-	"nw-guardian/internal/auth"
+	"netwatcher-controller/internal/auth"
 	"os"
 )
 

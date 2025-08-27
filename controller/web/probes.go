@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"io/ioutil"
 	"net/http"
-	"nw-guardian/internal/agent"
+	"netwatcher-controller/internal/agent"
 )
 
 func addRouteProbes(r *Router) []*Route {

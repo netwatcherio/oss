@@ -6,8 +6,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"nw-guardian/internal/agent"
-	"nw-guardian/internal/users"
+	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/users"
 	"time"
 )
 

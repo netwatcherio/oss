@@ -1,4 +1,4 @@
-module nw-guardian
+module netwatcher-controller
 
 go 1.21.1
 
