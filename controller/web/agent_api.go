@@ -1,72 +1,149 @@
 package web
 
 import (
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"net/http"
+	"gorm.io/gorm"
+
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/auth"
 )
 
-func addRouteAgentAPI(r *Router) []*Route {
-	var tempRoutes []*Route
+// Small response types so agents get exactly what they need.
+type agentLoginReq struct {
+	PIN          string `json:"pin"`
+	ID           uint   `json:"id"`      // GORM PK
+	AgentVersion string `json:"version"` // optional
+}
+type agentLoginResp struct {
+	Token string       `json:"token"`
+	Data  *agent.Agent `json:"data"`
+}
 
-	tempRoutes = append(tempRoutes, &Route{
+func addRouteAgentAPI(r *Router) []*Route {
+	var routes []*Route
+
+	// POST /agent/login
+	routes = append(routes, &Route{
 		Name: "Agent API Login",
 		Path: "/agent/login",
 		JWT:  false,
+		Type: RouteType_POST,
 		Func: func(ctx iris.Context) error {
+			ctx.ContentType("application/json")
 
-			ctx.ContentType("application/json") // "Application/json"
-
-			var l auth.AgentLogin
-			err := ctx.ReadJSON(&l)
-			if err != nil {
+			var in agentLoginReq
+			if err := ctx.ReadJSON(&in); err != nil {
 				ctx.StatusCode(http.StatusBadRequest)
 				return nil
 			}
 
-			t, err := l.AgentLogin(ctx.Values().GetString("client_ip"), r.DB)
+			ip := ctx.Values().GetString("client_ip")
+
+			// Go through auth service (creates session, issues JWT, best-effort version bump)
+			token, ag, err := r.AuthSvc.AgentLogin(ctx, auth.AgentLogin{
+				PIN:          in.PIN,
+				ID:           in.ID,
+				AgentVersion: in.AgentVersion,
+				IP:           ip,
+			})
 			if err != nil {
 				ctx.StatusCode(http.StatusUnauthorized)
 				return nil
 			}
 
-			hex, err := primitive.ObjectIDFromHex(l.ID)
-			if err != nil {
-				return err
+			// Heartbeat/initialize best-effort (don’t fail login if these fail)
+			if err := touchAgentHeartbeat(ctx, r.DB, r.AgentsRepo, ag.ID, ip); err != nil {
+				log.WithError(err).Warn("failed to update agent heartbeat")
+			}
+			if err := ensureAgentInitialized(ctx, r.DB, r.AgentsRepo, ag.ID); err != nil {
+				log.WithError(err).Warn("failed to initialize agent")
 			}
 
-			a := agent.Agent{ID: hex}
-			err = a.UpdateTimestamp(r.DB)
-			if err != nil {
-				log.Error(err)
-			}
-			err = a.Initialize(r.DB)
-			if err != nil {
-				return err
-			}
-
-			_, err = ctx.Write([]byte(t))
-			if err != nil {
-				return err
-			}
-			return nil
+			resp := agentLoginResp{Token: token, Data: ag}
+			err = ctx.JSON(resp)
+			return err
 		},
-		Type: RouteType_POST,
 	})
 
-	tempRoutes = append(tempRoutes, &Route{
+	// GET /agent/probes
+	// Returns the *complete* list of probes for this agent, including reverse/meta expansions,
+	// with targets resolved enough for execution (host/ip[:port]) when possible.
+	routes = append(routes, &Route{
 		Name: "Agent API - Get Probes",
 		Path: "/agent/probes",
 		JWT:  true,
-		Func: func(ctx iris.Context) error {
-
-			return nil
-		},
 		Type: RouteType_GET,
+		Func: func(ctx iris.Context) error {
+			ctx.ContentType("application/json")
+
+			token := bearer(ctx)
+			if token == "" {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return nil
+			}
+
+			ag, sess, err := r.AuthSvc.GetAgentFromJWT(ctx, token, r.DB)
+			if err != nil {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return nil
+			}
+			_ = sess // available if you want to refresh expiry, etc.
+
+			// Get persisted + reverse/virtual probes
+			prs, err := r.ProbesSvc.ListByAgent(ctx, ag.ID, true /* includeReverse */)
+			if err != nil {
+				ctx.StatusCode(http.StatusInternalServerError)
+				return nil
+			}
+
+			// Optionally: keep agent “last seen” fresh on fetch
+			if err := touchAgentHeartbeat(ctx, r.DB, r.AgentsRepo, ag.ID, ctx.Values().GetString("client_ip")); err != nil {
+				log.WithError(err).Warn("failed to refresh heartbeat on probe fetch")
+			}
+
+			// Respond as-is; agents know how to run based on Type/Server/Targets
+			err = ctx.JSON(prs)
+			return err
+		},
 	})
 
-	return tempRoutes
+	return routes
+}
+
+// ----- helpers -----
+
+func bearer(ctx iris.Context) string {
+	authz := ctx.GetHeader("Authorization")
+	if authz == "" {
+		return ""
+	}
+	if !strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(authz[7:])
+}
+
+func touchAgentHeartbeat(ctx iris.Context, db *gorm.DB, repo agent.Repository, agentID uint, ip string) error {
+	// Update UpdatedAt/LastSeenAt/IP (repo.PatchFields keeps it simple)
+	return repo.PatchFields(ctx, agentID, map[string]any{
+		"last_seen_at": time.Now(),
+		"updated_at":   time.Now(),
+		"last_ip":      ip,
+	})
+}
+
+func ensureAgentInitialized(ctx iris.Context, db *gorm.DB, repo agent.Repository, agentID uint) error {
+	ag, err := repo.GetByID(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if ag.Initialized {
+		return nil
+	}
+	return repo.PatchFields(ctx, agentID, map[string]any{"initialized": true})
 }

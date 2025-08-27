@@ -1,0 +1,355 @@
+package agent
+
+import (
+	"crypto/rand"
+	"errors"
+	"fmt"
+	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
+	"io"
+	"netwatcher-controller/internal"
+	"regexp"
+	"strconv"
+	"time"
+)
+
+type Agent struct {
+	ID               uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name             string    `gorm:"column:name" json:"name" form:"name"`                 // name of the agentprobe
+	SiteID           uint      `gorm:"column:site_id" json:"site"`                          // foreign key to site
+	Pin              string    `gorm:"column:pin" json:"pin"`                               // used for registration & authentication
+	Initialized      bool      `gorm:"column:initialized;default:false" json:"initialized"` // will this be used or will we use the sessions/jwt tokens?
+	Location         string    `gorm:"column:location" json:"location"`                     // logical/physical location
+	CreatedAt        time.Time `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt        time.Time `gorm:"column:updated_at" json:"updatedAt"` // used for heart beat
+	PublicIPOverride string    `gorm:"column:public_ip_override" json:"public_ip_override"`
+	Version          string    `gorm:"column:version" json:"version"`
+	// pin will be used for "auth" as the password, the ID will stay the same
+}
+
+// TableName specifies the table name for GORM
+func (Agent) TableName() string {
+	return "agents"
+}
+
+func (a *Agent) UpdateAgentDetails(db *gorm.DB, newName string, newLocation string, newIP string) error {
+	updates := map[string]interface{}{
+		"name":               newName,
+		"location":           newLocation,
+		"public_ip_override": newIP,
+		"updated_at":         time.Now(),
+	}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// Update the Agent struct to reflect the new state
+	a.Name = newName
+	a.Location = newLocation
+	a.PublicIPOverride = newIP
+	a.UpdatedAt = time.Now()
+
+	return nil
+}
+
+func UpdateProbeTarget(db *gorm.DB, probeID uint, newTarget string) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.UpdateProbeTarget", Level: log.ErrorLevel}
+
+	// This would need to be adjusted based on your probe structure
+	// For now, assuming a simple update to demonstrate the pattern
+	result := db.Exec(
+		"UPDATE probes SET config = jsonb_set(config, '{target,0,target}', ?::jsonb) WHERE id = ?",
+		fmt.Sprintf(`"%s"`, newTarget),
+		probeID,
+	)
+
+	if result.Error != nil {
+		ee.Message = "unable to update"
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func (a *Agent) UpdateTimestamp(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.UpdateTimestamp", Level: log.ErrorLevel}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Update("updated_at", time.Now())
+	if result.Error != nil {
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	// Refresh the agent data
+	err := a.Get(db)
+	if err != nil {
+		ee.Error = err
+		return ee.ToError()
+	}
+
+	// Version checking logic
+	pattern := `^v?(\d+)\.(\d+)\.(\d+)(rc|b|a)(\d+)$`
+	re := regexp.MustCompile(pattern)
+
+	versions := []string{a.Version}
+
+	for _, version := range versions {
+		versionMatch := re.FindStringSubmatch(version)
+		if versionMatch != nil {
+			var splitVer []int
+			for i, v := range versionMatch[1:] {
+				if i == 3 {
+					continue
+				}
+				atoi, err := strconv.Atoi(v)
+				if err != nil {
+					ee.Error = err
+					ee.Message = "unable to get agent version"
+					return ee.ToError()
+				}
+
+				splitVer = append(splitVer, atoi)
+			}
+
+			if splitVer[0] >= 1 && splitVer[1] >= 2 && splitVer[2] >= 1 {
+				probe := Probe{AgentID: a.ID}
+				pps, err2 := probe.GetAllProbesForAgent(db)
+				if err2 != nil {
+					ee.Error = err2
+					ee.Message = "unable to get all probes for agent"
+					return ee.ToError()
+				}
+
+				hasSpeedtestServers := false
+				hasSpeedtest := false
+
+				for _, pp := range pps {
+					if pp.Type == ProbeType_SPEEDTEST_SERVERS {
+						hasSpeedtestServers = true
+						continue
+					} else if pp.Type == ProbeType_SPEEDTEST {
+						hasSpeedtest = true
+						continue
+					}
+				}
+
+				if !hasSpeedtestServers {
+					s2 := Probe{AgentID: a.ID, Type: ProbeType_SPEEDTEST_SERVERS}
+					err = s2.Create(db)
+					if err != nil {
+						ee.Error = err
+						ee.Message = "unable to create speedtest servers probe for agent"
+						return ee.ToError()
+					}
+				}
+
+				if !hasSpeedtest {
+					target := ProbeTarget{Target: "ok"}
+
+					s3 := Probe{AgentID: a.ID, Type: ProbeType_SPEEDTEST, Config: ProbeConfig{Target: []ProbeTarget{target}}}
+					err = s3.Create(db)
+					if err != nil {
+						ee.Error = err
+						ee.Message = "unable to create speedtest probe for agent"
+						return ee.ToError()
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (a *Agent) UpdateAgentVersion(version string, db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.UpdateAgentVersion", Level: log.ErrorLevel}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Update("version", version)
+	if result.Error != nil {
+		ee.Error = result.Error
+		ee.Message = "unable to update agent version"
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func (a *Agent) Initialize(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.Initialize", Level: log.ErrorLevel}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Update("initialized", true)
+	if result.Error != nil {
+		ee.Message = "unable to initialize agent"
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+// DeleteAgent check based on provided agent ID in check struct
+func DeleteAgent(db *gorm.DB, agentID uint) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.DeleteAgent", Level: log.ErrorLevel}
+
+	// Delete probes first
+	err := DeleteProbesByAgentID(db, agentID)
+	if err != nil {
+		ee.Error = err
+		ee.Message = "unable to delete probes by agent id"
+		return ee.ToError()
+	}
+
+	// Delete the agent
+	result := db.Where("id = ?", agentID).Delete(&Agent{})
+	if result.Error != nil {
+		ee.Error = result.Error
+		ee.Message = "unable to delete agent by id"
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func (a *Agent) Deactivate(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.Deactivate", Level: log.ErrorLevel}
+
+	updates := map[string]interface{}{
+		"initialized": false,
+		"pin":         GeneratePin(9),
+	}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Updates(updates)
+	if result.Error != nil {
+		ee.Error = result.Error
+		ee.Message = "unable to deactivate agent"
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func (a *Agent) DeInitialize(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.DeInitialize", Level: log.ErrorLevel}
+
+	result := db.Model(&Agent{}).Where("id = ?", a.ID).Update("initialized", false)
+	if result.Error != nil {
+		ee.Message = "unable to de-initialize agent"
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func GeneratePin(max int) string {
+	var table = [...]byte{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'}
+	b := make([]byte, max)
+	n, err := io.ReadAtLeast(rand.Reader, b, max)
+	if n != max {
+		log.Error(err)
+		return "6969420" // the gamer numbers (XD rawr)
+	}
+	for i := 0; i < len(b); i++ {
+		b[i] = table[int(b[i])%len(table)]
+	}
+	return string(b)
+}
+
+func (a *Agent) Get(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.Get", Level: log.ErrorLevel}
+
+	result := db.Where("id = ?", a.ID).First(a)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			ee.Message = "no agents found"
+			return ee.ToError()
+		}
+		ee.Message = "unable to search for agent by id"
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	return nil
+}
+
+func (a *Agent) Create(db *gorm.DB) error {
+	ee := internal.ErrorFormat{Package: "internal.agent", Function: "agent.Create", Level: log.ErrorLevel}
+
+	// Set default values
+	a.Pin = GeneratePin(9)
+	a.Initialized = false
+	a.CreatedAt = time.Now()
+	a.UpdatedAt = time.Now()
+
+	// Create the agent
+	result := db.Create(a)
+	if result.Error != nil {
+		ee.Message = "error during agent creation"
+		ee.Error = result.Error
+		return ee.ToError()
+	}
+
+	// Create default probes
+	// Network info probe
+	probe := Probe{AgentID: a.ID, Type: ProbeType_NETWORKINFO}
+	err := probe.Create(db)
+	if err != nil {
+		ee.Message = "error creating netinfo probe"
+		ee.Error = err
+		return ee.ToError()
+	}
+
+	// System info probe
+	ss := Probe{AgentID: a.ID, Type: ProbeType_SYSTEMINFO}
+	err = ss.Create(db)
+	if err != nil {
+		ee.Message = "error creating sysinfo probe"
+		ee.Error = err
+		return ee.ToError()
+	}
+
+	// Speedtest servers probe
+	s2 := Probe{AgentID: a.ID, Type: ProbeType_SPEEDTEST_SERVERS}
+	err = s2.Create(db)
+	if err != nil {
+		ee.Message = "error creating speedtest servers probe"
+		ee.Error = err
+		return ee.ToError()
+	}
+
+	// Speedtest probe
+	target := ProbeTarget{Target: "ok"}
+	s3 := Probe{AgentID: a.ID, Type: ProbeType_SPEEDTEST, Config: ProbeConfig{Target: []ProbeTarget{target}}}
+	err = s3.Create(db)
+	if err != nil {
+		ee.Message = "error creating speedtest probe"
+		ee.Error = err
+		return ee.ToError()
+	}
+
+	log.Infof("created agent with id: %d\n", a.ID)
+	return nil
+}
+
+// BeforeCreate hook
+func (a *Agent) BeforeCreate(tx *gorm.DB) error {
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now()
+	}
+	if a.UpdatedAt.IsZero() {
+		a.UpdatedAt = time.Now()
+	}
+	if a.Pin == "" {
+		a.Pin = GeneratePin(9)
+	}
+	return nil
+}
+
+// BeforeUpdate hook
+func (a *Agent) BeforeUpdate(tx *gorm.DB) error {
+	a.UpdatedAt = time.Now()
+	return nil
+}

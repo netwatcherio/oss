@@ -1,70 +1,78 @@
 package web
 
 import (
-	"github.com/kataras/iris/v12"
 	"net/http"
+
+	"github.com/kataras/iris/v12"
+
 	"netwatcher-controller/internal/auth"
 )
 
 func addRouteAuth(r *Router) []*Route {
-	var tempRoutes []*Route
+	var routes []*Route
 
-	tempRoutes = append(tempRoutes, &Route{
+	// POST /auth/login
+	routes = append(routes, &Route{
 		Name: "Login",
 		Path: "/auth/login",
 		JWT:  false,
+		Type: RouteType_POST,
 		Func: func(ctx iris.Context) error {
-			ctx.ContentType("application/json") // "Application/json"
+			ctx.ContentType("application/json")
 
-			var l auth.Login
-			err := ctx.ReadJSON(&l)
-			if err != nil {
+			var in auth.Login
+			if err := ctx.ReadJSON(&in); err != nil {
 				ctx.StatusCode(http.StatusBadRequest)
 				return nil
 			}
 
-			t, err := l.Login(ctx.Values().GetString("client_ip"), r.DB)
+			ip := ctx.Values().GetString("client_ip")
+
+			token, user, err := r.AuthSvc.Login(ctx, in, ip)
 			if err != nil {
 				ctx.StatusCode(http.StatusUnauthorized)
 				return nil
 			}
-			_, err = ctx.Write([]byte(t))
-			if err != nil {
-				return err
-			}
-			return nil
 
+			resp := map[string]any{
+				"token": token,
+				"data":  user,
+			}
+			return ctx.JSON(resp)
 		},
-		Type: RouteType_POST,
 	})
 
-	tempRoutes = append(tempRoutes, &Route{
+	// POST /auth/register
+	routes = append(routes, &Route{
 		Name: "Register",
 		Path: "/auth/register",
 		JWT:  false,
-		Func: func(ctx iris.Context) error {
-			ctx.ContentType("Application/json") // "Application/json"
-
-			var reg auth.Register
-			err := ctx.ReadJSON(&reg)
-			if err != nil {
-				ctx.StatusCode(http.StatusBadRequest)
-				return err
-			}
-			t, err := reg.Register(r.DB)
-			if err != nil {
-				ctx.StatusCode(http.StatusConflict)
-				return err
-			}
-			_, err = ctx.Write([]byte(t))
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
 		Type: RouteType_POST,
+		Func: func(ctx iris.Context) error {
+			ctx.ContentType("application/json")
+
+			var in auth.Register
+			if err := ctx.ReadJSON(&in); err != nil {
+				ctx.StatusCode(http.StatusBadRequest)
+				return nil
+			}
+
+			ip := ctx.Values().GetString("client_ip")
+
+			token, user, err := r.AuthSvc.Register(ctx, in, ip)
+			if err != nil {
+				// conflict is reasonable for "email already exists", otherwise 400/500; keep 409 to match old behavior
+				ctx.StatusCode(http.StatusConflict)
+				return nil
+			}
+
+			resp := map[string]any{
+				"token": token,
+				"data":  user,
+			}
+			return ctx.JSON(resp)
+		},
 	})
 
-	return tempRoutes
+	return routes
 }
