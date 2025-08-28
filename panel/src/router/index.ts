@@ -7,7 +7,6 @@ import RootView from "@/views/Root.vue";
 
 // route modules (may export a single route or an array)
 import auth from '@/views/auth'
-import profile from '@/views/profile'
 
 // workspace views
 import Workspaces from '@/views/workspaces/Workspaces.vue'
@@ -32,6 +31,7 @@ import Speedtests from '@/views/agent/Speedtests.vue'
 import NewSpeedtest from '@/views/agent/NewSpeedtest.vue'
 import AgentView from "@/views/agent/AgentView.vue";
 import BasicView from "@/views/BasicView.vue";
+import Profile from "@/views/profile/Profile.vue"
 
 // Helper: normalize module export to array
 const asArray = (r: unknown) => (Array.isArray(r) ? r : r ? [r] : [])
@@ -56,7 +56,6 @@ const NotFound = defineComponent({
 
 const routes: RouteRecordRaw[] = [
     ...asArray(auth),
-    ...asArray(profile),
 
     // Home -> Workspaces list
     { path: '/', name: 'root', redirect: '/workspaces', component: RootView, children: [
@@ -172,7 +171,14 @@ const routes: RouteRecordRaw[] = [
         ],
     },
 
-    // 404
+            /*{
+                path: '/profile',
+                name: 'profile',
+                component: Profile,
+            },*/
+
+
+            // 404
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFound }
         ]},
 ]
