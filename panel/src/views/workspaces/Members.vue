@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 
-import type {AgentGroup, MemberInfo, Site, SiteMember} from "@/types";
+import type {AgentGroup, MemberInfo, Workspace, WorkspaceMember} from "@/types";
 import {onMounted, reactive} from "vue";
 import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
@@ -9,7 +9,7 @@ import {Agent} from "@/types";
 
 let state = reactive({
   members: [] as MemberInfo[],
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false
 })
 
@@ -18,7 +18,7 @@ onMounted(() => {
   if (!id) return
 
   siteService.getSite(id).then(res => {
-    state.site = res.data as Site
+    state.site = res.data as Workspace
   })
 
   siteService.getMemberInfos(id).then(res => {

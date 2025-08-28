@@ -2,12 +2,12 @@
 import { onMounted, reactive, toRefs } from "vue";
 import siteService from "@/services/workspaceService";
 import agentService from "@/services/agentService";
-import type { Site, Agent } from "@/types";
+import type { Workspace, Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   agent: {} as Agent
 });
@@ -21,7 +21,7 @@ onMounted(() => {
     console.log(state.agent)
 
     siteService.getSite(state.agent.site).then(res => {
-      state.site = res.data as Site
+      state.site = res.data as Workspace
       state.ready = true
     })
   })

@@ -313,7 +313,7 @@ CKEDITOR.lang["pt-br"] = {
     about: {
         copy: "Copyright &copy; $1. Todos os direitos reservados.",
         dlgTitle: "Sobre o CKEditor 4",
-        moreInfo: "Para informações sobre a licença por favor visite o nosso site:",
+        moreInfo: "Para informações sobre a licença por favor visite o nosso workspaces:",
     },
     editor: "Editor de Rich Text",
     editorPanel: "Painel do editor de Rich Text",

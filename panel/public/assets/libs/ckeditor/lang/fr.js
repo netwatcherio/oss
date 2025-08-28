@@ -325,7 +325,7 @@ CKEDITOR.lang["fr"] = {
         copy: "Copyright &copy; $1. Tous droits réservés.",
         dlgTitle: "À propos de CKEditor 4",
         moreInfo:
-            "Pour les informations de licence, veuillez visiter notre site web :",
+            "Pour les informations de licence, veuillez visiter notre workspaces web :",
     },
     editor: "Éditeur de texte enrichi",
     editorPanel: "Tableau de bord de l'éditeur de texte enrichi",

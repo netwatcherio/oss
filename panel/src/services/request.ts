@@ -52,6 +52,6 @@ export default {
     },
     async get(url: string, data?: {} | undefined): Promise<any> {
         return axios.get(`${host()}${url}`, getHeaders());
-    }
+    },
 }
 

@@ -14,7 +14,7 @@ import type {
   ProbeDataRequest,
   ProbeType,
   RPerfResults,
-  Site,
+  Workspace,
   TrafficSimResult
 } from "@/types";
 import Title from "@/components/Title.vue";
@@ -31,7 +31,7 @@ const activeTabIndex = ref(0);
 
 // Reactive state to hold parsed groups and UI data
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   agent: {} as Agent,
   similarProbes: [] as Probe[],
   // Parsed ProbeData by type
@@ -458,7 +458,7 @@ function reloadData(checkId: string) {
       state.agent = res.data as Agent;
 
       siteService.getSite(state.agent.site).then(res => {
-        state.site = res.data as Site;
+        state.site = res.data as Workspace;
         
         // Try to get grouped data first (AgentProbe approach)
         probeService.getProbeData(checkId, {
@@ -641,7 +641,7 @@ onMounted(() => {
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
 
-  // fetch site and agent metadata
+  // fetch workspaces and agent metadata
   Promise.all([
     probeService.getProbe(checkId),
     agentService.getAgent(checkId)

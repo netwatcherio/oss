@@ -316,7 +316,7 @@ CKEDITOR.lang["ro"] = {
         copy: "Copyright &copy; $1. Toate drepturile rezervate.",
         dlgTitle: "Despre CKEeditor 4",
         moreInfo:
-            "Pentru informații despre licențiere, vă rugăm vizitați web site-ul nostru:",
+            "Pentru informații despre licențiere, vă rugăm vizitați web workspaces-ul nostru:",
     },
     editor: "Editor de text îmbogățit",
     editorPanel: "Panoul editorului de text îmbogățit",

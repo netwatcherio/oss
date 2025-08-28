@@ -1,13 +1,13 @@
 <script lang="ts" setup>
 import { onMounted, reactive } from "vue";
 import siteService from "@/services/workspaceService";
-import type { Site } from "@/types";
+import type { Workspace } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 
 const router = core.router();
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false
 });
 
@@ -18,7 +18,7 @@ onMounted(() => {
   if (!siteId) return;
 
   siteService.getSite(siteId).then(res => {
-    state.site = res.data as Site
+    state.site = res.data as Workspace
     console.log(state.site)
     state.ready = true
   })

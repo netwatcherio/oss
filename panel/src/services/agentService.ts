@@ -1,24 +1,23 @@
 import request from "@/services/request";
-import type {Agent, Site} from "@/types";
+import type {Agent, Workspace} from "@/types";
 
 export default {
     async createAgent(agent: Agent): Promise<any> {
-        return await request.post(`/agents/new/${agent.site}`, agent)
+        return await request.post(`/workspaces/${agent.workspaceId}/agents`, agent)
     },
     async updateAgent(agent: Agent): Promise<any> {
-        return await request.post(`/agents/update/${agent.id}`, agent)
+        return await request.post(`/workspaces/${agent.workspaceId}/agents/${agent.id}/update`, agent)
     },
-    async deactivateAgent(id: string): Promise<any> {
-        return await request.get(`/agents/deactivate/${id}`)
+    async deactivateAgent(workspaceId: string, id: string): Promise<any> {
+        return await request.post(`/workspaces/${workspaceId}/agents/${id}/deactivate`)
     },
-    async getSiteAgents(id: string): Promise<any> {
-        return await request.get(`/agents/site/${id}`)
+    async getWorkspaceAgents(id: string): Promise<any> {
+        return await request.get(`/workspaces/${id}/agents`)
     },
-    async getAgent(id: string): Promise<any> {
-        console.log(id)
-        return await request.get(`/agents/${id}`)
+    async getAgent(workspaceId: string, id: string): Promise<any> {
+        return await request.get(`/workspaces/${workspaceId}/agents/${id}`)
     },
-    async deleteAgent(id: string): Promise<any> {
-        return await request.get(`/agents/delete/${id}`)
+    async deleteAgent(workspaceId: string, id: string): Promise<any> {
+        return await request.post(`/workspaces/${workspaceId}/agents/${id}/delete`)
     },
 }

@@ -1,6 +1,6 @@
 // src/services/workspaces.ts
 import request from "@/services/request";
-import type { AgentGroup, MemberInfo, Site } from "@/types";
+import type { AgentGroup, MemberInfo, Workspace } from "@/types";
 
 // NOTE on members:
 // - GET    /workspaces/:id/members
@@ -18,7 +18,7 @@ export default {
         return await request.get("/workspaces");
     },
 
-    async createSite(site: Site): Promise<any> {
+    async createSite(site: Workspace): Promise<any> {
         // was: POST /workspaces
         return await request.post("/workspaces", site);
     },
@@ -28,12 +28,12 @@ export default {
         return await request.get(`/workspaces/${id}`);
     },
 
-    async updateSite(site: Site & { id: string }): Promise<void> {
+    async updateSite(site: Workspace & { id: string }): Promise<void> {
         // was: POST /workspaces/update/{id}
         // now: PATCH /workspaces/{id}
         // send only updatable fields (backend accepts partials)
         const { id, name, location, description } = site as any;
-        await request.post(`/workspaces/${id}`, { name, location, description });
+        await request.post(`/workspaces/${id}/update`, { name, location, description });
     },
 
     // Optional new helper (clearer name):
@@ -60,7 +60,7 @@ export default {
         // now: PATCH /workspaces/{id}/members/{memberId}
         // Ensure you pass the WorkspaceMember row id as member.memberId (not userId).
         const memberId = (member as any).memberId ?? (member as any).id;
-        return await request.post(`/workspaces/${id}/members/${memberId}`, { role: (member as any).role });
+        return await request.post(`/workspaces/${id}/members/${memberId}/update`, { role: (member as any).role });
     },
 
     async removeMember(id: string, member: MemberInfo & { memberId?: number }): Promise<any> {

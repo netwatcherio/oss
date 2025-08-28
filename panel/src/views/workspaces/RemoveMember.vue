@@ -2,14 +2,14 @@
 
 import {onMounted, reactive} from "vue";
 import siteService from "@/services/workspaceService";
-import type {MemberInfo, Site} from "@/types";
+import type {MemberInfo, Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {Agent} from "@/types";
 import agentService from "@/services/agentService";
 
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   agent: {} as Agent,
   memberInfo: {} as MemberInfo
@@ -23,7 +23,7 @@ onMounted(() => {
   if (!userId) return
 
   siteService.getSite(id).then(res => {
-      state.site = res.data as Site
+      state.site = res.data as Workspace
       /*state.ready = true*/
 
     siteService.getMemberInfos(id).then(res => {

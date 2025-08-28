@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 
-import type {AgentGroup, Site} from "@/types";
+import type {AgentGroup, Workspace} from "@/types";
 import {onMounted, reactive} from "vue";
 import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
@@ -9,7 +9,7 @@ import {Agent} from "@/types";
 
 let state = reactive({
   groups: [] as AgentGroup[],
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false
 })
 
@@ -18,7 +18,7 @@ onMounted(() => {
   if (!id) return
 
   siteService.getSite(id).then(res => {
-    state.site = res.data as Site
+    state.site = res.data as Workspace
   })
 
   siteService.getAgentGroups(id).then(res => {
@@ -73,7 +73,7 @@ const router = core.router()
                   {{ group.description }}
                 </td>
                 <!--                  <td class="px-0">
-                                    <span class="badge bg-dark">{{ site. }}</span>
+                                    <span class="badge bg-dark">{{ workspaces. }}</span>
                                   </td>-->
                 <td class="px-0 text-end px-3">
                   <router-link :to="`/sites/${group.site}/groups`" class="">

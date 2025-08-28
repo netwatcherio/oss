@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
-import type { AgentGroup, Probe, ProbeConfig, ProbeTarget, ProbeType, SelectOption, Site } from "@/types";
+import type { AgentGroup, Probe, ProbeConfig, ProbeTarget, ProbeType, SelectOption, Workspace } from "@/types";
 import { Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
@@ -9,7 +9,7 @@ import probeService from "@/services/probeService";
 import siteService from "@/services/workspaceService";
 
 interface ProbeState {
-  site: Site;
+  site: Workspace;
   ready: boolean;
   loading: boolean;
   agent: Agent;
@@ -33,7 +33,7 @@ interface ProbeState {
 }
 
 const state = reactive<ProbeState>({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   loading: false,
   agent: {} as Agent,
@@ -117,11 +117,11 @@ onMounted(async () => {
     const probesRes = await probeService.getAgentProbes(id);
     state.existingProbes = probesRes.data as Probe[];
 
-    // Load site data
+    // Load workspaces data
     const siteRes = await siteService.getSite(state.agent.site);
-    state.site = siteRes.data as Site;
+    state.site = siteRes.data as Workspace;
 
-    // Load all agents for the site
+    // Load all agents for the workspaces
     const agentsRes = await agentService.getSiteAgents(state.agent.site);
     if (agentsRes.data.length > 0) {
       const agents = agentsRes.data as Agent[];

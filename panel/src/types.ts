@@ -1,115 +1,253 @@
+// Basic JSON type used for labels/metadata
+export type JSONValue =
+    | string
+    | number
+    | boolean
+    | null
+    | JSONValue[]
+    | { [key: string]: JSONValue };
+
+// ---- Users ----
+
 export interface User {
-    id: string; // You can use string for ObjectID in TypeScript
+    id: number;
     email: string;
     firstName: string;
     lastName: string;
     company: string;
-    admin: boolean;
-    password: string;
-    verified: boolean;
     phoneNumber: string;
+
+    // Access & security
+    admin: boolean;
     role: string;
-    createdAt: Date;
-    updatedAt: Date;
+    password: string; // (hash on backend; usually not sent to client)
+    verified: boolean;
+    mfaEnabled: boolean;
+
+    // State & telemetry
+    status?: string; // e.g. "ACTIVE"
+    lastLoginAt?: string; // ISO string
+    timezone?: string;
+    avatarUrl?: string;
+
+    // Free-form data
+    labels?: Record<string, JSONValue>;
+    metadata?: Record<string, JSONValue>;
+
+    createdAt: string; // ISO
+    updatedAt: string; // ISO
 }
 
-export interface Site {
-    id: string; // You can use string for ObjectID in TypeScript
+// ---- Workspaces ----
+
+export type WorkspaceMemberRole = "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
+
+export interface WorkspaceMember {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    workspaceId: number;
+    userId: number; // 0 if invite-only (not yet linked)
+    email: string;
+
+    role: WorkspaceMemberRole;
+
+    invitedAt?: string | null;
+    acceptedAt?: string | null;
+    revokedAt?: string | null;
+
+    displayName?: string;
+}
+
+export interface Workspace {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
     name: string;
+    slug: string;
     description: string;
     location: string;
-    members: SiteMember[];
-    createdAt: Date;
-    updatedAt: Date;
+
+    ownerUserId: number;
+
+    labels: Record<string, JSONValue>;
+    metadata: Record<string, JSONValue>;
+
+    // optional association
+    members?: WorkspaceMember[] | null;
 }
 
-export interface SelectOption {
-    value: string
-    text: string
-    disabled: boolean
+// Helpful DTOs for member operations
+export interface MemberInviteRequest {
+    // One of (userId | email) is required
+    userId?: number;
+    email?: string;
+    role: WorkspaceMemberRole;
+}
+export interface MemberRoleUpdateRequest {
+    role: WorkspaceMemberRole;
 }
 
-export type SiteMemberRole = "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
-
-export interface MemberInfo {
-    email: string;
-    firstName: string;
-    lastName: string;
-    role: SiteMemberRole;
-    id: string; // MongoDB ObjectID is typically represented as a string in TypeScript
-}
-
-
-export interface SiteMember {
-    user: string; // You can use string for ObjectID in TypeScript
-    role: SiteMemberRole;
-    // roles: "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
-    // ADMINS can regenerate agent pins
-}
-
-export interface SiteMemberUser {
-    user: string; // You can use string for ObjectID in TypeScript
-    role: SiteMemberRole;
-    email: string;
-    name: string;
-}
+// ---- Agents ----
 
 export interface Agent {
-    id: string; // You can use string for ObjectID in TypeScript
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    // Ownership / scoping
+    workspaceId: number;
+    siteId: number; // kept for legacy compatibility if still present in payloads
+
+    // Identity
     name: string;
-    site: string; // You can use string for ObjectID in TypeScript
-    pin: string;
+    hostname: string;
     initialized: boolean;
-    location: string; // Assuming location is a numeric value
-    createdAt: Date;
-    updatedAt: Date;
-    public_ip_override: String;
-    version: String;
+
+    // Auth
+    pin: string;
+    publicKey: string;
+
+    // Network
+    location: string;
+    public_ip_override: string; // preserving original field if still used on UI
+    detectedPublicIp: string;
+    privateIp: string;
+    macAddress: string;
+
+    // Runtime / versioning
+    version: string;
+    platform: string; // linux, darwin, windows
+    arch: string; // amd64, arm64, etc.
+
+    // Health / status
+    status?: string; // e.g. "ACTIVE"
+    lastSeenAt?: string; // ISO
+    heartbeatIntervalSec: number;
+
+    // Tags / labels
+    labels?: Record<string, JSONValue>;
+    metadata?: Record<string, JSONValue>;
+}
+
+// ---- Groups (optional, if you use them) ----
+
+export interface AgentGroup {
+    id: number;
+    workspaceId: number;
+    agents: number[]; // agent IDs
+    name: string;
+    description?: string;
+}
+
+// ---- Probes ----
+
+export type ProbeType =
+    | "RPERF"
+    | "MTR"
+    | "PING"
+    | "SPEEDTEST"
+    | "NETINFO"
+    | "TRAFFICSIM"
+    | "SPEEDTEST_SERVERS";
+
+export interface Target {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    probeId: number;
+    target: string; // IP/host[:port]
+    agentId?: number | null;
+    groupId?: number | null;
 }
 
 export interface Probe {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    workspaceId?: number; // optional/handy
+    agentId: number;
     type: ProbeType;
-    id: string; // You can use string for ObjectID in TypeScript
-    agent: string; // You can use string for ObjectID in TypeScript
-    pending: Date; // Assuming 'pending' is a timestamp represented as a Date
-    createdAt: Date;
-    updatedAt: Date;
+
+    // Flags & knobs
     notifications: boolean;
-    config: ProbeConfig;
+    durationSec: number;
+    count: number;
+    intervalSec: number;
+    server: boolean;
+    pendingAt?: string | null;
+
+    // Reverse/meta
+    reverseOfProbeId?: number | null;
+    originalAgentId?: number | null;
+
+    // Free-form extras
+    labels?: Record<string, JSONValue>;
+    metadata?: Record<string, JSONValue>;
+
+    targets: Target[];
 }
 
-export interface ProbeTarget {
+// ---- Sessions ----
+
+export interface Session {
+    itemId: number; // user or agent PK (matches Go: column:item_id)
+    isAgent: boolean;
+    sessionId: number;
+    expiry: string; // ISO
+    created: string; // ISO
+    wsConn?: string;
+    ip?: string;
+}
+
+// ---- Legacy / existing shapes you already had ----
+
+export interface SelectOption {
+    value: string;
+    text: string;
+    disabled: boolean;
+}
+
+// Kept for components that expect this shape when inviting via email
+export interface MemberInfo {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    role: WorkspaceMemberRole;
+    id?: number; // if you use numeric IDs now
+}
+
+// ProbeData (runtime telemetry payloads)
+
+export interface ProbeTargetDTO {
     target: string;
-    agent: string;
-    group: string;
+    agent?: number | null;
+    group?: number | null;
 }
 
-export // ProbeConfig
-interface ProbeConfig {
-    target: ProbeTarget[];
+export interface ProbeConfig {
+    target: ProbeTargetDTO[];
     duration: number;
     count: number;
     interval: number;
     server: boolean;
 }
 
-export interface OUIEntry {
-    Registry: string;
-    Assignment: string;
-    "Organization Name": string;
-    "Organization Address": string;
-}
-
-export interface AgentGroup {
+export interface ProbeData {
     id: string;
-    site: string;
-    agents: string[]; // these are the IDs of agents in the group
-    name: string;
-    description: string;
+    probe: string;
+    triggered: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    target: ProbeTargetDTO;
+    data?: any;
 }
 
-// ProbeType
-export type ProbeType = "RPERF" | "MTR" | "PING" | "SPEEDTEST" | "NETINFO" | "TRAFFICSIM" | "SPEEDTEST_SERVERS";
+// Speedtest / MTR / Ping results (unchanged)
 
 export interface SpeedTestResult {
     test_data: SpeedTestServer[];
@@ -126,7 +264,7 @@ export interface SpeedTestServer {
     id?: string;
     host?: string;
     distance?: number;
-    latency?: number; // TypeScript doesn't have a built-in Duration type, so we use number
+    latency?: number;
     max_latency?: number;
     min_latency?: number;
     jitter?: number;
@@ -139,7 +277,7 @@ export interface SpeedTestServer {
 export type SpeedTestByteRate = number;
 
 export interface SpeedTestTestDuration {
-    ping?: number; // Using number instead of Duration
+    ping?: number;
     download?: number;
     upload?: number;
     total?: number;
@@ -149,23 +287,6 @@ export interface SpeedTestPLoss {
     sent: number;
     dup: number;
     max: number;
-}
-
-// ProbeData
-export interface ProbeData {
-    id: string; // You can use string for ObjectID in TypeScript
-    probe: string; // You can use string for ObjectID in TypeScript
-    triggered: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-    target: ProbeTarget
-    data?: any; // Use an appropriate type for data if possible, otherwise 'any'
-}
-
-
-export interface Preferences {
-    dark: boolean,
-    token: string
 }
 
 export interface MtrResult {
@@ -199,105 +320,6 @@ export interface MtrHop {
     stddev: string;
 }
 
-
-export interface NetResult {
-    localAddress: string;
-    defaultGateway: string;
-    publicAddress: string;
-    internetProvider: string;
-    lat: string;
-    long: string;
-    timestamp: Date;
-}
-
-export interface TrafficSimResult {
-    averageRTT: number;
-    duplicatePackets: number;
-    lostPackets: number;
-    maxRTT: number;
-    minRTT: number;
-    outOfSequence: number;
-    stdDevRTT: number;
-    totalPackets: number;
-    reportTime: Date;
-}
-
-export interface RPerfResults {
-    startTimestamp: Date;
-    stopTimestamp: Date;
-    config: {
-        additional: {
-            ipVersion: number;
-            omitSeconds: number;
-            reverse: boolean;
-        };
-        common: {
-            family: string;
-            length: number;
-            streams: number;
-        };
-        download: {};
-        upload: {
-            bandwidth: number;
-            duration: number;
-            sendInterval: number;
-        };
-    };
-    streams: Array<{
-        abandoned: boolean;
-        failed: boolean;
-        intervals: {
-            receive: Array<{
-                bytesReceived: number;
-                duration: number;
-                jitterSeconds: number;
-                packetsDuplicated: number;
-                packetsLost: number;
-                packetsOutOfOrder: number;
-                packetsReceived: number;
-                timestamp: number;
-                unbrokenSequence: number;
-            }>;
-            send: Array<{
-                bytesSent: number;
-                duration: number;
-                packetsSent: number;
-                sendsBlocked: number;
-                timestamp: number;
-            }>;
-            summary: {
-                bytesReceived: number;
-                bytesSent: number;
-                durationReceive: number;
-                durationSend: number;
-                framedPacketSize: number;
-                jitterAverage: number;
-                jitterPacketsConsecutive: number;
-                packetsDuplicated: number;
-                packetsLost: number;
-                packetsOutOfOrder: number;
-                packetsReceived: number;
-                packetsSent: number;
-            };
-        };
-    }>;
-    success: boolean;
-    summary: {
-        bytesReceived: number;
-        bytesSent: number;
-        durationReceive: number;
-        durationSend: number;
-        framedPacketSize: number;
-        jitterAverage: number;
-        jitterPacketsConsecutive: number;
-        packetsDuplicated: number;
-        packetsLost: number;
-        packetsOutOfOrder: number;
-        packetsReceived: number;
-        packetsSent: number;
-    };
-}
-
 export interface PingResult {
     startTimestamp: Date;
     stopTimestamp: Date;
@@ -306,7 +328,7 @@ export interface PingResult {
     packetsRecvDuplicates: number;
     packetLoss: number;
     addr: string;
-    minRtt: number; // Same as latency in SpeedTestResult
+    minRtt: number;
     maxRtt: number;
     avgRtt: number;
     stdDevRtt: number;
@@ -327,7 +349,7 @@ export interface CompleteSystemInfo {
 }
 
 export interface CPUTimes {
-    user: number; // Assuming milliseconds or choose an appropriate unit
+    user: number;
     system: number;
     idle?: number;
     iowait?: number;
@@ -372,7 +394,7 @@ export interface HostMemoryInfo {
     virtualTotalBytes: number;
     virtualUsedBytes: number;
     virtualFreeBytes: number;
-    metrics?: Record<string, number>; // Other memory related metrics
+    metrics?: Record<string, number>;
 }
 
 export interface MeanOpinionScore {
@@ -382,20 +404,17 @@ export interface MeanOpinionScore {
     packetLoss: number;
 }
 
-function calculateMOS(jitter: number, latency: number, packetLoss: number): MeanOpinionScore {
-    // Placeholder for MOS calculation logic
-    // The actual calculation would depend on the specific formula you want to use
-    let mosValue = 5 /*- (jitter * factor1 + latency * factor2 + packetLoss * factor3)*/;
-    mosValue = Math.max(1, Math.min(mosValue, 5)); // MOS is typically between 1 and 5
-
-    return {
-        mosValue,
-        jitter,
-        latency,
-        packetLoss
-    };
+function calculateMOS(
+    jitter: number,
+    latency: number,
+    packetLoss: number
+): MeanOpinionScore {
+    let mosValue = 5;
+    mosValue = Math.max(1, Math.min(mosValue, 5));
+    return { mosValue, jitter, latency, packetLoss };
 }
 
-
-
-export {}
+export interface Preferences {
+    dark: boolean;
+    token: string;
+}

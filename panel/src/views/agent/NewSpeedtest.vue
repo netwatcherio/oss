@@ -10,7 +10,7 @@ import type {
   ProbeTarget,
   ProbeType,
   SelectOption,
-  Site, 
+  Workspace,
   SpeedTestPLoss,
   SpeedTestServer, 
   SpeedTestTestDuration
@@ -22,7 +22,7 @@ import probeService from "@/services/probeService";
 import siteService from "@/services/workspaceService";
 
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
@@ -133,7 +133,7 @@ onMounted(async () => {
     state.agent = agentRes.data as Agent
 
     const siteRes = await siteService.getSite(state.agent.site);
-    state.site = siteRes.data as Site
+    state.site = siteRes.data as Workspace
 
     let req = {limit: 1, recent: true} as ProbeDataRequest
     const dataRes = await probeService.getProbeData(state.probe.id, req);

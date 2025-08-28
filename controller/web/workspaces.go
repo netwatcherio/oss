@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/kataras/iris/v12"
-	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 )
@@ -101,7 +100,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 		_ = ctx.JSON(wsObj)
 	})
 
-	wsID.Patch("/", func(ctx iris.Context) {
+	wsID.Post("/update", func(ctx iris.Context) {
 		ctx.ContentType("application/json")
 
 		u, err := currentUser(ctx)
@@ -141,7 +140,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 		ctx.StatusCode(iris.StatusOK)
 	})
 
-	wsID.Delete("/", func(ctx iris.Context) {
+	wsID.Post("/delete", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -236,7 +235,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 		ctx.StatusCode(iris.StatusOK)
 	})
 
-	members.Patch("/{memberId:uint}", func(ctx iris.Context) {
+	members.Post("/{memberId:uint}/update", func(ctx iris.Context) {
 		ctx.ContentType("application/json")
 
 		u, err := currentUser(ctx)
@@ -282,7 +281,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 		ctx.StatusCode(iris.StatusOK)
 	})
 
-	members.Delete("/{memberId:uint}", func(ctx iris.Context) {
+	members.Post("/{memberId:uint}/delete", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -311,7 +310,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 	})
 
 	// -------- /workspaces/{id}/groups
-	groups := wsID.Party("/groups")
+	/*groups := wsID.Party("/groups")
 
 	groups.Get("/", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
@@ -335,7 +334,7 @@ func addRouteWorkspaces(r *Router) []*Route {
 			return
 		}
 		_ = ctx.JSON(out)
-	})
+	})*/
 
 	// we mounted routes directly, so nothing to add to r.Routes
 	return nil

@@ -2,7 +2,7 @@
 import {onMounted, reactive, computed} from "vue";
 import siteService from "@/services/workspaceService";
 import core from "@/core";
-import type {Agent, Site} from "@/types";
+import type {Agent, Workspace} from "@/types";
 import Title from "@/components/Title.vue";
 import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
@@ -12,7 +12,7 @@ import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import AgentCard from "@/components/AgentCard.vue";
 
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   agents: [] as Agent[],
   ready: false,
   loading: true,
@@ -32,7 +32,7 @@ const filteredAgents = computed(() => {
     filtered = filtered.filter(agent => 
       agent.name.toLowerCase().includes(query) ||
       agent.location?.toLowerCase().includes(query) ||
-      agent.id.toLowerCase().includes(query)
+      agent.id
     );
   }
   
@@ -62,12 +62,12 @@ const offlineAgentsCount = computed(() => {
 });
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["siteId"] as string
+  let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
   siteService.getSite(id).then(res => {
-    state.site = res.data as Site
-    agentService.getSiteAgents(id).then(res => {
+    state.site = res.data as Workspace
+    agentService.getWorkspaceAgents(id).then(res => {
       state.agents = res.data as Agent[] || []
       state.ready = state.agents.length > 0
       state.loading = false
@@ -111,7 +111,7 @@ function getLastSeenText(agent: Agent) {
           <i class="fa-solid fa-users"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
-        <router-link :to="`/agent/${state.site.id}/new`" class="btn btn-primary">
+        <router-link :to="`/agents/${state.site.id}/new`" class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
         </router-link>
       </div>
@@ -218,7 +218,7 @@ function getLastSeenText(agent: Agent) {
           
           <div class="agent-card-content">
             <div v-if="!agent.initialized" class="credentials-section">
-              <Code title="ID" :code="agent.id" />
+              <Code title="ID" :code="agent.id.toString()" />
               <Code title="PIN" :code="agent.pin" />
             </div>
             

@@ -3,13 +3,13 @@
 import {onMounted, reactive} from "vue";
 import siteService from "@/services/workspaceService";
 import agentService from "@/services/agentService"
-import type {Agent, AgentGroup, SelectOption, Site} from "@/types";
+import type {Agent, AgentGroup, SelectOption, Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 
 let state = reactive({
   name: "",
-  site: {} as Site,
+  site: {} as Workspace,
   agents: [] as Agent[],
   selected: [] as string[], // Array reference
   options: [] as SelectOption[],
@@ -25,7 +25,7 @@ onMounted(() => {
   if (!id) return
 
   siteService.getSite(id).then(res => {
-    state.site = res.data as Site
+    state.site = res.data as Workspace
   })
   agentService.getSiteAgents(id).then(res => {
     state.agents = res.data as Agent[]

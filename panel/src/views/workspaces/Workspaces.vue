@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { Site } from "@/types";
+import type { Workspace } from "@/types";
 import { onMounted, reactive, computed } from "vue";
 import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
@@ -11,11 +11,11 @@ declare interface AgentCountInfo {
 }
 
 declare interface sitesList {
-  sites: Site[];
+  sites: Workspace[];
 }
 
 const state = reactive({
-  sites: [] as Site[],
+  sites: [] as Workspace[],
   agent_counts: [] as AgentCountInfo[],
   ready: false,
   loading: true,
@@ -39,7 +39,7 @@ const filteredSites = computed(() => {
   // Sort sites
   filtered.sort((a, b) => {
     let aVal: any, bVal: any;
-    
+
     switch (state.sortBy) {
       case "name":
         aVal = a.name.toLowerCase();
@@ -87,8 +87,8 @@ function getSortIcon(column: string) {
 onMounted(async () => {
   try {
     const res = await siteService.getSites();
-    const data = res.data as Site[];
-    
+    const data = res.data as Workspace[];
+
     if (data && data.length > 0) {
       state.sites = data;
       state.ready = true;
@@ -104,19 +104,19 @@ onMounted(async () => {
 
 <template>
   <div class="container-fluid">
-    <Title 
-      title="workspaces" 
+    <Title
+      title="workspaces"
       subtitle="an overview of the workspaces you have access to"
     >
       <div class="d-flex gap-2">
-        <router-link 
-          to="/workspaces/alerts" 
+        <router-link
+          to="/workspaces/alerts"
           class="btn btn-outline-danger"
         >
           <i class="fa-solid fa-exclamation-triangle me-2"></i>View Alerts
         </router-link>
-        <router-link 
-          to="/workspace/new" 
+        <router-link
+          to="/workspace/new"
           class="btn btn-primary"
         >
           <i class="fa-solid fa-plus-circle me-2"></i>Create Workspace
@@ -199,10 +199,10 @@ onMounted(async () => {
                   <span class="input-group-text bg-light border-end-0">
                     <i class="fas fa-search text-muted"></i>
                   </span>
-                  <input 
+                  <input
                     v-model="state.searchQuery"
-                    type="text" 
-                    class="form-control border-start-0 ps-0" 
+                    type="text"
+                    class="form-control border-start-0 ps-0"
                     placeholder="Search workspaces by name, description, or location..."
                   >
                 </div>
@@ -249,8 +249,8 @@ onMounted(async () => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr 
-                    v-for="site in filteredSites" 
+                  <tr
+                    v-for="site in filteredSites"
                     :key="site.id"
                     class="workspace-row"
                   >
@@ -260,14 +260,14 @@ onMounted(async () => {
                           <i class="fas fa-building"></i>
                         </div>
                         <div>
-                          <router-link 
-                            :to="`/workspace/${site.id}`" 
+                          <router-link
+                            :to="`/workspace/${site.id}`"
                             class="text-decoration-none fw-semibold text-dark"
                           >
                             {{ site.name }}
                           </router-link>
                           <div class="text-muted small">
-                            ID: {{ site.id.slice(0, 8) }}...
+                            ID: {{ site.id }}...
                           </div>
                         </div>
                       </div>
@@ -296,15 +296,15 @@ onMounted(async () => {
                     </td>
                     <td class="text-end">
                       <div class="btn-group" role="group">
-                        <router-link 
-                          :to="`/workspace/${site.id}`" 
+                        <router-link
+                          :to="`/workspace/${site.id}`"
                           class="btn btn-sm btn-outline-primary"
                           title="View workspace"
                         >
                           <i class="fas fa-eye"></i>
                         </router-link>
-                        <router-link 
-                          :to="`/workspace/${site.id}/edit`" 
+                        <router-link
+                          :to="`/workspace/${site.id}/edit`"
                           class="btn btn-sm btn-outline-secondary"
                           title="Edit"
                         >
@@ -516,17 +516,17 @@ onMounted(async () => {
   .stat-card {
     margin-bottom: 1rem;
   }
-  
+
   .table-responsive {
     border-radius: 0.75rem;
   }
-  
+
   .btn-group {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
   }
-  
+
   .btn-group .btn {
     border-radius: 0.375rem !important;
   }

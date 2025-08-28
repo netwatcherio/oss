@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type {AgentGroup, MemberInfo, Probe, Site, SiteMember} from "@/types";
+import type {AgentGroup, MemberInfo, Probe, Workspace, WorkspaceMember} from "@/types";
 import {onMounted, reactive, computed} from "vue";
 import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
@@ -10,7 +10,7 @@ import probeService from "@/services/probeService";
 
 const state = reactive({
   probes: [] as Probe[],
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
@@ -209,7 +209,7 @@ onMounted(async () => {
     ]);
 
     state.agents = agentsRes.data as Agent[];
-    state.site = siteRes.data as Site;
+    state.site = siteRes.data as Workspace;
 
     // Get agent groups if available
     try {

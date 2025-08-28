@@ -1,5 +1,5 @@
 /* jquery.sparkline 2.1.2 - http://omnipotent.net/jquery.sparkline/
- ** Licensed under the New BSD License - see above site for details */
+ ** Licensed under the New BSD License - see above workspaces for details */
 
 (function (a, b, c) {
     (function (a) {

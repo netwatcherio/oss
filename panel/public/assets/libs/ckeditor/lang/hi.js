@@ -311,7 +311,7 @@ CKEDITOR.lang["hi"] = {
     about: {
         copy: "Copyright &copy; $1. All rights reserved.",
         dlgTitle: "About CKEditor 4",
-        moreInfo: "For licensing information please visit our web site:",
+        moreInfo: "For licensing information please visit our web workspaces:",
     },
     editor: "रिच टेक्स्ट एडिटर",
     editorPanel: "Rich Text Editor panel",

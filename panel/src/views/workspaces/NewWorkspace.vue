@@ -2,7 +2,7 @@
 
 import {reactive} from "vue";
 import siteService from "@/services/workspaceService";
-import type {Site} from "@/types";
+import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 
@@ -27,7 +27,7 @@ function submit() {
     name: state.name,
     description: state.description,
     location: state.location
-  } as Site).then(onCreate).catch(onError)
+  } as Workspace).then(onCreate).catch(onError)
 }
 
 </script>

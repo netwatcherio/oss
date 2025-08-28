@@ -6,7 +6,7 @@ import type {
   Probe,
   ProbeData,
   ProbeDataRequest,
-  Site, 
+  Workspace,
   SpeedTestPLoss, 
   SpeedTestResult, 
   SpeedTestServer, 
@@ -20,7 +20,7 @@ import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
 
 const state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
@@ -212,7 +212,7 @@ onMounted(() => {
     state.agent = res.data as Agent
 
     siteService.getSite(state.agent.site).then(res => {
-      state.site = res.data as Site
+      state.site = res.data as Workspace
     })
 
     probeService.getAgentProbes(state.agent.id).then(res => {

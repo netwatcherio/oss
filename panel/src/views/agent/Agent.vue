@@ -13,7 +13,7 @@ import type {
   Probe,
   ProbeData,
   ProbeType,
-  Site
+  Workspace
 } from "@/types";
 import {OUIEntry} from "@/types";
 import core from "@/core";
@@ -28,6 +28,7 @@ import {since} from "@/time";
 import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
+import agent from "@/views/agent/index";
 
 interface OrganizedProbe {
   key: string;
@@ -106,7 +107,7 @@ function getVendorFromMac(macAddress: string) {
 }
 
 let state = reactive({
-  site: {} as Site,
+  site: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
@@ -360,25 +361,26 @@ function getRandomProbeId(list: Probe[]): string | undefined {
 const router = core.router()
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["idParam"] as string
-  if (!id) return
+  let agentID = router.currentRoute.value.params["aID"] as string
+  let workspaceID = router.currentRoute.value.params["wID"] as string
+  if (!agentID || !workspaceID) return
 
-  agentService.getAgent(id).then(res => {
+  agentService.getAgent(workspaceID, agentID).then(res => {
     state.agent = res.data as Agent
 
     fetch('/ouiList.json')
         .then(response => response.json())
         .then(data => state.ouiList = data as OUIEntry[]);
 
-    siteService.getSite(state.agent.site).then(res => {
-      state.site = res.data as Site
-      probeService.getNetworkInfo(state.agent.id).then(res => {
+    siteService.getSite(workspaceID).then(res => {
+      state.site = res.data as Workspace
+      /*probeService.getNetworkInfo(state.agent.id).then(res => {
         state.networkInfo = res.data as ProbeData
         probeService.getSystemInfo(state.agent.id).then(res => {
           state.systemInfoComplete = convertToCompleteSystemInfo((res.data as ProbeData).data);
           reloadData(id);
         })
-      })
+      })*/
     })
   })
 })

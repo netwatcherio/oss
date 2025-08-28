@@ -314,7 +314,7 @@ CKEDITOR.lang["tt"] = {
     about: {
         copy: "Copyright &copy; $1. Бар хокуклар сакланган",
         dlgTitle: "CKEditor турында",
-        moreInfo: "For licensing information please visit our web site:",
+        moreInfo: "For licensing information please visit our web workspaces:",
     },
     editor: "Форматлаулы текст өлкәсе",
     editorPanel: "Rich Text Editor panel",

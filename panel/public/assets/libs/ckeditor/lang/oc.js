@@ -321,7 +321,7 @@ CKEDITOR.lang["oc"] = {
     about: {
         copy: "Copyright &copy; $1. Totes los dreits reservats.",
         dlgTitle: "A prepaus de CKEditor 4",
-        moreInfo: "Per las informacions de licéncia, visitatz nòstre site web :",
+        moreInfo: "Per las informacions de licéncia, visitatz nòstre workspaces web :",
     },
     editor: "Editor de tèxte enriquit",
     editorPanel: "Tablèu de bòrd de l'editor de tèxte enriquit",
