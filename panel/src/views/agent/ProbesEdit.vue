@@ -20,7 +20,7 @@ const state = reactive({
   selectedType: 'all'
 })
 
-// Helper functions that need to be accessible in template
+// Helper functions
 function getProbeTypeLabel(probe: Probe): string {
   if (probe.type === 'RPERF' && probe.config?.server) {
     return 'RPERF SERVER';
@@ -47,15 +47,15 @@ function getProbeIcon(probe: Probe): string {
 
 function getProbeColor(probe: Probe): string {
   switch (probe.type) {
-    case 'SYSINFO': 
-    case 'NETINFO': 
+    case 'SYSINFO':
+    case 'NETINFO': return 'blue';
     case 'SPEEDTEST':
-    case 'SPEEDTEST_SERVERS': return 'secondary';
-    case 'MTR': return 'info';
-    case 'PING': return 'success';
-    case 'RPERF': return probe.config?.server ? 'primary' : 'warning';
-    case 'TRAFFICSIM': return probe.config?.server ? 'purple' : 'danger';
-    default: return 'dark';
+    case 'SPEEDTEST_SERVERS': return 'teal';
+    case 'MTR': return 'cyan';
+    case 'PING': return 'green';
+    case 'RPERF': return probe.config?.server ? 'purple' : 'orange';
+    case 'TRAFFICSIM': return probe.config?.server ? 'indigo' : 'red';
+    default: return 'gray';
   }
 }
 
@@ -67,9 +67,9 @@ function getProbeDescription(probe: Probe): string {
     case 'SPEEDTEST_SERVERS': return 'Speed test server discovery';
     case 'MTR': return 'Multi-hop network trace';
     case 'PING': return 'Network latency monitoring';
-    case 'RPERF': 
+    case 'RPERF':
       return probe.config?.server ? 'Performance test server' : 'Network performance testing';
-    case 'TRAFFICSIM': 
+    case 'TRAFFICSIM':
       return probe.config?.server ? 'Traffic simulation server' : 'Network traffic simulation';
     default: return 'Custom probe monitoring';
   }
@@ -77,9 +77,9 @@ function getProbeDescription(probe: Probe): string {
 
 function getTargetDisplay(probe: Probe): { type: string, name: string, value: string } | null {
   if (!probe.config?.target?.[0]) return null;
-  
+
   const target = probe.config.target[0];
-  
+
   if (target.agent && target.agent !== '000000000000000000000000') {
     return {
       type: 'agent',
@@ -87,7 +87,7 @@ function getTargetDisplay(probe: Probe): { type: string, name: string, value: st
       value: target.target || 'N/A'
     };
   }
-  
+
   if (target.group && target.group !== '000000000000000000000000') {
     return {
       type: 'group',
@@ -95,7 +95,7 @@ function getTargetDisplay(probe: Probe): { type: string, name: string, value: st
       value: target.target || 'N/A'
     };
   }
-  
+
   if (target.target) {
     return {
       type: 'target',
@@ -103,7 +103,7 @@ function getTargetDisplay(probe: Probe): { type: string, name: string, value: st
       value: target.target
     };
   }
-  
+
   return null;
 }
 
@@ -139,12 +139,12 @@ const probeTypes = computed(() => {
 
 const filteredProbes = computed(() => {
   let filtered = state.probes;
-  
+
   // Filter by type
   if (state.selectedType !== 'all') {
     filtered = filtered.filter(p => getProbeTypeLabel(p) === state.selectedType);
   }
-  
+
   // Filter by search
   if (state.searchQuery) {
     const query = state.searchQuery.toLowerCase();
@@ -155,35 +155,30 @@ const filteredProbes = computed(() => {
       return type.includes(query) || target.includes(query) || agentName.includes(query);
     });
   }
-  
+
   return filtered;
 });
 
-// Built-in/Agent probes (non-removable)
+// Categorized probes
 const builtInProbes = computed(() => {
-  return filteredProbes.value.filter(p => 
-    ['SYSINFO', 'NETINFO', 'SPEEDTEST', 'SPEEDTEST_SERVERS'].includes(p.type)
+  return filteredProbes.value.filter(p =>
+      ['SYSINFO', 'NETINFO', 'SPEEDTEST', 'SPEEDTEST_SERVERS'].includes(p.type)
   );
 });
 
-// Server/Collector probes
 const serverProbes = computed(() => {
   return filteredProbes.value.filter(p => {
-    // RPERF servers and TRAFFICSIM servers
-    return (p.type === 'RPERF' && p.config?.server) || 
-           (p.type === 'TRAFFICSIM' && p.config?.server);
+    return (p.type === 'RPERF' && p.config?.server) ||
+        (p.type === 'TRAFFICSIM' && p.config?.server);
   });
 });
 
-// General probes (everything else)
 const generalProbes = computed(() => {
   return filteredProbes.value.filter(p => {
-    // Not a built-in probe
     if (['SYSINFO', 'NETINFO', 'SPEEDTEST', 'SPEEDTEST_SERVERS'].includes(p.type)) {
       return false;
     }
-    // Not a server probe
-    if ((p.type === 'RPERF' && p.config?.server) || 
+    if ((p.type === 'RPERF' && p.config?.server) ||
         (p.type === 'TRAFFICSIM' && p.config?.server)) {
       return false;
     }
@@ -191,9 +186,7 @@ const generalProbes = computed(() => {
   });
 });
 
-function isSystemProbe(probe: Probe): boolean {
-  return probe.type === 'SYSINFO' || probe.type === 'NETINFO';
-}
+const router = core.router()
 
 onMounted(async () => {
   let id = router.currentRoute.value.params["aID"] as string
@@ -214,7 +207,6 @@ onMounted(async () => {
     state.agents = agentsRes.data as Agent[];
     state.site = siteRes.data as Workspace;
 
-    // Get agent groups if available
     try {
       const groupsRes = await siteService.getAgentGroups(state.agent.workspaceId.toString());
       state.agentGroups = groupsRes.data as AgentGroup[];
@@ -224,7 +216,7 @@ onMounted(async () => {
 
     const probesRes = await probeService.getAgentProbes(state.agent.id.toString());
     state.probes = probesRes.data as Probe[] || [];
-    
+
     state.ready = true;
     state.loading = false;
   } catch (error) {
@@ -232,52 +224,43 @@ onMounted(async () => {
     state.loading = false;
   }
 })
-
-const router = core.router()
 </script>
 
 <template>
   <div class="container-fluid">
-    <Title 
-      title="Manage Probes" 
-      subtitle="Configure monitoring probes for this agent" 
-      :history="[
+    <Title
+        title="Manage Probes"
+        subtitle="Configure monitoring probes for this agent"
+        :history="[
         {title: 'workspaces', link: '/workspaces'},
         {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`},
         {title: state.agent.name || 'Loading...', link: `/workspace/${state.site.id}/agent/${state.agent.id}`}
       ]">
       <div class="d-flex gap-2">
-        <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary">
+        <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
       </div>
     </Title>
 
-    <!-- Loading State -->
-    <div v-if="state.loading" class="loading-container">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-      <p class="loading-text">Loading probes...</p>
-    </div>
-
-    <!-- Main Content -->
-    <div v-else-if="state.ready">
-      <!-- Filters and Stats -->
-      <div class="filters-section" v-if="state.probes.length > 0">
+    <!-- Main Content Container - Always visible -->
+    <div class="content-wrapper">
+      <!-- Filters Section - Always show structure -->
+      <div class="filters-section">
         <div class="filters-row">
           <div class="search-box">
             <i class="fa-solid fa-search search-icon"></i>
-            <input 
-              v-model="state.searchQuery" 
-              type="text" 
-              class="form-control search-input" 
-              placeholder="Search probes by type, target, or agent..."
+            <input
+                v-model="state.searchQuery"
+                type="text"
+                class="form-control search-input"
+                placeholder="Search probes by type, target, or agent..."
+                :disabled="state.loading"
             >
           </div>
-          
+
           <div class="type-filter">
-            <select v-model="state.selectedType" class="form-select">
+            <select v-model="state.selectedType" class="form-select" :disabled="state.loading">
               <option value="all">All Types</option>
               <option v-for="type in probeTypes.slice(1)" :key="type" :value="type">
                 {{ type }}
@@ -285,29 +268,79 @@ const router = core.router()
             </select>
           </div>
         </div>
-        
+
         <div class="stats-row">
-          <div class="stat-chip">
+          <div class="stat-chip" :class="{'loading': state.loading}">
             <i class="fa-solid fa-cube"></i>
-            <span>{{ filteredProbes.length }} Total Probes</span>
+            <span v-if="state.loading" class="skeleton-text">-- Total</span>
+            <span v-else>{{ filteredProbes.length }} Total Probes</span>
           </div>
-          <div class="stat-chip" v-if="builtInProbes.length > 0">
+          <div class="stat-chip" :class="{'loading': state.loading}">
             <i class="fa-solid fa-cog"></i>
-            <span>{{ builtInProbes.length }} Built-in</span>
+            <span v-if="state.loading" class="skeleton-text">-- Built-in</span>
+            <span v-else>{{ builtInProbes.length }} Built-in</span>
           </div>
-          <div class="stat-chip" v-if="serverProbes.length > 0">
+          <div class="stat-chip" :class="{'loading': state.loading}">
             <i class="fa-solid fa-server"></i>
-            <span>{{ serverProbes.length }} Servers</span>
+            <span v-if="state.loading" class="skeleton-text">-- Servers</span>
+            <span v-else>{{ serverProbes.length }} Servers</span>
           </div>
-          <div class="stat-chip" v-if="generalProbes.length > 0">
+          <div class="stat-chip" :class="{'loading': state.loading}">
             <i class="fa-solid fa-cubes"></i>
-            <span>{{ generalProbes.length }} General</span>
+            <span v-if="state.loading" class="skeleton-text">-- General</span>
+            <span v-else>{{ generalProbes.length }} General</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      <div v-if="state.loading" class="probes-container">
+        <!-- Built-in Section Skeleton -->
+        <div class="probe-section">
+          <h6 class="section-title">
+            <i class="fa-solid fa-cog"></i>
+            Built-in
+          </h6>
+          <div class="probes-grid">
+            <div v-for="i in 2" :key="`built-in-skeleton-${i}`" class="probe-card skeleton">
+              <div class="probe-header">
+                <div class="probe-icon skeleton-box"></div>
+                <div class="probe-info">
+                  <div class="skeleton-text probe-type-skeleton"></div>
+                  <div class="skeleton-text probe-desc-skeleton"></div>
+                </div>
+                <div class="skeleton-badge"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- General Section Skeleton -->
+        <div class="probe-section">
+          <h6 class="section-title">
+            <i class="fa-solid fa-cubes"></i>
+            Probes
+          </h6>
+          <div class="probes-grid">
+            <div v-for="i in 3" :key="`general-skeleton-${i}`" class="probe-card skeleton">
+              <div class="probe-header">
+                <div class="probe-icon skeleton-box"></div>
+                <div class="probe-info">
+                  <div class="skeleton-text probe-type-skeleton"></div>
+                  <div class="skeleton-text probe-desc-skeleton"></div>
+                  <div class="probe-target">
+                    <span class="skeleton-text target-skeleton"></span>
+                  </div>
+                </div>
+                <div class="skeleton-action"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Empty State -->
-      <div v-if="state.probes.length === 0" class="empty-state-card">
+      <div v-else-if="state.probes.length === 0" class="empty-state-card">
         <div class="empty-state">
           <i class="fa-solid fa-cube"></i>
           <h5>No Probes Configured</h5>
@@ -330,19 +363,19 @@ const router = core.router()
         </div>
       </div>
 
-      <!-- Probes List -->
+      <!-- Actual Probes List -->
       <div v-else class="probes-container">
         <!-- Built-in/Agent Probes -->
         <div v-if="builtInProbes.length > 0" class="probe-section">
           <h6 class="section-title">
             <i class="fa-solid fa-cog"></i>
             Built-in
-            <span class="section-subtitle"></span>
+            <span class="section-count">{{ builtInProbes.length }}</span>
           </h6>
           <div class="probes-grid">
             <div v-for="probe in builtInProbes" :key="probe.id" class="probe-card built-in">
               <div class="probe-header">
-                <div class="probe-icon" :class="`bg-${getProbeColor(probe)}`">
+                <div class="probe-icon" :class="`icon-${getProbeColor(probe)}`">
                   <i :class="getProbeIcon(probe)"></i>
                 </div>
                 <div class="probe-info">
@@ -350,9 +383,9 @@ const router = core.router()
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
                 </div>
                 <div class="probe-badge">
-                  <span class="badge bg-secondary">
+                  <span class="badge badge-secondary">
                     <i class="fa-solid fa-lock"></i>
-                    Built-in
+                    System
                   </span>
                 </div>
               </div>
@@ -365,12 +398,12 @@ const router = core.router()
           <h6 class="section-title">
             <i class="fa-solid fa-server"></i>
             Servers & Collectors
-            <span class="section-subtitle"></span>
+            <span class="section-count">{{ serverProbes.length }}</span>
           </h6>
           <div class="probes-grid">
             <div v-for="probe in serverProbes" :key="probe.id" class="probe-card server">
               <div class="probe-header">
-                <div class="probe-icon" :class="`bg-${getProbeColor(probe)}`">
+                <div class="probe-icon" :class="`icon-${getProbeColor(probe)}`">
                   <i :class="getProbeIcon(probe)"></i>
                 </div>
                 <div class="probe-info">
@@ -378,12 +411,12 @@ const router = core.router()
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
                   <div v-if="probe.config?.port" class="probe-target">
                     <i class="fa-solid fa-ethernet"></i>
-                    <span class="target-name">Port</span>
+                    <span class="target-label">Port:</span>
                     <span class="target-value">{{ probe.config.port }}</span>
                   </div>
                 </div>
                 <div class="probe-badge">
-                  <span class="badge bg-primary">
+                  <span class="badge badge-primary">
                     <i class="fa-solid fa-tower-broadcast"></i>
                     Server
                   </span>
@@ -398,12 +431,12 @@ const router = core.router()
           <h6 class="section-title">
             <i class="fa-solid fa-cubes"></i>
             Probes
-            <span class="section-subtitle"></span>
+            <span class="section-count">{{ generalProbes.length }}</span>
           </h6>
           <div class="probes-grid">
             <div v-for="probe in generalProbes" :key="probe.id" class="probe-card">
               <div class="probe-header">
-                <div class="probe-icon" :class="`bg-${getProbeColor(probe)}`">
+                <div class="probe-icon" :class="`icon-${getProbeColor(probe)}`">
                   <i :class="getProbeIcon(probe)"></i>
                 </div>
                 <div class="probe-info">
@@ -411,14 +444,14 @@ const router = core.router()
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
                   <div v-if="getTargetDisplay(probe)" class="probe-target">
                     <i :class="getTargetDisplay(probe).type === 'agent' ? 'fa-solid fa-robot' : 'fa-solid fa-bullseye'"></i>
-                    <span class="target-name">{{ getTargetDisplay(probe).name }}</span>
+                    <span class="target-label">{{ getTargetDisplay(probe).name }}:</span>
                     <span class="target-value">{{ getTargetDisplay(probe).value }}</span>
                   </div>
                 </div>
-                <router-link 
-                  :to="`/probe/${probe.id}/delete`" 
-                  class="probe-action delete"
-                  title="Remove probe"
+                <router-link
+                    :to="`/probe/${probe.id}/delete`"
+                    class="probe-action delete"
+                    title="Remove probe"
                 >
                   <i class="fa-solid fa-trash"></i>
                 </router-link>
@@ -432,21 +465,115 @@ const router = core.router()
 </template>
 
 <style scoped>
-/* Loading State */
-.loading-container {
+/* Content Wrapper */
+.content-wrapper {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 400px;
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  gap: 1.5rem;
 }
 
-.loading-text {
-  margin-top: 1rem;
-  color: #6b7280;
+/* Loading Animations */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-text {
+  display: inline-block;
+  background: #e5e7eb;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-text::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: skeleton-shimmer 1.5s infinite;
+}
+
+.skeleton-box {
+  background: #e5e7eb;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.skeleton-box::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: skeleton-shimmer 1.5s infinite;
+}
+
+.probe-type-skeleton {
+  width: 120px;
+  height: 20px;
+  margin-bottom: 0.5rem;
+}
+
+.probe-desc-skeleton {
+  width: 180px;
+  height: 16px;
+}
+
+.target-skeleton {
+  width: 150px;
+  height: 16px;
+}
+
+.skeleton-badge {
+  width: 80px;
+  height: 28px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-badge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: skeleton-shimmer 1.5s infinite;
+}
+
+.skeleton-action {
+  width: 36px;
+  height: 36px;
+  background: #e5e7eb;
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-action::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: skeleton-shimmer 1.5s infinite;
 }
 
 /* Filters Section */
@@ -455,7 +582,6 @@ const router = core.router()
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 1.25rem;
-  margin-bottom: 1.5rem;
 }
 
 .filters-row {
@@ -477,6 +603,7 @@ const router = core.router()
   top: 50%;
   transform: translateY(-50%);
   color: #6b7280;
+  pointer-events: none;
 }
 
 .search-input {
@@ -490,6 +617,11 @@ const router = core.router()
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
+.search-input:disabled {
+  background: #f9fafb;
+  cursor: not-allowed;
+}
+
 .type-filter {
   min-width: 200px;
 }
@@ -497,6 +629,11 @@ const router = core.router()
 .type-filter .form-select {
   border-radius: 6px;
   border: 1px solid #e5e7eb;
+}
+
+.type-filter .form-select:disabled {
+  background: #f9fafb;
+  cursor: not-allowed;
 }
 
 .stats-row {
@@ -516,6 +653,10 @@ const router = core.router()
   color: #4b5563;
 }
 
+.stat-chip.loading {
+  min-width: 100px;
+}
+
 .stat-chip i {
   font-size: 0.875rem;
   color: #6b7280;
@@ -526,7 +667,7 @@ const router = core.router()
   background: white;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 3rem 2rem;
+  padding: 4rem 2rem;
 }
 
 .empty-state {
@@ -542,6 +683,7 @@ const router = core.router()
 .empty-state h5 {
   color: #1f2937;
   margin-bottom: 0.5rem;
+  font-weight: 600;
 }
 
 .empty-state p {
@@ -577,56 +719,46 @@ const router = core.router()
   color: #6b7280;
 }
 
-.section-subtitle {
+.section-count {
   margin-left: auto;
-  font-size: 0.813rem;
-  font-weight: 400;
-  color: #6b7280;
-}
-
-.section-subtitle {
-  margin-left: auto;
-  font-size: 0.813rem;
-  font-weight: 400;
-  color: #6b7280;
-}
-
-.section-subtitle {
-  margin-left: auto;
-  font-size: 0.813rem;
-  font-weight: 400;
+  padding: 0.125rem 0.5rem;
+  background: #f3f4f6;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
   color: #6b7280;
 }
 
 /* Probes Grid */
 .probes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
   gap: 1rem;
 }
 
 .probe-card {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 1rem;
-  background: #f9fafb;
+  padding: 1.25rem;
+  background: white;
   transition: all 0.2s;
 }
 
-.probe-card:hover {
-  background: white;
+.probe-card:hover:not(.skeleton) {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
 }
 
 .probe-card.built-in {
-  background: #f3f4f6;
-  border-color: #d1d5db;
+  background: #f9fafb;
 }
 
 .probe-card.server {
-  background: #eff6ff;
-  border-color: #dbeafe;
+  background: #f0f9ff;
+}
+
+.probe-card.skeleton {
+  pointer-events: none;
 }
 
 .probe-header {
@@ -647,35 +779,40 @@ const router = core.router()
   flex-shrink: 0;
 }
 
-.probe-icon.bg-dark {
-  background: #374151;
-}
-
-.probe-icon.bg-info {
+/* Icon Colors */
+.icon-blue {
   background: #3b82f6;
 }
 
-.probe-icon.bg-success {
+.icon-green {
   background: #10b981;
 }
 
-.probe-icon.bg-primary {
-  background: #6366f1;
-}
-
-.probe-icon.bg-warning {
-  background: #f59e0b;
-}
-
-.probe-icon.bg-danger {
-  background: #ef4444;
-}
-
-.probe-icon.bg-purple {
+.icon-purple {
   background: #8b5cf6;
 }
 
-.probe-icon.bg-secondary {
+.icon-orange {
+  background: #f59e0b;
+}
+
+.icon-red {
+  background: #ef4444;
+}
+
+.icon-teal {
+  background: #14b8a6;
+}
+
+.icon-cyan {
+  background: #06b6d4;
+}
+
+.icon-indigo {
+  background: #6366f1;
+}
+
+.icon-gray {
   background: #6b7280;
 }
 
@@ -689,19 +826,21 @@ const router = core.router()
   font-size: 0.875rem;
   font-weight: 600;
   color: #1f2937;
+  line-height: 1.4;
 }
 
 .probe-description {
   margin: 0.25rem 0 0 0;
   font-size: 0.813rem;
   color: #6b7280;
+  line-height: 1.4;
 }
 
 .probe-target {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
   font-size: 0.813rem;
   color: #4b5563;
 }
@@ -711,7 +850,7 @@ const router = core.router()
   color: #9ca3af;
 }
 
-.target-name {
+.target-label {
   font-weight: 500;
   color: #374151;
 }
@@ -722,19 +861,52 @@ const router = core.router()
   border-radius: 4px;
   font-family: monospace;
   font-size: 0.75rem;
-  color: #4b5563;
+  color: #1f2937;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Badges */
 .probe-badge {
   flex-shrink: 0;
 }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-secondary {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.badge-primary {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.badge i {
+  font-size: 0.75rem;
+}
+
+/* Probe Actions */
 .probe-action {
   padding: 0.5rem;
   border-radius: 6px;
   color: #6b7280;
   transition: all 0.2s;
   text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .probe-action:hover {
@@ -742,9 +914,11 @@ const router = core.router()
   color: #dc2626;
 }
 
-.probe-action.delete:hover {
-  background: #fee2e2;
-  color: #dc2626;
+/* Disabled state */
+.btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Responsive */
@@ -752,17 +926,40 @@ const router = core.router()
   .filters-row {
     flex-direction: column;
   }
-  
+
   .search-box {
     min-width: 100%;
   }
-  
+
   .type-filter {
     width: 100%;
   }
-  
+
   .probes-grid {
     grid-template-columns: 1fr;
+  }
+
+  .probe-card {
+    padding: 1rem;
+  }
+
+  .probe-target {
+    flex-wrap: wrap;
+  }
+
+  .target-value {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 576px) {
+  .stat-chip {
+    font-size: 0.813rem;
+    padding: 0.25rem 0.625rem;
+  }
+
+  .empty-state-card {
+    padding: 3rem 1.5rem;
   }
 }
 </style>
