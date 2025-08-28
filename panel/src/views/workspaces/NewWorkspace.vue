@@ -15,7 +15,7 @@ const state = reactive({
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push("/sites")
+  router.push("/workspaces")
 }
 
 function onError(response: any) {

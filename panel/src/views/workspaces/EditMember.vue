@@ -16,7 +16,7 @@ const state = reactive({
 const router = core.router()
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["siteId"] as string
+  let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
   let mId = router.currentRoute.value.params["userId"] as string

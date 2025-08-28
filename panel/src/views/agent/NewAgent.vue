@@ -27,7 +27,7 @@ onMounted(() => {
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push("/sites")
+  router.push(`/workspace/${state.site.id}`)
 }
 
 function onError(response: any) {

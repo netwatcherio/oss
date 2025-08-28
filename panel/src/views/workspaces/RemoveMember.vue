@@ -16,7 +16,7 @@ const state = reactive({
 })
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["siteId"] as string
+  let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
   let userId = router.currentRoute.value.params["userId"] as string
@@ -46,7 +46,7 @@ onMounted(() => {
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push("/sites")
+  router.push(`/workspace/${state.site.id.toString()}`)
 }
 
 function onError(response: any) {

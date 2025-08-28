@@ -14,7 +14,7 @@ let state = reactive({
 })
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["siteId"] as string
+  let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
   siteService.getSite(id).then(res => {

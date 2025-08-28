@@ -196,16 +196,19 @@ function isSystemProbe(probe: Probe): boolean {
 }
 
 onMounted(async () => {
-  let id = router.currentRoute.value.params["idParam"] as string
+  let id = router.currentRoute.value.params["aID"] as string
   if (!id) return
 
+  let wid = router.currentRoute.value.params["wID"] as string
+  if (!wid) return
+
   try {
-    const agentRes = await agentService.getAgent(id);
+    const agentRes = await agentService.getAgent(wid, id)
     state.agent = agentRes.data as Agent;
 
     const [agentsRes, siteRes] = await Promise.all([
-      agentService.getSiteAgents(state.agent.site),
-      siteService.getSite(state.agent.site)
+      agentService.getWorkspaceAgents(state.agent.workspaceId.toString()),
+      siteService.getSite(state.agent.workspaceId.toString())
     ]);
 
     state.agents = agentsRes.data as Agent[];
@@ -213,13 +216,13 @@ onMounted(async () => {
 
     // Get agent groups if available
     try {
-      const groupsRes = await siteService.getAgentGroups(state.agent.site);
+      const groupsRes = await siteService.getAgentGroups(state.agent.workspaceId.toString());
       state.agentGroups = groupsRes.data as AgentGroup[];
     } catch (e) {
       console.log('Agent groups not available');
     }
 
-    const probesRes = await probeService.getAgentProbes(state.agent.id);
+    const probesRes = await probeService.getAgentProbes(state.agent.id.toString());
     state.probes = probesRes.data as Probe[] || [];
     
     state.ready = true;
@@ -241,7 +244,7 @@ const router = core.router()
       :history="[
         {title: 'workspaces', link: '/workspaces'},
         {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`},
-        {title: state.agent.name || 'Loading...', link: `/agent/${state.agent.id}`}
+        {title: state.agent.name || 'Loading...', link: `/workspace/${state.site.id}/agent/${state.agent.id}`}
       ]">
       <div class="d-flex gap-2">
         <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary">

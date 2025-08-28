@@ -94,8 +94,10 @@ const probeDescriptions = {
 
 // Initialize component
 onMounted(async () => {
-  const id = router.currentRoute.value.params["idParam"] as string;
-  if (!id) return;
+  const aID = router.currentRoute.value.params["aID"] as string;
+  if (!aID) return;
+  const wID = router.currentRoute.value.params["wID"] as string;
+  if (!wID) return;
 
   state.probeConfig = {
     duration: 60,
@@ -110,22 +112,22 @@ onMounted(async () => {
 
   try {
     // Load agent data
-    const agentRes = await agentService.getAgent(id);
+    const agentRes = await agentService.getAgent(wID.toString(), aID.toString());
     state.agent = agentRes.data as Agent;
 
-    // Load existing probes for duplicate checking
-    const probesRes = await probeService.getAgentProbes(id);
-    state.existingProbes = probesRes.data as Probe[];
-
     // Load workspaces data
-    const siteRes = await siteService.getSite(state.agent.site);
+    const siteRes = await siteService.getSite(wID.toString());
     state.site = siteRes.data as Workspace;
 
+    // Load existing probes for duplicate checking
+    const probesRes = await probeService.getAgentProbes(aID);
+    state.existingProbes = probesRes.data as Probe[];
+
     // Load all agents for the workspaces
-    const agentsRes = await agentService.getSiteAgents(state.agent.site);
+    const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
     if (agentsRes.data.length > 0) {
       const agents = agentsRes.data as Agent[];
-      state.agents = agents.filter(a => a.id !== id);
+      state.agents = agents.filter(a => a.id.toString() !== aID.toString());
       state.ready = true;
     }
 
@@ -240,7 +242,7 @@ async function getValidAgents(probeType: ProbeType) {
       if (agent.id === state.agent.id) continue;
 
       try {
-        const res = await probeService.getAgentProbes(agent.id);
+        const res = await probeService.getAgentProbes(agent.id.toString());
         const agentProbes = res.data as Probe[];
 
         // For TRAFFICSIM, only agents with server enabled are valid
@@ -273,7 +275,7 @@ async function submit() {
     return;
   }
 
-  const id = router.currentRoute.value.params["idParam"] as string;
+  const id = router.currentRoute.value.params["aID"] as string;
   if (!id) return;
 
   state.loading = true;
@@ -331,7 +333,7 @@ const availableAgentsForSelection = computed(() => {
         :history="[
           {title: 'workspaces', link: '/workspaces'},
           {title: state.site.name, link: `/workspace/${state.site.id}`},
-          {title: state.agent.name, link: `/agent/${state.agent.id}`}
+          {title: state.agent.name, link: `/workspace/${state.site.id}/agent/${state.agent.id}`}
         ]"
         :subtitle="`create a new probe for agent '${state.agent.name}'`"
         title="New Probe">

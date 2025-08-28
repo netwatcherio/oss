@@ -9,9 +9,9 @@ import RootView from "@/views/Root.vue";
 import auth from '@/views/auth'
 
 // workspace views
-import Workspaces from '@/views/workspaces/Workspaces.vue'
+import Workspaces from '@/views/Workspaces.vue'
 import NewWorkspace from '@/views/workspaces/NewWorkspace.vue'
-import WorkspaceDashboard from '@/views/workspaces/WorkspaceDashboard.vue'
+import Workspace from '@/views/workspaces/Workspace.vue'
 import EditWorkspace from '@/views/workspaces/EditWorkspace.vue'
 import Members from '@/views/workspaces/Members.vue'
 import InviteMember from '@/views/workspaces/InviteMember.vue'
@@ -29,9 +29,11 @@ import ProbesEdit from '@/views/agent/ProbesEdit.vue'
 import DeleteAgent from '@/views/agent/DeleteAgent.vue'
 import Speedtests from '@/views/agent/Speedtests.vue'
 import NewSpeedtest from '@/views/agent/NewSpeedtest.vue'
-import AgentView from "@/views/agent/AgentView.vue";
 import BasicView from "@/views/BasicView.vue";
 import Profile from "@/views/profile/Profile.vue"
+import Probe from "@/views/probes/Probe.vue";
+import NewProbe from "@/views/probes/NewProbe.vue";
+import DeleteProbe from "@/views/probes/DeleteProbe.vue";
 
 // Helper: normalize module export to array
 const asArray = (r: unknown) => (Array.isArray(r) ? r : r ? [r] : [])
@@ -73,7 +75,7 @@ const routes: RouteRecordRaw[] = [
             {
                 path: '',
                 name: 'workspace',
-                component: WorkspaceDashboard,
+                component: Workspace,
                 props: true,
             },
 
@@ -118,16 +120,42 @@ const routes: RouteRecordRaw[] = [
                     { path: 'new', name: 'workspaceGroupsNew', component: NewAgentGroup, props: true },
                 ],
             },*/
-            // ----- Agents: /workspaces/:wID/agents[...] -----
+            // ----- Agents: /workspaces/:wID/agent[...] -----
             {
-                path: 'agents',
+                path: 'agent',
                 props: true,
                 component: BasicView,
                 children: [
                     // /workspaces/:wID/agents/new
                     { path: 'new', name: 'agentNew', component: NewAgent, props: true },
                     // /workspaces/:wID/agents/:aID (detail)
-                    { path: ':aID(\\d+)', name: 'agent', component: Agent, props: true },
+                    { path: ':aID(\\d+)', name: 'agent', component: Agent, props: true},
+                    {
+                        path: ':aID(\\d+)/probe',
+                        name: 'probeView',
+                        component: BasicView,
+                        props: true,
+                        children: [
+                            {
+                                path: ':idP(\\d+)',
+                                name: 'probe',
+                                component: Probe,
+                                props: true
+                            },
+                            {
+                                path: 'new',
+                                name: 'newProbe',
+                                component: NewProbe,
+                                props: true
+                            },
+                            {
+                                path: ':idP(\\d+)/delete',
+                                name: 'deleteProbe',
+                                component: DeleteProbe,
+                                props: true
+                            },
+                        ]
+                    },
 
                     // /workspaces/:wID/agents/:aID/edit
                     { path: ':aID(\\d+)/edit', name: 'agentEdit', component: EditAgent, props: true },
@@ -140,19 +168,18 @@ const routes: RouteRecordRaw[] = [
                         props: true,
                     },
 
-                    // /workspaces/:wID/agents/:aID/probes
-                    {
-                        path: ':aID(\\d+)/probes',
-                        name: 'agentProbesEdit',
-                        component: ProbesEdit,
-                        props: true,
-                    },
-
                     // /workspaces/:wID/agents/:aID/delete
                     {
                         path: ':aID(\\d+)/delete',
                         name: 'agentDelete',
                         component: DeleteAgent,
+                        props: true,
+                    },
+
+                    {
+                        path: ':aID(\\d+)/probes',
+                        name: 'agentDelete',
+                        component: ProbesEdit,
                         props: true,
                     },
 
@@ -171,11 +198,11 @@ const routes: RouteRecordRaw[] = [
         ],
     },
 
-            /*{
+            {
                 path: '/profile',
                 name: 'profile',
                 component: Profile,
-            },*/
+            },
 
 
             // 404

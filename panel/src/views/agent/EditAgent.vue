@@ -13,14 +13,17 @@ const state = reactive({
 });
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["idParam"] as string
+  let id = router.currentRoute.value.params["aID"] as string
   if (!id) return
 
-  agentService.getAgent(id).then(res => {
+  let wID = router.currentRoute.value.params["wID"] as string
+  if (!id) return
+
+  agentService.getAgent(wID.toString(), id.toString()).then(res => {
     state.agent = res.data as Agent
     console.log(state.agent)
 
-    siteService.getSite(state.agent.site).then(res => {
+    siteService.getSite(state.agent.workspaceId.toString()).then(res => {
       state.site = res.data as Workspace
       state.ready = true
     })

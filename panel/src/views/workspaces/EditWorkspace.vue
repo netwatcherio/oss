@@ -12,12 +12,12 @@ const state = reactive({
 });
 
 // Extract the siteId from the route parameters
-const siteId = router.currentRoute.value.params.siteId as string;
+const siteId = router.currentRoute.value.params.wID;
 
 onMounted(() => {
   if (!siteId) return;
 
-  siteService.getSite(siteId).then(res => {
+  siteService.getSite([siteId]).then(res => {
     state.site = res.data as Workspace
     console.log(state.site)
     state.ready = true

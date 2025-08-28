@@ -111,7 +111,7 @@ function getLastSeenText(agent: Agent) {
           <i class="fa-solid fa-users"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
-        <router-link :to="`/agents/${state.site.id}/new`" class="btn btn-primary">
+        <router-link :to="`/workspace/${state.site.id}/agent/new`" class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
         </router-link>
       </div>
@@ -241,7 +241,7 @@ function getLastSeenText(agent: Agent) {
           <div class="agent-actions">
             <router-link 
               v-if="agent.initialized" 
-              :to="`/agent/${agent.id}/deactivate`" 
+              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}/deactivate`"
               class="btn btn-sm btn-outline-warning"
               title="Deactivate agent"
             >
@@ -249,7 +249,7 @@ function getLastSeenText(agent: Agent) {
               <span class="d-none d-lg-inline">&nbsp;Deactivate</span>
             </router-link>
             <router-link 
-              :to="`/agent/${agent.id}/edit`" 
+              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}/edit`"
               class="btn btn-sm btn-outline-success"
               title="Edit agent"
             >
@@ -257,7 +257,7 @@ function getLastSeenText(agent: Agent) {
               <span class="d-none d-lg-inline">&nbsp;Edit</span>
             </router-link>
             <router-link 
-              :to="`/agent/${agent.id}`" 
+              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}`"
               class="btn btn-sm btn-primary"
               title="View agent details"
             >
