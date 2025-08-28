@@ -25,7 +25,6 @@ type Workspace struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Name        string `gorm:"size:255;uniqueIndex:ux_workspace_name" json:"name"`
-	Slug        string `gorm:"size:255;uniqueIndex:ux_workspace_slug" json:"slug"` // optional URL/key
 	Description string `gorm:"type:text" json:"description"`
 	Location    string `gorm:"size:255" json:"location"`
 

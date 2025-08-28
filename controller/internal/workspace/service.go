@@ -75,7 +75,6 @@ type UpdateInput struct {
 func (s *service) Create(ctx context.Context, in CreateInput) (*Workspace, error) {
 	ws := &Workspace{
 		Name:        strings.TrimSpace(in.Name),
-		Slug:        strings.TrimSpace(in.Slug),
 		Description: strings.TrimSpace(in.Description),
 		Location:    strings.TrimSpace(in.Location),
 		OwnerUserID: in.OwnerUserID,
@@ -92,7 +91,6 @@ func (s *service) Create(ctx context.Context, in CreateInput) (*Workspace, error
 func (s *service) CreateWithOwner(ctx context.Context, ownerUserID uint, ws *Workspace) (*Workspace, error) {
 	in := CreateInput{
 		Name:        ws.Name,
-		Slug:        ws.Slug,
 		Description: ws.Description,
 		Location:    ws.Location,
 		OwnerUserID: ownerUserID,
@@ -118,7 +116,6 @@ func (s *service) Update(ctx context.Context, id uint, in UpdateInput) (*Workspa
 		ws.Name = strings.TrimSpace(*in.Name)
 	}
 	if in.Slug != nil {
-		ws.Slug = strings.TrimSpace(*in.Slug)
 	}
 	if in.Description != nil {
 		ws.Description = strings.TrimSpace(*in.Description)
