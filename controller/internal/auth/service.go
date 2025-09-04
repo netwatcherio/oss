@@ -40,7 +40,7 @@ type Service interface {
 	Login(ctx context.Context, in Login, ip string) (token string, u *userpkg.User, err error)
 	Register(ctx context.Context, in Register, ip string) (token string, u *userpkg.User, err error)
 
-	// agents
+	// agents (legacy PIN/JWT flow; key-auth preferred for HTTP APIs)
 	AgentLogin(ctx context.Context, in AgentLogin) (token string, a *agentpkg.Agent, err error)
 
 	// sessions
@@ -49,8 +49,11 @@ type Service interface {
 	GetSessionFromWSConn(ctx context.Context, ws string) (*Session, error)
 
 	// helpers
-	GetUserFromJWT(ctx context.Context, tokenString string, db *gorm.DB) (*userpkg.User, *Session, error)
-	GetAgentFromJWT(ctx context.Context, tokenString string, db *gorm.DB) (*agentpkg.Agent, *Session, error)
+	GetUserFromJWT(ctx context.Context, session *Session, db *gorm.DB) (*userpkg.User, *Session, error)
+	GetAgentFromJWT(ctx context.Context, session *Session, db *gorm.DB) (*agentpkg.Agent, *Session, error)
+
+	// In auth.Service:
+	CreateEphemeralAgentSession(ctx context.Context, agentID uint, ip, wsID string, ttl time.Duration) (*Session, error)
 }
 
 type service struct {
@@ -148,17 +151,26 @@ func (s *service) Register(ctx context.Context, in Register, ip string) (string,
 	return tok, u, nil
 }
 
-// ----- Agents -----
+// ----- Agents (legacy PIN/JWT login for backward compatibility) -----
 
 func (s *service) AgentLogin(ctx context.Context, in AgentLogin) (string, *agentpkg.Agent, error) {
-	if in.PIN == "" || in.ID == 0 {
+	if strings.TrimSpace(in.PIN) == "" || in.ID == 0 {
 		return "", nil, errors.New("invalid agent credentials")
 	}
+
 	a, err := s.agentsRepo.GetByID(ctx, in.ID)
 	if err != nil {
 		return "", nil, errors.New("agent not found")
 	}
-	if a.Pin != in.PIN {
+
+	// If the agent has already registered a public key, we require key-auth HTTP and
+	// do not allow PIN-based JWT login (keeps the key flow authoritative).
+	if len(a.PublicKey) > 0 || a.PinConsumedAt != nil {
+		return "", nil, errors.New("agent uses key authentication")
+	}
+
+	// Verify PIN using bcrypt hash stored on the agent.
+	if bcrypt.CompareHashAndPassword([]byte(a.PinHash), []byte(in.PIN)) != nil {
 		return "", nil, errors.New("invalid pin")
 	}
 
@@ -175,10 +187,13 @@ func (s *service) AgentLogin(ctx context.Context, in AgentLogin) (string, *agent
 	}
 
 	// Best-effort: bump version / heartbeat
-	_ = s.agentsRepo.PatchFields(ctx, a.ID, map[string]any{
-		"version":    strings.TrimSpace(in.AgentVersion),
+	update := map[string]any{
 		"updated_at": time.Now(),
-	})
+	}
+	if v := strings.TrimSpace(in.AgentVersion); v != "" {
+		update["version"] = v
+	}
+	_ = s.agentsRepo.PatchFields(ctx, a.ID, update)
 
 	// JWT
 	tok, err := IssueJWT(a.ID, sess.SessionID, true, 24*time.Hour)
@@ -186,6 +201,31 @@ func (s *service) AgentLogin(ctx context.Context, in AgentLogin) (string, *agent
 		return "", nil, err
 	}
 	return tok, a, nil
+}
+
+func (s *service) CreateEphemeralAgentSession(ctx context.Context, agentID uint, ip, wsID string, ttl time.Duration) (*Session, error) {
+	if agentID == 0 {
+		return nil, errors.New("agentID required")
+	}
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	now := time.Now()
+	sess := &Session{
+		ID:      agentID,
+		IsAgent: true,
+		IP:      ip,
+		Expiry:  now.Add(ttl),
+		Created: now,
+		WSConn:  wsID,
+	}
+	if err := s.sessionRepo.Create(ctx, sess); err != nil {
+		return nil, err
+	}
+	if wsID != "" {
+		_ = s.sessionRepo.UpdateWSConn(ctx, sess.SessionID, wsID)
+	}
+	return sess, nil
 }
 
 // ----- Sessions -----
@@ -204,12 +244,8 @@ func (s *service) GetSessionFromWSConn(ctx context.Context, ws string) (*Session
 
 // ----- Helpers (token → user/agent) -----
 
-func (s *service) GetUserFromJWT(ctx context.Context, tokenString string, db *gorm.DB) (*userpkg.User, *Session, error) {
-	claims, err := ParseJWT(tokenString)
-	if err != nil {
-		return nil, nil, err
-	}
-	sess, err := s.sessionRepo.GetBySessionID(ctx, claims.SessionID)
+func (s *service) GetUserFromJWT(ctx context.Context, session *Session, db *gorm.DB) (*userpkg.User, *Session, error) {
+	sess, err := s.sessionRepo.GetBySessionID(ctx, session.SessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -219,7 +255,7 @@ func (s *service) GetUserFromJWT(ctx context.Context, tokenString string, db *go
 	if sess.IsAgent {
 		return nil, nil, errors.New("session belongs to an agent")
 	}
-	if sess.ID != claims.ItemID {
+	if sess.ID != session.ID {
 		return nil, nil, errors.New("id mismatch")
 	}
 	u, err := s.usersRepo.GetByID(ctx, sess.ID)
@@ -229,12 +265,8 @@ func (s *service) GetUserFromJWT(ctx context.Context, tokenString string, db *go
 	return u, sess, nil
 }
 
-func (s *service) GetAgentFromJWT(ctx context.Context, tokenString string, db *gorm.DB) (*agentpkg.Agent, *Session, error) {
-	claims, err := ParseJWT(tokenString)
-	if err != nil {
-		return nil, nil, err
-	}
-	sess, err := s.sessionRepo.GetBySessionID(ctx, claims.SessionID)
+func (s *service) GetAgentFromJWT(ctx context.Context, session *Session, db *gorm.DB) (*agentpkg.Agent, *Session, error) {
+	sess, err := s.sessionRepo.GetBySessionID(ctx, session.SessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,10 +276,9 @@ func (s *service) GetAgentFromJWT(ctx context.Context, tokenString string, db *g
 	if !sess.IsAgent {
 		return nil, nil, errors.New("session is not an agent")
 	}
-	if sess.ID != claims.ItemID {
+	if sess.ID != session.ID {
 		return nil, nil, errors.New("id mismatch")
 	}
-	// you likely have agent repo wired already
 	a, err := s.agentsRepo.GetByID(ctx, sess.ID)
 	if err != nil {
 		return nil, nil, err

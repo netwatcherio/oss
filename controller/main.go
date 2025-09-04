@@ -49,10 +49,10 @@ func main() {
 	}
 
 	// ---- Build services ----
-	authSvc, agentsRepo, probesSvc, workspaceSvc := buildServices(db)
+	authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc := buildServices(db)
 
 	// ---- Router ----
-	r := web.NewRouter(db, authSvc, agentsRepo, probesSvc, workspaceSvc)
+	r := web.NewRouter(db, authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc)
 	// r.ProbeDataChan = make(chan agentpkg.ProbeData, 1024)
 
 	// Example CORS (unchanged)
@@ -82,13 +82,14 @@ func main() {
 
 // ---- wiring helpers ----
 
-func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Service, workspace.Service) {
+func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Service, workspace.Service, agentpkg.Service) {
 	// Users repo/svc
 	usersRepo := userspkg.NewRepository(db)
 	usersSvc := userspkg.NewService(usersRepo)
 
 	// Agents repo (and optionally a service if you added one)
 	agentsRepo := agentpkg.NewRepository(db)
+	agentsSvc := agentpkg.NewService(agentsRepo, db, os.Getenv("PIN_PEPPER"))
 
 	// Probes repo/svc
 	probeRepo := probepkg.NewRepository(db)
@@ -99,7 +100,7 @@ func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Ser
 
 	workspaceSvc := workspace.NewService(workspace.NewRepository(db), usersRepo)
 
-	return authSvc, agentsRepo, probesSvc, workspaceSvc
+	return authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc
 }
 
 func handleSignals() {

@@ -2,64 +2,100 @@ package web
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/kataras/iris/v12/websocket"
 	log "github.com/sirupsen/logrus"
-	"netwatcher-controller/internal/probe"
 )
 
 // addWebSocketServer wires a namespaced websocket server for agents.
 func addWebSocketServer(r *Router) error {
 	ws := websocket.New(websocket.DefaultGorillaUpgrader, getWebsocketEvents(r))
 
-	// Authenticate connection with Bearer JWT and bind ws_conn to the session.
+	// Authenticate connection using Ed25519-signed headers (no JWT).
 	ws.OnConnect = func(c *websocket.Conn) error {
 		ctx := websocket.GetContext(c) // iris.Context
 
-		authz := strings.TrimSpace(ctx.GetHeader("Authorization"))
-		if authz == "" || !strings.HasPrefix(authz, "Bearer ") {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: missing bearer token")
-		}
-		raw := strings.TrimPrefix(authz, "Bearer ")
+		// Required headers
+		idStr := strings.TrimSpace(ctx.GetHeader("X-Agent-Id"))
+		nonce := strings.TrimSpace(ctx.GetHeader("X-Agent-Nonce"))
+		ts := strings.TrimSpace(ctx.GetHeader("X-Agent-Timestamp"))
+		sigB64 := strings.TrimSpace(ctx.GetHeader("X-Agent-Signature"))
 
-		// Optional: quick signature check so we can return 401 fast if the key is wrong.
-		// (Service will validate again while parsing claims/lookup session.)
-		_, err := jwt.Parse(raw, func(tok *jwt.Token) (interface{}, error) {
-			return []byte(os.Getenv("KEY")), nil
+		if idStr == "" || nonce == "" || ts == "" || sigB64 == "" {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: missing signature headers")
+		}
+		agentIDu64, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil || agentIDu64 == 0 {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: invalid agent id")
+		}
+		agentID := uint(agentIDu64)
+
+		// Load agent & public key
+		ag, err := r.AgentsRepo.GetByID(ctx, agentID)
+		if err != nil || len(ag.PublicKey) == 0 {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: agent not found or missing key")
+		}
+
+		// Timestamp skew check
+		t, err := time.Parse(time.RFC1123, ts)
+		if err != nil || absDuration(time.Since(t)) > 90*time.Second {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: bad timestamp")
+		}
+
+		// Canonical string (GET, fixed path, empty body hash)
+		h := sha256.Sum256([]byte{})
+		canon := strings.Join([]string{
+			http.MethodGet,
+			"/agent_ws",
+			base64.RawStdEncoding.EncodeToString(h[:]),
+			t.UTC().Format(time.RFC1123),
+			nonce,
+		}, "\n")
+
+		// Verify signature
+		sig, err := base64.RawStdEncoding.DecodeString(sigB64)
+		if err != nil {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: bad signature encoding")
+		}
+		if !ed25519.Verify(ed25519.PublicKey(ag.PublicKey), []byte(canon), sig) {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: signature verify failed")
+		}
+
+		// Single-use nonce (replay prevention)
+		if _, err := r.AgentsRepo.UseNonce(ctx, nonce); err != nil {
+			ctx.StatusCode(http.StatusUnauthorized)
+			return errors.New("unauthorized: nonce invalid/used/expired")
+		}
+
+		// Create ephemeral session bound to ws_conn (no JWT needed)
+		ip := ctx.Values().GetString("client_ip")
+		if _, err := r.AuthSvc.CreateEphemeralAgentSession(ctx, ag.ID, ip, c.ID(), 24*time.Hour); err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			return errors.New("failed to create ws session")
+		}
+
+		// Best-effort heartbeat/auth metadata
+		_ = r.AgentsRepo.PatchFields(ctx, ag.ID, map[string]any{
+			"updated_at":   time.Now(),
+			"last_seen_at": time.Now(),
+			"last_auth_at": time.Now(),
+			"last_auth_ip": ip,
 		})
-		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: invalid token")
-		}
-
-		// Resolve agent + session from token using auth service
-		ag, sess, err := r.AuthSvc.GetAgentFromJWT(ctx, raw, r.DB)
-		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: invalid agent session")
-		}
-
-		// Bind ws connection id to the session (best-effort)
-		if err := r.AuthSvc.UpdateWSConn(ctx, sess.SessionID, c.ID()); err != nil {
-			// Don't block connection; log and continue
-			log.WithError(err).Warn("failed to update ws_conn on session")
-		}
-
-		// Best-effort heartbeat/last seen
-		if r.AgentsRepo != nil {
-			_ = r.AgentsRepo.PatchFields(ctx, ag.ID, map[string]any{
-				"updated_at":   time.Now(),
-				"last_seen_at": time.Now(),
-			})
-		}
 
 		log.Infof("Agent %d connected via ws [%s]", ag.ID, c.ID())
 		return nil
@@ -77,17 +113,13 @@ func getWebsocketEvents(r *Router) websocket.Namespaces {
 				return nil
 			},
 			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// Optionally: mark as offline or clear ws_conn if it matches
 				log.Infof("[%s] disconnected from namespace [%s]", nsConn, msg.Namespace)
 				return nil
 			},
 
-			// Agent asks for its assigned probes (including reverse/expanded).
 			"probe_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				// iris.Context -> implements stdlib Context via Deadline/Done? We'll wrap.
 				stdCtx := context.Background()
 
-				// Look up session by ws_conn
 				sess, err := r.AuthSvc.GetSessionFromWSConn(stdCtx, nsConn.Conn.ID())
 				if err != nil {
 					return err
@@ -96,24 +128,17 @@ func getWebsocketEvents(r *Router) websocket.Namespaces {
 					return errors.New("session is not an agent session")
 				}
 
-				// Best-effort heartbeat/last seen
-				if r.AgentsRepo != nil {
-					_ = r.AgentsRepo.PatchFields(stdCtx, sess.ID, map[string]any{
-						"updated_at":   time.Now(),
-						"last_seen_at": time.Now(),
-					})
-				}
+				_ = r.AgentsRepo.PatchFields(stdCtx, sess.ID, map[string]any{
+					"updated_at":   time.Now(),
+					"last_seen_at": time.Now(),
+				})
 
-				// Fetch probes for agent
-				var probes []probe.Probe
 				p, err := r.ProbesSvc.ListByAgent(stdCtx, sess.ID, true)
 				if err != nil {
-					log.WithError(err).Error("ListForAgent failed")
+					log.WithError(err).Error("ListByAgent failed")
 					return err
 				}
-				probes = p
-
-				b, err := json.Marshal(probes)
+				b, err := json.Marshal(p)
 				if err != nil {
 					return err
 				}
@@ -121,11 +146,9 @@ func getWebsocketEvents(r *Router) websocket.Namespaces {
 				return nil
 			},
 
-			// Agent posts probe results (streamed to worker channel).
 			"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
 				stdCtx := context.Background()
 
-				// Validate session again via ws_conn
 				sess, err := r.AuthSvc.GetSessionFromWSConn(stdCtx, nsConn.Conn.ID())
 				if err != nil {
 					return err
@@ -134,38 +157,16 @@ func getWebsocketEvents(r *Router) websocket.Namespaces {
 					return errors.New("session is not an agent session")
 				}
 
-				// Optional: ensure agent still exists
-				/*if r.Agents != nil {
-					if _, err := r.Agents.GetByID(stdCtx, sess.ID); err != nil {
-						// log and still accept data (or reject)
-						log.WithError(err).Warnf("agent %d not found for probe_post", sess.ID)
-					}
-				}
-
-				var data agent.ProbeData
-				if err := json.Unmarshal(msg.Body, &data); err != nil {
-					log.WithError(err).Error("invalid probe_post payload")
-					return err
-				}*/
-
-				// Stream to worker (non-blocking if you prefer; here we block)
-				/*if r.ProbeDataChan != nil {
-					r.ProbeDataChan <- data
-				} else {
-					log.Warn("ProbeDataChan is nil; dropping probe data")
-				}*/
-
+				// TODO: parse and forward results if needed
 				return nil
 			},
 		},
 	}
 }
 
-// small helper to detect the extended repo interface without hard dependency
-func hasListWithReverse(repo probe.Repository) bool {
-	type withReverse interface {
-		ListForAgentWithReverse(ctx context.Context, agentID uint, limit, offset int) ([]probe.Probe, int64, error)
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
 	}
-	_, ok := interface{}(repo).(withReverse)
-	return ok
+	return d
 }

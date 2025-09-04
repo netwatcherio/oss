@@ -143,28 +143,28 @@ func (s *service) generateReverseForAgent(ctx context.Context, thisAgentID uint)
 // makeReverseStandard creates reverse MTR/PING probes owned by thisAgent targeting the source's IP.
 func (s *service) makeReverseStandard(ctx context.Context, source Probe, thisAgentID uint) []Probe {
 	var out []Probe
-	sourceIP, ok := s.getAgentPublicIP(ctx, source.AgentID)
+	/*sourceIP, ok := s.getAgentPublicIP(ctx, source.AgentID)
 	if !ok {
 		return out
 	}
-	original := source.ID
+	original := source.ID*/
 
 	types := []Type{TypeMTR, TypePing}
 	for _, t := range types {
 		p := Probe{
-			AgentID:          thisAgentID,
-			Type:             t,
-			Notifications:    source.Notifications,
-			DurationSec:      source.DurationSec,
-			Count:            source.Count,
-			IntervalSec:      source.IntervalSec,
-			Server:           false,
-			ReverseOfProbeID: &original,
+			AgentID:       thisAgentID,
+			Type:          t,
+			Notifications: source.Notifications,
+			DurationSec:   source.DurationSec,
+			Count:         source.Count,
+			IntervalSec:   source.IntervalSec,
+			Server:        false,
+			/*ReverseOfProbeID: &original,
 			OriginalAgentID:  &source.AgentID,
 			Targets: []Target{{
 				Target:  sourceIP,        // concrete IP
 				AgentID: &source.AgentID, // keep origin
-			}},
+			}},*/
 		}
 		out = append(out, p)
 	}
@@ -190,27 +190,27 @@ func (s *service) makeReverseTrafficSim(ctx context.Context, source Probe, thisA
 	}
 
 	// source public ip
-	sourceIP, ok := s.getAgentPublicIP(ctx, source.AgentID)
+	/*sourceIP, ok := s.getAgentPublicIP(ctx, source.AgentID)
 	if !ok {
 		return nil
 	}
 	target := fmt.Sprintf("%s:%s", sourceIP, serverPort)
-	original := source.ID
+	original := source.ID*/
 
 	p := Probe{
-		AgentID:          thisAgentID,
-		Type:             TypeTrafficSim,
-		Server:           false,
-		Notifications:    source.Notifications,
-		DurationSec:      source.DurationSec,
-		Count:            source.Count,
-		IntervalSec:      source.IntervalSec,
-		ReverseOfProbeID: &original,
+		AgentID:       thisAgentID,
+		Type:          TypeTrafficSim,
+		Server:        false,
+		Notifications: source.Notifications,
+		DurationSec:   source.DurationSec,
+		Count:         source.Count,
+		IntervalSec:   source.IntervalSec,
+		/*ReverseOfProbeID: &original,
 		OriginalAgentID:  &source.AgentID,
 		Targets: []Target{{
 			Target:  target,
 			AgentID: &source.AgentID,
-		}},
+		}},*/
 	}
 	return &p
 }
@@ -228,16 +228,16 @@ func (s *service) resolveAgentTarget(ctx context.Context, t *Target) (string, bo
 		return "", false
 	}
 	host := a.PublicIPOverride
-	if host == "" {
+	/*if host == "" {
 		host = a.DetectedPublicIP
 	}
 	if host == "" {
 		host = a.PrivateIP
-	}
+	}*/
 	return host, host != ""
 }
 
-// getAgentPublicIP is a convenient view for reverse generation.
+/*// getAgentPublicIP is a convenient view for reverse generation.
 func (s *service) getAgentPublicIP(ctx context.Context, agentID uint) (string, bool) {
 	a, err := s.agents.GetByID(ctx, agentID)
 	if err != nil {
@@ -253,7 +253,7 @@ func (s *service) getAgentPublicIP(ctx context.Context, agentID uint) (string, b
 		return a.PrivateIP, true
 	}
 	return "", false
-}
+}*/
 
 // ---------- TrafficSim clients (server view) ----------
 

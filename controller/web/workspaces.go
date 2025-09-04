@@ -28,8 +28,8 @@ func addRouteWorkspaces(r *Router) []*Route {
 		return uint(id64), true
 	}
 	currentUser := func(ctx iris.Context) (*users.User, error) {
-		tok := bearer(ctx)
-		if tok == "" {
+		tok := GetClaims(ctx)
+		if tok == nil {
 			return nil, errors.New("missing token")
 		}
 		u, _, err := r.AuthSvc.GetUserFromJWT(ctx, tok, r.DB)

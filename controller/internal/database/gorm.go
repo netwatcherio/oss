@@ -205,6 +205,7 @@ func RunMigrations(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&users.User{},
 		&agent.Agent{},
+		&agent.AgentNonce{},
 		&workspace.Workspace{},
 		&workspace.WorkspaceMember{},
 		&auth.Session{},
@@ -260,6 +261,20 @@ func migratePostgres(db *gorm.DB) error {
 	}
 	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_hostname ON agents (hostname);`).Error; err != nil {
 		return fmt.Errorf("agents hostname idx: %w", err)
+	}
+
+	// Public key fingerprint & PIN uniqueness (unclaimed only)
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_pubkey_fp ON agents (public_key_fp);`).Error; err != nil {
+		return fmt.Errorf("agents pubkey_fp idx: %w", err)
+	}
+	// Ensure a PIN (via pin_index) cannot be duplicated among unclaimed agents in the same workspace.
+	// We use a partial unique index that applies only while the agent is unclaimed (no key, no pin_consumed_at).
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS ux_agents_ws_pin_unclaimed
+		ON agents (workspace_id, pin_index)
+		WHERE pin_index IS NOT NULL AND public_key IS NULL AND pin_consumed_at IS NULL;
+	`).Error; err != nil {
+		return fmt.Errorf("agents ws pin unclaimed unique: %w", err)
 	}
 
 	// -------- Workspaces --------
@@ -387,6 +402,19 @@ func migratePostgres(db *gorm.DB) error {
 		return fmt.Errorf("fk probes.agent_id: %w", err)
 	}
 
+	// -------- Agent nonces --------
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_nonces_nonce ON agent_nonces (nonce);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces nonce unique: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_agent ON agent_nonces (agent_id);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces agent idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_expiry ON agent_nonces (expires_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces expiry idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_used ON agent_nonces (used_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces used idx: %w", err)
+	}
 	return nil
 }
 
@@ -414,6 +442,16 @@ func migrateMySQL(db *gorm.DB) error {
 	}
 	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_hostname ON agents (hostname);`).Error; err != nil {
 		return fmt.Errorf("agents hostname idx: %w", err)
+	}
+
+	// Public key fingerprint
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_pubkey_fp ON agents (public_key_fp);`).Error; err != nil {
+		return fmt.Errorf("agents pubkey_fp idx: %w", err)
+	}
+	// MySQL cannot do partial unique indexes; enforce uniqueness by (workspace_id, pin_index)
+	// and ensure application clears pin_index (sets NULL) once the PIN is consumed.
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_agents_ws_pin ON agents (workspace_id, pin_index);`).Error; err != nil {
+		// if already exists, ignore; IF NOT EXISTS should handle modern MySQL/MariaDB, but versions vary
 	}
 
 	// -------- Workspaces --------
@@ -495,6 +533,20 @@ func migrateMySQL(db *gorm.DB) error {
 
 	// MySQL cannot do partial unique like Postgres; single-owner enforced in code.
 
+	// -------- Agent nonces --------
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_nonces_nonce ON agent_nonces (nonce);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces nonce unique: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_agent ON agent_nonces (agent_id);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces agent idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_expiry ON agent_nonces (expires_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces expiry idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_used ON agent_nonces (used_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces used idx: %w", err)
+	}
+
 	return nil
 }
 
@@ -522,6 +574,15 @@ func migrateSQLite(db *gorm.DB) error {
 	}
 	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_hostname ON agents (hostname);`).Error; err != nil {
 		return fmt.Errorf("agents hostname idx: %w", err)
+	}
+
+	// Public key fingerprint
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_pubkey_fp ON agents (public_key_fp);`).Error; err != nil {
+		return fmt.Errorf("agents pubkey_fp idx: %w", err)
+	}
+	// SQLite also lacks partial unique; use (workspace_id, pin_index) and set pin_index=NULL on consume in app logic.
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_agents_ws_pin ON agents (workspace_id, pin_index);`).Error; err != nil {
+		return fmt.Errorf("agents ws pin unique: %w", err)
 	}
 
 	// -------- Workspaces --------
@@ -576,5 +637,19 @@ func migrateSQLite(db *gorm.DB) error {
 	}
 
 	// (SQLite FKs require table recreation for ON DELETE changes; rely on GORM creates or leave as-is.)
+
+	// -------- Agent nonces --------
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_nonces_nonce ON agent_nonces (nonce);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces nonce unique: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_agent ON agent_nonces (agent_id);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces agent idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_expiry ON agent_nonces (expires_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces expiry idx: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_nonces_used ON agent_nonces (used_at);`).Error; err != nil {
+		return fmt.Errorf("agent_nonces used idx: %w", err)
+	}
 	return nil
 }

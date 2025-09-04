@@ -1,21 +1,27 @@
 package web
 
 import (
-	"errors"
+	"gorm.io/datatypes"
 	"strconv"
 	"time"
 
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 
-	"netwatcher-controller/internal"
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/users"
 )
 
 // Mount workspace-scoped Agent routes using Iris parties (subpaths).
-// We mirror the "workspaces" style: no PATCH/DELETE verbs; use POST .../update and POST .../delete paths.
-func addRouteAgents(r *Router) []*Route {
+// Style: GET/POST with action endpoints for mutations.
+func addRouteAgents(r *Router) {
+	currentUser := func(ctx iris.Context) (*users.User, error) {
+		// GetClaims(ctx) should return your *auth.Session claims
+		sess := GetClaims(ctx)
+		u, _, err := r.AuthSvc.GetUserFromJWT(ctx, sess, r.DB)
+		return u, err
+	}
+
 	// Helpers shared by handlers
 	parseUint := func(ctx iris.Context, name string) (uint, bool) {
 		raw := ctx.Params().Get(name)
@@ -25,24 +31,33 @@ func addRouteAgents(r *Router) []*Route {
 		}
 		return uint(id64), true
 	}
-	currentUser := func(ctx iris.Context) (*users.User, error) {
-		tok := bearer(ctx)
-		if tok == "" {
-			return nil, errors.New("missing token")
-		}
-		u, _, err := r.AuthSvc.GetUserFromJWT(ctx, tok, r.DB)
-		return u, err
+
+	type createAgentReq struct {
+		Name                 string         `json:"name"`
+		Hostname             string         `json:"hostname"`
+		Location             string         `json:"location"`
+		PublicIPOverride     string         `json:"publicIpOverride"`
+		Version              string         `json:"version"`
+		HeartbeatIntervalSec int            `json:"heartbeatIntervalSec"`
+		PinLength            int            `json:"pinLength"` // optional; default 9 if 0
+		Labels               datatypes.JSON `json:"labels"`
+		Metadata             datatypes.JSON `json:"metadata"`
+	}
+
+	type createAgentResp struct {
+		Agent *agent.Agent `json:"agent"`
+		PIN   string       `json:"pin"` // plaintext PIN shown once
 	}
 
 	// ====== /workspaces/{id}/agents subtree ======
 	ws := r.App.Party("/workspaces")
-	ws.Use(VerifySession()) // protect subtree (remove if already globally applied)
+	ws.Use(VerifySession()) // protect this subtree (remove if already globally applied)
 
 	wsID := ws.Party("/{id:uint}")
-	agents := wsID.Party("/agents")
+	agentsParty := wsID.Party("/agents")
 
 	// GET /workspaces/{id}/agents -> list agents in a workspace
-	agents.Get("/", func(ctx iris.Context) {
+	agentsParty.Get("/", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -68,8 +83,8 @@ func addRouteAgents(r *Router) []*Route {
 		_ = ctx.JSON(items)
 	})
 
-	// POST /workspaces/{id}/agents -> create agent in workspace
-	agents.Post("/", func(ctx iris.Context) {
+	// POST /workspaces/{id}/agents -> create agent in workspace (returns plaintext PIN once)
+	agentsParty.Post("/", func(ctx iris.Context) {
 		ctx.ContentType("application/json")
 
 		u, err := currentUser(ctx)
@@ -88,30 +103,39 @@ func addRouteAgents(r *Router) []*Route {
 			return
 		}
 
-		var body agent.Agent
-		if err := ctx.ReadJSON(&body); err != nil {
+		var in createAgentReq
+		if err := ctx.ReadJSON(&in); err != nil {
 			ctx.StatusCode(iris.StatusBadRequest)
 			return
 		}
 
-		now := time.Now()
-		body.WorkspaceID = wsID
-		body.CreatedAt = now
-		body.UpdatedAt = now
-		if body.Pin == "" {
-			body.Pin = internal.GeneratePIN(6)
-		}
-
-		if err := r.AgentsRepo.Create(ctx, &body); err != nil {
+		out, err := r.AgentsSvc.Create(ctx, agent.CreateInput{
+			WorkspaceID:          wsID,
+			Name:                 in.Name,
+			Hostname:             in.Hostname,
+			PinLength:            in.PinLength, // defaults to 9 inside service if 0
+			Location:             in.Location,
+			PublicIPOverride:     in.PublicIPOverride,
+			Version:              in.Version,
+			HeartbeatIntervalSec: in.HeartbeatIntervalSec,
+			Labels:               in.Labels,
+			Metadata:             in.Metadata,
+		})
+		if err != nil {
 			log.WithError(err).Error("create agent")
 			ctx.StatusCode(iris.StatusInternalServerError)
 			return
 		}
-		_ = ctx.JSON(body)
+
+		ctx.StatusCode(iris.StatusCreated)
+		_ = ctx.JSON(createAgentResp{
+			Agent: out.Agent,
+			PIN:   out.PIN,
+		})
 	})
 
 	// GET /workspaces/{id}/agents/{agentId} -> get one agent
-	agents.Get("/{agentId:uint}", func(ctx iris.Context) {
+	agentsParty.Get("/{agentId:uint}", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -138,7 +162,6 @@ func addRouteAgents(r *Router) []*Route {
 			ctx.StatusCode(iris.StatusInternalServerError)
 			return
 		}
-		// Optional: ensure the agent belongs to this workspace
 		if a.WorkspaceID != wsID {
 			ctx.StatusCode(iris.StatusForbidden)
 			return
@@ -147,7 +170,7 @@ func addRouteAgents(r *Router) []*Route {
 	})
 
 	// POST /workspaces/{id}/agents/{agentId}/update -> update allowed fields
-	agents.Post("/{agentId:uint}/update", func(ctx iris.Context) {
+	agentsParty.Post("/{agentId:uint}/update", func(ctx iris.Context) {
 		ctx.ContentType("application/json")
 
 		u, err := currentUser(ctx)
@@ -203,8 +226,6 @@ func addRouteAgents(r *Router) []*Route {
 		if body.Version != "" {
 			patch["version"] = body.Version
 		}
-		// moving agents across workspaces should be rare; deny by default
-		// if body.WorkspaceID != 0 && body.WorkspaceID != wsID { ... }
 
 		if err := r.AgentsRepo.PatchFields(ctx, agentID, patch); err != nil {
 			log.WithError(err).Error("update agent")
@@ -215,7 +236,7 @@ func addRouteAgents(r *Router) []*Route {
 	})
 
 	// POST /workspaces/{id}/agents/{agentId}/deactivate -> soft disable
-	agents.Post("/{agentId:uint}/deactivate", func(ctx iris.Context) {
+	agentsParty.Post("/{agentId:uint}/deactivate", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -258,7 +279,7 @@ func addRouteAgents(r *Router) []*Route {
 	})
 
 	// POST /workspaces/{id}/agents/{agentId}/delete -> delete agent (and clean probes)
-	agents.Post("/{agentId:uint}/delete", func(ctx iris.Context) {
+	agentsParty.Post("/{agentId:uint}/delete", func(ctx iris.Context) {
 		u, err := currentUser(ctx)
 		if err != nil {
 			ctx.StatusCode(iris.StatusUnauthorized)
@@ -301,7 +322,4 @@ func addRouteAgents(r *Router) []*Route {
 		}
 		ctx.StatusCode(iris.StatusOK)
 	})
-
-	// Using parties, nothing to append to Router.Routes here.
-	return nil
 }

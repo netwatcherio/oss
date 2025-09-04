@@ -36,7 +36,7 @@ function onError(response: any) {
 
 function submit() {
   agentService.createAgent(state.agent).then((res) => {
-    router.push(`/workspace/${state.site.id}`)
+    //router.push(`/workspace/${state.site.id}`)
     console.log(res)
   }).catch(err => {
     console.log(err)
