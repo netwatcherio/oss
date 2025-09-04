@@ -64,7 +64,7 @@ const routes: RouteRecordRaw[] = [
 
     // ----- /workspaces (list + create) -----
     { path: '/workspaces', name: 'workspaces', component: Workspaces },
-    { path: '/workspaces/new', name: 'workspaceNew', component: NewWorkspace },
+    { path: '/workspace/new', name: 'workspaceNew', component: NewWorkspace },
 
     // ----- /workspaces/:wID (shell with children) -----
     {

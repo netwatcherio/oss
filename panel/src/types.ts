@@ -9,38 +9,31 @@ export type JSONValue =
 
 // ---- Users ----
 
+// -------------------- USERS --------------------
+
 export interface User {
-    id: number;
+    id: number;              // uint in Go
+    createdAt: string;       // ISO datetime
+    updatedAt: string;       // ISO datetime
+
     email: string;
-    firstName: string;
-    lastName: string;
-    company: string;
-    phoneNumber: string;
+    passwordHash: string;
+    name?: string | null;
 
-    // Access & security
-    admin: boolean;
-    role: string;
-    password: string; // (hash on backend; usually not sent to client)
-    verified: boolean;
-    mfaEnabled: boolean;
-
-    // State & telemetry
-    status?: string; // e.g. "ACTIVE"
-    lastLoginAt?: string; // ISO string
-    timezone?: string;
-    avatarUrl?: string;
-
-    // Free-form data
-    labels?: Record<string, JSONValue>;
-    metadata?: Record<string, JSONValue>;
-
-    createdAt: string; // ISO
-    updatedAt: string; // ISO
+    // Relations
+    sessions?: Session[];
 }
 
-// ---- Workspaces ----
+export interface Session {
+    id: number;
+    created: string;
+    expiry: string;
 
-export type WorkspaceMemberRole = "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
+    userId: number;
+    token: string;
+}
+
+// -------------------- WORKSPACES (just membership bits) --------------------
 
 export interface WorkspaceMember {
     id: number;
@@ -48,17 +41,76 @@ export interface WorkspaceMember {
     updatedAt: string;
 
     workspaceId: number;
-    userId: number; // 0 if invite-only (not yet linked)
-    email: string;
+    userId?: number | null;
+    email?: string | null;
 
-    role: WorkspaceMemberRole;
-
-    invitedAt?: string | null;
-    acceptedAt?: string | null;
-    revokedAt?: string | null;
-
-    displayName?: string;
+    role: string; // "owner" | "admin" | "member" etc.
 }
+
+// -------------------- AGENTS --------------------
+
+export interface Agent {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    workspaceId: number;
+
+    name: string;
+    description?: string;
+
+    location?: string;
+    publicIpOverride?: string;
+
+    version?: string;
+
+    // runtime state
+    lastSeenAt?: string;
+    online?: boolean;
+
+    labels?: Record<string, string>;
+    metadata?: Record<string, any>;
+}
+
+// -------------------- AUTH (REGISTRATION / LOGIN) --------------------
+
+// Used for agent bootstrap PINs
+export interface AgentAuthPin {
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+
+    workspaceId: number;
+    agentId: number;
+
+    pin: string;
+    pinIndex: string;
+
+    consumed: boolean;
+    expiresAt: string;
+}
+
+// Registration (user signup)
+export interface RegistrationRequest {
+    email: string;
+    password: string;
+    name?: string;
+}
+
+// Login
+export interface LoginRequest {
+    email: string;
+    password: string;
+}
+
+export interface LoginResponse {
+    token: string;
+    user: User;
+}
+
+// ---- Workspaces ----
+
+export type WorkspaceMemberRole = "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
 
 export interface Workspace {
     id: number;
@@ -88,48 +140,6 @@ export interface MemberInviteRequest {
 }
 export interface MemberRoleUpdateRequest {
     role: WorkspaceMemberRole;
-}
-
-// ---- Agents ----
-
-export interface Agent {
-    id: number;
-    createdAt: string;
-    updatedAt: string;
-
-    // Ownership / scoping
-    workspaceId: number;
-    siteId: number; // kept for legacy compatibility if still present in payloads
-
-    // Identity
-    name: string;
-    hostname: string;
-    initialized: boolean;
-
-    // Auth
-    pin: string;
-    publicKey: string;
-
-    // Network
-    location: string;
-    public_ip_override: string; // preserving original field if still used on UI
-    detectedPublicIp: string;
-    privateIp: string;
-    macAddress: string;
-
-    // Runtime / versioning
-    version: string;
-    platform: string; // linux, darwin, windows
-    arch: string; // amd64, arm64, etc.
-
-    // Health / status
-    status?: string; // e.g. "ACTIVE"
-    lastSeenAt?: string; // ISO
-    heartbeatIntervalSec: number;
-
-    // Tags / labels
-    labels?: Record<string, JSONValue>;
-    metadata?: Record<string, JSONValue>;
 }
 
 // ---- Groups (optional, if you use them) ----

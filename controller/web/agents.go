@@ -1,325 +1,207 @@
+// web/agents.go
 package web
 
 import (
-	"gorm.io/datatypes"
+	"net/http"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/kataras/iris/v12"
-	log "github.com/sirupsen/logrus"
-
+	"gorm.io/gorm"
 	"netwatcher-controller/internal/agent"
-	"netwatcher-controller/internal/users"
 )
 
-// Mount workspace-scoped Agent routes using Iris parties (subpaths).
-// Style: GET/POST with action endpoints for mutations.
-func addRouteAgents(r *Router) {
-	currentUser := func(ctx iris.Context) (*users.User, error) {
-		// GetClaims(ctx) should return your *auth.Session claims
-		sess := GetClaims(ctx)
-		u, _, err := r.AuthSvc.GetUserFromJWT(ctx, sess, r.DB)
-		return u, err
-	}
+func panelAgents(api iris.Party, db *gorm.DB) {
+	ws := api.Party("/workspaces/{id:uint}")
+	as := ws.Party("/agents")
 
-	// Helpers shared by handlers
-	parseUint := func(ctx iris.Context, name string) (uint, bool) {
-		raw := ctx.Params().Get(name)
-		id64, err := strconv.ParseUint(raw, 10, 64)
+	// GET /workspaces/{id}/agents
+	as.Get("/", func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		limit := intParam(ctx, "limit", 50, 1, 200)
+		offset := intParam(ctx, "offset", 0, 0, 1_000_000)
+		list, total, err := agent.ListAgentsByWorkspace(ctx.Request().Context(), db, wsID, limit, offset)
 		if err != nil {
-			return 0, false
-		}
-		return uint(id64), true
-	}
-
-	type createAgentReq struct {
-		Name                 string         `json:"name"`
-		Hostname             string         `json:"hostname"`
-		Location             string         `json:"location"`
-		PublicIPOverride     string         `json:"publicIpOverride"`
-		Version              string         `json:"version"`
-		HeartbeatIntervalSec int            `json:"heartbeatIntervalSec"`
-		PinLength            int            `json:"pinLength"` // optional; default 9 if 0
-		Labels               datatypes.JSON `json:"labels"`
-		Metadata             datatypes.JSON `json:"metadata"`
-	}
-
-	type createAgentResp struct {
-		Agent *agent.Agent `json:"agent"`
-		PIN   string       `json:"pin"` // plaintext PIN shown once
-	}
-
-	// ====== /workspaces/{id}/agents subtree ======
-	ws := r.App.Party("/workspaces")
-	ws.Use(VerifySession()) // protect this subtree (remove if already globally applied)
-
-	wsID := ws.Party("/{id:uint}")
-	agentsParty := wsID.Party("/agents")
-
-	// GET /workspaces/{id}/agents -> list agents in a workspace
-	agentsParty.Get("/", func(ctx iris.Context) {
-		u, err := currentUser(ctx)
-		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		// Must be a member to view agents
-		if err := r.WorkspacesSvc.RequireMember(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		items, _, err := r.AgentsRepo.ListByWorkspace(ctx, wsID, 10_000, 0)
-		if err != nil {
-			log.WithError(err).Error("list agents by workspace")
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		_ = ctx.JSON(items)
+		_ = ctx.JSON(iris.Map{"data": list, "total": total, "limit": limit, "offset": offset})
 	})
 
-	// POST /workspaces/{id}/agents -> create agent in workspace (returns plaintext PIN once)
-	agentsParty.Post("/", func(ctx iris.Context) {
-		ctx.ContentType("application/json")
-
-		u, err := currentUser(ctx)
+	// POST /workspaces/{id}/agents  (returns agent + bootstrap PIN)
+	as.Post("/", func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		var body struct {
+			Name             string         `json:"name"`
+			Description      string         `json:"description"`
+			Location         string         `json:"location"`
+			PublicIPOverride string         `json:"public_ip_override"`
+			Version          string         `json:"version"`
+			PinLength        int            `json:"pinLength"`
+			PinTTLSeconds    int            `json:"pinTTLSeconds"`
+			Labels           map[string]any `json:"labels"`
+			Metadata         map[string]any `json:"metadata"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			return
+		}
+		var ttl *time.Duration
+		if body.PinTTLSeconds > 0 {
+			d := time.Duration(body.PinTTLSeconds) * time.Second
+			ttl = &d
+		}
+		pinPepper := os.Getenv("PIN_PEPPER")
+		out, err := agent.CreateAgent(ctx.Request().Context(), db, agent.CreateInput{
+			WorkspaceID:      wsID,
+			Name:             body.Name,
+			Description:      body.Description,
+			PinLength:        body.PinLength,
+			Location:         body.Location,
+			PublicIPOverride: body.PublicIPOverride,
+			Version:          body.Version,
+			Labels:           jsonFromMap(body.Labels),
+			Metadata:         jsonFromMap(body.Metadata),
+			PINTTL:           ttl,
+		}, pinPepper)
 		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		// Must be ADMIN+ to create agents
-		if err := r.WorkspacesSvc.RequireAdmin(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		var in createAgentReq
-		if err := ctx.ReadJSON(&in); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-
-		out, err := r.AgentsSvc.Create(ctx, agent.CreateInput{
-			WorkspaceID:          wsID,
-			Name:                 in.Name,
-			Hostname:             in.Hostname,
-			PinLength:            in.PinLength, // defaults to 9 inside service if 0
-			Location:             in.Location,
-			PublicIPOverride:     in.PublicIPOverride,
-			Version:              in.Version,
-			HeartbeatIntervalSec: in.HeartbeatIntervalSec,
-			Labels:               in.Labels,
-			Metadata:             in.Metadata,
-		})
-		if err != nil {
-			log.WithError(err).Error("create agent")
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-
-		ctx.StatusCode(iris.StatusCreated)
-		_ = ctx.JSON(createAgentResp{
-			Agent: out.Agent,
-			PIN:   out.PIN,
-		})
+		ctx.StatusCode(http.StatusCreated)
+		_ = ctx.JSON(out)
 	})
 
-	// GET /workspaces/{id}/agents/{agentId} -> get one agent
-	agentsParty.Get("/{agentId:uint}", func(ctx iris.Context) {
-		u, err := currentUser(ctx)
-		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
-			return
-		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		agentID, ok := parseUint(ctx, "agentId")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		if err := r.WorkspacesSvc.RequireMember(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
+	// /workspaces/{id}/agents/{agentID}
+	aid := as.Party("/{agentID:uint}")
 
-		a, err := r.AgentsRepo.GetByID(ctx, agentID)
-		if err != nil {
-			log.WithError(err).Error("get agent")
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		if a.WorkspaceID != wsID {
-			ctx.StatusCode(iris.StatusForbidden)
+	// GET /workspaces/{id}/agents/{agentID}
+	aid.Get("/", func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+		a, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, wsID, aID)
+		if err != nil || a == nil {
+			ctx.StatusCode(http.StatusNotFound)
 			return
 		}
 		_ = ctx.JSON(a)
 	})
 
-	// POST /workspaces/{id}/agents/{agentId}/update -> update allowed fields
-	agentsParty.Post("/{agentId:uint}/update", func(ctx iris.Context) {
-		ctx.ContentType("application/json")
-
-		u, err := currentUser(ctx)
-		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
-			return
+	// PATCH /workspaces/{id}/agents/{agentID}
+	aid.Patch("/", func(ctx iris.Context) {
+		aID := uintParam(ctx, "agentID")
+		var body struct {
+			Name             *string         `json:"name"`
+			Description      *string         `json:"description"`
+			Location         *string         `json:"location"`
+			PublicIPOverride *string         `json:"public_ip_override"`
+			Version          *string         `json:"version"`
+			Labels           *map[string]any `json:"labels"`
+			Metadata         *map[string]any `json:"metadata"`
 		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		agentID, ok := parseUint(ctx, "agentId")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		// Must be ADMIN+ to update
-		if err := r.WorkspacesSvc.RequireAdmin(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		// confirm agent belongs to workspace
-		cur, err := r.AgentsRepo.GetByID(ctx, agentID)
-		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		if cur.WorkspaceID != wsID {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		var body agent.Agent
 		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
+			ctx.StatusCode(http.StatusBadRequest)
 			return
 		}
+		patch := map[string]any{}
+		if body.Name != nil {
+			patch["name"] = *body.Name
+		}
+		if body.Description != nil {
+			patch["description"] = *body.Description
+		}
+		if body.Location != nil {
+			patch["location"] = *body.Location
+		}
+		if body.PublicIPOverride != nil {
+			patch["public_ip_override"] = *body.PublicIPOverride
+		}
+		if body.Version != nil {
+			patch["version"] = *body.Version
+		}
+		if body.Labels != nil {
+			patch["labels"] = jsonFromMap(*body.Labels)
+		}
+		if body.Metadata != nil {
+			patch["metadata"] = jsonFromMap(*body.Metadata)
+		}
 
-		patch := map[string]any{
-			"updated_at": time.Now(),
-		}
-		if body.Name != "" {
-			patch["name"] = body.Name
-		}
-		if body.Location != "" {
-			patch["location"] = body.Location
-		}
-		if body.PublicIPOverride != "" {
-			patch["public_ip_override"] = body.PublicIPOverride
-		}
-		if body.Version != "" {
-			patch["version"] = body.Version
-		}
-
-		if err := r.AgentsRepo.PatchFields(ctx, agentID, patch); err != nil {
-			log.WithError(err).Error("update agent")
-			ctx.StatusCode(iris.StatusInternalServerError)
+		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, patch); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		ctx.StatusCode(iris.StatusOK)
+		a, _ := agent.GetAgentByID(ctx.Request().Context(), db, aID)
+		_ = ctx.JSON(a)
 	})
 
-	// POST /workspaces/{id}/agents/{agentId}/deactivate -> soft disable
-	agentsParty.Post("/{agentId:uint}/deactivate", func(ctx iris.Context) {
-		u, err := currentUser(ctx)
-		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
+	// DELETE /workspaces/{id}/agents/{agentID}
+	aid.Delete("/", func(ctx iris.Context) {
+		aID := uintParam(ctx, "agentID")
+		if err := agent.DeleteAgent(ctx.Request().Context(), db, aID); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		agentID, ok := parseUint(ctx, "agentId")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		if err := r.WorkspacesSvc.RequireAdmin(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		cur, err := r.AgentsRepo.GetByID(ctx, agentID)
-		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		if cur.WorkspaceID != wsID {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		if err := r.AgentsRepo.PatchFields(ctx, agentID, map[string]any{
-			"status":     "DEACTIVATED",
-			"updated_at": time.Now(),
-		}); err != nil {
-			log.WithError(err).Error("deactivate agent")
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		ctx.StatusCode(iris.StatusOK)
+		_ = ctx.JSON(iris.Map{"ok": true})
 	})
 
-	// POST /workspaces/{id}/agents/{agentId}/delete -> delete agent (and clean probes)
-	agentsParty.Post("/{agentId:uint}/delete", func(ctx iris.Context) {
-		u, err := currentUser(ctx)
-		if err != nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
+	// POST /workspaces/{id}/agents/{agentID}/heartbeat
+	aid.Post("/heartbeat", func(ctx iris.Context) {
+		aID := uintParam(ctx, "agentID")
+		now := time.Now()
+		if err := agent.UpdateAgentSeen(ctx.Request().Context(), db, aID, now); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		wsID, ok := parseUint(ctx, "id")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		agentID, ok := parseUint(ctx, "agentId")
-		if !ok {
-			ctx.StatusCode(iris.StatusBadRequest)
-			return
-		}
-		// ADMIN+ to delete
-		if err := r.WorkspacesSvc.RequireAdmin(ctx, wsID, u.ID); err != nil {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		cur, err := r.AgentsRepo.GetByID(ctx, agentID)
-		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		if cur.WorkspaceID != wsID {
-			ctx.StatusCode(iris.StatusForbidden)
-			return
-		}
-
-		// Best-effort: remove probes first
-		if err := r.ProbesSvc.DeleteByAgent(ctx, agentID); err != nil {
-			log.WithError(err).Warn("deleting probes for agent, continuing")
-		}
-		if err := r.AgentsRepo.Delete(ctx, agentID); err != nil {
-			log.WithError(err).Error("delete agent")
-			ctx.StatusCode(iris.StatusInternalServerError)
-			return
-		}
-		ctx.StatusCode(iris.StatusOK)
+		_ = ctx.JSON(iris.Map{"ok": true, "ts": now})
 	})
+
+	// POST /workspaces/{id}/agents/{agentID}/issue-pin
+	aid.Post("/issue-pin", func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+		var body struct {
+			PinLength  int `json:"pinLength"`
+			TTLSeconds int `json:"ttlSeconds"`
+		}
+		_ = ctx.ReadJSON(&body)
+		var ttl *time.Duration
+		if body.TTLSeconds > 0 {
+			d := time.Duration(body.TTLSeconds) * time.Second
+			ttl = &d
+		}
+		pinPepper := os.Getenv("PIN_PEPPER")
+		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), pinPepper, ttl)
+		if err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+		_ = ctx.JSON(iris.Map{"pin": pin})
+	})
+}
+
+func intParam(ctx iris.Context, name string, def, min, max int) int {
+	if v, err := strconv.Atoi(ctx.URLParamDefault(name, "")); err == nil {
+		if v < min {
+			return min
+		}
+		if v > max {
+			return max
+		}
+		return v
+	}
+	return def
+}
+
+func ifZero(v, def int) int {
+	if v == 0 {
+		return def
+	}
+	return v
 }

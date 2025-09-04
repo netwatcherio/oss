@@ -118,18 +118,11 @@ function submit(_: MouseEvent) {
             </div>
             <div class="form-horizontal needs-validation mt-2">
               <div class="form-floating mb-2">
-                <input id="nw-firstname" v-model="state.user.firstName" class="form-control form-input-bg"
+                <input id="nw-name" v-model="state.user.name" class="form-control form-input-bg"
                        name="first_name" placeholder="john deo"
                        required="" type="text">
-                <label for="nw-firstname">First Name</label>
-                <div class="invalid-feedback">First name is required</div>
-              </div>
-              <div class="form-floating mb-2">
-                <input id="nw-lastname" v-model="state.user.lastName" class="form-control form-input-bg"
-                       name="last_name" placeholder="john deo"
-                       required="" type="text">
-                <label for="nw-lastname">Last Name</label>
-                <div class="invalid-feedback">Last name is required</div>
+                <label for="nw-name">Name</label>
+                <div class="invalid-feedback">name is required</div>
               </div>
               <div class="form-floating mb-2">
                 <input id="nw-remail" v-model="state.user.email" class="form-control form-input-bg" name="email"
@@ -153,12 +146,12 @@ function submit(_: MouseEvent) {
                 <div class="invalid-feedback">Password is required</div>
               </div>
               <div class="d-flex justify-content-between align-items-center">
-                <div class="form-check mx-1">
+<!--                <div class="form-check mx-1">
                   <input id="r-me" class="form-check-input" required="" type="checkbox" value="">
                   <label class="form-check-label" for="r-me">
                     Remember me
                   </label>
-                </div>
+                </div>-->
                 <div class="d-flex align-items-center gap-3">
                 <div class="d-flex align-items-center justify-content-center">
                   <Loader v-if="state.waiting" inverse large></Loader>

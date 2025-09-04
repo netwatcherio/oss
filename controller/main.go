@@ -1,122 +1,82 @@
+// cmd/controller/main.go
 package main
 
 import (
-	"fmt"
+	"os"
+	"time"
+
 	"github.com/joho/godotenv"
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
-	"gorm.io/gorm"
-	"netwatcher-controller/internal/database"
-	"netwatcher-controller/internal/workspace"
-	"netwatcher-controller/web"
-	"os"
-	"os/signal"
-	"runtime"
-	"syscall"
-	"time"
 
-	// modules for wiring
-	agentpkg "netwatcher-controller/internal/agent"
-	"netwatcher-controller/internal/auth"
-	probepkg "netwatcher-controller/internal/probe"
-	userspkg "netwatcher-controller/internal/users"
+	"netwatcher-controller/internal/database"
+	"netwatcher-controller/web"
 )
 
 func main() {
-	runtime.GOMAXPROCS(4)
-	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-
 	_ = godotenv.Load()
 
-	// ---- DB (agnostic) ----
+	// ---- DB ----
 	db, err := database.OpenFromEnv()
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		log.WithError(err).Fatal("db open failed")
 	}
 
-	// ---- Automigrate + indexes ----
-	if err := db.AutoMigrate(
-		&userspkg.User{},
-		&agentpkg.Agent{},
-		&probepkg.Probe{},
-		&probepkg.Target{},
-		&auth.Session{},
-	); err != nil {
-		log.Fatalf("automigrate failed: %v", err)
-	}
-	if err := database.RunMigrations(db); err != nil {
-		log.Fatalf("migrations failed: %v", err)
+	err = database.CreateIndexes(db)
+	if err != nil {
+		log.WithError(err).Fatal("db index creation failed")
 	}
 
-	// ---- Build services ----
-	authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc := buildServices(db)
+	// ---- Iris ----
+	app := iris.New()
+	app.Configure(iris.WithConfiguration(iris.Configuration{
+		DisableStartupLog: false,
+		Charset:           "UTF-8",
+		TimeFormat:        time.RFC3339,
+	}))
 
-	// ---- Router ----
-	r := web.NewRouter(db, authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc)
-	// r.ProbeDataChan = make(chan agentpkg.ProbeData, 1024)
-
-	// Example CORS (unchanged)
 	crs := func(ctx iris.Context) {
 		ctx.Header("Access-Control-Allow-Origin", "*")
 		ctx.Header("Access-Control-Allow-Credentials", "true")
+
 		if ctx.Method() == iris.MethodOptions {
-			ctx.Header("Access-Control-Methods", "POST, PUT, PATCH, DELETE, OPTIONS")
-			ctx.Header("Access-Control-Allow-Headers", "Access-Control-Allow-Origin,Content-Type,*")
-			ctx.Header("Access-Control-Max-Age", "86400")
+			ctx.Header("Access-Control-Methods",
+				"POST, PUT, PATCH, DELETE, OPTIONS")
+
+			ctx.Header("Access-Control-Allow-Headers",
+				"Access-Control-Allow-Origin,Content-Type,*")
+
+			ctx.Header("Access-Control-Max-Age",
+				"86400")
+
 			ctx.StatusCode(iris.StatusNoContent)
 			return
 		}
+
 		ctx.Next()
 	}
-	r.App.UseRouter(crs)
+	app.UseRouter(crs)
 
-	// Workers that need DB/router
-	// workers.CreateProbeDataWorker(r.ProbeDataChan, r.DB)
+	// Routes (public + protected)
+	web.RegisterRoutes(app, db)
 
-	handleSignals()
+	// Health
+	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })
 
-	// Routes + serve
-	r.Init()
-	r.Listen(os.Getenv("LISTEN"))
+	// ---- Listen ----
+	listen := getenv("LISTEN", "0.0.0.0:8080")
+	log.Infof("HTTP listening on %s", listen)
+	if err := app.Listen(listen,
+		iris.WithoutServerError(iris.ErrServerClosed),
+		iris.WithOptimizations,
+	); err != nil {
+		log.WithError(err).Fatal("server exited")
+	}
 }
 
-// ---- wiring helpers ----
-
-func buildServices(db *gorm.DB) (auth.Service, agentpkg.Repository, probepkg.Service, workspace.Service, agentpkg.Service) {
-	// Users repo/svc
-	usersRepo := userspkg.NewRepository(db)
-	usersSvc := userspkg.NewService(usersRepo)
-
-	// Agents repo (and optionally a service if you added one)
-	agentsRepo := agentpkg.NewRepository(db)
-	agentsSvc := agentpkg.NewService(agentsRepo, db, os.Getenv("PIN_PEPPER"))
-
-	// Probes repo/svc
-	probeRepo := probepkg.NewRepository(db)
-	probesSvc := probepkg.NewService(probeRepo, agentsRepo)
-
-	// Auth service
-	authSvc := auth.NewService(db, usersRepo, usersSvc, agentsRepo)
-
-	workspaceSvc := workspace.NewService(workspace.NewRepository(db), usersRepo)
-
-	return authSvc, agentsRepo, probesSvc, workspaceSvc, agentsSvc
-}
-
-func handleSignals() {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
-	go func() {
-		for range signals {
-			shutdown()
-		}
-	}()
-}
-
-func shutdown() {
-	fmt.Println()
-	log.Warnf("%d goroutines at exit.", runtime.NumGoroutine())
-	log.Warn("Shutting down NetWatcher Controller...")
-	time.Sleep(100 * time.Millisecond)
-	os.Exit(0)
+func getenv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
