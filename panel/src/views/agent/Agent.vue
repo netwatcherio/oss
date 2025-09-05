@@ -356,6 +356,8 @@ onMounted(() => {
   ProbeService.netInfo(workspaceID, agentID).then(res => {
     let pD = res as ProbeData
     state.networkInfo = pD.payload as NetInfoPayload
+    console.log(state.networkInfo)
+    state.loading = false
   })
 
   fetch('/ouiList.json')
