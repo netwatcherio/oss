@@ -143,7 +143,7 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				}
 
 				// Force/augment meta from the authenticated context
-				pp.ID = uint(aid)
+				pp.AgentID = uint(aid) // reporting agent ID
 				if pp.CreatedAt.IsZero() {
 					pp.CreatedAt = time.Now()
 				}

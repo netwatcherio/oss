@@ -2,13 +2,14 @@
 package web
 
 import (
+	"database/sql"
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 // RegisterRoutes mounts all Iris routes using your internal/* packages.
-func RegisterRoutes(app *iris.Application, db *gorm.DB) {
+func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 	// ----- Public (no auth) -----
 	registerAuthRoutes(app, db) // /auth/*
 	agentAuth(app, db)          // /agent
@@ -24,7 +25,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB) {
 
 	panelWorkspaces(api, db) // /workspaces/*
 	panelProbes(api, db)     // /workspaces/{id}/agents/{agentID}/probes/*
-	panelAgents(api, db)
+	panelAgents(api, db, ch)
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })

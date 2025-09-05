@@ -2,6 +2,7 @@ package probe_data
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,15 +14,16 @@ import (
 // ---- Top-level meta you want at the main level ----
 
 type ProbeData struct {
-	ID                uint            `json:"id"`
-	ProbeID           uint            `json:"probeID"`
-	OriginalAgentID   uint            `json:"originalAgentID"`
-	SubmittingAgentID uint            `json:"submittingAgentID"`
-	Triggered         bool            `json:"triggered"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
-	Type              probe.Type      `json:"type"`
-	Payload           json.RawMessage `json:"payload"`
+	ID              uint            `json:"id"`
+	ProbeID         uint            `json:"probe_id"`
+	ProbeAgentID    uint            `json:"probe_agent_id"` // probe ID owner - used for reverse probes
+	AgentID         uint            `json:"agent_id"`       // submitting agent ID
+	Triggered       bool            `json:"triggered"`
+	TriggeredReason string          `json:"triggered_reason"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	Type            probe.Type      `json:"type"`
+	Payload         json.RawMessage `json:"payload"`
 	// Optional: carry target string if you still resolve AGENT types dynamically
 	Target      string `json:"target,omitempty"`
 	TargetAgent uint   `json:"targetAgent,omitempty"`
@@ -149,6 +151,6 @@ func Dispatch(ctx context.Context, pp ProbeData) error {
 	return Default.Dispatch(ctx, pp)
 }
 
-func InitWorkers() {
-	initNetInfo()
+func InitWorkers(ch *sql.DB) {
+	initNetInfo(ch)
 }

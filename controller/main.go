@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"netwatcher-controller/internal/probe_data"
 	"os"
 	"time"
@@ -26,6 +27,14 @@ func main() {
 	err = database.CreateIndexes(db)
 	if err != nil {
 		log.WithError(err).Fatal("db index creation failed")
+	}
+
+	ch, err := probe_data.OpenClickHouseFromEnv()
+	if err != nil {
+		log.WithError(err).Fatal("clickhouse open failed")
+	}
+	if err := probe_data.MigrateCH(context.Background(), ch); err != nil {
+		log.WithError(err).Fatal("clickhouse migrate failed")
 	}
 
 	// ---- Iris ----
@@ -54,10 +63,10 @@ func main() {
 	}
 	app.UseRouter(crs)
 
-	probe_data.InitWorkers()
+	probe_data.InitWorkers(ch)
 
 	// Routes (public + protected)
-	web.RegisterRoutes(app, db)
+	web.RegisterRoutes(app, db, ch)
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })

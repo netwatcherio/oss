@@ -2,7 +2,10 @@
 package web
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
+	"netwatcher-controller/internal/probe_data"
 	"os"
 	"strconv"
 	"time"
@@ -12,7 +15,7 @@ import (
 	"netwatcher-controller/internal/agent"
 )
 
-func panelAgents(api iris.Party, db *gorm.DB) {
+func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 	ws := api.Party("/workspaces/{id:uint}")
 	as := ws.Party("/agents")
 
@@ -83,6 +86,17 @@ func panelAgents(api iris.Party, db *gorm.DB) {
 		wsID := uintParam(ctx, "id")
 		aID := uintParam(ctx, "agentID")
 		a, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, wsID, aID)
+		if err != nil || a == nil {
+			ctx.StatusCode(http.StatusNotFound)
+			return
+		}
+		_ = ctx.JSON(a)
+	})
+
+	aid.Get("/netinfo", func(ctx iris.Context) {
+		//wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+		a, err := probe_data.GetLatestNetInfoForAgent(context.TODO(), ch, uint64(aID), nil)
 		if err != nil || a == nil {
 			ctx.StatusCode(http.StatusNotFound)
 			return
