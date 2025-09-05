@@ -143,11 +143,11 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				}
 
 				// Force/augment meta from the authenticated context
-				pp.AgentID = uint(aid) // reporting agent ID
+				pp.AgentID = aid // reporting agent ID
 				if pp.CreatedAt.IsZero() {
 					pp.CreatedAt = time.Now()
 				}
-				pp.UpdatedAt = time.Now()
+				pp.ReceivedAt = time.Now()
 
 				// Dispatch to the registered handler for pp.Kind (or AGENT-derived)
 				if err := probe_data.Dispatch(context.TODO(), pp); err != nil {

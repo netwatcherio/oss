@@ -6,7 +6,7 @@ import type {
   CompleteSystemInfo,
   CPUTimes,
   HostInfo,
-  HostMemoryInfo,
+  HostMemoryInfo, NetInfoPayload,
   OSInfo,
   Probe,
   ProbeData,
@@ -24,7 +24,7 @@ import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import agent from "@/views/agent/index";
-import {AgentService, WorkspaceService} from "@/services/apiService";
+import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 interface OrganizedProbe {
   key: string;
@@ -109,27 +109,12 @@ let state = reactive({
   agent: {} as Agent,
   agents: [] as Agent[],
   probes: [] as Probe[],
-  organizedProbes: [] as OrganizedProbe[],
-  agentGroups: [] as AgentGroup[],
-  networkInfo: {} as ProbeData,
-  netData: {} as NetResult,
+  networkInfo: {} as NetInfoPayload,
   systemInfoComplete: {} as CompleteSystemInfo,
   systemData: {} as SystemData,
   hasData: false,
   ouiList: [] as OUIEntry[]
 })
-
-function transformNetData(data: any): NetResult {
-  return {
-    localAddress: data.find((d: any) => d.Key === "local_address")?.Value || 'Unknown',
-    defaultGateway: data.find((d: any) => d.Key === "default_gateway")?.Value || 'Unknown',
-    publicAddress: data.find((d: any) => d.Key === "public_address")?.Value || 'Unknown',
-    internetProvider: data.find((d: any) => d.Key === "internet_provider")?.Value || 'Unknown',
-    lat: data.find((d: any) => d.Key === "lat")?.Value || 'Unknown',
-    long: data.find((d: any) => d.Key === "long")?.Value || 'Unknown',
-    timestamp: new Date(data.find((d: any) => d.Key === "timestamp")?.Value || Date.now()),
-  };
-}
 
 function convertToCompleteSystemInfo(data: any[]): CompleteSystemInfo {
   let completeSystemInfo: any = {};
@@ -368,6 +353,11 @@ onMounted(() => {
     state.agent = res as Agent
   })
 
+  ProbeService.netInfo(workspaceID, agentID).then(res => {
+    let pD = res as ProbeData
+    state.networkInfo = pD.payload as NetInfoPayload
+  })
+
   fetch('/ouiList.json')
       .then(response => response.json())
       .then(data => state.ouiList = data as OUIEntry[]);
@@ -539,7 +529,7 @@ onMounted(() => {
               <span class="info-label">Public IP</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">---------------</span>
-                <span v-else>{{ state.netData.publicAddress || 'Loading...' }}</span>
+                <span v-else>{{ state.networkInfo.public_address || 'Loading...' }}</span>
               </span>
             </div>
             <div class="info-row">

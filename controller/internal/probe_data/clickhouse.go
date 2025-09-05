@@ -63,12 +63,12 @@ func MigrateCH(ctx context.Context, ch *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS probe_data (
 		id               UInt64           DEFAULT 0,
 		created_at       DateTime('UTC')  DEFAULT now('UTC'),
-		updated_at       DateTime('UTC')  DEFAULT now('UTC'),
+		received_at       DateTime('UTC')  DEFAULT now('UTC'),
 	type             LowCardinality(String),
 	probe_id         UInt64,
 		probe_agent_id   UInt64,
 	    agent_id         UInt64,
-		triggered        UInt8,
+		triggered        Boolean,
 		triggered_reason String,
 		target           String,
 		target_agent     UInt64,
@@ -85,7 +85,7 @@ func MigrateCH(ctx context.Context, ch *sql.DB) error {
 }
 
 // SaveRecordCH inserts one probe event row.
-func SaveRecordCH(ctx context.Context, ch *sql.DB, meta ProbeData, kind string, payload any) error {
+func SaveRecordCH(ctx context.Context, ch *sql.DB, data ProbeData, kind string, payload any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -93,21 +93,25 @@ func SaveRecordCH(ctx context.Context, ch *sql.DB, meta ProbeData, kind string, 
 
 	const ins = `
 INSERT INTO probe_data
-(created_at, updated_at, type, probe_id, probe_agent_id, agent_id,
+(created_at, received_at, type, probe_id, probe_agent_id, agent_id,
  triggered, triggered_reason, target, target_agent, payload_raw)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
-	created := meta.CreatedAt
+	created := data.CreatedAt
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	updated := time.Now().UTC()
+
+	received := data.ReceivedAt
+	if received.IsZero() {
+		received = time.Now().UTC()
+	}
 
 	_, err = ch.ExecContext(ctx, ins,
-		created, updated, kind,
-		uint64(meta.ProbeID), uint64(meta.ProbeAgentID), uint64(meta.AgentID),
-		boolToUInt8(meta.Triggered), meta.TriggeredReason,
-		meta.Target, uint64(meta.TargetAgent),
+		created, received, kind,
+		uint64(data.ProbeID), uint64(data.ProbeAgentID), uint64(data.AgentID),
+		boolToUInt8(data.Triggered), data.TriggeredReason,
+		data.Target, uint64(data.TargetAgent),
 		string(raw),
 	)
 	return err
@@ -174,7 +178,7 @@ func GetProbeDataByProbe(
 
 	q := `
 SELECT
-    created_at, updated_at, type, probe_id, agent_id, probe_agent_id,
+    created_at, received_at, type, probe_id, agent_id, probe_agent_id,
     triggered, triggered_reason, target, target_agent, payload_raw
 FROM probe_data
 WHERE ` + strings.Join(clauses, " AND ") + `
@@ -197,7 +201,7 @@ ORDER BY created_at ` + order
 		var typeStr string
 		var payloadStr string
 		if err := rows.Scan(
-			&r.CreatedAt, &r.UpdatedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
+			&r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
 			&trigUInt8, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
 		); err != nil {
 			return nil, err
@@ -232,7 +236,7 @@ func GetLatestByTypeAndAgent(
 
 	q := `
 SELECT
-    created_at, updated_at, type, probe_id, agent_id, probe_agent_id,
+    created_at, received_at, type, probe_id, agent_id, probe_agent_id,
     triggered, triggered_reason, target, target_agent, payload_raw
 FROM probe_data
 WHERE ` + strings.Join(clauses, " AND ") + `
@@ -247,7 +251,7 @@ LIMIT 1
 	var typeStr string
 	var payloadStr string
 	if err := row.Scan(
-		&r.CreatedAt, &r.UpdatedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
+		&r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
 		&trigUInt8, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -329,7 +333,7 @@ func FindProbeData(ctx context.Context, db *sql.DB, p FindParams) ([]ProbeData, 
 
 	q := `
 SELECT
-    created_at, updated_at, type, probe_id, agent_id, probe_agent_id,
+    created_at, received_at, type, probe_id, agent_id, probe_agent_id,
     triggered, triggered_reason, target, target_agent, payload_raw
 FROM probe_data
 WHERE ` + where + `
@@ -348,17 +352,17 @@ ORDER BY created_at ` + order
 	var out []ProbeData
 	for rows.Next() {
 		var r ProbeData
-		var trigUInt8 uint8
+		var trigBool bool
 		var typeStr string
 		var payloadStr string
 		if err := rows.Scan(
-			&r.CreatedAt, &r.UpdatedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
-			&trigUInt8, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
+			&r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
+			&trigBool, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
 		); err != nil {
 			return nil, err
 		}
 		r.Type = probe.Type(typeStr)
-		r.Triggered = trigUInt8 == 1
+		r.Triggered = trigBool
 		r.Payload = json.RawMessage(payloadStr)
 		out = append(out, r)
 	}

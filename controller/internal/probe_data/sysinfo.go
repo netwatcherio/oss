@@ -1,8 +1,34 @@
 package probe_data
 
-import "time"
+import (
+	"context"
+	"database/sql"
+	log "github.com/sirupsen/logrus"
+	"netwatcher-controller/internal/probe"
+	"time"
+)
 
-type CompleteSystemInfo struct {
+func initSysInfo(db *sql.DB) {
+	Register(NewHandler[sysInfoPayload](
+		probe.TypeSysInfo,
+		func(p sysInfoPayload) error {
+			return nil
+		},
+		func(ctx context.Context, data ProbeData, p sysInfoPayload) error {
+			if err := SaveRecordCH(ctx, db, data, string(probe.TypeSysInfo), p); err != nil {
+				log.WithError(err).Error("save sysinfo record (CH)")
+				return err
+			}
+
+			// Store to DB / compute / alert as needed:
+			log.Printf("[sysinfo] id=%d hostname=%s timezone=%s timestamp=%s",
+				data.ID, p.HostInfo.Hostname, p.HostInfo.Timezone, p.Timestamp)
+			return nil
+		},
+	))
+}
+
+type sysInfoPayload struct {
 	HostInfo   SystemHostInfo       `json:"hostInfo" bson:"hostInfo"`
 	MemoryInfo SystemHostMemoryInfo `json:"memoryInfo" bson:"memoryInfo"`
 	CPUTimes   SystemCPUTimes       `json:"CPUTimes" bson:"CPUTimes"`

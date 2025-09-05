@@ -117,6 +117,11 @@ export const ProbeService = {
         );
         return data;
     },
+    // network information getter
+    async netInfo(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.get<ProbeData>(`/workspaces/${workspaceId}/agents/${agentId}/netinfo`);
+        return data;
+    },
 };
 
 /** ===== Public agent bootstrap/auth (no JWT) ===== */

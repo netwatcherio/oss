@@ -17,16 +17,16 @@ type ProbeData struct {
 	ID              uint            `json:"id"`
 	ProbeID         uint            `json:"probe_id"`
 	ProbeAgentID    uint            `json:"probe_agent_id"` // probe ID owner - used for reverse probes
-	AgentID         uint            `json:"agent_id"`       // submitting agent ID
+	AgentID         uint            `json:"agent_id"`
 	Triggered       bool            `json:"triggered"`
 	TriggeredReason string          `json:"triggered_reason"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	CreatedAt       time.Time       `json:"created_at"`  // this is the timestamp that the agent provides
+	ReceivedAt      time.Time       `json:"received_at"` // this is the timestamp the backend provides
 	Type            probe.Type      `json:"type"`
 	Payload         json.RawMessage `json:"payload"`
 	// Optional: carry target string if you still resolve AGENT types dynamically
 	Target      string `json:"target,omitempty"`
-	TargetAgent uint   `json:"targetAgent,omitempty"`
+	TargetAgent uint   `json:"target_agent,omitempty"`
 }
 
 // ---- Non-generic handler interface the registry stores ----
@@ -153,4 +153,5 @@ func Dispatch(ctx context.Context, pp ProbeData) error {
 
 func InitWorkers(ch *sql.DB) {
 	initNetInfo(ch)
+	initSysInfo(ch)
 }

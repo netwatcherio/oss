@@ -188,6 +188,21 @@ export interface SelectOption {
     disabled: boolean;
 }
 
+export interface ProbeData {
+    id: number;
+    probe_id: number;
+    probe_agent_id: number; // probe ID owner - used for reverse probes
+    agent_id: number;
+    triggered: boolean;
+    triggered_reason: string;
+    created_at: string;   // ISO 8601 timestamp (agent-provided)
+    received_at: string;  // ISO 8601 timestamp (backend-provided)
+    type: string;         // maps to probe.Type enum on backend
+    payload: any;         // raw JSON payload, may vary by probe type
+    target?: string;      // optional
+    targetAgent?: number; // optional
+}
+
 // ProbeData (runtime telemetry payloads)
 
 export interface ProbeTargetDTO {
@@ -202,16 +217,6 @@ export interface ProbeConfig {
     count: number;
     interval: number;
     server: boolean;
-}
-
-export interface ProbeData {
-    id: string;
-    probe: string;
-    triggered: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-    target: ProbeTargetDTO;
-    data?: any;
 }
 
 // Speedtest / MTR / Ping results (unchanged)
@@ -306,6 +311,16 @@ export interface ProbeDataRequest {
     startTimestamp: Date;
     endTimestamp: Date;
     recent: boolean;
+}
+
+export interface NetInfoPayload {
+    local_address: string;
+    default_gateway: string;
+    public_address: string;
+    internet_provider: string;
+    lat: string;
+    long: string;
+    timestamp: string; // ISO 8601 timestamp
 }
 
 export interface CompleteSystemInfo {
