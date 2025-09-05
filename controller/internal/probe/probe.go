@@ -52,6 +52,9 @@ type Probe struct {
 	Enabled     bool           `gorm:"default:true;index" json:"enabled"`
 	IntervalSec int            `gorm:"default:60" json:"intervalSec"`
 	TimeoutSec  int            `gorm:"default:10" json:"timeoutSec"`
+	Count       int            `json:"count"`
+	DurationSec int            `json:"durationSec"`
+	Server      bool           `json:"server"`
 	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`
 	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
 

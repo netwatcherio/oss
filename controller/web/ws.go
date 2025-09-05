@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
 	"net/http"
 	"netwatcher-controller/internal/agent"
+	probe "netwatcher-controller/internal/probe"
 	"strconv"
 	"strings"
 	"time"
@@ -96,29 +99,29 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				}
 
 				// Load and update agent
-				a, err := agent.GetAgentByID(ctx, db, uint(aid))
+				a, err := agent.GetAgentByID(context.TODO(), db, aid)
 				if err != nil {
+					log.Error(err)
 					return err
 				}
-				if err := agent.UpdateAgentSeen(ctx, db, a.ID, time.Now()); err != nil {
+				if err := agent.UpdateAgentSeen(context.TODO(), db, a.ID, time.Now()); err != nil {
 					log.Error(err)
 				}
 
 				// Fetch probes for this agent
 				// NOTE: Adjust your Probe struct if needed; this mirrors your previous logic
-				/*probe := agent.Probe{Agent: a.ID}
-				probes, err := probe.GetAllProbesForAgent(r.DB)
+				ownedP, err := probe.ListByAgent(context.TODO(), db, a.ID)
 				if err != nil {
 					log.Errorf("probe_get: %v", err)
-				}*/
+				}
 
-				/*payload, err := json.Marshal(probes)
+				payload, err := json.Marshal(ownedP)
 				if err != nil {
 					return err
-				}*/
+				}
 
 				// Important: nsConn.Emit returns bool; do not treat as error
-				nsConn.Emit("probe_get", []byte("bing bong"))
+				nsConn.Emit("probe_get", payload)
 				return nil
 			},
 
