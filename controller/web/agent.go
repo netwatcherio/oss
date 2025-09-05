@@ -39,32 +39,21 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 	base := api.Party("/agent")
 
 	// POST /workspaces/{workspaceID}/agents/{agentID}/login
-	base.Post("/login", func(ctx iris.Context) {
+	base.Post("/", func(ctx iris.Context) {
 		ctx.ContentType("application/json")
-
-		// Path params are canonical; fall back to body if missing.
-		workspaceID := uintParam(ctx, "workspaceID")
-		agentID := uintParam(ctx, "agentID")
 
 		var req agentLoginRequest
 		_ = ctx.ReadJSON(&req) // ignore error; fields are optional
 
-		if workspaceID == 0 {
-			workspaceID = req.WorkspaceID
-		}
-		if agentID == 0 {
-			agentID = req.AgentID
-		}
-
-		if workspaceID == 0 || agentID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(agentLoginResponse{Error: "workspaceId_and_agentId_required"})
-			return
-		}
+		/*		if workspaceID == 0 || agentID == 0 {
+				ctx.StatusCode(http.StatusBadRequest)
+				_ = ctx.JSON(agentLoginResponse{Error: "workspaceId_and_agentId_required"})
+				return
+			}*/
 
 		// 1) Prefer PSK if provided
 		if req.PSK != "" {
-			a, err := agent.AuthenticateWithPSK(ctx, db, workspaceID, agentID, req.PSK)
+			a, err := agent.AuthenticateWithPSK(ctx, db, req.WorkspaceID, req.AgentID, req.PSK)
 			if err != nil {
 				ctx.StatusCode(http.StatusUnauthorized)
 				_ = ctx.JSON(agentLoginResponse{Error: "invalid_psk"})
@@ -86,8 +75,8 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 		if req.PIN != "" {
 			pepper := os.Getenv("PIN_PEPPER")
 			out, err := agent.BootstrapWithPIN(ctx, db, agent.BootstrapWithPINInput{
-				WorkspaceID: workspaceID,
-				AgentID:     agentID,
+				WorkspaceID: req.WorkspaceID,
+				AgentID:     req.AgentID,
 				PIN:         req.PIN,
 			}, pepper)
 			if err != nil {

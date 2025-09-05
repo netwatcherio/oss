@@ -69,7 +69,7 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB) error {
 		return nil
 	}
 
-	/*app.WebSocketServer = websocketServer*/
+	app.Get("ws", websocket.Handler(websocketServer))
 	return nil
 }
 
