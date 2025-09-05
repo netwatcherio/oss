@@ -1,15 +1,12 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
-import type { AgentGroup, Probe, ProbeConfig, ProbeTarget, ProbeType, SelectOption, Workspace } from "@/types";
-import { Agent } from "@/types";
+import {Agent, type Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import agentService from "@/services/agentService";
-import probeService from "@/services/probeService";
-import siteService from "@/services/workspaceService";
+import {AgentService, WorkspaceService} from "@/services/apiService";
 
 interface ProbeState {
-  site: Workspace;
+  workspace: Workspace;
   ready: boolean;
   loading: boolean;
   agent: Agent;
@@ -33,7 +30,7 @@ interface ProbeState {
 }
 
 const state = reactive<ProbeState>({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   loading: false,
   agent: {} as Agent,
@@ -94,10 +91,17 @@ const probeDescriptions = {
 
 // Initialize component
 onMounted(async () => {
-  const aID = router.currentRoute.value.params["aID"] as string;
-  if (!aID) return;
-  const wID = router.currentRoute.value.params["wID"] as string;
-  if (!wID) return;
+  let agentID = router.currentRoute.value.params["aID"] as string
+  let workspaceID = router.currentRoute.value.params["wID"] as string
+  if (!agentID || !workspaceID) return
+
+  WorkspaceService.get(workspaceID).then(res => {
+    state.workspace = res as Workspace
+  })
+
+  AgentService.get(workspaceID, agentID).then(res => {
+    state.agent = res as Agent
+  })
 
   state.probeConfig = {
     duration: 60,
@@ -111,33 +115,26 @@ onMounted(async () => {
   } as ProbeTarget;
 
   try {
-    // Load agent data
-    const agentRes = await agentService.getAgent(wID.toString(), aID.toString());
-    state.agent = agentRes.data as Agent;
-
-    // Load workspaces data
-    const siteRes = await siteService.getSite(wID.toString());
-    state.site = siteRes.data as Workspace;
-
     // Load existing probes for duplicate checking
-    const probesRes = await probeService.getAgentProbes(aID);
+    const probesRes = await probeService.getAgentProbes(agentID);
     state.existingProbes = probesRes.data as Probe[];
 
     // Load all agents for the workspaces
     const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
     if (agentsRes.data.length > 0) {
       const agents = agentsRes.data as Agent[];
-      state.agents = agents.filter(a => a.id.toString() !== aID.toString());
+      state.agents = agents.filter(a => a.id.toString() !== agentID.toString());
       state.ready = true;
     }
 
     // Initialize probe type options
-    initializeOptions();
 
   } catch (error) {
     console.error("Error loading data:", error);
-    state.errors.push("Failed to load agent data");
+    state.errors.push("failed to load other agent selections");
   }
+
+  initializeOptions();
 });
 
 // Initialize probe type options with AGENT as preferred
@@ -332,8 +329,8 @@ const availableAgentsForSelection = computed(() => {
     <Title
         :history="[
           {title: 'workspaces', link: '/workspaces'},
-          {title: state.site.name, link: `/workspace/${state.site.id}`},
-          {title: state.agent.name, link: `/workspace/${state.site.id}/agent/${state.agent.id}`}
+          {title: state.workspace.name, link: `/workspace/${state.workspace.id}`},
+          {title: state.agent.name, link: `/workspace/${state.workspace.id}/agent/${state.agent.id}`}
         ]"
         :subtitle="`create a new probe for agent '${state.agent.name}'`"
         title="New Probe">

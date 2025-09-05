@@ -72,41 +72,6 @@ export interface Agent {
     metadata?: Record<string, any>;
 }
 
-// -------------------- AUTH (REGISTRATION / LOGIN) --------------------
-
-// Used for agent bootstrap PINs
-export interface AgentAuthPin {
-    id: number;
-    createdAt: string;
-    updatedAt: string;
-
-    workspaceId: number;
-    agentId: number;
-
-    pin: string;
-    pinIndex: string;
-
-    consumed: boolean;
-    expiresAt: string;
-}
-
-// Registration (user signup)
-export interface RegistrationRequest {
-    email: string;
-    password: string;
-    name?: string;
-}
-
-// Login
-export interface LoginRequest {
-    email: string;
-    password: string;
-}
-
-export interface LoginResponse {
-    token: string;
-    user: User;
-}
 
 // ---- Workspaces ----
 

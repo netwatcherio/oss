@@ -1,13 +1,18 @@
 <script lang="ts" setup>
-import {useRouter} from "vue-router";
-import {reactive} from "vue";
-import {User} from "@/types";
-import authService from "@/services/authService";
-import core from "@/core";
+import { useRouter } from "vue-router";
+import { reactive } from "vue";
 import Loader from "@/components/Loader.vue";
 
-const router = useRouter()
+// NEW: use the new auth service
+import { AuthService } from "@/services/apiService";
 
+const router = useRouter();
+
+type User = {
+  name?: string;
+  email: string;
+  password: string;
+};
 
 const state = reactive({
   user: {} as User,
@@ -16,64 +21,79 @@ const state = reactive({
   waiting: false,
   began: 0,
   error: false,
-})
+});
 
-interface Response {
-  token: string
-  user: User
-}
-
-let session = core.session()
-
-function onRegister(response: any) {
-  done()
-  /*  let data = response.data as Response
-    session.token = data.token
-    session.data = data.user*/
-  // TODO log successful login and let user know they successfully registered / prompt for email verification
-  // console.log(response)
-  router.push("/auth/login")
-}
 function begin() {
-  state.waiting = true
-  state.began = Date.now().valueOf()
+  state.waiting = true;
+  state.began = Date.now().valueOf();
 }
 
 function done() {
-  if (state.waiting) {
-    let delta = Date.now().valueOf() - state.began
-    let minTimeout = 250
-    setTimeout(() => {
-      state.waiting = false
-      state.began = 0
-    }, Math.max(minTimeout - delta, 0))
-  }
+  if (!state.waiting) return;
+  const delta = Date.now().valueOf() - state.began;
+  const minTimeout = 250;
+  setTimeout(() => {
+    state.waiting = false;
+    state.began = 0;
+  }, Math.max(minTimeout - delta, 0));
+}
+
+function onRegister(_: unknown) {
+  done();
+  // Optional: show a toast/snackbar “Registered! Please log in.”
+  router.push("/auth/login");
 }
 
 function onFailure(error: any) {
-  done()
-  state.error = true
-  console.log(error)
-  switch (error.response.data) {
+  done();
+  state.error = true;
+
+  // Try common shapes: { error: "..." } or plain string
+  const server =
+      error?.response?.data?.error ??
+      error?.response?.data ??
+      error?.message ??
+      "";
+
+  switch (server) {
     case "user exists":
-      state.errorMessage = "The email provided has already been registered for an account."
+    case "User already exists":
+      state.errorMessage = "The email provided has already been registered for an account.";
       break;
     case "invalid":
-      state.errorMessage = "Invalid request. Please check your information."
+    case "Invalid request":
+    case "validation_error":
+      state.errorMessage = "Invalid request. Please check your information.";
       break;
     default:
-      state.errorMessage = "An error occurred. Please try again later."
+      state.errorMessage = "An error occurred. Please try again later.";
       break;
   }
-
 }
 
-function submit(_: MouseEvent) {
-  begin()
-  authService.authRegister(state.user).then(onRegister).catch(onFailure)
+async function submit(e: MouseEvent) {
+  e.preventDefault();
+
+  // client-side confirm password check
+  if (!state.user.password || state.user.password !== state.confirmPassword) {
+    state.error = true;
+    state.errorMessage = "Passwords do not match.";
+    return;
+  }
+
+  begin();
+  try {
+    const body = {
+      email: state.user.email,
+      password: state.user.password,
+      name: state.user.name,
+    };
+    await AuthService.register(body);
+    onRegister(null);
+  } catch (err) {
+    onFailure(err);
+  }
 }
-
-
 </script>
 
 <template>

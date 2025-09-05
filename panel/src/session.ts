@@ -1,64 +1,41 @@
-import type {User} from "@/types";
-import {provide, reactive, watch} from "vue";
-import axios from "axios";
-import profileService from "@/services/profile";
+// Lightweight session storage for JWT + user
+export interface SessionUser {
+    id: number | string;
+    email?: string;
+    name?: string;
+    [k: string]: any;
+}
 
 export interface Session {
-    token: string
-    data: User
+    token: string;
+    user?: SessionUser;
 }
 
-function init() {
+const STORAGE_KEY = "netwatcher.session";
 
-}
-
-let defaults = {
-    token: "",
-    data: {} as User,
-} as Session
-
-
-// Save the Preferences object to localStorage
-function save(session: Session) {
-    // Convert the object to a string
-    let payload = JSON.stringify(session)
-    // Save the string to localStorage
-    localStorage.setItem("session", payload)
-}
-
-// Restores values from a previous save, or sets defaults
-function restore(): Session {
-    // Get the session string from localStorage
-    let stored = localStorage.getItem("session")
-    // If the retrieval was successful, parse it
-    if (stored) {
-        // Parse the string to the Preferences object
-        return JSON.parse(stored)
-    } else {
-        let defaults = {
-            token: "",
-            data: {} as User,
-        } as Session
-
-        // If the retrieval failed, save the default values to localStorage
-        save(defaults)
-        // Return the default parameters
-        return defaults
+export function getSession(): Session | null {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw) as Session;
+    } catch {
+        return null;
     }
 }
 
-export function getSession() {
-    return reactive<Session>(restore())
+export function setSession(s: Session) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    window.dispatchEvent(new CustomEvent("session:changed", { detail: s }));
 }
 
-export function useSession() {
-    // Create a reactive object to contain the preferences
-    let session = reactive<Session>(restore())
-    // Watch all changes made to the Preferences reactive object
-    watch(session, () => {
-        // Save any changes to localStorage
-        save(session)
-    })
-    return session
+export function clearSession() {
+    localStorage.removeItem(STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent("session:changed", { detail: null }));
 }
 
+// Optional listener helper
+export function onSessionChanged(cb: (s: Session | null) => void) {
+    const handler = (e: Event) => cb((e as CustomEvent).detail);
+    window.addEventListener("session:changed", handler as EventListener);
+    return () => window.removeEventListener("session:changed", handler as EventListener);
+}

@@ -17,9 +17,6 @@ import type {
 } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import agentService from "@/services/agentService";
-import probeService from "@/services/probeService";
-import siteService from "@/services/workspaceService";
 
 const state = reactive({
   site: {} as Workspace,

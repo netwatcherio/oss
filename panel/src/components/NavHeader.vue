@@ -1,14 +1,13 @@
 <script lang="ts" setup>
 import core from "@/core";
-import {User} from "@/types";
+import {clearSession, type Session} from "@/session";
 
 const persistent = core.persistent()
 const router = core.router()
 const session = core.session()
 
 function logout() {
-  session.token = ""
-  session.data = {} as User
+  clearSession()
   router.push("/auth/login")
 }
 </script>
@@ -51,7 +50,7 @@ function logout() {
             </div>
             <div class="user-info">
               <span class="user-name">
-                {{ session.data.firstName }} {{ session.data.lastName }}
+                {{ session.user?.name }}
               </span>
               <span class="user-role">Administrator</span>
             </div>

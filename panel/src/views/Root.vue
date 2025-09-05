@@ -1,11 +1,9 @@
 <script lang="ts" setup>
 
 import NavHeader from "@/components/NavHeader.vue";
-import NavSidebar from "@/components/NavSidebar.vue";
 import Footer from "@/components/Footer.vue";
 import {onMounted, reactive} from "vue";
 import core from "@/core";
-import {User} from "@/types";
 
 const session = core.session()
 const router = core.router()

@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 
 import {reactive} from "vue";
-import siteService from "@/services/workspaceService";
 import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";

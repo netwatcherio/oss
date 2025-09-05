@@ -1,12 +1,12 @@
 <script lang="ts" setup>
 
 import {onMounted, reactive} from "vue";
-import siteService from "@/services/workspaceService";
 import type {MemberInfo, Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {Agent} from "@/types";
 import agentService from "@/services/agentService";
+import {WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   site: {} as Workspace,
@@ -22,11 +22,11 @@ onMounted(() => {
   let userId = router.currentRoute.value.params["userId"] as string
   if (!userId) return
 
-  siteService.getSite(id).then(res => {
-      state.site = res.data as Workspace
+  WorkspaceService.get(id).then(res => {
+      state.site = res as Workspace
       /*state.ready = true*/
 
-    siteService.getMemberInfos(id).then(res => {
+    Workspace.getMemberInfos(id).then(res => {
       if(res.data.length > 0) {
         const members = res.data as MemberInfo[];
         state.ready = true

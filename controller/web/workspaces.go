@@ -46,7 +46,7 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 		in := workspace.CreateWorkspaceInput{
 			Name:        body.Name,
 			OwnerID:     uid,
-			DisplayName: body.DisplayName,
+			Description: body.DisplayName,
 			Settings:    jsonFromMap(body.Settings),
 		}
 		ws, err := store.CreateWorkspace(ctx.Request().Context(), in)
@@ -85,7 +85,7 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 			return
 		}
 		in := workspace.UpdateWorkspaceInput{
-			DisplayName: body.DisplayName,
+			Description: body.DisplayName,
 			Settings:    jsonPtrFromMap(body.Settings),
 		}
 		ws, err := store.UpdateWorkspace(ctx.Request().Context(), id, in)

@@ -1,57 +1,44 @@
+import type { AxiosInstance, AxiosRequestConfig } from "axios";
 import axios from "axios";
-import type {Session} from "@/session";
-import {getSession} from "@/session";
+import { getSession } from "@/session";
 
-interface RequestHeaders {
-    mode: string
-    cache: string
-    headers: {
-        Authorization: string
-    }
+function baseURL(): string {
+    // Prefer a global override if present (e.g., set on index.html)
+    const anyWindow = window as any;
+    if (anyWindow?.NW_GLOBAL_ENDPOINT) return anyWindow.NW_GLOBAL_ENDPOINT as string;
+
+    // Fallback env or default
+    const envUrl = (import.meta as any)?.env?.NW_ENDPOINT;
+    if (envUrl) return envUrl as string;
+
+    return "http://localhost:8080";
 }
 
-// Generates the headers for an endpoint request with the user's session token
-function getHeaders(): RequestHeaders {
-    let token: string = "";
-    // Attempt to retrieve the user session
-    let session: Session = getSession();
-    // Set the authentication token to the stored token if present
-    if (session.token) {
-        token = session.token;
-    }
-    return {
-        mode: 'cors',
-        cache: 'no-cache',
-        headers: {
-            Authorization: "Bearer " + token
-        }
-    };
-}
+const client: AxiosInstance = axios.create({
+    baseURL: baseURL(),
+    withCredentials: false,
+});
 
-// returns the preferred guardian endpoint
-function host(): string {
-    // Attempt to leverage implementation-specific endpoints
-    let envUrl: string = import.meta.env.NW_ENDPOINT;
-    // Return the environment-declared url if it is present
-    if (envUrl) {
-        return envUrl;
+client.interceptors.request.use((config) => {
+    const session = getSession();
+    /*if (!config.headers) config.headers = {};*/
+    if (session?.token) {
+        (config.headers as any).Authorization = `Bearer ${session.token}`;
     }
-    // Attempt to load the globally defined default endpoint url
-    let globalUrl: string = import.meta.env.NW_GLOBAL_ENDPOINT;
-    // Return the globally declared url if it is present
-    if (globalUrl) {
-        return globalUrl;
-    }
-    // Return a hard coded value if no other url is found
-    return 'https://api.netwatcher.io';
-}
+    return config;
+});
 
 export default {
-    async post(url: string, data?: {} | undefined): Promise<any> {
-        return await axios.post(`${host()}${url}`, data, getHeaders());
+    get<T = any>(url: string, config?: AxiosRequestConfig) {
+        return client.get<T>(url, config);
     },
-    async get(url: string, data?: {} | undefined): Promise<any> {
-        return axios.get(`${host()}${url}`, getHeaders());
+    post<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+        return client.post<T>(url, data, config);
     },
-}
-
+    patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+        return client.patch<T>(url, data, config);
+    },
+    delete<T = any>(url: string, config?: AxiosRequestConfig) {
+        return client.delete<T>(url, config);
+    },
+};

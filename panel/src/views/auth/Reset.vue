@@ -1,7 +1,5 @@
 <script lang="ts" setup>
 import {reactive} from "vue";
-import authService from "@/services/authService";
-import profileService from "@/services/profile";
 import type {User} from "@/types"
 import core from "@/core";
 import Loader from "@/components/Loader.vue";

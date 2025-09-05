@@ -1,12 +1,10 @@
 <script lang="ts" setup>
 
 import {onMounted, reactive} from "vue";
-import siteService from "@/services/workspaceService";
 import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {Agent} from "@/types";
-import agentService from "@/services/agentService";
 
 const state = reactive({
   site: {} as Workspace,

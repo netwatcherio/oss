@@ -1,12 +1,10 @@
 <script lang="ts" setup>
-import type {AgentGroup, MemberInfo, Probe, Workspace, WorkspaceMember} from "@/types";
+import type {AgentGroup, MemberInfo, Workspace, WorkspaceMember} from "@/types";
 import {onMounted, reactive, computed} from "vue";
-import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
 import core from "@/core";
 import {Agent} from "@/types";
-import agentService from "@/services/agentService";
-import probeService from "@/services/probeService";
+import {AgentService, type Probe, ProbeService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   probes: [] as Probe[],
@@ -189,23 +187,27 @@ const generalProbes = computed(() => {
 const router = core.router()
 
 onMounted(async () => {
-  let id = router.currentRoute.value.params["aID"] as string
-  if (!id) return
+  let agentID = router.currentRoute.value.params["aID"] as string
+  let workspaceID = router.currentRoute.value.params["wID"] as string
+  if (!agentID || !workspaceID) return
 
-  let wid = router.currentRoute.value.params["wID"] as string
-  if (!wid) return
+  WorkspaceService.get(workspaceID).then(res => {
+    state.site = res as Workspace
+  })
+  AgentService.get(workspaceID, agentID).then(res => {
+    state.agent = res as Agent
+  })
+
+  AgentService.list(workspaceID).then(res => {
+    state.agents = res.data as Agent[]
+  })
+
+  ProbeService.list(workspaceID, agentID).then(res => {
+    state.probes = res as Probe[] || [];
+  })
+  
 
   try {
-    const agentRes = await agentService.getAgent(wid, id)
-    state.agent = agentRes.data as Agent;
-
-    const [agentsRes, siteRes] = await Promise.all([
-      agentService.getWorkspaceAgents(state.agent.workspaceId.toString()),
-      siteService.getSite(state.agent.workspaceId.toString())
-    ]);
-
-    state.agents = agentsRes.data as Agent[];
-    state.site = siteRes.data as Workspace;
 
     try {
       const groupsRes = await siteService.getAgentGroups(state.agent.workspaceId.toString());
@@ -213,9 +215,6 @@ onMounted(async () => {
     } catch (e) {
       console.log('Agent groups not available');
     }
-
-    const probesRes = await probeService.getAgentProbes(state.agent.id.toString());
-    state.probes = probesRes.data as Probe[] || [];
 
     state.ready = true;
     state.loading = false;

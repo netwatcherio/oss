@@ -1,9 +1,9 @@
 <script lang="ts" setup>
-import type { Workspace } from "@/types";
+import type { Workspace } from "@/services/apiService";
 import { onMounted, reactive, computed } from "vue";
-import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
 import Element from "@/components/Element.vue";
+import {WorkspaceService} from "@/services/apiService";
 
 declare interface AgentCountInfo {
   site_id: string;
@@ -31,8 +31,7 @@ const filteredSites = computed(() => {
     const query = state.searchQuery.toLowerCase();
     return (
       site.name.toLowerCase().includes(query) ||
-      site.description?.toLowerCase().includes(query) ||
-      site.location?.toLowerCase().includes(query)
+      site.description?.toLowerCase().includes(query)
     );
   });
 
@@ -45,14 +44,14 @@ const filteredSites = computed(() => {
         aVal = a.name.toLowerCase();
         bVal = b.name.toLowerCase();
         break;
-      case "location":
+      /*case "location":
         aVal = a.location?.toLowerCase() || "";
         bVal = b.location?.toLowerCase() || "";
         break;
       case "members":
         aVal = a.members?.length || 0;
         bVal = b.members?.length || 0;
-        break;
+        break;*/
     }
 
     if (state.sortOrder === "asc") {
@@ -66,7 +65,7 @@ const filteredSites = computed(() => {
 });
 
 const totalMembers = computed(() => {
-  return state.sites.reduce((total, site) => total + (site.members?.length || 0), 0);
+  return state.sites.reduce((total, site) => total + (69 || 0), 0); // todo
 });
 
 // Functions
@@ -86,8 +85,8 @@ function getSortIcon(column: string) {
 
 onMounted(async () => {
   try {
-    const res = await siteService.getSites();
-    const data = res.data as Workspace[];
+    const res = await WorkspaceService.list()
+    const data = res as Workspace[];
 
     if (data && data.length > 0) {
       state.sites = data;

@@ -1,23 +1,21 @@
 <script lang="ts" setup>
 import {onMounted, reactive, computed} from "vue";
-import siteService from "@/services/workspaceService";
 import core from "@/core";
-import type {Agent, Workspace} from "@/types";
 import Title from "@/components/Title.vue";
 import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
-import agentService from "@/services/agentService";
 import Element from "@/components/Element.vue";
 import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import AgentCard from "@/components/AgentCard.vue";
+import {type Agent, AgentService, type Workspace, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   agents: [] as Agent[],
   ready: false,
   loading: true,
   searchQuery: '',
-  sortBy: 'status' as 'status' | 'name' | 'location' | 'updated'
+  sortBy: 'status' as 'status' | 'name' | 'description' | 'updated'
 })
 
 let router = core.router()
@@ -43,8 +41,8 @@ const filteredAgents = computed(() => {
         return getOnlineStatus(b) - getOnlineStatus(a);
       case 'name':
         return a.name.localeCompare(b.name);
-      case 'location':
-        return (a.location || '').localeCompare(b.location || '');
+      case 'description':
+        return (a.description || '').localeCompare(b.description || '');
       case 'updated':
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       default:
@@ -65,10 +63,11 @@ onMounted(() => {
   let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
-  siteService.getSite(id).then(res => {
-    state.site = res.data as Workspace
-    agentService.getWorkspaceAgents(id).then(res => {
-      state.agents = res.data as Agent[] || []
+  WorkspaceService.get(id).then(res => {
+    state.workspace = res as Workspace
+    AgentService.list(id).then(res => {
+      console.log(res)
+      state.agents = res.data
       state.ready = state.agents.length > 0
       state.loading = false
     }).catch(() => {
@@ -79,14 +78,14 @@ onMounted(() => {
 
 function getOnlineStatus(agent: Agent) {
     let currentTime = new Date();
-    let agentTime = new Date(agent.updatedAt)
+    let agentTime = new Date(agent.updatedAt?.toString())
     let timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000; // Convert to minutes
     return timeDifference <= 1;
 }
 
 function getLastSeenText(agent: Agent) {
     const now = new Date();
-    const lastSeen = new Date(agent.updatedAt);
+    const lastSeen = new Date(agent.updatedAt?.toString());
     const diffMs = now.getTime() - lastSeen.getTime();
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
@@ -101,17 +100,17 @@ function getLastSeenText(agent: Agent) {
 
 <template>
   <div class="container-fluid">
-    <Title :title="state.site.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
+    <Title :title="state.workspace.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
       <div class="d-flex flex-wrap gap-2">
-        <router-link :to="`/workspace/${state.site.id}/edit`" class="btn btn-outline-dark">
+        <router-link :to="`/workspace/${state.workspace.id}/edit`" class="btn btn-outline-dark">
           <i class="fa-solid fa-pencil-alt"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit</span>
         </router-link>
-        <router-link :to="`/workspace/${state.site.id}/members`" class="btn btn-outline-dark">
+        <router-link :to="`/workspace/${state.workspace.id}/members`" class="btn btn-outline-dark">
           <i class="fa-solid fa-users"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
-        <router-link :to="`/workspace/${state.site.id}/agent/new`" class="btn btn-primary">
+        <router-link :to="`/workspace/${state.workspace.id}/agent/new`" class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
         </router-link>
       </div>
@@ -183,7 +182,7 @@ function getLastSeenText(agent: Agent) {
       </div>
       <h5>No agents yet</h5>
       <p class="text-muted">Create your first agent to start monitoring your network.</p>
-      <router-link :to="`/agents/${state.site.id}/new`" class="btn btn-primary">
+      <router-link :to="`/agents/${state.workspace.id}/new`" class="btn btn-primary">
         <i class="fa-solid fa-plus"></i>&nbsp;Create First Agent
       </router-link>
     </div>

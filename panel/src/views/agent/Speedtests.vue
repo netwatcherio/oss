@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import {onMounted, reactive, computed} from "vue";
-import siteService from "@/services/workspaceService";
 import type {
   Agent,
   Probe,
@@ -14,8 +13,6 @@ import type {
 } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import agentService from "@/services/agentService";
-import probeService from "@/services/probeService";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
 

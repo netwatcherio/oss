@@ -44,7 +44,7 @@ type Workspace struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// denormalized convenience
-	DisplayName string `gorm:"size:255" json:"displayName"`
+	Description string `gorm:"size:255" json:"description"`
 }
 
 func (Workspace) TableName() string { return "workspaces" }
@@ -64,9 +64,6 @@ type Member struct {
 	InvitedAt  *time.Time `json:"invitedAt"`
 	AcceptedAt *time.Time `json:"acceptedAt"`
 	RevokedAt  *time.Time `json:"revokedAt"`
-
-	// denormalized convenience
-	DisplayName string `gorm:"size:255" json:"displayName"`
 }
 
 func (Member) TableName() string { return "workspace_members" }
@@ -131,7 +128,7 @@ func jdefault(j datatypes.JSON) datatypes.JSON {
 type CreateWorkspaceInput struct {
 	Name        string         // required, unique
 	OwnerID     uint           // required
-	DisplayName string         // optional
+	Description string         // optional
 	Settings    datatypes.JSON // optional
 }
 
@@ -143,7 +140,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, in CreateWorkspaceInput) (*
 	ws := &Workspace{
 		Name:        name,
 		OwnerID:     in.OwnerID,
-		DisplayName: strings.TrimSpace(in.DisplayName),
+		Description: strings.TrimSpace(in.Description),
 		Settings:    jdefault(in.Settings),
 	}
 	if err := s.db.WithContext(ctx).Create(ws).Error; err != nil {
@@ -202,7 +199,7 @@ func (s *Store) ListWorkspaces(ctx context.Context, f ListWorkspacesFilter) ([]W
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		pat := "%" + strings.ToLower(q) + "%"
-		db = db.Where("LOWER(name) LIKE ? OR LOWER(display_name) LIKE ?", pat, pat)
+		db = db.Where("LOWER(name) LIKE ?", pat, pat)
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > 200 {
@@ -216,7 +213,7 @@ func (s *Store) ListWorkspaces(ctx context.Context, f ListWorkspacesFilter) ([]W
 }
 
 type UpdateWorkspaceInput struct {
-	DisplayName *string
+	Description *string
 	Settings    *datatypes.JSON
 }
 
@@ -229,8 +226,8 @@ func (s *Store) UpdateWorkspace(ctx context.Context, id uint, in UpdateWorkspace
 		return nil, err
 	}
 	updates := map[string]any{}
-	if in.DisplayName != nil {
-		updates["display_name"] = strings.TrimSpace(*in.DisplayName)
+	if in.Description != nil {
+		updates["description"] = strings.TrimSpace(*in.Description)
 	}
 	if in.Settings != nil {
 		updates["settings"] = jdefault(*in.Settings)
@@ -262,7 +259,6 @@ type AddMemberInput struct {
 	UserID      uint   // optional if Email set
 	Email       string // optional if UserID set (invite)
 	Role        Role   // required
-	DisplayName string // optional
 	Meta        datatypes.JSON
 }
 
@@ -288,7 +284,6 @@ func (s *Store) AddMember(ctx context.Context, in AddMemberInput) (*Member, erro
 		UserID:      in.UserID,
 		Email:       normEmail(in.Email),
 		Role:        in.Role,
-		DisplayName: strings.TrimSpace(in.DisplayName),
 		Meta:        jdefault(in.Meta),
 	}
 	if err := s.db.WithContext(ctx).Create(m).Error; err != nil {

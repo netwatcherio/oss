@@ -2,10 +2,8 @@
 
 import type {AgentGroup, Workspace} from "@/types";
 import {onMounted, reactive} from "vue";
-import siteService from "@/services/workspaceService";
 import Title from "@/components/Title.vue";
 import core from "@/core";
-import {Agent} from "@/types";
 
 let state = reactive({
   groups: [] as AgentGroup[],

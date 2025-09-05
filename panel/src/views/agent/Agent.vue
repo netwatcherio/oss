@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import {onMounted, reactive, computed} from "vue";
-import siteService from "@/services/workspaceService";
 import type {
   Agent,
   AgentGroup,
@@ -8,18 +7,14 @@ import type {
   CPUTimes,
   HostInfo,
   HostMemoryInfo,
-  NetResult,
   OSInfo,
   Probe,
   ProbeData,
   ProbeType,
   Workspace
 } from "@/types";
-import {OUIEntry} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import agentService from "@/services/agentService";
-import probeService from "@/services/probeService";
 import Chart from "@/components/Chart.vue"
 import ElementLink from "@/components/ElementLink.vue";
 import Element from "@/components/Element.vue";
@@ -29,6 +24,7 @@ import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import agent from "@/views/agent/index";
+import {AgentService, WorkspaceService} from "@/services/apiService";
 
 interface OrganizedProbe {
   key: string;
@@ -107,7 +103,7 @@ function getVendorFromMac(macAddress: string) {
 }
 
 let state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
@@ -364,18 +360,17 @@ onMounted(() => {
   let workspaceID = router.currentRoute.value.params["wID"] as string
   if (!agentID || !workspaceID) return
 
-  agentService.getAgent(workspaceID, agentID).then(res => {
-    state.agent = res.data as Agent
-
-    fetch('/ouiList.json')
-        .then(response => response.json())
-        .then(data => state.ouiList = data as OUIEntry[]);
-
-    siteService.getSite(workspaceID).then(res => {
-      state.site = res.data as Workspace
-      reloadData(state.agent.id.toString());
-    })
+  WorkspaceService.get(workspaceID).then(res => {
+    state.workspace = res as Workspace
   })
+
+  AgentService.get(workspaceID, agentID).then(res => {
+    state.agent = res as Agent
+  })
+
+  fetch('/ouiList.json')
+      .then(response => response.json())
+      .then(data => state.ouiList = data as OUIEntry[]);
 })
 </script>
 
@@ -384,7 +379,7 @@ onMounted(() => {
     <Title
         :history="[
         {title: 'workspaces', link: '/workspaces'},
-        {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`}
+        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id}`}
       ]"
         :title="state.agent.name || 'Loading...'"
         :subtitle="state.agent.location || 'Agent Information'">
@@ -397,7 +392,7 @@ onMounted(() => {
           <i class="fa-regular fa-pen-to-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
         </router-link>
-        <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary" :class="{'': state.loading}">
+        <router-link :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probe/new`" class="btn btn-primary" :class="{'': state.loading}">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
       </div>
