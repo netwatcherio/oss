@@ -217,8 +217,7 @@ function getLastSeenText(agent: Agent) {
           
           <div class="agent-card-content">
             <div v-if="!agent.initialized" class="credentials-section">
-              <Code title="ID" :code="agent.id.toString()" />
-              <Code title="PIN" :code="agent.pin" />
+              <Code title="" :code="agent.description" />
             </div>
             
             <div class="agent-stats" v-else>

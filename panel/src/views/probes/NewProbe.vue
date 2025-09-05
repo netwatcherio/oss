@@ -119,7 +119,7 @@ onMounted(async () => {
     const probesRes = await probeService.getAgentProbes(agentID);
     state.existingProbes = probesRes.data as Probe[];
 
-    // Load all agents for the workspaces
+    // Load all agents for the workspace
     const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
     if (agentsRes.data.length > 0) {
       const agents = agentsRes.data as Agent[];

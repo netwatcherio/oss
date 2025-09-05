@@ -1,31 +1,65 @@
 <script lang="ts" setup>
-import type {AgentGroup, MemberInfo, Workspace, WorkspaceMember} from "@/types";
 import {onMounted, reactive, computed} from "vue";
 import Title from "@/components/Title.vue";
 import core from "@/core";
-import {Agent} from "@/types";
-import {AgentService, type Probe, ProbeService, WorkspaceService} from "@/services/apiService";
+import {Agent, Probe, type Workspace} from "@/types";
+import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   probes: [] as Probe[],
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
   agents: [] as Agent[],
-  agentGroups: [] as AgentGroup[],
   searchQuery: '',
   selectedType: 'all'
 })
 
+
+// todo load other
+
+const router = core.router()
+
+onMounted(async () => {
+  let agentID = router.currentRoute.value.params["aID"] as string
+  let workspaceID = router.currentRoute.value.params["wID"] as string
+  if (!agentID || !workspaceID) return
+
+  WorkspaceService.get(workspaceID).then(res => {
+    state.workspace = res as Workspace
+  })
+  AgentService.get(workspaceID, agentID).then(res => {
+    state.agent = res as Agent
+  })
+
+  AgentService.list(workspaceID).then(res => {
+    state.agents = res.data as Agent[]
+  })
+
+  ProbeService.list(workspaceID, agentID).then(res => {
+    state.probes = res as Probe[] || [];
+  })
+
+
+  try {
+
+    state.ready = true;
+    state.loading = false;
+  } catch (error) {
+    console.error('Error loading data:', error);
+    state.loading = false;
+  }
+})
+
 // Helper functions
 function getProbeTypeLabel(probe: Probe): string {
-  if (probe.type === 'RPERF' && probe.config?.server) {
+  /*if (probe.type === 'RPERF' && probe.config?.server) {
     return 'RPERF SERVER';
   }
   if (probe.type === 'TRAFFICSIM' && probe.config?.server) {
     return 'TRAFFIC SIM SERVER';
-  }
+  }*/
   return probe.type;
 }
 
@@ -35,8 +69,8 @@ function getProbeIcon(probe: Probe): string {
     case 'NETINFO': return 'fa-solid fa-network-wired';
     case 'MTR': return 'fa-solid fa-route';
     case 'PING': return 'fa-solid fa-satellite-dish';
-    case 'RPERF': return probe.config?.server ? 'fa-solid fa-server' : 'fa-solid fa-gauge-high';
-    case 'TRAFFICSIM': return probe.config?.server ? 'fa-solid fa-tower-broadcast' : 'fa-solid fa-chart-line';
+    /*case 'RPERF': return probe.config?.server ? 'fa-solid fa-server' : 'fa-solid fa-gauge-high';
+    case 'TRAFFICSIM': return probe.config?.server ? 'fa-solid fa-tower-broadcast' : 'fa-solid fa-chart-line';*/
     case 'SPEEDTEST': return 'fa-solid fa-gauge-high';
     case 'SPEEDTEST_SERVERS': return 'fa-solid fa-list-check';
     default: return 'fa-solid fa-cube';
@@ -51,8 +85,8 @@ function getProbeColor(probe: Probe): string {
     case 'SPEEDTEST_SERVERS': return 'teal';
     case 'MTR': return 'cyan';
     case 'PING': return 'green';
-    case 'RPERF': return probe.config?.server ? 'purple' : 'orange';
-    case 'TRAFFICSIM': return probe.config?.server ? 'indigo' : 'red';
+    /*case 'RPERF': return probe.config?.server ? 'purple' : 'orange';
+    case 'TRAFFICSIM': return probe.config?.server ? 'indigo' : 'red';*/
     default: return 'gray';
   }
 }
@@ -65,43 +99,43 @@ function getProbeDescription(probe: Probe): string {
     case 'SPEEDTEST_SERVERS': return 'Speed test server discovery';
     case 'MTR': return 'Multi-hop network trace';
     case 'PING': return 'Network latency monitoring';
-    case 'RPERF':
+   /* case 'RPERF':
       return probe.config?.server ? 'Performance test server' : 'Network performance testing';
     case 'TRAFFICSIM':
-      return probe.config?.server ? 'Traffic simulation server' : 'Network traffic simulation';
+      return probe.config?.server ? 'Traffic simulation server' : 'Network traffic simulation';*/
     default: return 'Custom probe monitoring';
   }
 }
 
 function getTargetDisplay(probe: Probe): { type: string, name: string, value: string } | null {
-  if (!probe.config?.target?.[0]) return null;
+ /* if (!probe.config?.target?.[0]) return null;
 
-  const target = probe.config.target[0];
+  const target = probe.config.target[0];*/
 
-  if (target.agent && target.agent !== '000000000000000000000000') {
+  /*if (target.agent && target.agent !== '000000000000000000000000') {
     return {
       type: 'agent',
       name: getAgentName(target.agent),
       value: target.target || 'N/A'
     };
-  }
+  }*/
 
-  if (target.group && target.group !== '000000000000000000000000') {
+  /*if (target.group && target.group !== '000000000000000000000000') {
     return {
       type: 'group',
       name: getGroupName(target.group),
       value: target.target || 'N/A'
     };
-  }
+  }*/
 
-  if (target.target) {
+  /*if (target.target) {
     return {
       type: 'target',
       name: 'Direct',
       value: target.target
     };
   }
-
+*/
   return null;
 }
 
@@ -110,24 +144,24 @@ function isBuiltInProbe(probe: Probe): boolean {
 }
 
 function isServerProbe(probe: Probe): boolean {
-  return (probe.type === 'RPERF' || probe.type === 'TRAFFICSIM') && probe.config?.server;
+  return (probe.type === 'RPERF' || probe.type === 'TRAFFICSIM') && probe?.server;
 }
 
 function canDeleteProbe(probe: Probe): boolean {
   return !isBuiltInProbe(probe) && !isServerProbe(probe);
 }
 
-function getAgentName(id: string): string {
-  if (!id || id === '000000000000000000000000') return 'Unknown';
-  const agent = state.agents.find(a => a.id === id);
+function getAgentName(id: number): string {
+  if (!id || id == 0) return 'Unknown';
+  const agent = state.agents.find(a => a.id == id);
   return agent?.name || 'Unknown Agent';
 }
-
+/*
 function getGroupName(id: string): string {
   if (!id || id === '000000000000000000000000') return 'Unknown';
   const group = state.agentGroups.find(g => g.id === id);
   return group?.name || 'Unknown Group';
-}
+}*/
 
 // Computed properties
 const probeTypes = computed(() => {
@@ -144,7 +178,7 @@ const filteredProbes = computed(() => {
   }
 
   // Filter by search
-  if (state.searchQuery) {
+  /*if (state.searchQuery) {
     const query = state.searchQuery.toLowerCase();
     filtered = filtered.filter(p => {
       const type = getProbeTypeLabel(p).toLowerCase();
@@ -152,7 +186,7 @@ const filteredProbes = computed(() => {
       const agentName = getAgentName(p.config?.target?.[0]?.agent || '').toLowerCase();
       return type.includes(query) || target.includes(query) || agentName.includes(query);
     });
-  }
+  }*/
 
   return filtered;
 });
@@ -166,8 +200,8 @@ const builtInProbes = computed(() => {
 
 const serverProbes = computed(() => {
   return filteredProbes.value.filter(p => {
-    return (p.type === 'RPERF' && p.config?.server) ||
-        (p.type === 'TRAFFICSIM' && p.config?.server);
+    /*return (p.type === 'RPERF' && p.config?.server) ||
+        (p.type === 'TRAFFICSIM' && p.config?.server);*/
   });
 });
 
@@ -176,53 +210,13 @@ const generalProbes = computed(() => {
     if (['SYSINFO', 'NETINFO', 'SPEEDTEST', 'SPEEDTEST_SERVERS'].includes(p.type)) {
       return false;
     }
-    if ((p.type === 'RPERF' && p.config?.server) ||
+    /*if ((p.type === 'RPERF' && p.config?.server) ||
         (p.type === 'TRAFFICSIM' && p.config?.server)) {
       return false;
-    }
+    }*/
     return true;
   });
 });
-
-const router = core.router()
-
-onMounted(async () => {
-  let agentID = router.currentRoute.value.params["aID"] as string
-  let workspaceID = router.currentRoute.value.params["wID"] as string
-  if (!agentID || !workspaceID) return
-
-  WorkspaceService.get(workspaceID).then(res => {
-    state.site = res as Workspace
-  })
-  AgentService.get(workspaceID, agentID).then(res => {
-    state.agent = res as Agent
-  })
-
-  AgentService.list(workspaceID).then(res => {
-    state.agents = res.data as Agent[]
-  })
-
-  ProbeService.list(workspaceID, agentID).then(res => {
-    state.probes = res as Probe[] || [];
-  })
-  
-
-  try {
-
-    try {
-      const groupsRes = await siteService.getAgentGroups(state.agent.workspaceId.toString());
-      state.agentGroups = groupsRes.data as AgentGroup[];
-    } catch (e) {
-      console.log('Agent groups not available');
-    }
-
-    state.ready = true;
-    state.loading = false;
-  } catch (error) {
-    console.error('Error loading data:', error);
-    state.loading = false;
-  }
-})
 </script>
 
 <template>
@@ -232,17 +226,18 @@ onMounted(async () => {
         subtitle="Configure monitoring probes for this agent"
         :history="[
         {title: 'workspaces', link: '/workspaces'},
-        {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`},
-        {title: state.agent.name || 'Loading...', link: `/workspace/${state.site.id}/agent/${state.agent.id}`}
+        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id}`},
+        {title: state.agent.name || 'Loading...', link: `/workspace/${state.workspace.id}/agent/${state.agent.id}`}
       ]">
       <div class="d-flex gap-2">
-        <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
+        <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
       </div>
     </Title>
 
     <!-- Main Content Container - Always visible -->
+
     <div class="content-wrapper">
       <!-- Filters Section - Always show structure -->
       <div class="filters-section">
@@ -460,6 +455,7 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
   </div>
 </template>
 

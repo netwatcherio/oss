@@ -1,46 +1,5 @@
 import request from "./request";
-
-/** ===== Types kept minimal & flexible ===== */
-export interface Workspace {
-    id: number;
-    name: string;
-    description?: string;
-    settings?: Record<string, any>;
-    createdAt?: string;
-    updatedAt?: string;
-}
-
-export interface Agent {
-    id: number;
-    workspaceId: number;
-    name: string;
-    description?: string;
-    location?: string;
-    public_ip_override?: string;
-    version?: string;
-    labels?: Record<string, any>;
-    metadata?: Record<string, any>;
-    createdAt?: string;
-    updatedAt?: string;
-}
-
-export type ProbeType = "PING" | "MTR" | "RPERF" | "TRAFFICSIM" | string;
-
-export interface Probe {
-    id: number;
-    workspaceId: number;
-    agentId: number;
-    type: ProbeType;
-    enabled?: boolean;
-    intervalSec?: number;
-    timeoutSec?: number;
-    labels?: Record<string, any>;
-    metadata?: Record<string, any>;
-    targets?: string[];
-    agentTargets?: number[];
-    createdAt?: string;
-    updatedAt?: string;
-}
+import type {Agent, Probe, Workspace, WorkspaceMember} from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {

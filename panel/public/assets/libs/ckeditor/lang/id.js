@@ -315,7 +315,7 @@ CKEDITOR.lang["id"] = {
     about: {
         copy: "Hak cipta &copy; $1. All rights reserved.",
         dlgTitle: "Tentang CKEditor 4",
-        moreInfo: "Untuk informasi lisensi silahkan kunjungi web workspaces kami:",
+        moreInfo: "Untuk informasi lisensi silahkan kunjungi web workspace kami:",
     },
     editor: "Rich Text Editor",
     editorPanel: "Panel Rich Text Editor",

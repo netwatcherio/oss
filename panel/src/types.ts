@@ -7,193 +7,185 @@ export type JSONValue =
     | JSONValue[]
     | { [key: string]: JSONValue };
 
-// ---- Users ----
+/** Generic JSON blob equivalent to GORM datatypes.JSON */
+export type JsonObject = Record<string, unknown>;
 
-// -------------------- USERS --------------------
+/** Probe type placeholder (tighten to string literals when you finalize the set) */
+export type ProbeType = string;
 
-export interface User {
-    id: number;              // uint in Go
-    createdAt: string;       // ISO datetime
-    updatedAt: string;       // ISO datetime
+/** ===== Agents ===== */
 
-    email: string;
-    passwordHash: string;
-    name?: string | null;
-
-    // Relations
-    sessions?: Session[];
-}
-
-export interface Session {
-    id: number;
-    created: string;
-    expiry: string;
-
-    userId: number;
-    token: string;
-}
-
-// -------------------- WORKSPACES (just membership bits) --------------------
-
-export interface WorkspaceMember {
-    id: number;
-    createdAt: string;
-    updatedAt: string;
-
+export interface AgentCreateInput {
     workspaceId: number;
-    userId?: number | null;
-    email?: string | null;
-
-    role: string; // "owner" | "admin" | "member" etc.
+    name: string;
+    description: string;
+    /** default 9 */
+    pinLength: number;
+    location: string;
+    publicIPOverride: string;
+    version: string;
+    labels: JsonObject;
+    metadata: JsonObject;
+    /** optional bootstrap PIN TTL (milliseconds recommended) */
+    pinTtlMs?: number;
 }
-
-// -------------------- AGENTS --------------------
 
 export interface Agent {
     id: number;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: string;   // ISO 8601
+    updatedAt: string;   // ISO 8601
 
+    // Ownership / scoping
     workspaceId: number;
 
+    // Identity
     name: string;
-    description?: string;
-
-    location?: string;
-    publicIpOverride?: string;
-
-    version?: string;
-
-    // runtime state
-    lastSeenAt?: string;
-    online?: boolean;
-
-    labels?: Record<string, string>;
-    metadata?: Record<string, any>;
-}
-
-
-// ---- Workspaces ----
-
-export type WorkspaceMemberRole = "READ_ONLY" | "READ_WRITE" | "ADMIN" | "OWNER";
-
-export interface Workspace {
-    id: number;
-    createdAt: string;
-    updatedAt: string;
-
-    name: string;
-    slug: string;
     description: string;
+
+    // Network
     location: string;
+    public_ip_override: string;
 
-    ownerUserId: number;
+    // Runtime / versioning
+    version: string;
 
-    labels: Record<string, JSONValue>;
-    metadata: Record<string, JSONValue>;
+    // Health
+    lastSeenAt: string;  // ISO 8601
 
-    // optional association
-    members?: WorkspaceMember[] | null;
+    // Tags / labels
+    labels: JsonObject;
+    metadata: JsonObject;
+
+    // Authentication: PSKHash is omitted (json:"-")
 }
 
-// Helpful DTOs for member operations
-export interface MemberInviteRequest {
-    // One of (userId | email) is required
-    userId?: number;
-    email?: string;
-    role: WorkspaceMemberRole;
-}
-export interface MemberRoleUpdateRequest {
-    role: WorkspaceMemberRole;
-}
-
-// ---- Groups (optional, if you use them) ----
-
-export interface AgentGroup {
-    id: number;
-    workspaceId: number;
-    agents: number[]; // agent IDs
-    name: string;
-    description?: string;
-}
-
-// ---- Probes ----
-
-export type ProbeType =
-    | "RPERF"
-    | "MTR"
-    | "PING"
-    | "SPEEDTEST"
-    | "NETINFO"
-    | "TRAFFICSIM"
-    | "SPEEDTEST_SERVERS";
-
-export interface Target {
-    id: number;
-    createdAt: string;
-    updatedAt: string;
-
-    probeId: number;
-    target: string; // IP/host[:port]
-    agentId?: number | null;
-    groupId?: number | null;
-}
+/** ===== Probes ===== */
 
 export interface Probe {
     id: number;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: string;     // ISO 8601
+    updatedAt: string;     // ISO 8601
 
-    workspaceId?: number; // optional/handy
+    workspaceId: number;
     agentId: number;
     type: ProbeType;
-
-    // Flags & knobs
-    notifications: boolean;
-    durationSec: number;
-    count: number;
+    enabled: boolean;
     intervalSec: number;
+    timeoutSec: number;
+    count: number;
+    durationSec: number;
     server: boolean;
-    pendingAt?: string | null;
-
-    // Reverse/meta
-    reverseOfProbeId?: number | null;
-    originalAgentId?: number | null;
-
-    // Free-form extras
-    labels?: Record<string, JSONValue>;
-    metadata?: Record<string, JSONValue>;
+    labels: JsonObject;
+    metadata: JsonObject;
 
     targets: Target[];
 }
 
-// ---- Sessions ----
+export interface Target {
+    id: number;
+    createdAt: string;   // ISO 8601
+    updatedAt: string;   // ISO 8601
 
-export interface Session {
-    itemId: number; // user or agent PK (matches Go: column:item_id)
-    isAgent: boolean;
-    sessionId: number;
-    expiry: string; // ISO
-    created: string; // ISO
-    wsConn?: string;
-    ip?: string;
+    probeId: number;
+
+    /** ip/host[:port] (leave empty when agentId is set) */
+    target: string;
+
+    /** target agent (nullable in DB; may be null or omitted) */
+    agentId?: number | null;
+
+    /** optional grouping/batching (nullable) */
+    groupId?: number | null;
 }
 
-// ---- Legacy / existing shapes you already had ----
+export interface ProbeCreateInput {
+    workspaceId: number;
+    agentId: number;
+    type: ProbeType;
+    enabled?: boolean;
+    intervalSec: number;
+    timeoutSec: number;
+    labels: JsonObject;
+    metadata: JsonObject;
+
+    /** One of:
+     *  - targets: literal endpoints
+     *  - agentTargets: agent IDs (controller resolves runtime address)
+     */
+    targets?: string[];
+    agentTargets?: number[];
+}
+
+export interface ProbeUpdateInput {
+    id: number;
+    enabled?: boolean;
+    intervalSec?: number;
+    timeoutSec?: number;
+    labels?: JsonObject;
+    metadata?: JsonObject;
+
+    /** Optional full replacement of targets in one shot */
+    replaceTargets?: string[];
+    replaceAgentTargets?: number[];
+}
+
+/** ===== Users ===== */
+
+export interface User {
+    id: number;
+    email: string;
+    // passwordHash omitted (json:"-")
+    name: string;
+    role: string;            // "USER" by default on backend
+    verified: boolean;
+    labels: JsonObject;
+    metadata: JsonObject;
+    lastLoginAt?: string | null; // ISO 8601 or null
+    createdAt: string;           // ISO 8601
+    updatedAt: string;           // ISO 8601
+}
+
+/** ===== Workspaces & Members ===== */
+
+export interface Workspace {
+    id: number;
+    name: string;
+    ownerId: number;
+    settings: JsonObject;
+    createdAt: string;   // ISO 8601
+    updatedAt: string;   // ISO 8601
+    // DeletedAt omitted (json:"-")
+
+    /** denormalized convenience */
+    description: string;
+}
+
+export type Role = 'READ_ONLY' | 'READ_WRITE' | 'ADMIN' | 'OWNER';
+
+export interface WorkspaceMember {
+    id: number;
+    workspaceId: number;
+    /** 0 means invited by email only */
+    userId: number;
+    email: string;
+    role: Role;
+    meta: JsonObject;
+
+    createdAt: string;   // ISO 8601
+    updatedAt: string;   // ISO 8601
+    // DeletedAt omitted (json:"-")
+
+    invitedAt?: string | null;   // ISO 8601 or null
+    acceptedAt?: string | null;  // ISO 8601 or null
+    revokedAt?: string | null;   // ISO 8601 or null
+}
+
+
 
 export interface SelectOption {
     value: string;
     text: string;
     disabled: boolean;
-}
-
-// Kept for components that expect this shape when inviting via email
-export interface MemberInfo {
-    email: string;
-    firstName?: string;
-    lastName?: string;
-    role: WorkspaceMemberRole;
-    id?: number; // if you use numeric IDs now
 }
 
 // ProbeData (runtime telemetry payloads)

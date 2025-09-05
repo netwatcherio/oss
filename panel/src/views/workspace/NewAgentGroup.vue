@@ -58,7 +58,7 @@ function submit() {
 
 <template>
   <div class="container-fluid">
-    <Title title="Create Agent Group" :subtitle="`create a group of agents for the site '${state.site.name}'`" :history="[{title: 'workspaces', link: '/sites'}, {title: state.site.name, link: `/sites/${state.site.id}`}]"></Title>
+    <Title title="Create Agent Group" :subtitle="`create a group of agents for the site '${state.site.name}'`" :history="[{title: 'workspace', link: '/sites'}, {title: state.site.name, link: `/sites/${state.site.id}`}]"></Title>
     <div class="row">
       <div class="col-12">
         <div class="card">

@@ -619,7 +619,7 @@ function containsProbeType(type: ProbeType): boolean {
 
 // Preserved from original Probe.vue
 function onCreate(response: any) {
-  router.push("/workspaces");
+  router.push("/workspace");
 }
 
 function onError(response: any) {
@@ -638,7 +638,7 @@ onMounted(() => {
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
 
-  // fetch workspaces and agent metadata
+  // fetch workspace and agent metadata
   Promise.all([
     probeService.getProbe(checkId),
     agentService.getAgent(checkId)

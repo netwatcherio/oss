@@ -61,7 +61,7 @@ type Agent struct {
 
 // -------------------- Auth placeholders in separate tables --------------------
 
-// One-time bootstrap PINs (plaintext never stored)
+// Auth One-time bootstrap PINs (plaintext never stored)
 type Auth struct {
 	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
 	CreatedAt time.Time      `gorm:"index" json:"createdAt"`

@@ -3,9 +3,10 @@ import { onMounted, reactive, toRefs } from "vue";
 import type { Workspace, Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
+import {AgentService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   agent: {} as Agent
 });
@@ -17,14 +18,14 @@ onMounted(() => {
   let wID = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
-  agentService.getAgent(wID.toString(), id.toString()).then(res => {
-    state.agent = res.data as Agent
-    console.log(state.agent)
+  WorkspaceService.get(wID).then(res => {
+    state.workspace = res as Workspace
+    state.ready = true
+  })
 
-    siteService.getSite(state.agent.workspaceId.toString()).then(res => {
-      state.site = res.data as Workspace
-      state.ready = true
-    })
+  AgentService.get(wID, id).then(res => {
+    state.agent = res as Agent
+    console.log(state.agent)
   })
 });
 
@@ -37,8 +38,8 @@ function onError(error: any) {
 
 function submit() {
   if (state.agent.id) {
-    agentService.updateAgent(state.agent).then(() => {
-      router.push(`/workspace/${state.site.id}`);
+    AgentService.update(state.workspace.id, state.agent.id, state.agent).then(() => {
+      router.push(`/workspace/${state.workspace.id}`);
     }).catch(onError);
   }
 }
@@ -49,7 +50,7 @@ function submit() {
   <div class="container-fluid" v-if="state.ready">
     <Title :title="`edit agent`"
            :subtitle="`update agent details`"
-           :history="[{ title: 'workspaces', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.workspace.name, link: `/workspace/${state.workspace.id}` }]">
       <router-link :to="`/agent/${state.agent.id}/delete`" active-class="active" class="btn btn-danger"><i class="fa-solid fa-trash"></i>&nbsp;delete</router-link>
     </Title>
     <div class="row">

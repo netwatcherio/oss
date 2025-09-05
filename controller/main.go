@@ -2,6 +2,7 @@
 package main
 
 import (
+	"netwatcher-controller/internal/probe_data"
 	"os"
 	"time"
 
@@ -40,15 +41,11 @@ func main() {
 		ctx.Header("Access-Control-Allow-Credentials", "true")
 
 		if ctx.Method() == iris.MethodOptions {
-			ctx.Header("Access-Control-Methods",
-				"POST, PUT, PATCH, DELETE, OPTIONS")
-
+			ctx.Header("Access-Control-Allow-Methods",
+				"GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			ctx.Header("Access-Control-Allow-Headers",
-				"Access-Control-Allow-Origin,Content-Type,*")
-
-			ctx.Header("Access-Control-Max-Age",
-				"86400")
-
+				"Authorization, Content-Type, X-Requested-With, Accept")
+			ctx.Header("Access-Control-Max-Age", "86400")
 			ctx.StatusCode(iris.StatusNoContent)
 			return
 		}
@@ -56,6 +53,8 @@ func main() {
 		ctx.Next()
 	}
 	app.UseRouter(crs)
+
+	probe_data.InitWorkers()
 
 	// Routes (public + protected)
 	web.RegisterRoutes(app, db)

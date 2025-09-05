@@ -13,7 +13,7 @@ func Push2Loki(cd *agent.Data, db *mongo.Database) error {
 		return errors.New("agent does not have loki data path set")
 	}
 
-	site2 := workspaces.Site{ID: agent.Site}
+	site2 := workspace.Site{ID: agent.Site}
 	err = site2.Get(db)
 	if err != nil {
 		return err

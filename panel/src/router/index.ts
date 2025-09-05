@@ -10,15 +10,15 @@ import auth from '@/views/auth'
 
 // workspace views
 import Workspaces from '@/views/Workspaces.vue'
-import NewWorkspace from '@/views/workspaces/NewWorkspace.vue'
-import Workspace from '@/views/workspaces/Workspace.vue'
-import EditWorkspace from '@/views/workspaces/EditWorkspace.vue'
-import Members from '@/views/workspaces/Members.vue'
-import InviteMember from '@/views/workspaces/InviteMember.vue'
-import RemoveMember from '@/views/workspaces/RemoveMember.vue'
-import EditMember from '@/views/workspaces/EditMember.vue'
-import AgentGroups from '@/views/workspaces/AgentGroups.vue'
-import NewAgentGroup from '@/views/workspaces/NewAgentGroup.vue'
+import NewWorkspace from '@/views/workspace/NewWorkspace.vue'
+import Workspace from '@/views/workspace/Workspace.vue'
+import EditWorkspace from '@/views/workspace/EditWorkspace.vue'
+import Members from '@/views/workspace/Members.vue'
+import InviteMember from '@/views/workspace/InviteMember.vue'
+import RemoveMember from '@/views/workspace/RemoveMember.vue'
+import EditMember from '@/views/workspace/EditMember.vue'
+import AgentGroups from '@/views/workspace/AgentGroups.vue'
+import NewAgentGroup from '@/views/workspace/NewAgentGroup.vue'
 
 // agent views
 import Agent from '@/views/agent/Agent.vue'
@@ -64,14 +64,15 @@ const routes: RouteRecordRaw[] = [
 
     // ----- /workspaces (list + create) -----
     { path: '/workspaces', name: 'workspaces', component: Workspaces },
-    { path: '/workspace/new', name: 'workspaceNew', component: NewWorkspace },
+    { path: '/workspaces/new', name: 'workspaceNew', component: NewWorkspace },
 
     // ----- /workspaces/:wID (shell with children) -----
     {
         path: '/workspace/:wID(\\d+)',
+        component: BasicView,
         props: true,
         children: [
-            // Dashboard at /workspaces/:wID
+            // Dashboard at /
             {
                 path: '',
                 name: 'workspace',

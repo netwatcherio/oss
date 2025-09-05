@@ -34,7 +34,7 @@ const router = core.router()
 
 <template>
   <div class="container-fluid">
-    <Title title="Agent Groups" subtitle="agent groups associated with current site" :history="[{title: 'workspaces', link: '/sites'}, {title: state.site.name, link: `/sites/${state.site.id}`}]">
+    <Title title="Agent Groups" subtitle="agent groups associated with current site" :history="[{title: 'workspace', link: '/sites'}, {title: state.site.name, link: `/sites/${state.site.id}`}]">
       <router-link :to="`/workspace/${state.site.id}/groups/new`" active-class="active" class="btn btn-primary"><i class="fa-solid fa-plus"></i>&nbsp;Create</router-link>
 
       <!--      <div class="d-flex gap-1">
@@ -71,7 +71,7 @@ const router = core.router()
                   {{ group.description }}
                 </td>
                 <!--                  <td class="px-0">
-                                    <span class="badge bg-dark">{{ workspaces. }}</span>
+                                    <span class="badge bg-dark">{{ workspace. }}</span>
                                   </td>-->
                 <td class="px-0 text-end px-3">
                   <router-link :to="`/sites/${group.site}/groups`" class="">

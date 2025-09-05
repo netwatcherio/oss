@@ -3,6 +3,7 @@ import { onMounted, reactive } from "vue";
 import type { Workspace } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
+import {WorkspaceService} from "@/services/apiService";
 
 const router = core.router();
 const state = reactive({
@@ -11,13 +12,13 @@ const state = reactive({
 });
 
 // Extract the siteId from the route parameters
-const siteId = router.currentRoute.value.params.wID;
 
 onMounted(() => {
-  if (!siteId) return;
+  const workspaceId = router.currentRoute.value.params.wID;
+  if (!workspaceId) return;
 
-  siteService.getSite([siteId]).then(res => {
-    state.site = res.data as Workspace
+  WorkspaceService.get([workspaceId]).then(res => {
+    state.site = res as Workspace
     console.log(state.site)
     state.ready = true
   })
@@ -30,7 +31,7 @@ function onError(error: any) {
 function submit() {
   if (state.site.id) {
     // Call the updateSite method from the siteService
-    siteService.updateSite(state.site).then(() => {
+    WorkspaceService.update(state.site.id, state.site).then(() => {
       router.push(`/workspace/${state.site.id}`);
     }).catch(onError);
   }
@@ -41,7 +42,7 @@ function submit() {
   <div class="container-fluid" v-if="state.ready">
     <Title title="edit workspace"
            subtitle="update site details"
-           :history="[{ title: 'workspaces', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` }]">
     </Title>
     <div class="row">
       <div class="col-12">

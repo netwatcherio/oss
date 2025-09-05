@@ -26,7 +26,7 @@ onMounted(() => {
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push("/workspaces")
+  router.push("/workspace")
 }
 
 function onError(response: any) {
@@ -51,7 +51,7 @@ function cancel() {
 <template>
   <div class="container-fluid" v-if="state.ready">
     <Title :title="`delete agent`"
-           :history="[{ title: 'workspaces', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` },{ title: `edit agent`, link: `/agent/${state.agent.id}/edit` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` },{ title: `edit agent`, link: `/agent/${state.agent.id}/edit` }]">
     </Title>
     <div class="row">
       <div class="col-12">

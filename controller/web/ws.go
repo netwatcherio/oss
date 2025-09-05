@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"netwatcher-controller/internal/agent"
 	probe "netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/probe_data"
 	"strconv"
 	"strings"
 	"time"
@@ -125,30 +126,39 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				return nil
 			},
 
-			/*"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, ok := ctx.Values().GetUint("agent_id")
-				if !ok || aid == 0 {
+				if (ok != nil) || (aid == 0) {
 					return errors.New("unauthorized: no agent in context")
 				}
 
-				// Ensure agent exists
-				a, err := agent.GetAgentByID(ctx, r.DB, uint(aid))
-				if err != nil {
-					return err
-				}
+				// Unmarshal as ProbeData (top-level fields + payload)
+				log.Infof("[%s] posted message to namespace [%s]: %s", nsConn, msg.Namespace, msg.Body)
 
-				// Unmarshal posted probe data and push to channel
-				data := agent.ProbeData{}
-				if err := json.Unmarshal(msg.Body, &data); err != nil {
+				var pp probe_data.ProbeData
+				if err := json.Unmarshal(msg.Body, &pp); err != nil {
 					log.Error(err)
 					return err
 				}
 
-				// propagate
-				r.ProbeDataChan <- data
+				// Force/augment meta from the authenticated context
+				pp.ID = uint(aid)
+				if pp.CreatedAt.IsZero() {
+					pp.CreatedAt = time.Now()
+				}
+				pp.UpdatedAt = time.Now()
+
+				// Dispatch to the registered handler for pp.Kind (or AGENT-derived)
+				if err := probe_data.Dispatch(context.TODO(), pp); err != nil {
+					log.Errorf("probe_post dispatch: %v", err)
+					return err
+				}
+
+				// Optionally ACK
+				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))
 				return nil
-			},*/
+			},
 		},
 	}
 

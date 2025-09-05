@@ -250,7 +250,7 @@ const router = core.router()
   <div class="container-fluid">
     <Title
         :history="[
-          {title: 'workspaces', link: '/workspaces'}, 
+          {title: 'workspaces', link: '/workspaces'},
           {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`}, 
           {title: state.agent.name || 'Loading...', link: `/agent/${state.agent.id}`}
         ]"

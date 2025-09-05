@@ -93,8 +93,8 @@ onMounted(async () => {
       state.ready = true;
     }
   } catch (error) {
-    console.error("Failed to load workspaces:", error);
-    state.error = "Failed to load workspaces. Please try again.";
+    console.error("Failed to load workspace:", error);
+    state.error = "Failed to load workspace. Please try again.";
   } finally {
     state.loading = false;
   }
