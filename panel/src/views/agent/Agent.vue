@@ -7,10 +7,10 @@ import type {
   CPUTimes,
   HostInfo,
   HostMemoryInfo, NetInfoPayload,
-  OSInfo,
+  OSInfo, OUIEntry,
   Probe,
   ProbeData,
-  ProbeType,
+  ProbeType, SysInfoPayload,
   Workspace
 } from "@/types";
 import core from "@/core";
@@ -51,8 +51,8 @@ interface SystemData {
 
 // Computed properties for better organization
 const isOnline = computed(() => {
-  if (!state.systemInfoComplete?.timestamp) return false;
-  const lastSeen = new Date(state.systemInfoComplete.timestamp);
+  if (!state.agent.updatedAt) return false;
+  const lastSeen = new Date(state.agent.updatedAt);
   const now = new Date();
   const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
   return diffMinutes <= 5; // Consider online if seen in last 5 minutes
@@ -72,7 +72,7 @@ function roundTo(value: number): number {
   return Math.round(value * 1000) / 1000
 }
 
-function updateSystemData(info: CompleteSystemInfo): SystemData {
+function updateSystemData(info: SysInfoPayload): SystemData {
   let cpuCapacity: number = (info.CPUTimes?.idle || 0) + info.CPUTimes.system + info.CPUTimes.user;
   let ramCapacity: number = info.memoryInfo.totalBytes;
   let virtualCapacity: number = info.memoryInfo.virtualTotalBytes;
@@ -110,171 +110,11 @@ let state = reactive({
   agents: [] as Agent[],
   probes: [] as Probe[],
   networkInfo: {} as NetInfoPayload,
-  systemInfoComplete: {} as CompleteSystemInfo,
+  systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
   hasData: false,
   ouiList: [] as OUIEntry[]
 })
-
-function convertToCompleteSystemInfo(data: any[]): CompleteSystemInfo {
-  let completeSystemInfo: any = {};
-
-  data.forEach(item => {
-    switch (item.Key) {
-      case 'hostInfo':
-        completeSystemInfo.hostInfo = convertToHostInfo(item.Value);
-        break;
-      case 'memoryInfo':
-        completeSystemInfo.memoryInfo = convertToHostMemoryInfo(item.Value);
-        break;
-      case 'CPUTimes':
-        completeSystemInfo.CPUTimes = convertToCPUTimes(item.Value);
-        break;
-      case 'timestamp':
-        completeSystemInfo.timestamp = new Date(item.Value);
-        break;
-    }
-  });
-
-  return completeSystemInfo as CompleteSystemInfo;
-}
-
-function convertToHostInfo(data: any[]): HostInfo {
-  let hostInfo: any = {IPs: [], MACs: [], os: {}};
-
-  data.forEach(item => {
-    switch (item.Key) {
-      case 'architecture':
-      case 'bootTime':
-      case 'containerized':
-      case 'hostname':
-      case 'kernelVersion':
-      case 'timezone':
-      case 'timezoneOffsetSec':
-      case 'uniqueID':
-        hostInfo[item.Key] = item.Value;
-        break;
-      case 'IPs':
-        hostInfo.IPs = item.Value;
-        break;
-      case 'MACs':
-        hostInfo.MACs = item.Value;
-        break;
-      case 'OS':
-        hostInfo.os = convertToOSInfo(item.Value);
-        break;
-    }
-  });
-
-  hostInfo.bootTime = new Date(hostInfo.bootTime);
-
-  return hostInfo as HostInfo;
-}
-
-function convertToOSInfo(data: any[]): OSInfo {
-  let osInfo: any = {};
-
-  data.forEach(item => {
-    osInfo[item.Key] = item.Value;
-  });
-
-  return osInfo as OSInfo;
-}
-
-function convertToHostMemoryInfo(data: any[]): HostMemoryInfo {
-  let memoryInfo: any = {metrics: {}};
-
-  data.forEach(item => {
-    if (item.Key === 'metrics' && item.Value != null) {
-      item.Value.forEach((metric: any) => {
-        memoryInfo.metrics[metric.Key] = metric.Value;
-      });
-    } else {
-      memoryInfo[item.Key + 'Bytes'] = item.Value;
-    }
-  });
-
-  return memoryInfo as HostMemoryInfo;
-}
-
-function convertToCPUTimes(data: any[]): CPUTimes {
-  let cpuTimes: any = {};
-
-  data.forEach(item => {
-    cpuTimes[item.Key] = item.Value;
-  });
-
-  return cpuTimes as CPUTimes;
-}
-
-function reloadData(id: string) {
-  state.probes = [] as Probe[]
-  state.organizedProbes = [] as OrganizedProbe[];
-  state.ready = false;
-
-  probeService.getSystemInfo(id).then(res => {
-    let sysInfo = (res.data as ProbeData)
-    state.systemInfoComplete = convertToCompleteSystemInfo(sysInfo.data)
-    state.systemData = updateSystemData(state.systemInfoComplete);
-  })
-
-  probeService.getNetworkInfo(id).then(res => {
-    state.networkInfo = res.data as ProbeData
-    state.netData = transformNetData(state.networkInfo.data)
-  })
-
-  agentService.getWorkspaceAgents(state.agent.workspaceId.toString()).then(res => {
-    state.agents = res.data as Agent[]
-  })
-
-  siteService.getAgentGroups(state.agent.workspaceId.toString()).then(res => {
-    state.agentGroups = res.data as AgentGroup[]
-
-    /*probeService.getAgentProbes(id).then(res => {
-      state.probes = res.data as Probe[]
-      let organizedProbesMap = new Map<string, Probe[]>();
-
-      for (let probe of state.probes) {
-        if (probe.type == "SYSINFO" as ProbeType || probe.type == "NETINFO" as ProbeType) {
-          continue
-        }
-
-        if (probe.config && probe.config.target) {
-          for (let target of probe.config.target) {
-            let key = target.target;
-
-            if (probe.type == "SPEEDTEST") {
-              continue
-            }
-
-            if (target.group && target.group != "000000000000000000000000") {
-              key = `group:${target.group}`;
-            } else if (target.agent && target.agent != "000000000000000000000000") {
-              key = `agent:${target.agent}`;
-            } else if (probe.type == "RPERF" && !probe.config.server && probe.config.target[0].agent != "000000000000000000000000") {
-              key = target.target.split(':')[0]
-            } else if (probe.type == "TRAFFICSIM" && !probe.config.server && probe.config.target[0].agent != "000000000000000000000000") {
-              key = target.target.split(':')[0]
-            } else if (probe.type == "TRAFFICSIM") {
-              key = probe.type + " SERVER"
-            }
-
-            if (!organizedProbesMap.has(key)) {
-              organizedProbesMap.set(key, []);
-            }
-
-            organizedProbesMap.get(key).push(probe);
-          }
-        }
-      }
-
-      state.organizedProbes = Array.from(organizedProbesMap, ([key, probes]) => ({key, probes}));
-      state.ready = true
-      state.hasData = true
-      state.loading = false
-    })*/
-  })
-}
 
 function bytesToString(bytes: number, si: boolean = true, dp: number = 2): string {
   const thresh = si ? 1000 : 1024;
@@ -310,32 +150,9 @@ function formatSnakeCaseToHumanCase(name: string): string {
   return words.join(" ")
 }
 
-function getGroupName(id: string): string {
-  const group = state.agentGroups.find(group => group.id === id);
-  return group ? group.name : 'Unknown Group';
-}
-
-function getAgentName(id: string) {
+function getAgentName(id: number) {
   let agent = state.agents.find(a => a.id == id);
   return agent ? agent.name : 'Unknown Agent';
-}
-
-function probeTitle(probeKey: string): string {
-  if (probeKey.startsWith("group:")) {
-    return getGroupName(probeKey.split(":")[1]);
-  } else if (probeKey.startsWith("agent:")) {
-    return getAgentName(probeKey.split(":")[1]);
-  } else {
-    return probeKey;
-  }
-}
-
-function getRandomProbeId(list: Probe[]): string | undefined {
-  if (list.length === 0) {
-    return undefined;
-  }
-  const randomIndex = Math.floor(Math.random() * list.length);
-  return list[randomIndex].id;
 }
 
 const router = core.router()
@@ -353,12 +170,23 @@ onMounted(() => {
     state.agent = res as Agent
   })
 
+  ProbeService.sysInfo(workspaceID, agentID).then(res => {
+    let pD = res as ProbeData
+    state.systemInfo = pD.payload as SysInfoPayload
+    console.log(state.systemInfo)
+
+    state.systemData = updateSystemData(state.systemInfo)
+  })
+
   ProbeService.netInfo(workspaceID, agentID).then(res => {
     let pD = res as ProbeData
     state.networkInfo = pD.payload as NetInfoPayload
     console.log(state.networkInfo)
-    state.loading = false
   })
+
+  state.ready = true
+  state.hasData = true
+  state.loading = false
 
   fetch('/ouiList.json')
       .then(response => response.json())
@@ -423,7 +251,7 @@ onMounted(() => {
         <div class="stat-content">
           <div class="stat-value">
             <span v-if="state.loading" class="skeleton-text">-</span>
-            <span v-else>{{ state.organizedProbes.length }}</span>
+            <span v-else>todo</span>
           </div>
           <div class="stat-label">Active Probes</div>
         </div>
@@ -435,7 +263,7 @@ onMounted(() => {
         <div class="stat-content">
           <div class="stat-value">
             <span v-if="state.loading" class="skeleton-text">--</span>
-            <span v-else>{{ since(state.systemInfoComplete.hostInfo?.bootTime + "", false) }}</span>
+            <span v-else>{{ since(state.systemInfo.hostInfo?.bootTime + "", false) }}</span>
           </div>
           <div class="stat-label">Uptime</div>
         </div>
@@ -443,7 +271,7 @@ onMounted(() => {
     </div>
 
     <!-- Main Content - Always show layout -->
-    <div v-if="!state.agent.initialized && !state.loading" class="empty-state">
+    <div v-if="state.loading" class="empty-state">
       <i class="fa-solid fa-exclamation-triangle text-warning"></i>
       <h5>Agent Not Initialized</h5>
       <p>This agent needs to be initialized before it can be used.</p>
@@ -457,7 +285,7 @@ onMounted(() => {
             <i class="fa-solid fa-diagram-project"></i>
             Monitoring Probes
           </h5>
-          <span class="badge bg-primary" v-if="!state.loading">{{ state.organizedProbes.length }} Active</span>
+          <span class="badge bg-primary" v-if="!state.loading">todo Active</span>
           <span class="badge bg-secondary" v-else>
             <i class="fa-solid fa-spinner fa-spin"></i> Loading
           </span>
@@ -480,7 +308,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-else-if="state.organizedProbes.length > 0" class="probes-grid">
+        <div v-else-if="1 > 0" class="probes-grid">
           <div v-for="(organized, index) in state.organizedProbes" :key="index" class="probe-card">
             <router-link :to="`/probe/${getRandomProbeId(organized.probes)}`" class="probe-link">
               <div class="probe-icon">
@@ -524,7 +352,7 @@ onMounted(() => {
               <span class="info-label">Hostname</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">--------------------</span>
-                <span v-else>{{ state.systemInfoComplete.hostInfo?.hostname || 'Unknown' }}</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.hostname || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
@@ -538,21 +366,21 @@ onMounted(() => {
               <span class="info-label">ISP</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">-------------------------</span>
-                <span v-else>{{ state.netData.internetProvider || 'Loading...' }}</span>
+                <span v-else>{{ state.networkInfo.internet_provider || 'Loading...' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Gateway</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">---------------</span>
-                <span v-else>{{ state.netData.defaultGateway || 'Loading...' }}</span>
+                <span v-else>{{ state.networkInfo.default_gateway || 'Loading...' }}</span>
               </span>
             </div>
             <div class="info-row expandable">
               <span class="info-label">Local IPs</span>
               <div class="info-value">
                 <div v-if="state.loading" class="skeleton-text">---------------</div>
-                <div v-else v-for="ip in getLocalAddresses(state.systemInfoComplete.hostInfo?.IPs || [])" :key="ip">
+                <div v-else v-for="ip in getLocalAddresses(state.systemInfo.hostInfo?.IPs || [])" :key="ip">
                   {{ ip }}
                 </div>
               </div>
@@ -602,9 +430,9 @@ onMounted(() => {
               </div>
               <div class="resource-details">
                 <span v-if="state.loading" class="skeleton-text">Used: --- GB</span>
-                <span v-else>Used: {{ bytesToString(state.systemInfoComplete.memoryInfo?.usedBytes || 0) }}</span>
+                <span v-else>Used: {{ bytesToString(state.systemInfo.memoryInfo?.usedBytes || 0) }}</span>
                 <span v-if="state.loading" class="skeleton-text">Total: --- GB</span>
-                <span v-else>Total: {{ bytesToString(state.systemInfoComplete.memoryInfo?.totalBytes || 0) }}</span>
+                <span v-else>Total: {{ bytesToString(state.systemInfo.memoryInfo?.totalBytes || 0) }}</span>
               </div>
             </div>
 
@@ -615,7 +443,7 @@ onMounted(() => {
                     <span class="skeleton-text">--------------</span>
                     <span class="skeleton-text">--- GB</span>
                   </div>
-                  <div v-else v-for="(value, key) in state.systemInfoComplete.memoryInfo?.metrics" :key="key" class="detail-row">
+                  <div v-else v-for="(value, key) in state.systemInfo.memoryInfo?.metrics" :key="key" class="detail-row">
                     <span>{{ formatSnakeCaseToHumanCase(key) }}</span>
                     <span>{{ bytesToString(value) }}</span>
                   </div>
@@ -639,8 +467,8 @@ onMounted(() => {
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">-------------------------</span>
                 <span v-else>
-                  {{ state.systemInfoComplete.hostInfo?.os?.name }}
-                  {{ state.systemInfoComplete.hostInfo?.os?.version }}
+                  {{ state.systemInfo.hostInfo?.os?.name }}
+                  {{ state.systemInfo.hostInfo?.os?.version }}
                 </span>
               </span>
             </div>
@@ -648,7 +476,7 @@ onMounted(() => {
               <span class="info-label">Architecture</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">-----------</span>
-                <span v-else>{{ state.systemInfoComplete.hostInfo?.architecture }}</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.architecture }}</span>
               </span>
             </div>
             <div class="info-row">
@@ -656,7 +484,7 @@ onMounted(() => {
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">-----------</span>
                 <span v-else>
-                  {{ state.systemInfoComplete.hostInfo?.containerized ? 'Virtualized' : 'Physical' }}
+                  {{ state.systemInfo.hostInfo?.containerized ? 'Virtualized' : 'Physical' }}
                 </span>
               </span>
             </div>
@@ -664,21 +492,21 @@ onMounted(() => {
               <span class="info-label">Timezone</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">-------------------</span>
-                <span v-else>{{ state.systemInfoComplete.hostInfo?.timezone }}</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.timezone }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Location</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">------------------</span>
-                <span v-else>{{ state.netData.lat }}, {{ state.netData.long }}</span>
+                <span v-else>{{ state.networkInfo.lat }}, {{ state.networkInfo.long }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Last Seen</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">------------</span>
-                <span v-else>{{ since(state.systemInfoComplete.timestamp + "", true) }}</span>
+                <span v-else>{{ since(state.agent.updatedAt + "", true) }}</span>
               </span>
             </div>
           </div>
@@ -697,14 +525,14 @@ onMounted(() => {
               <span v-if="state.loading" class="badge bg-secondary">
                 <i class="fa-solid fa-spinner fa-spin"></i> Loading
               </span>
-              <span v-else class="badge bg-secondary">{{ Object.keys(state.systemInfoComplete.hostInfo?.MACs || {}).length }} interfaces</span>
+              <span v-else class="badge bg-secondary">{{ Object.keys(state.systemInfo.hostInfo?.MACs || {}).length }} interfaces</span>
               <template v-slot:expanded>
                 <div class="mac-list">
                   <div v-if="state.loading" v-for="i in 2" :key="`mac-skeleton-${i}`" class="mac-item skeleton">
                     <div class="mac-address skeleton-text">--:--:--:--:--:--</div>
                     <div class="mac-vendor skeleton-text">--------------------------</div>
                   </div>
-                  <div v-else v-for="(mac, iface) in state.systemInfoComplete.hostInfo?.MACs" :key="iface" class="mac-item">
+                  <div v-else v-for="(mac, iface) in state.systemInfo.hostInfo?.MACs" :key="iface" class="mac-item">
                     <div class="mac-address">{{ mac }}</div>
                     <div class="mac-vendor">{{ getVendorFromMac(mac) }}</div>
                   </div>

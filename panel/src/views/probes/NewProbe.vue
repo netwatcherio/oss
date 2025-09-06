@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
-import {Agent, type Workspace} from "@/types";
+import {Agent, type Probe, type ProbeType, type SelectOption, type Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import {AgentService, WorkspaceService} from "@/services/apiService";
+import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 interface ProbeState {
   workspace: Workspace;
@@ -13,10 +13,6 @@ interface ProbeState {
   selected: SelectOption;
   options: SelectOption[];
   probe: Probe;
-  probeConfig: ProbeConfig;
-  probeTarget: ProbeTarget;
-  targetGroup: boolean;
-  agentGroupSelected: AgentGroup[];
   agents: Agent[];
   customServer: boolean;
   targetAgent: boolean;
@@ -37,10 +33,6 @@ const state = reactive<ProbeState>({
   selected: {} as SelectOption,
   options: [],
   probe: {} as Probe,
-  probeConfig: {} as ProbeConfig,
-  probeTarget: {} as ProbeTarget,
-  targetGroup: false,
-  agentGroupSelected: [],
   agents: [],
   customServer: false,
   targetAgent: true,
@@ -58,23 +50,17 @@ const router = core.router();
 // Computed properties
 const showTargetAgentOption = computed(() => {
   const validTypes = ['MTR', 'PING', 'RPERF', 'TRAFFICSIM', 'AGENT'];
-  return state.selected.value && validTypes.includes(state.selected.value) && state.agents.length >= 1;
+  return state.selected.agentAvailable
 });
 
 const showTargetInput = computed(() => {
-  return !state.targetGroup && !state.targetAgent;
+  return !state.targetAgent;
 });
 
 const isValidProbe = computed(() => {
   if (!state.selected.value) return false;
 
   if (state.targetAgent && !state.targetAgentSelected) return false;
-
-  if (state.targetGroup && state.agentGroupSelected.length === 0) return false;
-
-  if (!state.targetAgent && !state.targetGroup) {
-    if (!state.probeConfig.server && !state.probeTarget.target) return false;
-  }
 
   return state.duplicateWarning === "";
 });
@@ -103,29 +89,18 @@ onMounted(async () => {
     state.agent = res as Agent
   })
 
-  state.probeConfig = {
-    duration: 60,
-    count: 60,
-    interval: 5,
-    server: false,
-  } as ProbeConfig;
-
-  state.probeTarget = {
-    target: ""
-  } as ProbeTarget;
-
   try {
-    // Load existing probes for duplicate checking
-    const probesRes = await probeService.getAgentProbes(agentID);
-    state.existingProbes = probesRes.data as Probe[];
+    // Load existing probes for duplicate checking todo
+    /*const probesRes = await ProbeService.getAgentProbes(agentID);
+    state.existingProbes = probesRes.data as Probe[];*/
 
     // Load all agents for the workspace
-    const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
+    /*const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
     if (agentsRes.data.length > 0) {
       const agents = agentsRes.data as Agent[];
       state.agents = agents.filter(a => a.id.toString() !== agentID.toString());
       state.ready = true;
-    }
+    }*/
 
     // Initialize probe type options
 
@@ -140,11 +115,11 @@ onMounted(async () => {
 // Initialize probe type options with AGENT as preferred
 function initializeOptions() {
   state.options = [
-    { value: "AGENT", text: "Agent Monitoring", icon: "fa-heartbeat", recommended: true },
-    { value: "PING", text: "PING (Packet Internet Groper)", icon: "fa-signal" },
-    { value: "MTR", text: "MTR (My Traceroute)", icon: "fa-route" },
-    { value: "TRAFFICSIM", text: "Simulated Traffic (UDP)", icon: "fa-stream" },
-    // { value: "SPEEDTEST", text: "Speed Test", icon: "fa-tachometer-alt" },
+    //{ value: "AGENT", text: "Agent Monitoring", icon: "fa-heartbeat", recommended: true, agentAvailable: false},
+    { value: "PING", text: "PING (Packet Internet Groper)", icon: "fa-signal", agentAvailable: false},
+    { value: "MTR", text: "MTR (My Traceroute)", icon: "fa-route", agentAvailable: false},
+    //{ value: "TRAFFICSIM", text: "Simulated Traffic (UDP)", icon: "fa-stream",agentAvailable: false},
+    { value: "DNS", text: "DNS", icon: "fa-map-signs", agentAvailable: false},
     // { value: "RPERF", text: "RPERF (UDP)", icon: "fa-chart-line" }
   ];
 }
@@ -169,23 +144,23 @@ watch(() => state.selected.value, async (newType) => {
 });
 
 // Watch for host/port changes to update target
-watch([() => state.hostInput, () => state.portInput], () => {
+/*watch([() => state.hostInput, () => state.portInput], () => {
   if (state.hostInput && state.portInput) {
     state.probeTarget.target = `${state.hostInput}:${state.portInput}`;
   }
-});
+});*/
 
 // Watch for target changes to check duplicates
 watch([
   () => state.targetAgentSelected,
-  () => state.probeTarget.target,
-  () => state.probeConfig.server
+/*  () => state.probeTarget.target,
+  () => state.probeConfig.server*/
 ], () => {
   checkForDuplicates();
 });
 
 // Check for duplicate probes
-function checkForDuplicates() {
+/*function checkForDuplicates() {
   state.duplicateWarning = "";
 
   if (!state.selected.value) return;
@@ -196,7 +171,7 @@ function checkForDuplicates() {
     if (existingProbe.type !== probeType) continue;
 
     // Check server probes
-    if (state.probeConfig.server && existingProbe.config.server) {
+    if (state.server && existingProbe.server) {
       if (probeType === 'TRAFFICSIM' || probeType === 'RPERF') {
         state.duplicateWarning = `A ${probeType} server probe already exists for this agent`;
         return;
@@ -225,9 +200,10 @@ function checkForDuplicates() {
       }
     }
   }
-}
+}*/
 
 // Get valid agents for specific probe types
+/*
 async function getValidAgents(probeType: ProbeType) {
   const validAgents: Agent[] = [];
   state.loading = true;
@@ -262,6 +238,7 @@ async function getValidAgents(probeType: ProbeType) {
   state.validAgents = validAgents;
   console.log(`Found ${validAgents.length} valid agents for ${probeType}`);
 }
+*/
 
 // Create probe
 async function submit() {
@@ -277,7 +254,7 @@ async function submit() {
 
   state.loading = true;
 
-  try {
+  /*try {
     // Build probe targets
     if (state.targetGroup && state.agentGroupSelected.length > 0) {
       // Group targets
@@ -310,7 +287,7 @@ async function submit() {
     state.errors.push("Failed to create probe. Please try again.");
   } finally {
     state.loading = false;
-  }
+  }*/
 }
 
 // Helper function to get available agents based on probe type
@@ -363,13 +340,13 @@ const availableAgentsForSelection = computed(() => {
           </div>
           <div class="card-body">
             <div class="row g-3">
-              <div 
-                v-for="option in state.options" 
+              <div
+                v-for="option in state.options"
                 :key="option.value"
                 class="col-lg-6 col-xl-4">
-                <div 
+                <div
                   class="probe-type-card"
-                  :class="{ 
+                  :class="{
                     'selected': state.selected.value === option.value,
                     'recommended': option.recommended
                   }"
@@ -407,24 +384,11 @@ const availableAgentsForSelection = computed(() => {
             <!-- Target Selection -->
             <div class="configuration-section">
               <h6 class="section-title">Target Configuration</h6>
-              
+
               <!-- Target Mode Toggle (if applicable) -->
-              <div v-if="showTargetAgentOption" class="mb-4">
-                <div class="form-check form-switch">
-                  <input
-                      id="useAgentTarget"
-                      v-model="state.targetAgent"
-                      class="form-check-input"
-                      type="checkbox">
-                  <label class="form-check-label" for="useAgentTarget">
-                    Use Agent as Target
-                    <small class="text-muted d-block">Select another agent as the probe target</small>
-                  </label>
-                </div>
-              </div>
 
               <!-- Agent Selection -->
-              <div v-if="state.targetAgent" class="mb-4">
+              <div v-if="state.selected.agentAvailable" class="mb-4">
                 <label class="form-label fw-semibold" for="targetAgent">
                   <i class="fas fa-server me-2"></i>Target Agent
                 </label>
@@ -438,7 +402,7 @@ const availableAgentsForSelection = computed(() => {
                       v-for="agent in availableAgentsForSelection"
                       :key="agent.id"
                       :value="agent">
-                    {{ agent.name }} 
+                    {{ agent.name }}
                     <span v-if="agent.location">({{ agent.location }})</span>
                   </option>
                 </select>
@@ -451,7 +415,7 @@ const availableAgentsForSelection = computed(() => {
               <div v-if="state.selected.value === 'AGENT'" class="info-box mb-4">
                 <i class="fas fa-info-circle me-2"></i>
                 <div>
-                  <strong>Agent Monitoring</strong> will continuously check the health, connectivity, and performance 
+                  <strong>Agent Monitoring</strong> will continuously check the health, connectivity, and performance
                   metrics of the selected target agent. This includes uptime, response times, and system resources.
                 </div>
               </div>
@@ -515,8 +479,8 @@ const availableAgentsForSelection = computed(() => {
                 </div>
               </div>
 
-              <!-- PING Options -->
-              <div v-if="state.selected.value === 'PING' && showTargetInput" class="mb-4">
+              <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR'
+              || state.selected.value === 'DNS') && !state.selected.agentAvailable" class="mb-4">
                 <label class="form-label fw-semibold" for="pingTarget">
                   <i class="fas fa-bullseye me-2"></i>Target Address
                 </label>
@@ -524,7 +488,7 @@ const availableAgentsForSelection = computed(() => {
                   <span class="input-group-text"><i class="fas fa-globe"></i></span>
                   <input
                       id="pingTarget"
-                      v-model="state.probeTarget.target"
+                      v-model="state.probe.targets"
                       class="form-control"
                       type="text"
                       placeholder="1.1.1.1 or google.com">
@@ -533,39 +497,44 @@ const availableAgentsForSelection = computed(() => {
               </div>
 
               <!-- MTR Options -->
-              <div v-if="state.selected.value === 'MTR'">
-                <div v-if="showTargetInput" class="mb-4">
-                  <label class="form-label fw-semibold" for="mtrTarget">
-                    <i class="fas fa-route me-2"></i>Target Address
-                  </label>
-                  <div class="input-group">
-                    <span class="input-group-text"><i class="fas fa-globe"></i></span>
-                    <input
-                        id="mtrTarget"
-                        v-model="state.probeTarget.target"
-                        class="form-control"
-                        type="text"
-                        placeholder="1.1.1.1 or google.com">
-                  </div>
-                  <small class="text-muted">Enter an IP address or domain name</small>
-                </div>
+              <div v-if="state.selected.value === 'MTR' || state.selected.value === 'PING'">
                 <div class="mb-4">
                   <label class="form-label fw-semibold" for="mtrInterval">
-                    <i class="fas fa-clock me-2"></i>Probe Interval
+                    <i class="fas fa-clock me-2"></i>{{state.selected.value}} Interval
                   </label>
                   <div class="input-group">
                     <input
                         id="mtrInterval"
-                        v-model.number="state.probeConfig.interval"
+                        v-model.number="state.probe.intervalSec"
                         class="form-control"
                         type="number"
-                        min="1"
-                        max="60">
-                    <span class="input-group-text">minutes</span>
+                        min="60"
+                        max="900">
+                    <span class="input-group-text">seconds</span>
                   </div>
-                  <small class="text-muted">How often to run the MTR trace</small>
+                  <small class="text-muted">How often to run the probe (recommended: 300 seconds = 5 minutes) </small>
                 </div>
               </div>
+
+              <div v-if="state.selected.value === 'MTR'">
+                <div class="mb-4">
+                  <label class="form-label fw-semibold" for="mtrInterval">
+                    <i class="fas fa-clock me-2"></i>Packet Count
+                  </label>
+                  <div class="input-group">
+                    <input
+                        id="mtrInterval"
+                        v-model.number="state.probe.intervalSec"
+                        class="form-control"
+                        type="number"
+                        min="5"
+                        max="50">
+                    <span class="input-group-text">pkts</span>
+                  </div>
+                  <small class="text-muted">How many packets to send per round of MTR? (recommended: 5-10 - triggered probes are 2x)</small>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -825,7 +794,7 @@ code {
   .probe-type-card {
     margin-bottom: 1rem;
   }
-  
+
   .btn-lg {
     padding: 0.5rem 1rem;
     font-size: 1rem;

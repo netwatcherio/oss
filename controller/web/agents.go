@@ -104,6 +104,17 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		_ = ctx.JSON(a)
 	})
 
+	aid.Get("/sysinfo", func(ctx iris.Context) {
+		//wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+		a, err := probe_data.GetLatestSysInfoForAgent(context.TODO(), ch, uint64(aID), nil)
+		if err != nil || a == nil {
+			ctx.StatusCode(http.StatusNotFound)
+			return
+		}
+		_ = ctx.JSON(a)
+	})
+
 	// PATCH /workspaces/{id}/agents/{agentID}
 	aid.Patch("/", func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")

@@ -402,3 +402,22 @@ func GetLatestNetInfoForAgent(
 	}
 	return GetLatest(ctx, db, params)
 }
+
+// Convenience wrapper for your stated use-case:
+// “ONLY the newest entry for probe with type NETINFO and agent (reporting agent) id = X”
+func GetLatestSysInfoForAgent(
+	ctx context.Context,
+	db *sql.DB,
+	agentID uint64,
+	probeID *uint64, // pass nil to ignore probe_id
+) (*ProbeData, error) {
+	typ := string(probe.TypeSysInfo) // or string(probe.TypeNetInfo) if you prefer
+	params := FindParams{
+		Type:    &typ,
+		AgentID: &agentID,
+	}
+	if probeID != nil {
+		params.ProbeID = probeID
+	}
+	return GetLatest(ctx, db, params)
+}

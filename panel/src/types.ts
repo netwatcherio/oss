@@ -186,6 +186,7 @@ export interface SelectOption {
     value: string;
     text: string;
     disabled: boolean;
+    agentAvailable: boolean;
 }
 
 export interface ProbeData {
@@ -323,7 +324,14 @@ export interface NetInfoPayload {
     timestamp: string; // ISO 8601 timestamp
 }
 
-export interface CompleteSystemInfo {
+export interface OUIEntry {
+    Registry: string;
+    Assignment: string;
+    "Organization Name": string;
+    "Organization Address": string;
+}
+
+export interface SysInfoPayload {
     hostInfo: HostInfo;
     memoryInfo: HostMemoryInfo;
     CPUTimes: CPUTimes;

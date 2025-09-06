@@ -1,39 +1,62 @@
 <script lang="ts" setup>
-import {onMounted, reactive, computed} from "vue";
+import {computed, onMounted, reactive} from "vue";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
-import Element from "@/components/Element.vue";
-import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import AgentCard from "@/components/AgentCard.vue";
-import {type Agent, AgentService, type Workspace, WorkspaceService} from "@/services/apiService";
-
+import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
+import type {Agent, NetInfoPayload, Workspace} from "@/types"
+// --- STATE: add stores for net-info by agent ---
 const state = reactive({
   workspace: {} as Workspace,
   agents: [] as Agent[],
+  netInfoByAgent: {} as Record<number, NetInfoPayload>,
   ready: false,
   loading: true,
+  loadingNetInfo: false,
   searchQuery: '',
   sortBy: 'status' as 'status' | 'name' | 'description' | 'updated'
 })
+
+// Fetch all net-infos for currently loaded agents and populate state
+async function fetchAllNetInfo(workspaceId: string) {
+  state.loadingNetInfo = true
+  try {
+    return await Promise.all(
+        state.agents.map(async (agent) => {
+          try {
+            // Assumes ProbeService.netInfo returns an array of ProbeData for that agent
+            const res = await ProbeService.netInfo(workspaceId, agent.id)
+            // Store
+            state.netInfoByAgent[agent.id] = res.payload as NetInfoPayload
+          } catch (e) {
+            // On per-agent error, just initialize empty so callers can rely on key presence
+            state.netInfoByAgent[agent.id] = {} as NetInfoPayload
+          }
+        })
+    )
+  } finally {
+    state.loadingNetInfo = false
+  }
+}
 
 let router = core.router()
 
 // Computed properties for filtering and sorting
 const filteredAgents = computed(() => {
   let filtered = state.agents;
-  
+
   // Apply search filter
   if (state.searchQuery) {
     const query = state.searchQuery.toLowerCase();
-    filtered = filtered.filter(agent => 
+    filtered = filtered.filter(agent =>
       agent.name.toLowerCase().includes(query) ||
       agent.location?.toLowerCase().includes(query) ||
       agent.id
     );
   }
-  
+
   // Apply sorting
   return filtered.sort((a, b) => {
     switch (state.sortBy) {
@@ -51,51 +74,57 @@ const filteredAgents = computed(() => {
   });
 });
 
-const onlineAgentsCount = computed(() => {
-  return state.agents.filter(agent => getOnlineStatus(agent)).length;
-});
+const onlineAgentsCount = computed(() =>
+    state.agents.filter(agent => getOnlineStatus(agent)).length
+);
 
-const offlineAgentsCount = computed(() => {
-  return state.agents.filter(agent => !getOnlineStatus(agent)).length;
-});
-
-onMounted(() => {
-  let id = router.currentRoute.value.params["wID"] as string
-  if (!id) return
-
-  WorkspaceService.get(id).then(res => {
-    state.workspace = res as Workspace
-    AgentService.list(id).then(res => {
-      console.log(res)
-      state.agents = res.data
-      state.ready = state.agents.length > 0
-      state.loading = false
-    }).catch(() => {
-      state.loading = false
-    })
-  })
-})
+const offlineAgentsCount = computed(() =>
+    state.agents.filter(agent => !getOnlineStatus(agent)).length
+);
 
 function getOnlineStatus(agent: Agent) {
-    let currentTime = new Date();
-    let agentTime = new Date(agent.updatedAt?.toString())
-    let timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000; // Convert to minutes
-    return timeDifference <= 1;
+  const currentTime = new Date();
+  const agentTime = new Date(agent.updatedAt?.toString())
+  const timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000;
+  return timeDifference <= 1;
 }
 
 function getLastSeenText(agent: Agent) {
-    const now = new Date();
-    const lastSeen = new Date(agent.updatedAt?.toString());
-    const diffMs = now.getTime() - lastSeen.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return `${diffDays}d ago`;
+  const now = new Date();
+  const lastSeen = new Date(agent.updatedAt?.toString());
+  const diffMs = now.getTime() - lastSeen.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
 }
+
+onMounted(async () => {
+  const id = router.currentRoute.value.params["wID"] as string
+  if (!id) return
+
+  try {
+    state.loading = true
+
+    const ws = await WorkspaceService.get(id)
+    state.workspace = ws as Workspace
+
+    const res = await AgentService.list(id)
+    state.agents = res.data
+    state.ready = state.agents.length > 0
+
+    // fetch all net infos for loaded agents
+    await fetchAllNetInfo(id)
+  } catch (e) {
+    // swallow/log as needed
+    console.log(state.netInfoByAgent)
+  } finally {
+    state.loading = false
+  }
+})
 </script>
 
 <template>
@@ -201,7 +230,7 @@ function getLastSeenText(agent: Agent) {
 
     <!-- Agents Grid -->
     <div class="agents-grid" v-else>
-      <div v-for="agent in filteredAgents" :key="agent.id" class="agent-card-wrapper">
+      <div v-for="agent in state.agents" :key="agent.id" class="agent-card-wrapper">
         <AgentCard
           :title="agent.name"
           :subtitle="(agent.version?' ':'') + agent.location"
@@ -216,11 +245,14 @@ function getLastSeenText(agent: Agent) {
           </template>
           
           <div class="agent-card-content">
-            <div v-if="!agent.initialized" class="credentials-section">
-              <Code title="" :code="agent.description" />
-            </div>
+          <!--      todo add section panel on agent creation for pin      -->
             
-            <div class="agent-stats" v-else>
+            <div class="agent-stats">
+              <div class="mini-stat" v-if="(state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider">
+                <i class="fa-solid fa-map-signs"></i>
+                <span>{{ (state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider}} </span>
+              </div>
+
               <div class="mini-stat">
                 <i class="fa-solid fa-clock"></i>
                 <span>{{ getLastSeenText(agent) }}</span>
@@ -231,7 +263,7 @@ function getLastSeenText(agent: Agent) {
               </div>
               <div class="mini-stat">
                 <i class="fa-solid fa-hammer"></i>
-                <span>{{ agent.version }}</span>
+                <span>version TODO</span>
               </div>
             </div>
           </div>

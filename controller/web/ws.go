@@ -149,6 +149,11 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				}
 				pp.ReceivedAt = time.Now()
 
+				err := agent.UpdateAgentSeen(context.TODO(), db, pp.AgentID, time.Now())
+				if err != nil {
+					return err
+				}
+
 				// Dispatch to the registered handler for pp.Kind (or AGENT-derived)
 				if err := probe_data.Dispatch(context.TODO(), pp); err != nil {
 					log.Errorf("probe_post dispatch: %v", err)

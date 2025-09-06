@@ -1,5 +1,5 @@
 import request from "./request";
-import type {Agent, Probe, Workspace, WorkspaceMember} from "@/types";
+import type {Agent, Probe, ProbeData, Workspace, WorkspaceMember} from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {
@@ -120,6 +120,11 @@ export const ProbeService = {
     // network information getter
     async netInfo(workspaceId: number | string, agentId: number | string) {
         const { data } = await request.get<ProbeData>(`/workspaces/${workspaceId}/agents/${agentId}/netinfo`);
+        return data;
+    },
+
+    async sysInfo(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.get<ProbeData>(`/workspaces/${workspaceId}/agents/${agentId}/sysinfo`);
         return data;
     },
 };
