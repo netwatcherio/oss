@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
-import {Agent, type Probe, type ProbeType, type SelectOption, type Workspace} from "@/types";
+import {Agent, type Probe, type ProbeType, type SelectOption, type Target, type Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
@@ -17,6 +17,7 @@ interface ProbeState {
   customServer: boolean;
   targetAgent: boolean;
   targetAgentSelected: Agent | null;
+  target: Target;
   validAgents: Agent[];
   existingProbes: Probe[];
   duplicateWarning: string;
@@ -35,6 +36,7 @@ const state = reactive<ProbeState>({
   probe: {} as Probe,
   agents: [],
   customServer: false,
+  target: {} as Target,
   targetAgent: true,
   targetAgentSelected: null,
   validAgents: [],
@@ -60,9 +62,25 @@ const showTargetInput = computed(() => {
 const isValidProbe = computed(() => {
   if (!state.selected.value) return false;
 
-  if (state.targetAgent && !state.targetAgentSelected) return false;
+  switch (state.selected.value){
+    case "MTR":
+      if (state.target.target != "" && state.probe.intervalSec > 0){
+        // todo more complex check on backend?
+        return true
+      }
+    case "PING":
+      if (state.target.target != "" && state.probe.intervalSec > 0){
+        // todo more complex check on backend?
+        return true
+      }
+    default:
+      console.log("poo")
+      return false
+  }
 
-  return state.duplicateWarning === "";
+
+
+  return false;
 });
 
 // Probe type descriptions
@@ -74,6 +92,65 @@ const probeDescriptions = {
   SPEEDTEST: "Measure bandwidth performance between locations",
   RPERF: "Advanced UDP performance testing with detailed metrics"
 };
+
+async function submit() {
+  state.errors = [];
+
+  if (!isValidProbe.value) {
+    state.errors.push("Please fill in all required fields");
+    return;
+  }
+
+  let newProbe = state.probe
+  newProbe.agentId = state.agent.id
+  newProbe.workspaceId = state.workspace.id
+  newProbe.type = state.selected.value
+
+  newProbe.targets = [state.target]
+
+  ProbeService.create(state.workspace.id, state.agent.id, newProbe).then(res => {
+    console.log(res)
+    state.loading = true;
+
+    router.push(`/workspace/${state.workspace.id}/agent/${state.agent.id}`)
+  })
+
+  /*try {
+    // Build probe targets
+    if (state.targetGroup && state.agentGroupSelected.length > 0) {
+      // Group targets
+      state.probeConfig.target = state.agentGroupSelected.map(
+          group => ({ group: group.id } as ProbeTarget)
+      );
+    } else if (state.targetAgent && state.targetAgentSelected) {
+      // Agent target
+      state.probeConfig.target = [{ agent: state.targetAgentSelected.id } as ProbeTarget];
+    } else if (!state.probeConfig.server) {
+      // Custom target
+      state.probeConfig.target = [state.probeTarget];
+    }
+
+    // Special handling for TRAFFICSIM client mode
+    if (state.selected.value === 'TRAFFICSIM' && state.targetAgent && state.probeConfig.target.length >= 1) {
+      state.probeConfig.server = false;
+    }
+
+    // Set probe configuration
+    state.probe.config = state.probeConfig;
+    state.probe.type = state.selected.value as ProbeType;
+
+    // Create the probe
+    await probeService.createProbe(id, state.probe);
+    router.push(`/agent/${id}`);
+
+  } catch (error) {
+    console.error("Error creating probe:", error);
+    state.errors.push("Failed to create probe. Please try again.");
+  } finally {
+    state.loading = false;
+  }*/
+}
+
 
 // Initialize component
 onMounted(async () => {
@@ -126,7 +203,7 @@ function initializeOptions() {
 
 // Watch for probe type changes
 watch(() => state.selected.value, async (newType) => {
-  if (newType === 'TRAFFICSIM') {
+  /*if (newType === 'TRAFFICSIM') {
     await getValidAgents('TRAFFICSIM');
   } else if (newType === 'AGENT') {
     // For AGENT type, all other agents are valid targets
@@ -140,7 +217,7 @@ watch(() => state.selected.value, async (newType) => {
   // Check for duplicates when type changes
   if (state.targetAgent && state.targetAgentSelected) {
     checkForDuplicates();
-  }
+  }*/
 });
 
 // Watch for host/port changes to update target
@@ -153,10 +230,11 @@ watch(() => state.selected.value, async (newType) => {
 // Watch for target changes to check duplicates
 watch([
   () => state.targetAgentSelected,
+  () => isValidProbe, // todo is this needed?
 /*  () => state.probeTarget.target,
   () => state.probeConfig.server*/
 ], () => {
-  checkForDuplicates();
+ /* checkForDuplicates();*/
 });
 
 // Check for duplicate probes
@@ -241,55 +319,6 @@ async function getValidAgents(probeType: ProbeType) {
 */
 
 // Create probe
-async function submit() {
-  state.errors = [];
-
-  if (!isValidProbe.value) {
-    state.errors.push("Please fill in all required fields");
-    return;
-  }
-
-  const id = router.currentRoute.value.params["aID"] as string;
-  if (!id) return;
-
-  state.loading = true;
-
-  /*try {
-    // Build probe targets
-    if (state.targetGroup && state.agentGroupSelected.length > 0) {
-      // Group targets
-      state.probeConfig.target = state.agentGroupSelected.map(
-          group => ({ group: group.id } as ProbeTarget)
-      );
-    } else if (state.targetAgent && state.targetAgentSelected) {
-      // Agent target
-      state.probeConfig.target = [{ agent: state.targetAgentSelected.id } as ProbeTarget];
-    } else if (!state.probeConfig.server) {
-      // Custom target
-      state.probeConfig.target = [state.probeTarget];
-    }
-
-    // Special handling for TRAFFICSIM client mode
-    if (state.selected.value === 'TRAFFICSIM' && state.targetAgent && state.probeConfig.target.length >= 1) {
-      state.probeConfig.server = false;
-    }
-
-    // Set probe configuration
-    state.probe.config = state.probeConfig;
-    state.probe.type = state.selected.value as ProbeType;
-
-    // Create the probe
-    await probeService.createProbe(id, state.probe);
-    router.push(`/agent/${id}`);
-
-  } catch (error) {
-    console.error("Error creating probe:", error);
-    state.errors.push("Failed to create probe. Please try again.");
-  } finally {
-    state.loading = false;
-  }*/
-}
-
 // Helper function to get available agents based on probe type
 const availableAgentsForSelection = computed(() => {
   if (state.selected.value === 'TRAFFICSIM') {
@@ -488,7 +517,7 @@ const availableAgentsForSelection = computed(() => {
                   <span class="input-group-text"><i class="fas fa-globe"></i></span>
                   <input
                       id="pingTarget"
-                      v-model="state.probe.targets"
+                      v-model="state.target.target"
                       class="form-control"
                       type="text"
                       placeholder="1.1.1.1 or google.com">
@@ -518,13 +547,13 @@ const availableAgentsForSelection = computed(() => {
 
               <div v-if="state.selected.value === 'MTR'">
                 <div class="mb-4">
-                  <label class="form-label fw-semibold" for="mtrInterval">
+                  <label class="form-label fw-semibold" for="mtrCount">
                     <i class="fas fa-clock me-2"></i>Packet Count
                   </label>
                   <div class="input-group">
                     <input
-                        id="mtrInterval"
-                        v-model.number="state.probe.intervalSec"
+                        id="mtrCount"
+                        v-model.number="state.probe.count"
                         class="form-control"
                         type="number"
                         min="5"

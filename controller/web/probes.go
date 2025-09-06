@@ -26,35 +26,14 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 
 	// POST /workspaces/{id}/agents/{agentID}/probes
 	base.Post("/", func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
-		var body struct {
-			Type         string         `json:"type"`
-			Enabled      *bool          `json:"enabled"`
-			IntervalSec  int            `json:"intervalSec"`
-			TimeoutSec   int            `json:"timeoutSec"`
-			Labels       map[string]any `json:"labels"`
-			Metadata     map[string]any `json:"metadata"`
-			Targets      []string       `json:"targets"`
-			AgentTargets []uint         `json:"agentTargets"`
-		}
-		if err := ctx.ReadJSON(&body); err != nil {
+		// todo validate workspace id permissions and such
+		var input probe.CreateInput
+
+		if err := ctx.ReadJSON(&input); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			return
 		}
-		in := probe.CreateInput{
-			WorkspaceID:  wsID,
-			AgentID:      aID,
-			Type:         probe.Type(body.Type),
-			Enabled:      body.Enabled,
-			IntervalSec:  body.IntervalSec,
-			TimeoutSec:   body.TimeoutSec,
-			Labels:       jsonFromMap(body.Labels),
-			Metadata:     jsonFromMap(body.Metadata),
-			Targets:      body.Targets,
-			AgentTargets: body.AgentTargets,
-		}
-		p, err := probe.Create(ctx.Request().Context(), db, in)
+		p, err := probe.Create(ctx.Request().Context(), db, input)
 		if err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})

@@ -42,18 +42,18 @@ var (
 // Probe is owned by an agent, scoped to a workspace.
 type Probe struct {
 	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time      `gorm:"index" json:"createdAt"`
-	UpdatedAt time.Time      `gorm:"index" json:"updatedAt"`
+	CreatedAt time.Time      `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	WorkspaceID uint           `gorm:"index" json:"workspaceId"`
+	WorkspaceID uint           `gorm:"index" json:"workspace_id"`
 	AgentID     uint           `gorm:"index" json:"agentId"`
 	Type        Type           `gorm:"type:VARCHAR(64);index" json:"type"`
 	Enabled     bool           `gorm:"default:true;index" json:"enabled"`
-	IntervalSec int            `gorm:"default:60" json:"intervalSec"`
-	TimeoutSec  int            `gorm:"default:10" json:"timeoutSec"`
+	IntervalSec int            `gorm:"default:60" json:"interval_sec"`
+	TimeoutSec  int            `gorm:"default:10" json:"timeout_sec"`
 	Count       int            `json:"count"`
-	DurationSec int            `json:"durationSec"`
+	DurationSec int            `json:"duration_sec"`
 	Server      bool           `json:"server"`
 	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`
 	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
@@ -70,12 +70,12 @@ type Target struct {
 	UpdatedAt time.Time      `json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	ProbeID uint `gorm:"index;not null" json:"probeId"`
+	ProbeID uint `gorm:"index;not null" json:"probe_id"`
 
 	// If AgentID is non-nil, it's an inter-agent target (the controller will resolve IP/port).
 	Target  string `gorm:"size:512" json:"target"` // ip/host[:port] (leave empty when AgentID is set)
-	AgentID *uint  `gorm:"index" json:"agentId"`   // target agent
-	GroupID *uint  `gorm:"index" json:"groupId"`   // optional grouping/batching
+	AgentID *uint  `gorm:"index" json:"agent_id"`  // target agent
+	GroupID *uint  `gorm:"index" json:"group_id"`  // optional grouping/batching
 }
 
 func (Target) TableName() string { return "probe_targets" }
@@ -83,20 +83,19 @@ func (Target) TableName() string { return "probe_targets" }
 // -------------------- DTOs --------------------
 
 type CreateInput struct {
-	WorkspaceID uint
-	AgentID     uint
-	Type        Type
-	Enabled     *bool
-	IntervalSec int
-	TimeoutSec  int
-	Labels      datatypes.JSON
-	Metadata    datatypes.JSON
-
-	// One of:
-	//   - Targets: literal endpoints
-	//   - AgentTargets: agent IDs (controller resolves runtime address)
-	Targets      []string
-	AgentTargets []uint
+	WorkspaceID  uint           `gorm:"index" json:"workspace_id"`
+	AgentID      uint           `gorm:"index" json:"agent_id"`
+	Type         Type           `gorm:"type:VARCHAR(64);index" json:"type"`
+	Enabled      bool           `gorm:"default:true;index" json:"enabled,omitempty"`
+	IntervalSec  int            `gorm:"default:60" json:"interval_sec,omitempty"`
+	TimeoutSec   int            `gorm:"default:10" json:"timeout_sec,omitempty"`
+	Count        int            `json:"count,omitempty"`
+	DurationSec  int            `json:"duration_sec,omitempty"`
+	Server       bool           `json:"server,omitempty"`
+	Targets      []string       `json:"targets,omitempty"`
+	AgentTargets []uint         `json:"agent_targets,omitempty"`
+	Labels       datatypes.JSON `gorm:"type:jsonb" json:"labels,omitempty"`
+	Metadata     datatypes.JSON `gorm:"type:jsonb" json:"metadata,omitempty"`
 }
 
 type UpdateInput struct {
@@ -164,7 +163,7 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		Type:        in.Type,
-		Enabled:     boolOr(in.Enabled, true),
+		Enabled:     boolOr(&in.Enabled, true),
 		IntervalSec: ifZero(in.IntervalSec, 60),
 		TimeoutSec:  ifZero(in.TimeoutSec, 10),
 		Labels:      coalesceJSON(in.Labels),
