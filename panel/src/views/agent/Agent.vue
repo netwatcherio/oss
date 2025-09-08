@@ -8,7 +8,7 @@ import type {
   OSInfo, OUIEntry,
   Probe,
   ProbeData,
-  ProbeType, SysInfoPayload,
+  ProbeType, SysInfoPayload, Target,
   Workspace
 } from "@/types";
 import core from "@/core";
@@ -25,6 +25,7 @@ import agent from "@/views/agent/index";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type ProbeVue from "../probes/Probe.vue";
 import pl from "../../../public/assets/libs/moment/src/locale/pl";
+import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 
 interface OrganizedProbe {
   key: string;
@@ -102,22 +103,6 @@ function getVendorFromMac(macAddress: string) {
   return entry ? (entry as OUIEntry)["Organization Name"] : "Unknown Vendor";
 }
 
-let state = reactive({
-  workspace: {} as Workspace,
-  ready: false,
-  loading: true,
-  agent: {} as Agent,
-  agents: [] as Agent[],
-  probes: [] as Probe[],
-  networkInfo: {} as NetInfoPayload,
-  systemInfo: {} as SysInfoPayload,
-  systemData: {} as SystemData,
-  hostProbes: [] as Probe[],
-  agentProbes: [] as Probe[],
-  hasData: false,
-  ouiList: [] as OUIEntry[]
-})
-
 function bytesToString(bytes: number, si: boolean = true, dp: number = 2): string {
   const thresh = si ? 1000 : 1024;
 
@@ -152,12 +137,35 @@ function formatSnakeCaseToHumanCase(name: string): string {
   return words.join(" ")
 }
 
-function getAgentName(id: number) {
-  let agent = state.agents.find(a => a.id == id);
-  return agent ? agent.name : 'Unknown Agent';
-}
-
 const router = core.router()
+
+let state = reactive({
+  workspace: {} as Workspace,
+  probes: [] as Probe[],
+
+  // group-driven UI
+  // groups
+// grouped by target (type-agnostic)
+  targetGroups: [] as ProbeGroupByTarget[],
+  targetGroupsByKey: {} as Record<string, ProbeGroupByTarget>,
+  groupKinds: [] as TargetGroupKind[],
+
+  // totals for badges
+  totalProbes: 0,
+  activeProbes: 0,
+  totalTargets: 0,
+  totalsByType: {} as Record<string, { probes: number; enabled: number; targets: number }>,
+
+  ready: false,
+  loading: true,
+  agent: {} as Agent,
+  agents: [] as Agent[],
+  networkInfo: {} as NetInfoPayload,
+  systemInfo: {} as SysInfoPayload,
+  systemData: {} as SystemData,
+  hasData: false,
+  ouiList: [] as OUIEntry[]
+})
 
 onMounted(() => {
   let agentID = router.currentRoute.value.params["aID"] as string
@@ -186,29 +194,33 @@ onMounted(() => {
     console.log(state.networkInfo)
   })
 
+  // load & group
   ProbeService.list(workspaceID, agentID).then(res => {
-    let pL = res as Probe[]
-    state.probes = pL
+    const pL = res as Probe[];
+    state.probes = pL;
 
-    pL.forEach(p => {
-      switch( p.type ){
-        case "PING":
-          if( p.targets[0].target != "" ){
-            let i = state.hostProbes.length
-            state.hostProbes[i] = p
-          }
-      }
-    })
-  })
+    const grouped = groupProbesByTarget(pL, { excludeDefaults: true });
+
+    state.targetGroups = grouped.groups;
+    state.targetGroupsByKey = grouped.byKey;
+    state.groupKinds = grouped.kinds;
+
+    state.totalProbes = grouped.totals.probes;
+    state.activeProbes = grouped.totals.enabled;
+    state.totalTargets = grouped.totals.targets;
+    state.totalsByType = grouped.totals.byType;
+  }).finally(() => {
+    state.loading = false;
+  });
 
   state.ready = true
   state.hasData = true
-  state.loading = false
 
   fetch('/ouiList.json')
       .then(response => response.json())
       .then(data => state.ouiList = data as OUIEntry[]);
 })
+
 </script>
 
 <template>
@@ -325,25 +337,38 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-else-if="1 > 0" class="probes-grid">
-          <div v-for="(probe, index) in state.hostProbes" :key="index" class="probe-card">
-            <router-link :to="`/probe/${probe.id}`" class="probe-link">
+        <div v-else-if="state.targetGroups.length > 0" class="probes-grid">
+          <div v-for="g in state.targetGroups" :key="g.key" class="probe-card">
+            <router-link :to="`/probe/${g.probes[0]?.id || ''}`" class="probe-link">
               <div class="probe-icon">
-                <i :class="probe.type.startsWith('agent:') ? 'fa-solid fa-robot' : 'fa-solid fa-diagram-project'"></i>
+                <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
+                : g.kind === 'host' ? 'fa-solid fa-diagram-project'
+                : 'fa-solid fa-microchip'"></i>
               </div>
+
               <div class="probe-content">
-                <h6 class="probe-title">{{ probe.type }}</h6>
+                <h6 class="probe-title">
+                  <span v-if="g.kind==='host'">{{ g.label }}</span>
+                  <span v-else-if="g.kind==='agent'">Agent {{ g.id }}</span>
+                  <span v-else>Local on Agent {{ g.id }}</span>
+                </h6>
+
                 <div class="probe-types">
-                  <span v-for="p in probe" :key="probe.id" class="probe-type-badge">
-                    {{ probe.type }}
-                  </span>
+                  <!-- show types present in this target group -->
+                  <span v-for="t in g.types" :key="t" class="probe-type-badge">
+            {{ t }} ({{ g.perType[t].count }})
+          </span>
+                  <span class="probe-type-badge" v-if="g.countEnabled !== g.countProbes">
+            {{ g.countEnabled }}/{{ g.countProbes }} enabled
+          </span>
                 </div>
               </div>
+
               <i class="fa-solid fa-chevron-right probe-arrow"></i>
             </router-link>
           </div>
         </div>
-
+        
         <div v-else class="empty-state">
           <i class="fa-solid fa-diagram-project"></i>
           <h5>No Probes Configured</h5>
