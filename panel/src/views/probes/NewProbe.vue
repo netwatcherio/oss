@@ -1,6 +1,14 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
-import {Agent, type Probe, type ProbeType, type SelectOption, type Target, type Workspace} from "@/types";
+import {
+  Agent,
+  type Probe,
+  type ProbeCreateInput,
+  type ProbeType,
+  type SelectOption,
+  type Target,
+  type Workspace
+} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
@@ -12,7 +20,7 @@ interface ProbeState {
   agent: Agent;
   selected: SelectOption;
   options: SelectOption[];
-  probe: Probe;
+  probe: ProbeCreateInput;
   agents: Agent[];
   customServer: boolean;
   targetAgent: boolean;
@@ -33,7 +41,7 @@ const state = reactive<ProbeState>({
   agent: {} as Agent,
   selected: {} as SelectOption,
   options: [],
-  probe: {} as Probe,
+  probe: {} as ProbeCreateInput,
   agents: [],
   customServer: false,
   target: {} as Target,
@@ -64,12 +72,12 @@ const isValidProbe = computed(() => {
 
   switch (state.selected.value){
     case "MTR":
-      if (state.target.target != "" && state.probe.intervalSec > 0){
+      if (state.hostInput != "" && state.probe.interval_sec > 0){
         // todo more complex check on backend?
         return true
       }
     case "PING":
-      if (state.target.target != "" && state.probe.intervalSec > 0){
+      if (state.hostInput != "" && state.probe.interval_sec > 0){
         // todo more complex check on backend?
         return true
       }
@@ -102,11 +110,11 @@ async function submit() {
   }
 
   let newProbe = state.probe
-  newProbe.agentId = state.agent.id
-  newProbe.workspaceId = state.workspace.id
+  newProbe.agent_id = state.agent.id
+  newProbe.workspace_id = state.workspace.id
   newProbe.type = state.selected.value
 
-  newProbe.targets = [state.target]
+  newProbe.targets = [state.hostInput]
 
   ProbeService.create(state.workspace.id, state.agent.id, newProbe).then(res => {
     console.log(res)
@@ -517,7 +525,7 @@ const availableAgentsForSelection = computed(() => {
                   <span class="input-group-text"><i class="fas fa-globe"></i></span>
                   <input
                       id="pingTarget"
-                      v-model="state.target.target"
+                      v-model="state.hostInput"
                       class="form-control"
                       type="text"
                       placeholder="1.1.1.1 or google.com">
@@ -534,7 +542,7 @@ const availableAgentsForSelection = computed(() => {
                   <div class="input-group">
                     <input
                         id="mtrInterval"
-                        v-model.number="state.probe.intervalSec"
+                        v-model.number="state.probe.interval_sec"
                         class="form-control"
                         type="number"
                         min="60"
@@ -553,7 +561,7 @@ const availableAgentsForSelection = computed(() => {
                   <div class="input-group">
                     <input
                         id="mtrCount"
-                        v-model.number="state.probe.count"
+                        v-model.number="state.probe.interval_sec"
                         class="form-control"
                         type="number"
                         min="5"

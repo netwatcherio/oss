@@ -1,5 +1,5 @@
 import request from "./request";
-import type {Agent, Probe, ProbeData, Workspace, WorkspaceMember} from "@/types";
+import type {Agent, Probe, ProbeCreateInput, ProbeData, Workspace, WorkspaceMember} from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {
@@ -91,7 +91,7 @@ export const ProbeService = {
         const { data } = await request.get<Probe[]>(`/workspaces/${workspaceId}/agents/${agentId}/probes`);
         return data;
     },
-    async create(workspaceId: number | string, agentId: number | string, body: Partial<Probe>) {
+    async create(workspaceId: number | string, agentId: number | string, body: Partial<ProbeCreateInput>) {
         const { data } = await request.post<Probe>(`/workspaces/${workspaceId}/agents/${agentId}/probes`, body);
         return data;
     },

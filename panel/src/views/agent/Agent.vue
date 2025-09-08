@@ -2,8 +2,6 @@
 import {onMounted, reactive, computed} from "vue";
 import type {
   Agent,
-  AgentGroup,
-  CompleteSystemInfo,
   CPUTimes,
   HostInfo,
   HostMemoryInfo, NetInfoPayload,
@@ -25,6 +23,8 @@ import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import agent from "@/views/agent/index";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
+import type ProbeVue from "../probes/Probe.vue";
+import pl from "../../../public/assets/libs/moment/src/locale/pl";
 
 interface OrganizedProbe {
   key: string;
@@ -112,6 +112,8 @@ let state = reactive({
   networkInfo: {} as NetInfoPayload,
   systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
+  hostProbes: [] as Probe[],
+  agentProbes: [] as Probe[],
   hasData: false,
   ouiList: [] as OUIEntry[]
 })
@@ -182,6 +184,21 @@ onMounted(() => {
     let pD = res as ProbeData
     state.networkInfo = pD.payload as NetInfoPayload
     console.log(state.networkInfo)
+  })
+
+  ProbeService.list(workspaceID, agentID).then(res => {
+    let pL = res as Probe[]
+    state.probes = pL
+
+    pL.forEach(p => {
+      switch( p.type ){
+        case "PING":
+          if( p.targets[0].target != "" ){
+            let i = state.hostProbes.length
+            state.hostProbes[i] = p
+          }
+      }
+    })
   })
 
   state.ready = true
@@ -309,15 +326,15 @@ onMounted(() => {
         </div>
 
         <div v-else-if="1 > 0" class="probes-grid">
-          <div v-for="(organized, index) in state.organizedProbes" :key="index" class="probe-card">
-            <router-link :to="`/probe/${getRandomProbeId(organized.probes)}`" class="probe-link">
+          <div v-for="(probe, index) in state.hostProbes" :key="index" class="probe-card">
+            <router-link :to="`/probe/${probe.id}`" class="probe-link">
               <div class="probe-icon">
-                <i :class="organized.key.startsWith('agent:') ? 'fa-solid fa-robot' : 'fa-solid fa-diagram-project'"></i>
+                <i :class="probe.type.startsWith('agent:') ? 'fa-solid fa-robot' : 'fa-solid fa-diagram-project'"></i>
               </div>
               <div class="probe-content">
-                <h6 class="probe-title">{{ probeTitle(organized.key) }}</h6>
+                <h6 class="probe-title">{{ probe.type }}</h6>
                 <div class="probe-types">
-                  <span v-for="probe in organized.probes" :key="probe.id" class="probe-type-badge">
+                  <span v-for="p in probe" :key="probe.id" class="probe-type-badge">
                     {{ probe.type }}
                   </span>
                 </div>

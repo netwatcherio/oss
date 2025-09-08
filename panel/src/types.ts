@@ -63,17 +63,17 @@ export interface Agent {
 
 export interface Probe {
     id: number;
-    createdAt: string;     // ISO 8601
-    updatedAt: string;     // ISO 8601
+    created_at: string;     // ISO 8601
+    updated_at: string;     // ISO 8601
 
-    workspaceId: number;
-    agentId: number;
+    workspace_id: number;
+    agent_id: number;
     type: ProbeType;
     enabled: boolean;
-    intervalSec: number;
-    timeoutSec: number;
+    interval_sec: number;
+    timeout_sec: number;
     count: number;
-    durationSec: number;
+    duration_sec: number;
     server: boolean;
     labels: JsonObject;
     metadata: JsonObject;
@@ -99,12 +99,12 @@ export interface Target {
 }
 
 export interface ProbeCreateInput {
-    workspaceId: number;
-    agentId: number;
+    workspace_id: number;
+    agent_id: number;
     type: ProbeType;
     enabled?: boolean;
-    intervalSec: number;
-    timeoutSec: number;
+    interval_sec: number;
+    timeout_sec: number;
     labels: JsonObject;
     metadata: JsonObject;
 
@@ -113,7 +113,7 @@ export interface ProbeCreateInput {
      *  - agentTargets: agent IDs (controller resolves runtime address)
      */
     targets?: string[];
-    agentTargets?: number[];
+    agent_targets?: number[];
 }
 
 export interface ProbeUpdateInput {
