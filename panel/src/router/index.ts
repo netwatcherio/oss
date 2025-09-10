@@ -137,12 +137,12 @@ const routes: RouteRecordRaw[] = [
                         component: BasicView,
                         props: true,
                         children: [
-                            /*{
-                                path: ':idP(\\d+)',
+                            {
+                                path: ':pID(\\d+)',
                                 name: 'probe',
                                 component: Probe,
                                 props: true
-                            },*/
+                            },
                             {
                                 path: 'new',
                                 name: 'newProbe',

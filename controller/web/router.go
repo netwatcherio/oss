@@ -26,6 +26,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 	panelWorkspaces(api, db) // /workspaces/*
 	panelProbes(api, db)     // /workspaces/{id}/agents/{agentID}/probes/*
 	panelAgents(api, db, ch)
+	panelProbeData(api, db, ch)
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })

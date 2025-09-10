@@ -154,4 +154,5 @@ func Dispatch(ctx context.Context, pp ProbeData) error {
 func InitWorkers(ch *sql.DB) {
 	initNetInfo(ch)
 	initSysInfo(ch)
+	initMtr(ch)
 }

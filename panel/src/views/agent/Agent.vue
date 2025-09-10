@@ -391,6 +391,12 @@ onMounted(() => {
           </div>
           <div class="card-content">
             <div class="info-row">
+              <span class="info-label">Last data @</span>
+              <span class="info-value">
+                <span>{{state.networkInfo ? state.networkInfo.timestamp : "not found"}}</span>
+              </span>
+            </div>
+            <div class="info-row">
               <span class="info-label">Hostname</span>
               <span class="info-value">
                 <span v-if="state.loading" class="skeleton-text">--------------------</span>
@@ -444,6 +450,12 @@ onMounted(() => {
             </h5>
           </div>
           <div class="card-content">
+            <div class="info-row">
+              <span class="info-label">Last data @</span>
+              <span class="info-value">
+                <span>{{state.systemInfo ? state.systemInfo.timestamp : "not found"}}</span>
+              </span>
+            </div>
             <div class="resource-meter">
               <div class="resource-header">
                 <span>CPU Usage</span>
@@ -551,6 +563,13 @@ onMounted(() => {
                 <span v-else>{{ since(state.agent.updatedAt + "", true) }}</span>
               </span>
             </div>
+          </div>
+          <hr>
+          <div class="info-row">
+            <span class="info-label">Last data @</span>
+            <span class="info-value">
+                <span>{{state.systemInfo ? state.systemInfo.timestamp : "not found"}}</span>
+              </span>
           </div>
         </div>
 

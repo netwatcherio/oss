@@ -5,7 +5,6 @@ export function usePersistent() {
     // preferenceDefaults are the default preferences for a new terminal install
     const preferenceDefaults: Preferences = {
         dark: false,
-        token: ""
     }
 
     // Create a reactive object to contain the preferences

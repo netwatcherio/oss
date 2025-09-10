@@ -406,5 +406,4 @@ function calculateMOS(
 
 export interface Preferences {
     dark: boolean;
-    token: string;
 }

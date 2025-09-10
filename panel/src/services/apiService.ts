@@ -85,6 +85,170 @@ export const AgentService = {
     },
 };
 
+/** ===== Utils (local) ===== */
+const toRFC3339 = (v?: string | number | Date): string | undefined => {
+    if (v == null || v === "") return undefined;
+    if (v instanceof Date) return v.toISOString();
+    if (typeof v === "number") return new Date(v * (v < 2_000_000_000 ? 1000 : 1)).toISOString(); // secs or ms
+    return v; // assume already RFC3339 string
+};
+const setIf = (qs: URLSearchParams, key: string, val: any) => {
+    if (val === undefined || val === null || val === "") return;
+    qs.set(key, String(val));
+};
+
+/** ===== Probe Data (ClickHouse-backed) ===== */
+export const ProbeDataService = {
+    /**
+     * Flexible finder across ClickHouse.
+     * Mirrors backend /workspaces/{id}/probe-data/find
+     */
+    async find(
+        workspaceId: number | string,
+        params?: {
+            type?: string;
+            probeId?: number | string;
+            agentId?: number | string;         // reporting agent
+            probeAgentId?: number | string;    // owner of probe_id
+            targetAgent?: number | string;     // reverse target agent
+            targetPrefix?: string;
+            triggered?: boolean;
+            from?: string | number | Date;
+            to?: string | number | Date;
+            limit?: number;
+            asc?: boolean;
+        }
+    ) {
+        const qs = new URLSearchParams();
+        if (params) {
+            setIf(qs, "type", params.type);
+            setIf(qs, "probeId", params.probeId);
+            setIf(qs, "agentId", params.agentId);
+            setIf(qs, "probeAgentId", params.probeAgentId);
+            setIf(qs, "targetAgent", params.targetAgent);
+            setIf(qs, "targetPrefix", params.targetPrefix);
+            if (params.triggered !== undefined) setIf(qs, "triggered", params.triggered ? "true" : "false");
+            setIf(qs, "from", toRFC3339(params.from));
+            setIf(qs, "to", toRFC3339(params.to));
+            setIf(qs, "limit", params.limit);
+            if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
+        }
+        const { data } = await request.get<ProbeData[]>(
+            `/workspaces/${workspaceId}/probe-data/find${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
+
+    /**
+     * Timeseries for a specific probe.
+     * GET /workspaces/{id}/probe-data/probes/{probeID}/data
+     */
+    async byProbe(
+        workspaceId: number | string,
+        probeId: number | string,
+        params?: { from?: string | number | Date; to?: string | number | Date; limit?: number; asc?: boolean }
+    ) {
+        const qs = new URLSearchParams();
+        if (params) {
+            setIf(qs, "from", toRFC3339(params.from));
+            setIf(qs, "to", toRFC3339(params.to));
+            setIf(qs, "limit", params.limit);
+            if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
+        }
+        const { data } = await request.get<ProbeData[]>(
+            `/workspaces/${workspaceId}/probe-data/probes/${probeId}/data${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
+
+    /**
+     * Latest datapoint by type + reporting agent (optional probeId).
+     * GET /workspaces/{id}/probe-data/latest?type=...&agentId=...&probeId=...
+     */
+    async latest(
+        workspaceId: number | string,
+        params: { type: string; agentId: number | string; probeId?: number | string }
+    ) {
+        const qs = new URLSearchParams();
+        setIf(qs, "type", params.type);
+        setIf(qs, "agentId", params.agentId);
+        setIf(qs, "probeId", params.probeId);
+        const { data } = await request.get<ProbeData>(
+            `/workspaces/${workspaceId}/probe-data/latest?${qs.toString()}`
+        );
+        return data; // 404 -> request throws; catch upstream if you want null
+    },
+
+    /**
+     * Timeseries (or latestOnly) for all probes that hit a literal target.
+     * GET /workspaces/{id}/probe-data/by-target/data
+     */
+    async byTargetData(
+        workspaceId: number | string,
+        params: {
+            target: string;                     // required
+            type?: string;                      // optional filter
+            latestOnly?: boolean;               // default false
+            from?: string | number | Date;
+            to?: string | number | Date;
+            limit?: number;
+        }
+    ) {
+        const qs = new URLSearchParams();
+        setIf(qs, "target", params.target);
+        setIf(qs, "type", params.type);
+        if (params.latestOnly !== undefined) setIf(qs, "latestOnly", params.latestOnly ? "true" : "false");
+        setIf(qs, "from", toRFC3339(params.from));
+        setIf(qs, "to", toRFC3339(params.to));
+        setIf(qs, "limit", params.limit);
+
+        type Bundle =
+            | { probe_id: number; Latest?: ProbeData; Rows?: undefined }
+            | { probe_id: number; Latest?: undefined; Rows?: ProbeData[] };
+
+        const { data } = await request.get<{
+            target: string;
+            probeIds: number[];
+            bundles: Bundle[];
+        }>(`/workspaces/${workspaceId}/probe-data/by-target/data?${qs.toString()}`);
+
+        return data;
+    },
+
+    /**
+     * Discover similar probes (same literal target and/or same target agent).
+     * GET /workspaces/{id}/probe-data/probes/{probeId}/similar
+     */
+    async similar(
+        workspaceId: number | string,
+        probeId: number | string,
+        params?: { sameType?: boolean; includeSelf?: boolean; latest?: boolean }
+    ) {
+        const qs = new URLSearchParams();
+        if (params?.sameType !== undefined) setIf(qs, "sameType", params.sameType ? "true" : "false");
+        if (params?.includeSelf !== undefined) setIf(qs, "includeSelf", params.includeSelf ? "true" : "false");
+        if (params?.latest !== undefined) setIf(qs, "latest", params.latest ? "true" : "false");
+
+        const { data } = await request.get<{
+            probe: Probe;
+            similar_by_target: Probe[];
+            similar_by_agent_id: Probe[];
+            latest?: { probe_id: number; latest: ProbeData | null }[];
+        }>(
+            `/workspaces/${workspaceId}/probe-data/probes/${probeId}/similar${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
+
+    /** Convenience wrappers */
+    async latestNetInfo(workspaceId: number | string, agentId: number | string, probeId?: number | string) {
+        return this.latest(workspaceId, { type: "NETINFO", agentId, probeId });
+    },
+    async latestSysInfo(workspaceId: number | string, agentId: number | string, probeId?: number | string) {
+        return this.latest(workspaceId, { type: "SYSINFO", agentId, probeId });
+    },
+};
+
 /** ===== Probes (scoped to workspace + agent) ===== */
 export const ProbeService = {
     async list(workspaceId: number | string, agentId: number | string) {

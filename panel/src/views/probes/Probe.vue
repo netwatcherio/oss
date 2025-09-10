@@ -8,11 +8,8 @@ import type {
   PingResult,
   Probe,
   ProbeData,
-  ProbeDataRequest,
   ProbeType,
-  RPerfResults,
   Workspace,
-  TrafficSimResult
 } from "@/types";
 import Title from "@/components/Title.vue";
 import { AsciiTable3 } from "@/lib/ascii-table3/ascii-table3";
@@ -23,17 +20,21 @@ import RperfGraph from "@/components/RperfGraph.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 
+// NEW: API services wired to your new endpoints
+import { WorkspaceService, AgentService, ProbeService, ProbeDataService } from "@/services/apiService";
+import {timeFormat} from "d3-time-format";
+
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
 
 // Reactive state to hold parsed groups and UI data
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   agent: {} as Agent,
   similarProbes: [] as Probe[],
   // Parsed ProbeData by type
   pingData: [] as ProbeData[],
-  probe: {} as Probe[],
+  probe: {} as Probe,
   mtrData: [] as ProbeData[],
   rperfData: [] as ProbeData[],
   trafficSimData: [] as ProbeData[],
@@ -54,7 +55,7 @@ const state = reactive({
   probeAgent: {} as Agent,
   table: {} as string,
   pingGraph: {} as any,
-  target: {} as string,
+  target: "" as string,
   checks: [] as Probe[],
   // New state for agent probe groupings
   agentPairData: [] as Array<{
@@ -73,253 +74,40 @@ const state = reactive({
 
 const router = core.router();
 
-// Function to handle tab changes
+// ---------- Small utils ----------
+const toRFC3339 = (v?: Date | string | number) =>
+    v instanceof Date ? v.toISOString() : typeof v === "number" ? new Date(v).toISOString() : v;
+
 function onTabChange(index: number) {
   activeTabIndex.value = index;
-  // Force NetworkMap re-render after tab switch
-  nextTick(() => {
-    // This ensures the NetworkMap component re-initializes with the new data
-    const event = new Event('resize');
-    window.dispatchEvent(event);
-  });
-}
-
-function transformPingDataMulti(dataArray: any[]): PingResult[] {
-  return dataArray.map(data => {
-    const findValueByKey = (key: string) => data.data.find((d: any) => d.Key === key)?.Value;
-
-    return {
-      startTimestamp: new Date(findValueByKey("start_timestamp")),
-      stopTimestamp: new Date(findValueByKey("stop_timestamp")),
-      packetsRecv: parseInt(findValueByKey("packets_recv")),
-      packetsSent: parseInt(findValueByKey("packets_sent")),
-      packetsRecvDuplicates: parseInt(findValueByKey("packets_recv_duplicates")),
-      packetLoss: parseInt(findValueByKey("packet_loss")),
-      addr: findValueByKey("addr"),
-      minRtt: parseInt(findValueByKey("min_rtt")),
-      maxRtt: parseInt(findValueByKey("max_rtt")),
-      avgRtt: parseInt(findValueByKey("avg_rtt")),
-      stdDevRtt: parseInt(findValueByKey("std_dev_rtt")),
-    };
-  });
-}
-
-function camelCase(str: string) {
-  return str.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
-}
-
-function transformToTrafficSimResult(dataArray: ProbeData[]): TrafficSimResult[] {
-  return dataArray.map(data => {
-    const result: TrafficSimResult = {
-      averageRTT: 0,
-      duplicatePackets: 0,
-      lostPackets: 0,
-      maxRTT: 0,
-      minRTT: 0,
-      outOfSequence: 0,
-      stdDevRTT: 0,
-      totalPackets: 0,
-      reportTime: new Date()
-    };
-
-    data.data.forEach((item: { Key: string; Value: any }) => {
-      switch (item.Key) {
-        case 'averageRTT':
-          result.averageRTT = item.Value;
-          break;
-        case 'duplicatePackets':
-          result.duplicatePackets = item.Value;
-          break;
-        case 'lostPackets':
-          result.lostPackets = item.Value;
-          break;
-        case 'maxRTT':
-          result.maxRTT = item.Value;
-          break;
-        case 'minRTT':
-          result.minRTT = item.Value;
-          break;
-        case 'outOfSequence':
-          result.outOfSequence = item.Value;
-          break;
-        case 'stdDevRTT':
-          result.stdDevRTT = item.Value;
-          break;
-        case 'totalPackets':
-          result.totalPackets = item.Value;
-          break;
-        case 'reportTime':
-          result.reportTime = new Date(item.Value);
-          break;
-      }
-    });
-
-    return result;
-  });
-}
-
-function transformToRPerfResults(dataArray: ProbeData[]): RPerfResults[] {
-  return dataArray.map(data => {
-    const result: RPerfResults = {
-      startTimestamp: new Date(),
-      stopTimestamp: new Date(),
-      config: {
-        additional: {ipVersion: 0, omitSeconds: 0, reverse: false},
-        common: {family: '', length: 0, streams: 0},
-        download: {},
-        upload: {bandwidth: 0, duration: 0, sendInterval: 0}
-      },
-      streams: [],
-      success: false,
-      summary: {
-        bytesReceived: 0,
-        bytesSent: 0,
-        durationReceive: 0,
-        durationSend: 0,
-        framedPacketSize: 0,
-        jitterAverage: 0,
-        jitterPacketsConsecutive: 0,
-        packetsDuplicated: 0,
-        packetsLost: 0,
-        packetsOutOfOrder: 0,
-        packetsReceived: 0,
-        packetsSent: 0
-      }
-    };
-
-    data.data.forEach((item: { Key: string; Value: any }) => {
-      switch (item.Key) {
-        case 'start_timestamp':
-          result.startTimestamp = new Date(item.Value);
-          break;
-        case 'stop_timestamp':
-          result.stopTimestamp = new Date(item.Value);
-          break;
-        case 'config':
-          // Map the config data according to RPerfResults structure
-          break;
-        case 'success':
-          result.success = item.Value;
-          break;
-        case 'summary':
-          item.Value.forEach((summaryItem: { Key: string; Value: any }) => {
-            const key = camelCase(summaryItem.Key);
-            if (key in result.summary) {
-              result.summary[key as keyof typeof result.summary] = summaryItem.Value;
-            }
-          });
-          break;
-      }
-    });
-
-    return result;
-  });
-}
-
-function transformMtrDataMulti(dataArray: ProbeData[]): MtrResult[] {
-  return dataArray.map(data => transformMtrData(data.data));
-}
-
-function transformMtrData(data: any[]): MtrResult {
-  const result: MtrResult = {
-    startTimestamp: new Date(),
-    stopTimestamp: new Date(),
-    report: {
-      info: {
-        target: {
-          ip: '',
-          hostname: ''
-        }
-      },
-      hops: []
-    }
-  };
-
-  const reportData = data.find(d => d.Key === 'report')?.Value;
-  if (reportData) {
-    reportData.forEach((item: any) => {
-      if (item.Key === 'info') {
-        const targetData = item.Value.find((val: any) => val.Key === 'target')?.Value;
-        if (targetData) {
-          targetData.forEach((target: any) => {
-            if (target.Key === 'ip') result.report.info.target.ip = target.Value;
-            if (target.Key === 'hostname') result.report.info.target.hostname = target.Value;
-          });
-        }
-      } else if (item.Key === 'hops') {
-        result.report.hops = item.Value.map((hopArray: any[]) => {
-          const hop: MtrHop = {
-            ttl: 0,
-            hosts: [],
-            extensions: [],
-            loss_pct: '',
-            sent: 0,
-            last: '',
-            recv: 0,
-            avg: '',
-            best: '',
-            worst: '',
-            stddev: ''
-          };
-          hopArray.forEach(hopItem => {
-            if (hopItem.Key === 'ttl') hop.ttl = hopItem.Value;
-            else if (hopItem.Key === 'hosts') {
-              hop.hosts = hopItem.Value.map(hostArray => {
-                const host = {ip: '', hostname: ''};
-                hostArray.forEach(hostItem => {
-                  if (hostItem.Key === 'ip') host.ip = hostItem.Value;
-                  if (hostItem.Key === 'hostname') host.hostname = hostItem.Value;
-                });
-                return host;
-              });
-            } else {
-              hop[hopItem.Key] = hopItem.Value;
-            }
-          });
-          return hop;
-        });
-      }
-    });
-  }
-
-  const startTimestampItem = data.find(d => d.Key === 'start_timestamp');
-  if (startTimestampItem) result.startTimestamp = new Date(startTimestampItem.Value);
-
-  const stopTimestampItem = data.find(d => d.Key === 'stop_timestamp');
-  if (stopTimestampItem) result.stopTimestamp = new Date(stopTimestampItem.Value);
-
-  return result;
+  nextTick(() => window.dispatchEvent(new Event('resize')));
 }
 
 function generateTable(probeData: ProbeData) {
-  let mtrCalculate = transformMtrData(probeData.data);
+  // NEW: payload holds the typed body
+  const mtrCalculate = (probeData as any).payload;
 
-  let table = new AsciiTable3(mtrCalculate.report.info.target.hostname + " (" + mtrCalculate.report.info.target.ip + ")" + " - " + mtrCalculate.stopTimestamp.toISOString());
+  if (!mtrCalculate?.report?.info?.target) return "No MTR payload";
+  const title =
+      `${mtrCalculate.report.info.target.hostname} (${mtrCalculate.report.info.target.ip}) - ` +
+      new Date(mtrCalculate.stopTimestamp || probeData.created_at || (probeData as any).createdAt).toISOString();
+
+  const table = new AsciiTable3(title);
   table.setHeading('Hop', 'Host', 'Loss%', 'Snt', 'Recv', 'Avg', 'Best', 'Worst', 'StDev');
 
-  const seenIPs = new Map();
+  const seenIPs = new Map<string, number>();
 
-  mtrCalculate.report.hops.forEach((hop, hopIndex) => {
-    if (hop.hosts.length === 0) {
-      table.addRow(
-          hopIndex.toString(),
-          '*',
-          '*',
-          '*',
-          '*',
-          '*',
-          '*',
-          '*',
-          '*'
-      );
+  (mtrCalculate.report.hops as any[]).forEach((hop: any, hopIndex: number) => {
+    if (!hop.hosts || hop.hosts.length === 0) {
+      table.addRow(hopIndex.toString(), '*','*','*','*','*','*','*','*');
     } else {
-      hop.hosts.forEach((host, hostIndex) => {
-        const hostDisplay = host.hostname + " (" + host.ip + ")";
+      hop.hosts.forEach((host: any, hostIndex: number) => {
+        const hostDisplay = `${host.hostname} (${host.ip})`;
         let hopDisplay = hopIndex.toString();
         let prefix = '    ';
 
         if (seenIPs.has(host.ip)) {
-          const occurrences = seenIPs.get(host.ip);
+          const occurrences = seenIPs.get(host.ip)!;
           prefix = '|   ';
           hopDisplay = "+-> " + hopDisplay;
           seenIPs.set(host.ip, occurrences + 1);
@@ -327,16 +115,14 @@ function generateTable(probeData: ProbeData) {
           seenIPs.set(host.ip, 1);
         }
 
-        if (hostIndex !== 0) {
-          hopDisplay = prefix + hopDisplay;
-        }
+        if (hostIndex !== 0) hopDisplay = prefix + hopDisplay;
 
         table.addRow(
             hopDisplay,
             hostDisplay,
             hop.loss_pct,
-            hop.sent.toString(),
-            hop.recv.toString(),
+            hop.sent?.toString?.() ?? '',
+            hop.recv?.toString?.() ?? '',
             hop.avg,
             hop.best,
             hop.worst,
@@ -352,312 +138,264 @@ function generateTable(probeData: ProbeData) {
 
 // Helper function to add probe data without duplicates
 function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
+  // Ensure we give the record a stable key for Vue
+  if (!newData.id || newData.id == 0) {
+    // Prefer real UUID if available
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      (newData as any).id = crypto.randomUUID();
+    } else {
+      // fallback: pseudo-UUID
+      (newData as any).id =
+          "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === "x" ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          });
+    }
+  }
+
+  // Only push if not already in array
   const exists = targetArray.some(item => item.id === newData.id);
   if (!exists) {
     targetArray.push(newData);
-  } else {
-    console.log(`Duplicate probe data detected and skipped: ${newData.id}`);
   }
 }
 
-// Helper function to parse agent pair data from groups
+// --------- Adapters for graphs (expecting your components’ input shapes) ---------
+
+// PING: flatten rows -> PingResult[]
+function transformPingDataMulti(rows: ProbeData[]): PingResult[] {
+  return rows
+      .map((r) => {
+        const p = (r as any).payload;
+        // Normalize likely fields: ts/created_at, avg/latency, loss, min/max
+        return {
+          ts: new Date((p?.timestamp ?? r.created_at ?? (r as any).createdAt)).getTime(),
+          avg: p?.avg ?? p?.latency_avg ?? p?.rtt_avg ?? 0,
+          min: p?.min ?? p?.rtt_min ?? 0,
+          max: p?.max ?? p?.rtt_max ?? 0,
+          loss: p?.loss ?? p?.loss_pct ?? 0,
+          count: p?.count ?? p?.sent ?? 0,
+          probeId: r.probe_id,
+          agentId: r.agent_id,
+          target: r.target || p?.target,
+        } as any;
+      })
+      .sort((a, b) => a.ts - b.ts);
+}
+
+// MTR: a single MTR payload -> MtrResult (for title/accordion)
+function transformMtrData(data: ProbeData): MtrResult {
+  return data.payload as MtrResult;
+}
+
+// MTR: multiple rows -> MtrResult[]
+function transformMtrDataMulti(rows: ProbeData[]): MtrResult[] {
+  return rows.map(r => transformMtrData((r as any)));
+}
+
+// TRAFFICSIM: normalize series
+function transformToTrafficSimResult(rows: ProbeData[]) {
+  return rows.map((r) => {
+    const p = (r as any).payload;
+    return {
+      ts: new Date(p?.timestamp ?? r.created_at ?? (r as any).createdAt).getTime(),
+      bitrate: p?.bitrate_bps ?? p?.throughput_bps ?? 0,
+      loss: p?.loss ?? p?.loss_pct ?? 0,
+      jitter: p?.jitter_ms ?? 0,
+      probeId: r.probe_id,
+      agentId: r.agent_id,
+      target: r.target || p?.target,
+    };
+  }).sort((a,b) => a.ts - b.ts);
+}
+
+// ---------- Agent pair parsing (kept; expects grouped data if you add that later) ----------
 async function parseAgentPairData(groups: any) {
   const agentPairs: typeof state.agentPairData = [];
-  const agentNameCache: Record<string, string> = {};
-  
-  // Helper to get agent name with caching
-  const getAgentName = async (agentId: string): Promise<string> => {
-    if (agentNameCache[agentId]) {
-      return agentNameCache[agentId];
-    }
+  const nameCache: Record<string,string> = {};
+  const getName = async (wid: number|string, aid: string) => {
+    if (nameCache[aid]) return nameCache[aid];
     try {
-      const res = await agentService.getAgent(agentId);
-      const agent = res.data as Agent;
-      agentNameCache[agentId] = agent.name || agentId;
-      return agent.name || agentId;
-    } catch (error) {
-      console.error(`Failed to get agent name for ${agentId}:`, error);
-      return agentId;
-    }
+      const a = await AgentService.get(wid, aid);
+      nameCache[aid] = a.name || String(a.id);
+      return nameCache[aid];
+    } catch { return aid; }
   };
+  const wid = currentWorkspaceId();
 
-  // Parse the nested structure
-  for (const [sourceAgentId, targetAgents] of Object.entries(groups)) {
+  for (const [sourceAgentId, targetAgents] of Object.entries(groups || {})) {
     for (const [targetAgentId, probeTypes] of Object.entries(targetAgents as any)) {
-      const sourceAgentName = await getAgentName(sourceAgentId);
-      const targetAgentName = await getAgentName(targetAgentId);
-      
-      const pairData = {
-        sourceAgentId,
-        targetAgentId,
-        sourceAgentName,
-        targetAgentName,
-        pingData: [] as ProbeData[],
-        mtrData: [] as ProbeData[],
-        trafficSimData: [] as ProbeData[],
-        rperfData: [] as ProbeData[]
+      const pair = {
+        sourceAgentId, targetAgentId,
+        sourceAgentName: await getName(wid, sourceAgentId),
+        targetAgentName: await getName(wid, targetAgentId),
+        pingData: [] as ProbeData[], mtrData: [] as ProbeData[], trafficSimData: [] as ProbeData[], rperfData: [] as ProbeData[]
       };
-
-      // Sort probe data by type
-      for (const [probeType, probeDataArray] of Object.entries(probeTypes as any)) {
-        switch (probeType) {
-          case 'PING':
-            pairData.pingData = probeDataArray as ProbeData[];
-            break;
-          case 'MTR':
-            pairData.mtrData = probeDataArray as ProbeData[];
-            break;
-          case 'TRAFFICSIM':
-            pairData.trafficSimData = probeDataArray as ProbeData[];
-            break;
-          case 'RPERF':
-            pairData.rperfData = probeDataArray as ProbeData[];
-            break;
-        }
+      for (const [t, arr] of Object.entries(probeTypes as any)) {
+        if (t === "PING") pair.pingData = arr as ProbeData[];
+        if (t === "MTR") pair.mtrData = arr as ProbeData[];
+        if (t === "TRAFFICSIM") pair.trafficSimData = arr as ProbeData[];
+        if (t === "RPERF") pair.rperfData = arr as ProbeData[];
       }
-
-      agentPairs.push(pairData);
+      agentPairs.push(pair);
     }
   }
-
   return agentPairs;
 }
 
-// Enhanced reload using grouped API response (from AgentProbe)
-function reloadData(checkId: string) {
-  state.loading = true;
-  state.pingData = [];
-  state.mtrData = [];
-  state.rperfData = [];
-  state.trafficSimData = [];
-  state.probeData = [];
-  state.similarProbes = [];
-  state.agentPairData = [];
+// ---------- Data loader (new services + new data model) ----------
 
-  probeService.getProbe(checkId).then(res => {
-    state.probe = res.data as Probe[];
-
-    console.log(state.probe[0].config.target[0].agent);
-    if (state.probe[0].config.target[0].agent != "0000000000000000" && !state.probe[0].config.target[0].target) {
-      agentService.getAgent(state.probe[0].config.target[0].agent).then(res => {
-        state.probeAgent = res.data as Agent;
-        state.title = state.probeAgent.name;
-      });
-    } else if(state.probe[0].config.target[0].target) {
-      state.title = state.probe[0].config.target[0].target;
-      let split = state.probe[0].config.target[0].target.split(":");
-      if (split.length >= 2) {
-        state.title = split[0];
-      }
-    }
-
-    agentService.getAgent(state.probe[0].agent).then(res => {
-      state.agent = res.data as Agent;
-
-      siteService.getSite(state.agent.site).then(res => {
-        state.site = res.data as Workspace;
-        
-        // Try to get grouped data first (AgentProbe approach)
-        probeService.getProbeData(checkId, {
-          recent: false,
-          limit: 5000,
-          startTimestamp: state.timeRange[0],
-          endTimestamp: state.timeRange[1]
-        } as ProbeDataRequest)
-        .then(res => {
-          if (res.data.groups) {
-            // Use grouped approach from AgentProbe
-            const { groups, availableTargets, summary } = res.data;
-
-            state.availableTargets = availableTargets || [];
-            state.summary = summary || state.summary;
-            state.rawGroups = groups;
-
-            // Check if this is an AGENT probe type
-            if (state.probe[0] && state.probe[0].type === 'AGENT') {
-              state.isAgentProbe = true;
-              // Parse agent pair data for comparison view
-              parseAgentPairData(groups).then(agentPairs => {
-                state.agentPairData = agentPairs;
-                state.ready = true;
-                state.loading = false;
-                console.log(`Loaded ${agentPairs.length} agent pairs for comparison`);
-              });
-            } else {
-              // Original processing for non-AGENT probes
-              state.isAgentProbe = false;
-              Object.values(groups).forEach(agentGroup => {
-                Object.entries(agentGroup).forEach(([agentId, typeMap]) => {
-                  Object.entries(typeMap as Record<string, ProbeData[]>).forEach(([type, entries]) => {
-                    entries.forEach(entry => {
-                      addProbeDataUnique(state.probeData, entry);
-                      switch (type) {
-                        case 'PING':
-                          addProbeDataUnique(state.pingData, entry);
-                          break;
-                        case 'MTR':
-                          addProbeDataUnique(state.mtrData, entry);
-                          break;
-                        case 'TRAFFICSIM':
-                          addProbeDataUnique(state.trafficSimData, entry);
-                          break;
-                        case 'RPERF':
-                          addProbeDataUnique(state.rperfData, entry);
-                          break;
-                      }
-                    });
-                  });
-                });
-              });
-
-              state.ready = true;
-              state.loading = false;
-              console.log(`Loaded ${state.mtrData.length} unique MTR entries`);
-            }
-            
-            // Also get similar probes for compatibility
-            probeService.getSimilarProbes(checkId).then(res => {
-              state.similarProbes = res.data as Probe[];
-            }).catch(() => {});
-          } else {
-            // Fallback to original Probe.vue approach
-            handleLegacyDataLoading(checkId);
-          }
-        })
-        .catch(() => {
-          // Fallback to original approach if grouped API fails
-          handleLegacyDataLoading(checkId);
-        });
-      });
-    });
-  }).catch(() => {
-    state.loading = false;
-    state.ready = false;
-  });
+function currentWorkspaceId(): number {
+  // route param name choices: workspaceId OR wid; support both
+  const p = router.currentRoute.value.params;
+  return Number(p["workspaceId"] ?? p["wid"] ?? 0);
+}
+function currentAgentId(): number {
+  const p = router.currentRoute.value.params;
+  return Number(p["agentId"] ?? p["aid"] ?? 0);
+}
+function currentProbeId(): number {
+  const p = router.currentRoute.value.params;
+  return Number(p["probeId"] ?? p["idParam"] ?? 0);
 }
 
-// Original Probe.vue data loading approach as fallback
-function handleLegacyDataLoading(checkId: string) {
-  state.ready = true;
-  
-  probeService.getSimilarProbes(checkId).then(res => {
-    state.similarProbes = res.data as Probe[];
-    let loadPromises: Promise<any>[] = [];
-    
-    for (let p of state.similarProbes) {
-      console.log(p);
-      const promise = probeService.getProbeData(p.id, {
-        recent: false,
-        limit: 5000,
-        startTimestamp: state.timeRange[0],
-        endTimestamp: state.timeRange[1]
-      } as ProbeDataRequest).then(res => {
-        for (let d of res.data as ProbeData[]) {
-          addProbeDataUnique(state.probeData, d);
+let agentID = router.currentRoute.value.params["aID"] as string
+let workspaceID = router.currentRoute.value.params["wID"] as string
+let probeID = (router.currentRoute.value.params["pID"] as string)
+    || (router.currentRoute.value.params["idParam"] as string) // fallback if needed
+if (!agentID || !workspaceID || !probeID) {
+  // early exit — nothing to load
+}
 
-          let pprober = getProbe(d.probe) as Probe;
+async function reloadData() {
+    state.loading = true;
+    state.pingData = [];
+    state.mtrData = [];
+    state.rperfData = [];
+    state.trafficSimData = [];
+    state.probeData = [];
+    state.similarProbes = [];
+    state.agentPairData = [];
+    state.isAgentProbe = false;
 
-          if (pprober.type == "PING") {
-            addProbeDataUnique(state.pingData, d);
-          }
-          if (pprober.type == "MTR") {
-            addProbeDataUnique(state.mtrData, d);
-          }
-          if (pprober.type == "RPERF" && !pprober.config.server) {
-            addProbeDataUnique(state.rperfData, d);
-          }
-          if (pprober.type == "TRAFFICSIM") {
-            addProbeDataUnique(state.trafficSimData, d);
-          }
-        }
-      });
-      loadPromises.push(promise);
-    }
-    
-    // Log when all data is loaded
-    Promise.all(loadPromises).then(() => {
+    if (!workspaceID || !probeID) {
       state.loading = false;
-      console.log(`Legacy load complete: ${state.mtrData.length} unique MTR entries`);
-    });
-  }).catch(() => {
-    state.loading = false;
-  });
-}
-
-function getProbe(probeId: string) {
-  let foundProbe = state.similarProbes.find(probe => probe.id === probeId);
-  return foundProbe ? foundProbe : null;
-}
-
-function containsProbeType(type: ProbeType): boolean {
-  // Check in similar probes first
-  for (const probe of state.similarProbes) {
-    if (probe.type === type) {
-      return true;
+      state.ready = false;
+      return;
     }
-  }
-  
-  // Also check in summary if available
-  if (state.summary.probeTypes && state.summary.probeTypes.includes(type)) {
-    return true;
-  }
-  
-  // Check actual data
+
+    // 1) Load workspace & agent metadata in parallel (mimic style)
+    WorkspaceService.get(workspaceID).then(ws => {
+      state.workspace = ws as Workspace;
+    }).catch(() => { /* ignore */ });
+
+    AgentService.get(workspaceID, agentID).then(ag => {
+      state.agent = ag as Agent;
+    }).catch(() => { /* ignore */ });
+
+    // 2) Load probe → title, then series → bucket by type, then similars
+    ProbeService.get(workspaceID, agentID, probeID)
+        .then((probeRes) => {
+          state.probe = probeRes as Probe;
+
+          // Title from first target (agent ref vs literal)
+          const firstTarget = (state.probe?.targets?.[0]) || {} as any;
+          if (firstTarget.agentId && !firstTarget.target) {
+            return AgentService.get(workspaceID, firstTarget.agentId).then(targ => {
+              state.probeAgent = targ as Agent;
+              state.title = targ.name || `agent:${(targ as any).id}`;
+              return true;
+            }).catch(() => {
+              state.title = `${state.probe.type} #${state.probe.id}`;
+              return true;
+            });
+          } else if (firstTarget.target) {
+            const split = String(firstTarget.target).split(":");
+            state.title = split[0] || String(firstTarget.target);
+          } else {
+            state.title = `${state.probe.type} #${state.probe.id}`;
+          }
+          return true;
+        })
+        .then(() => {
+
+          // 3) Pull series for this probe from ClickHouse
+          const [from, to] = state.timeRange;
+          return ProbeDataService.byProbe(
+              workspaceID,
+              probeID,
+              { from, to, limit: 5000, asc: false }
+          ).then(rows => {
+            // Bucket rows by type
+            console.log(rows)
+            for (const d of rows) {
+              addProbeDataUnique(state.probeData, d);
+              const t = (d as any).type as ProbeType;
+              if (t === "PING") addProbeDataUnique(state.pingData, d);
+              if (t === "MTR") addProbeDataUnique(state.mtrData, d);
+              if (t === "RPERF" && !(state.probe as any).server) addProbeDataUnique(state.rperfData, d);
+              if (t === "TRAFFICSIM") addProbeDataUnique(state.trafficSimData, d);
+            }
+            return true;
+          });
+        })
+        .then(() => {
+
+          // 4) Similar probes (optional)
+          return ProbeDataService.similar(workspaceID, probeID, { sameType: true, latest: true })
+              .then(sim => {
+                state.similarProbes = [
+                  ...((sim?.similar_by_target ?? []) as Probe[]),
+                  ...((sim?.similar_by_agent_id ?? []) as Probe[]),
+                ];
+                return true;
+              })
+              .catch(() => {
+                return true;
+              });
+        })
+        .then(() => {
+          state.ready = true;
+        })
+        .catch((e) => {
+          console.error(e);
+          state.ready = false;
+        })
+        .finally(() => {
+          state.loading = false;
+        });
+}
+
+// ---------- Guards / helpers ----------
+function containsProbeType(type: ProbeType): boolean {
   switch(type) {
-    case 'PING':
-      return state.pingData.length > 0;
-    case 'MTR':
-      return state.mtrData.length > 0;
-    case 'RPERF':
-      return state.rperfData.length > 0;
-    case 'TRAFFICSIM':
-      return state.trafficSimData.length > 0;
-    default:
-      return false;
+    case 'PING': return state.pingData.length > 0;
+    case 'MTR': return state.mtrData.length > 0;
+    case 'RPERF': return state.rperfData.length > 0;
+    case 'TRAFFICSIM': return state.trafficSimData.length > 0;
+    default: return false;
   }
 }
 
-// Preserved from original Probe.vue
-function onCreate(response: any) {
-  router.push("/workspace");
-}
+function onCreate(_: any) { router.push("/workspace"); }
+function onError(response: any) { alert(response); }
+function submit() {}
 
-function onError(response: any) {
-  alert(response);
-}
-
-function submit() {
-  // Implementation if needed
-}
-
-// Initialize on mount
 onMounted(() => {
-  const checkId = router.currentRoute.value.params['idParam'] as string;
-  if (!checkId) return;
-
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
-
-  // fetch workspace and agent metadata
-  Promise.all([
-    probeService.getProbe(checkId),
-    agentService.getAgent(checkId)
-  ]).catch(() => {});
-
-  reloadData(checkId);
+  reloadData();
 });
 
 // Watch for timeRange changes
-watch(() => state.timeRange, (newRange) => {
-  const checkId = router.currentRoute.value.params['idParam'] as string;
-  if (checkId) reloadData(checkId);
-}, { deep: true });
+watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
 </script>
 
 <template>
   <div class="container-fluid">
     <Title
-        :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.site.name, link: `/workspace/${state.site.id}`}, {title: state.agent.name, link: `/agent/${state.agent.id}`}]"
+        :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspace/${state.workspace.id}`}, {title: state.agent.name, link: `/agent/${state.agent.id}`}]"
         :title="state.title"
         subtitle="information about this target">
       <div v-if="state.ready" class="d-flex gap-1">
@@ -789,7 +527,7 @@ watch(() => state.timeRange, (newRange) => {
                         <!-- Key to force re-render on tab change -->
                         <NetworkMap 
                           :key="`mtr-map-${index}-${activeTabIndex}`"
-                          :mtrResults="transformMtrDataMulti(pair.mtrData)" 
+                          :mtrResults="transformMtrDataMulti(pair.mtrData)"
                         />
                         <div :id="`mtrAccordion-${index}`" class="accordion mt-3">
                           <div v-for="(mtr, mtrIndex) in pair.mtrData" :key="`${mtr.id}-${index}-${mtrIndex}`">
@@ -802,7 +540,7 @@ watch(() => state.timeRange, (newRange) => {
                                   class="accordion-button collapsed" 
                                   data-bs-toggle="collapse" 
                                   type="button">
-                                  {{ transformMtrData((mtr as ProbeData).data).stopTimestamp }}
+                                  {{ transformMtrData((mtr as ProbeData)).stopTimestamp }}
                                   <span v-if="(mtr as ProbeData).triggered" class="badge bg-dark ms-2">TRIGGERED</span>
                                 </button>
                               </h2>
@@ -931,15 +669,15 @@ watch(() => state.timeRange, (newRange) => {
                       <button :aria-controls="'collapse' + mtr.id" :aria-expanded="false"
                               :data-bs-target="'#collapse' + mtr.id"
                               class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                        {{ transformMtrData((mtr as ProbeData).data).stopTimestamp }}
-                        <span v-if="(mtr as ProbeData).triggered" class="badge bg-dark">TRIGGERED</span>
+                        {{ (mtr.created_at as Date).toLocaleString() }}
+                        <span v-if="mtr.triggered" class="badge bg-dark">TRIGGERED</span>
                       </button>
                     </h2>
                     <div :id="'collapse' + mtr.id" :aria-labelledby="'heading' + mtr.id"
                          class="accordion-collapse collapse"
                          data-bs-parent="#mtrAccordion">
                       <div class="accordion-body">
-                        <pre style="text-align: center">{{ generateTable(mtr as ProbeData) }}</pre>
+                        <pre style="text-align: center">{{ generateTable(mtr) }}</pre>
                       </div>
                     </div>
                   </div>
@@ -966,16 +704,6 @@ watch(() => state.timeRange, (newRange) => {
   </div>
   
   <!-- Error state -->
-  <div v-else class="container-fluid">
-    <div class="d-flex justify-content-center align-items-center" style="min-height: 80vh;">
-      <div class="text-center">
-        <i class="bi bi-exclamation-triangle fs-1 text-danger mb-3"></i>
-        <h3 class="text-danger">Error Loading Data</h3>
-        <p class="text-muted">Failed to load probe information. Please try again.</p>
-        <button class="btn btn-primary" @click="location.reload()">Reload Page</button>
-      </div>
-    </div>
-  </div>
 </div>
 </template>
 

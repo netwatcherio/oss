@@ -9,7 +9,6 @@ const session = core.session()
 
 function logout() {
   session.token = ""
-  session.data = {} as User
   router.push("/auth/login")
 }
 

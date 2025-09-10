@@ -13,7 +13,7 @@ const state = reactive({
 })
 
 onMounted(() => {
-  if(session.token === "") {
+  if(session == null || session.token === "") {
     router.push("/auth/login")
     return
   }

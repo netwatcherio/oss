@@ -85,6 +85,7 @@ func MigrateCH(ctx context.Context, ch *sql.DB) error {
 }
 
 // SaveRecordCH inserts one probe event row.
+// SaveRecordCH inserts one probe event row.
 func SaveRecordCH(ctx context.Context, ch *sql.DB, data ProbeData, kind string, payload any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -110,7 +111,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	_, err = ch.ExecContext(ctx, ins,
 		created, received, kind,
 		uint64(data.ProbeID), uint64(data.ProbeAgentID), uint64(data.AgentID),
-		boolToUInt8(data.Triggered), data.TriggeredReason,
+		data.Triggered, /* <— pass bool, not uint8 */
+		data.TriggeredReason,
 		data.Target, uint64(data.TargetAgent),
 		string(raw),
 	)
@@ -197,17 +199,17 @@ ORDER BY created_at ` + order
 	var out []ProbeData
 	for rows.Next() {
 		var r ProbeData
-		var trigUInt8 uint8
+		var trigBool bool
 		var typeStr string
 		var payloadStr string
 		if err := rows.Scan(
 			&r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
-			&trigUInt8, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
+			&trigBool, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
 		); err != nil {
 			return nil, err
 		}
 		r.Type = probe.Type(typeStr)
-		r.Triggered = trigUInt8 == 1
+		r.Triggered = trigBool
 		r.Payload = json.RawMessage(payloadStr)
 		out = append(out, r)
 	}
@@ -247,12 +249,12 @@ LIMIT 1
 	row := db.QueryRowContext(ctx, q)
 
 	var r ProbeData
-	var trigUInt8 uint8
+	var trigBool bool
 	var typeStr string
 	var payloadStr string
 	if err := row.Scan(
 		&r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
-		&trigUInt8, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
+		&trigBool, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -260,7 +262,7 @@ LIMIT 1
 		return nil, err
 	}
 	r.Type = probe.Type(typeStr)
-	r.Triggered = trigUInt8 == 1
+	r.Triggered = trigBool
 	r.Payload = json.RawMessage(payloadStr)
 	return &r, nil
 }
