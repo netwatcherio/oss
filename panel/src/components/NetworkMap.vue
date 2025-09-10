@@ -35,7 +35,7 @@ export default {
     
     let visualization: NetworkVisualization | null = null;
 
-    console.log(props.mtrResults)
+    // console.log(props.mtrResults)
 
     const resetView = () => {
       visualization?.resetZoom();

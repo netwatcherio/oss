@@ -294,17 +294,17 @@ export interface MtrHop {
 }
 
 export interface PingResult {
-    startTimestamp: Date;
-    stopTimestamp: Date;
-    packetsRecv: number;
-    packetsSent: number;
-    packetsRecvDuplicates: number;
-    packetLoss: number;
+    start_timestamp: Date;
+    stop_timestamp: Date;
+    packets_recv: number;
+    packets_sent: number;
+    packets_recv_duplicates: number;
+    packet_loss: number;
     addr: string;
-    minRtt: number;
-    maxRtt: number;
-    avgRtt: number;
-    stdDevRtt: number;
+    min_rtt: number;
+    max_rtt: number;
+    avg_rtt: number;
+    std_dev_rtt: number;
 }
 
 export interface ProbeDataRequest {

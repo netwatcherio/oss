@@ -1,28 +1,17 @@
 <script lang="ts" setup>
-import { onMounted, reactive, watch, ref, nextTick } from "vue";
+import {nextTick, onMounted, reactive, ref, watch} from "vue";
 import core from "@/core";
-import type {
-  Agent,
-  MtrHop,
-  MtrResult,
-  PingResult,
-  Probe,
-  ProbeData,
-  ProbeType,
-  Workspace,
-} from "@/types";
+import type {Agent, MtrResult, PingResult, Probe, ProbeData, ProbeType, Workspace,} from "@/types";
 import Title from "@/components/Title.vue";
-import { AsciiTable3 } from "@/lib/ascii-table3/ascii-table3";
+import {AsciiTable3} from "@/lib/ascii-table3/ascii-table3";
 import LatencyGraph from "@/components/PingGraph.vue";
 import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import NetworkMap from "@/components/NetworkMap.vue";
-import RperfGraph from "@/components/RperfGraph.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 
 // NEW: API services wired to your new endpoints
-import { WorkspaceService, AgentService, ProbeService, ProbeDataService } from "@/services/apiService";
-import {timeFormat} from "d3-time-format";
+import {AgentService, ProbeDataService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
@@ -167,21 +156,10 @@ function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
 function transformPingDataMulti(rows: ProbeData[]): PingResult[] {
   return rows
       .map((r) => {
-        const p = (r as any).payload;
         // Normalize likely fields: ts/created_at, avg/latency, loss, min/max
-        return {
-          ts: new Date((p?.timestamp ?? r.created_at ?? (r as any).createdAt)).getTime(),
-          avg: p?.avg ?? p?.latency_avg ?? p?.rtt_avg ?? 0,
-          min: p?.min ?? p?.rtt_min ?? 0,
-          max: p?.max ?? p?.rtt_max ?? 0,
-          loss: p?.loss ?? p?.loss_pct ?? 0,
-          count: p?.count ?? p?.sent ?? 0,
-          probeId: r.probe_id,
-          agentId: r.agent_id,
-          target: r.target || p?.target,
-        } as any;
+        console.log(r)
+        return r.payload as PingResult
       })
-      .sort((a, b) => a.ts - b.ts);
 }
 
 // MTR: a single MTR payload -> MtrResult (for title/accordion)
@@ -328,7 +306,6 @@ async function reloadData() {
               { from, to, limit: 5000, asc: false }
           ).then(rows => {
             // Bucket rows by type
-            console.log(rows)
             for (const d of rows) {
               addProbeDataUnique(state.probeData, d);
               const t = (d as any).type as ProbeType;
@@ -364,6 +341,7 @@ async function reloadData() {
         })
         .finally(() => {
           state.loading = false;
+          console.log(state.pingData)
         });
 }
 
