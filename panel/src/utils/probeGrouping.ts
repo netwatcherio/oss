@@ -364,3 +364,140 @@ export function groupProbesByTarget(
         },
     };
 }
+
+type SimilarMatches = {
+    /** Probes that match any host-based target of the subject probe */
+    byHost: Probe[];
+    /** Probes that match any agent-id-based target of the subject probe */
+    byAgent: Probe[];
+    /** Union of both (deduped), excluding the subject */
+    combined: Probe[];
+    /** Which group keys we matched (debug/telemetry) */
+    matchedKeys: string[];
+};
+
+function uniqueById<T extends { id: number }>(arr: T[]): T[] {
+    const seen = new Set<number>();
+    const out: T[] = [];
+    for (const x of arr) if (!seen.has(x.id)) { seen.add(x.id); out.push(x); }
+    return out;
+}
+
+/** Reuse your helpers */
+const keyForHost = (host: string) => makeKey("host", normHost(host));
+const keyForAgent = (aid: number) => makeKey("agent", aid);
+
+/** Build the group keys that a single probe participates in (host|agent|local). */
+function keysForProbeTargetsStrict(p: Probe): string[] {
+    const keys: string[] = [];
+    const tlist = p.targets ?? [];
+
+    for (const t of tlist) {
+        const hasHost = !!t.target && t.target.trim() !== "";
+        const tgtAid = getTargetAgentId(t);
+        const hasAgent = tgtAid != null && tgtAid !== 0;
+
+        // Match your grouper’s logic: one or the other, not both
+        if (hasHost && !hasAgent) keys.push(keyForHost(t.target!.trim()));
+        else if (!hasHost && hasAgent) keys.push(keyForAgent(Number(tgtAid)));
+    }
+
+    // If no targets, treat as local on probe’s own agent (your grouper does this)
+    if (keys.length === 0) {
+        const aid = getProbeAgentId(p) || 0;
+        keys.push(makeKey("local", aid));
+    }
+
+    return Array.from(new Set(keys));
+}
+
+/**
+ * Find probes that share any target (host or agent) with the given probeId.
+ * - If you already computed `grouped`, pass it to avoid re-grouping.
+ * - Options:
+ *   - sameTypeOnly: only return matches with the same Probe.type (default true)
+ *   - excludeDefaults: forward to groupProbesByTarget to skip built-ins (default true)
+ */
+export function findMatchingProbesByProbeId(
+    probeId: number,
+    allProbes: Probe[],
+    grouped?: GroupingResult,
+    opts?: { sameTypeOnly?: boolean; excludeDefaults?: boolean; caseInsensitive?: boolean }
+): SimilarMatches {
+    const sameTypeOnly = opts?.sameTypeOnly ?? false;
+
+    const subject = allProbes.find(p => p.id === probeId);
+    if (!subject) {
+        return { byHost: [], byAgent: [], combined: [], matchedKeys: [] };
+    }
+
+    const g = grouped ?? groupProbesByTarget(allProbes, {
+        excludeDefaults: opts?.excludeDefaults ?? true,
+        caseInsensitive: opts?.caseInsensitive ?? true,
+    });
+
+    const subjectKeys = keysForProbeTargetsStrict(subject);
+
+    // Collect matches per key
+    const hostMatches: Probe[] = [];
+    const agentMatches: Probe[] = [];
+    const matchedKeys: string[] = [];
+
+    for (const key of subjectKeys) {
+        const grp = g.byKey[key];
+        if (!grp) continue;
+
+        // grp.probes already deduped per your grouper
+        let candidates = grp.probes.filter(p => p.id !== subject.id);
+        if (sameTypeOnly) candidates = candidates.filter(p => p.type === subject.type);
+
+        if (key.startsWith("host|")) hostMatches.push(...candidates);
+        else if (key.startsWith("agent|")) agentMatches.push(...candidates);
+        // local|… will fall into neither byHost nor byAgent; they’ll still be in combined below
+
+        matchedKeys.push(key);
+    }
+
+    const combined = uniqueById([...hostMatches, ...agentMatches]);
+
+    // Optional nice ordering: enabled first, then type, then labelish thing
+    const sortFn = (a: Probe, b: Probe) =>
+        Number(!!b.enabled) - Number(!!a.enabled) ||
+        String(a.type).localeCompare(String(b.type)) ||
+        String(a.id).localeCompare(String(b.id));
+
+    return {
+        byHost: uniqueById(hostMatches).sort(sortFn),
+        byAgent: uniqueById(agentMatches).sort(sortFn),
+        combined: combined.sort(sortFn),
+        matchedKeys: matchedKeys,
+    };
+}
+
+export function findProbesByInitialTarget(seed: Probe, all: Probe[]): Probe[] {
+    const seedKey = canonicalTargetKey(seed);
+    if (!seedKey) return [];
+
+    return all.filter(p => canonicalTargetKey(p) === seedKey);
+}
+
+/** Builds a stable key from a probe's *first* target.
+ *  Prefer agentId; otherwise use the target string (lowercased & trimmed). */
+function canonicalTargetKey(probe: Probe): string | null {
+    if (!probe?.targets?.length) return null;
+
+    const t = probe.targets[0];
+    // Prefer agentId if set (including 0 as a valid id)
+    if (t && t.agentId !== undefined && t.agentId !== null) {
+        return `agent:${t.agentId}`;
+    }
+
+    // Fallback to target string
+    const s = (t?.target ?? "").trim();
+    if (!s) return null;
+
+    // Minimal normalization: lowercase, strip trailing dot and extra spaces
+    // (Keep port and IPv6 brackets as part of the identity on purpose.)
+    const normalized = s.toLowerCase().replace(/\.+$/, "");
+    return `host:${normalized}`;
+}

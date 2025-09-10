@@ -12,12 +12,14 @@ import '@vuepic/vue-datepicker/dist/main.css';
 
 // NEW: API services wired to your new endpoints
 import {AgentService, ProbeDataService, ProbeService, WorkspaceService} from "@/services/apiService";
+import {findMatchingProbesByProbeId, findProbesByInitialTarget} from "@/utils/probeGrouping";
 
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
 
 // Reactive state to hold parsed groups and UI data
 const state = reactive({
+  probes: [] as Probe[],
   workspace: {} as Workspace,
   agent: {} as Agent,
   similarProbes: [] as Probe[],
@@ -247,104 +249,100 @@ if (!agentID || !workspaceID || !probeID) {
 }
 
 async function reloadData() {
-    state.loading = true;
-    state.pingData = [];
-    state.mtrData = [];
-    state.rperfData = [];
-    state.trafficSimData = [];
-    state.probeData = [];
-    state.similarProbes = [];
-    state.agentPairData = [];
-    state.isAgentProbe = false;
+  state.loading = true;
+  state.pingData = [];
+  state.mtrData = [];
+  state.rperfData = [];
+  state.trafficSimData = [];
+  state.probeData = [];
+  state.similarProbes = [];
+  state.agentPairData = [];
+  state.isAgentProbe = false;
+  // optional extras for UI chips
+  (state as any).similarByHost = [];
+  (state as any).similarByAgent = [];
+  (state as any).matchedGroupKeys = [];
 
-    if (!workspaceID || !probeID) {
-      state.loading = false;
-      state.ready = false;
-      return;
-    }
+  if (!workspaceID || !probeID) {
+    state.loading = false;
+    state.ready = false;
+    return;
+  }
 
-    // 1) Load workspace & agent metadata in parallel (mimic style)
-    WorkspaceService.get(workspaceID).then(ws => {
-      state.workspace = ws as Workspace;
-    }).catch(() => { /* ignore */ });
+  // 1) Load workspace & agent metadata in parallel (untouched)
+  WorkspaceService.get(workspaceID)
+      .then(ws => {
+        state.workspace = ws as Workspace;
+      })
+      .catch(() => { /* ignore */
+      });
 
-    AgentService.get(workspaceID, agentID).then(ag => {
-      state.agent = ag as Agent;
-    }).catch(() => { /* ignore */ });
+  AgentService.get(workspaceID, agentID)
+      .then(ag => {
+        state.agent = ag as Agent;
+      })
+      .catch(() => { /* ignore */
+      });
 
-    // 2) Load probe → title, then series → bucket by type, then similars
-    ProbeService.get(workspaceID, agentID, probeID)
-        .then((probeRes) => {
-          state.probe = probeRes as Probe;
+  ProbeService.get(workspaceID, agentID, probeID)
+      .then(res => {
+        state.probe = res as Probe;
 
-          // Title from first target (agent ref vs literal)
-          const firstTarget = (state.probe?.targets?.[0]) || {} as any;
-          if (firstTarget.agentId && !firstTarget.target) {
-            return AgentService.get(workspaceID, firstTarget.agentId).then(targ => {
-              state.probeAgent = targ as Agent;
-              state.title = targ.name || `agent:${(targ as any).id}`;
-              return true;
-            }).catch(() => {
-              state.title = `${state.probe.type} #${state.probe.id}`;
-              return true;
-            });
-          } else if (firstTarget.target) {
-            const split = String(firstTarget.target).split(":");
-            state.title = split[0] || String(firstTarget.target);
-          } else {
-            state.title = `${state.probe.type} #${state.probe.id}`;
-          }
-          return true;
-        })
-        .then(() => {
+        ProbeService.list(workspaceID, agentID)
+            .then(res => {
+              state.probes = findProbesByInitialTarget(state.probe, res as Probe[])
 
-          // 3) Pull series for this probe from ClickHouse
-          const [from, to] = state.timeRange;
-          return ProbeDataService.byProbe(
-              workspaceID,
-              probeID,
-              { from, to, limit: 5000, asc: false }
-          ).then(rows => {
-            // Bucket rows by type
-            for (const d of rows) {
-              addProbeDataUnique(state.probeData, d);
-              const t = (d as any).type as ProbeType;
-              if (t === "PING") addProbeDataUnique(state.pingData, d);
-              if (t === "MTR") addProbeDataUnique(state.mtrData, d);
-              if (t === "RPERF" && !(state.probe as any).server) addProbeDataUnique(state.rperfData, d);
-              if (t === "TRAFFICSIM") addProbeDataUnique(state.trafficSimData, d);
-            }
-            return true;
-          });
-        })
-        .then(() => {
+              // Title from first target (agent ref vs literal)
+              const firstTarget = (state.probe?.targets?.[0]) || {} as any;
+              if (firstTarget.agentId && !firstTarget.target) {
+                return AgentService.get(workspaceID, firstTarget.agentId).then(targ => {
+                  state.probeAgent = targ as Agent;
+                  state.title = targ.name || `agent:${(targ as any).id}`;
+                }).catch(() => {
+                  state.title = `${state.probe.type} #${state.probe.id}`;
+                });
+              } else if (firstTarget.target) {
+                const split = String(firstTarget.target).split(":");
+                state.title = split[0] || String(firstTarget.target);
+              } else {
+                state.title = `${state.probe.type} #${state.probe.id}`;
+              }
 
-          // 4) Similar probes (optional)
-          return ProbeDataService.similar(workspaceID, probeID, { sameType: true, latest: true })
-              .then(sim => {
-                state.similarProbes = [
-                  ...((sim?.similar_by_target ?? []) as Probe[]),
-                  ...((sim?.similar_by_agent_id ?? []) as Probe[]),
-                ];
-                return true;
+              state.probes.forEach(p => {
+                  // 3) Pull series for this probe from ClickHouse (untouched)
+                  const [from, to] = state.timeRange;
+                  return ProbeDataService.byProbe(
+                      workspaceID,
+                      p.id,
+                      { from, to, limit: 5000, asc: false }
+                  ).then(rows => {
+                    for (const d of rows) {
+                      addProbeDataUnique(state.probeData, d);
+                      const t = (d as any).type as ProbeType;
+                      if (t === "PING") addProbeDataUnique(state.pingData, d);
+                      if (t === "MTR") addProbeDataUnique(state.mtrData, d);
+                      if (t === "RPERF" && !(state.probe as any).server) addProbeDataUnique(state.rperfData, d);
+                      if (t === "TRAFFICSIM") addProbeDataUnique(state.trafficSimData, d);
+                    }
+                    return true;
+                  });
+                })
               })
-              .catch(() => {
-                return true;
-              });
-        })
-        .then(() => {
-          state.ready = true;
-        })
-        .catch((e) => {
-          console.error(e);
-          state.ready = false;
-        })
-        .finally(() => {
-          state.loading = false;
-          console.log(state.pingData)
-        });
-}
+            }).then(() => {
+    state.ready = true;
+  })
+      .catch((e) => {
+        console.error(e);
+        state.ready = false;
+      })
+      .finally(() => {
+        state.loading = false;
+        console.log(state.pingData);
+      });
+  // load probe
 
+  // 2) Load probe → title, then series → bucket by typ
+}
 // ---------- Guards / helpers ----------
 function containsProbeType(type: ProbeType): boolean {
   switch(type) {
