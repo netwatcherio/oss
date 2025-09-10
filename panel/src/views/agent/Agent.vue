@@ -339,7 +339,7 @@ onMounted(() => {
 
         <div v-else-if="state.targetGroups.length > 0" class="probes-grid">
           <div v-for="g in state.targetGroups" :key="g.key" class="probe-card">
-            <router-link :to="`/probe/${g.probes[0]?.id || ''}`" class="probe-link">
+            <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/${g.probes[0]?.id || ''}`" class="probe-link">
               <div class="probe-icon">
                 <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
                 : g.kind === 'host' ? 'fa-solid fa-diagram-project'

@@ -395,7 +395,11 @@ watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
 <template>
   <div class="container-fluid">
     <Title
-        :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspace/${state.workspace.id}`}, {title: state.agent.name, link: `/agent/${state.agent.id}`}]"
+        :history="[
+        {title: 'workspaces', link: '/workspaces'},
+        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id}`},
+        {title: state.agent.name || 'Loading...', link: `/workspace/${state.workspace.id}/agent/${state.agent.id}`},
+      ]"
         :title="state.title"
         subtitle="information about this target">
       <div v-if="state.ready" class="d-flex gap-1">
