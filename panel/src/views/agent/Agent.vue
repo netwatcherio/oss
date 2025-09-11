@@ -73,10 +73,43 @@ function roundTo(value: number): number {
   return Math.round(value * 1000) / 1000
 }
 
+// Computed property for active probes count
+const activeProbesCount = computed(() => {
+  return state.activeProbes || 0;
+});
+
+// Computed property for total probes count
+const totalProbesCount = computed(() => {
+  return state.totalProbes || 0;
+});
+
+// Computed property for probe statistics
+const probeStats = computed(() => {
+  return {
+    active: state.activeProbes || 0,
+    total: state.totalProbes || 0,
+    percentage: state.totalProbes > 0
+        ? Math.round((state.activeProbes / state.totalProbes) * 100)
+        : 0,
+    targets: state.totalTargets || 0,
+    byType: state.totalsByType || {}
+  };
+});
+
+// Function to get active probes by type
+function getActiveProbesByType(type: string): number {
+  return state.totalsByType[type]?.enabled || 0;
+}
+
+// Function to get total probes by type
+function getTotalProbesByType(type: string): number {
+  return state.totalsByType[type]?.probes || 0;
+}
+
 function updateSystemData(info: SysInfoPayload): SystemData {
   let cpuCapacity: number = (info.CPUTimes?.idle || 0) + info.CPUTimes.system + info.CPUTimes.user;
-  let ramCapacity: number = info.memoryInfo.totalBytes;
-  let virtualCapacity: number = info.memoryInfo.virtualTotalBytes;
+  let ramCapacity: number = info.memoryInfo.total_bytes;
+  let virtualCapacity: number = info.memoryInfo.virtual_total_bytes;
   return {
     cpu: {
       idle: roundTo((info.CPUTimes?.idle || 0) / cpuCapacity),
@@ -84,14 +117,14 @@ function updateSystemData(info: SysInfoPayload): SystemData {
       user: roundTo((info.CPUTimes?.user || 0) / cpuCapacity),
     },
     ram: {
-      used: roundTo(info.memoryInfo.usedBytes / ramCapacity),
-      free: roundTo(info.memoryInfo.availableBytes / ramCapacity),
-      total: roundTo(info.memoryInfo.totalBytes / ramCapacity),
+      used: roundTo(info.memoryInfo.used_bytes / ramCapacity),
+      free: roundTo(info.memoryInfo.available_bytes / ramCapacity),
+      total: roundTo(info.memoryInfo.total_bytes / ramCapacity),
     },
     virtual: {
-      used: roundTo(info.memoryInfo.virtualUsedBytes / ramCapacity),
-      free: roundTo(info.memoryInfo.virtualFreeBytes / virtualCapacity),
-      total: roundTo(info.memoryInfo.virtualTotalBytes / virtualCapacity),
+      used: roundTo(info.memoryInfo.virtual_used_bytes / ramCapacity),
+      free: roundTo(info.memoryInfo.virtual_free_bytes / virtualCapacity),
+      total: roundTo(info.memoryInfo.virtual_total_bytes / virtualCapacity),
     }
   } as SystemData
 }
@@ -280,7 +313,9 @@ onMounted(() => {
         <div class="stat-content">
           <div class="stat-value">
             <span v-if="state.loading" class="skeleton-text">-</span>
-            <span v-else>todo</span>
+            <span v-else>
+  {{ activeProbesCount }}
+</span>
           </div>
           <div class="stat-label">Active Probes</div>
         </div>
@@ -292,7 +327,7 @@ onMounted(() => {
         <div class="stat-content">
           <div class="stat-value">
             <span v-if="state.loading" class="skeleton-text">--</span>
-            <span v-else>{{ since(state.systemInfo.hostInfo?.bootTime + "", false) }}</span>
+            <span v-else>{{ since(state.systemInfo.hostInfo?.boot_time + "", false) }}</span>
           </div>
           <div class="stat-label">Uptime</div>
         </div>
@@ -314,7 +349,9 @@ onMounted(() => {
             <i class="fa-solid fa-diagram-project"></i>
             Monitoring Probes
           </h5>
-          <span class="badge bg-primary" v-if="!state.loading">todo Active</span>
+          <span class="badge bg-primary" v-if="!state.loading">
+  {{ activeProbesCount }}/{{ totalProbesCount }} Active ({{ probeStats.percentage }}%)
+</span>
           <span class="badge bg-secondary" v-else>
             <i class="fa-solid fa-spinner fa-spin"></i> Loading
           </span>
@@ -586,14 +623,14 @@ onMounted(() => {
               <span v-if="state.loading" class="badge bg-secondary">
                 <i class="fa-solid fa-spinner fa-spin"></i> Loading
               </span>
-              <span v-else class="badge bg-secondary">{{ Object.keys(state.systemInfo.hostInfo?.MACs || {}).length }} interfaces</span>
+              <span v-else class="badge bg-secondary">{{ Object.keys(state.systemInfo.hostInfo?.mac || {}).length }} interfaces</span>
               <template v-slot:expanded>
                 <div class="mac-list">
                   <div v-if="state.loading" v-for="i in 2" :key="`mac-skeleton-${i}`" class="mac-item skeleton">
                     <div class="mac-address skeleton-text">--:--:--:--:--:--</div>
                     <div class="mac-vendor skeleton-text">--------------------------</div>
                   </div>
-                  <div v-else v-for="(mac, iface) in state.systemInfo.hostInfo?.MACs" :key="iface" class="mac-item">
+                  <div v-else v-for="(mac, iface) in state.systemInfo.hostInfo?.mac" :key="iface" class="mac-item">
                     <div class="mac-address">{{ mac }}</div>
                     <div class="mac-vendor">{{ getVendorFromMac(mac) }}</div>
                   </div>

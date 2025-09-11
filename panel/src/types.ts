@@ -354,15 +354,15 @@ export interface CPUTimes {
 
 export interface HostInfo {
     architecture: string;
-    bootTime: Date;
+    boot_time: Date;
     containerized?: boolean | null;
     hostname: string;
-    IPs?: string[];
-    kernelVersion: string;
-    MACs: string[];
+    ips?: string[];
+    kernel_version: string;
+    mac: string[];
     os: OSInfo;
     timezone: string;
-    timezoneOffsetSec: number;
+    timezone_offset_sec: number;
     uniqueID?: string;
 }
 
@@ -380,13 +380,13 @@ export interface OSInfo {
 }
 
 export interface HostMemoryInfo {
-    totalBytes: number;
-    usedBytes: number;
-    availableBytes: number;
-    freeBytes: number;
-    virtualTotalBytes: number;
-    virtualUsedBytes: number;
-    virtualFreeBytes: number;
+    total_bytes: number;
+    used_bytes: number;
+    available_bytes: number;
+    free_Bytes: number;
+    virtual_total_bytes: number;
+    virtual_used_bytes: number;
+    virtual_free_bytes: number;
     metrics?: Record<string, number>;
 }
 
