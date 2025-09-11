@@ -76,16 +76,9 @@ services:
     restart: unless-stopped
     networks: [netwatcher]
     # no host port mapping; Caddy (and other services) talk to it on the Docker network
-    environment:
-      DEBUG: ${NW_CONTROLLER__DEBUG:-true}
-      LISTEN: ${NW_CONTROLLER_LISTEN:-0.0.0.0:8080}
-      KEY: ${NW_GUARDIAN_KEY}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      # If your app also needs CH/PG URLs, add them like:
-      # CLICKHOUSE_URL: ${CLICKHOUSE_URL}
-      # POSTGRES_URL: ${POSTGRES_URL}
+    env_file:
+      - path: .env
+        required: true # default
     depends_on:
       postgres:
         condition: service_healthy
