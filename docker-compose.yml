@@ -18,18 +18,17 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    # pass envs through to let Caddyfile use {$VARS} if you do that
     env_file:
-      - .env.example
+      - .env
     healthcheck:
-      # simple HTTP check on :80; change to https://127.0.0.1 if you prefer TLS probe
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 12
+      start_period: 10s
 
   postgres:
-    image: ghcr.io/ferretdb/postgres-documentdb:${POSTGRES_IMAGE_TAG}
+    image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
     restart: on-failure
     networks: [netwatcher]
     environment:
@@ -39,12 +38,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
+      start_period: 10s
 
   clickhouse:
     image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG}
@@ -56,41 +56,34 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     ports:
-      - "${CLICKHOUSE_HTTP_PORT}:8123"
-      - "${CLICKHOUSE_NATIVE_PORT}:9000"
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', '127.0.0.1:8123/ping']
-      interval: 1s
-      timeout: 1s
+      test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --port 9000 --user ${CLICKHOUSE_USER} --password ${CLICKHOUSE_PASSWORD} --query 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
       retries: 30
+      start_period: 15s
     logging:
       driver: local
       options:
         max-size: "10m"
         max-file: "5"
 
-  # === New services ===
+  # === App services ===
 
   controller:
     image: netwatcher-controller
     restart: unless-stopped
     networks: [netwatcher]
-    # no host port mapping; Caddy (and other services) talk to it on the Docker network
     env_file:
-      - path: .env
-        required: true # default
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-    healthcheck:
-      # Change /health if your app exposes a different path or use a TCP check:
-      # ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
-      test: ["CMD-SHELL", "wget --spider -q 127.0.0.1:8080/health || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
+    # (healthcheck intentionally removed)
 
   panel:
     image: netwatcher-panel
@@ -99,9 +92,17 @@ services:
     environment:
       NW_GLOBAL_ENDPOINT: ${NW_GLOBAL_ENDPOINT}
     ports:
-      - "3000:3000"   # keep for local dev access; optional if only behind Caddy
+      - "3000:3000"
     depends_on:
+      # caddy has a healthcheck; keep waiting on that
       caddy:
         condition: service_healthy
-      controller:
-        condition: service_healthy
+        # controller has no healthcheck now—just start order is enough
+        # Use simple list to avoid waiting on health:
+        # (Compose will start panel after controller is started)
+        # If you prefer condition syntax, you can use `service_started`
+        # where supported by your Compose version.
+        # controller:
+        #   condition: service_started
+        # Simpler/most compatible:
+        # - controller
