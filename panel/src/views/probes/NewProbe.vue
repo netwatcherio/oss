@@ -13,6 +13,13 @@ import core from "@/core";
 import Title from "@/components/Title.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
+interface DnsConfig {
+  queryAll: boolean;
+  selectedRecordTypes: string[];
+  dnsServer: string;
+  dnssecValidation: boolean;
+}
+
 interface ProbeState {
   workspace: Workspace;
   ready: boolean;
@@ -32,6 +39,21 @@ interface ProbeState {
   errors: string[];
   hostInput: string;
   portInput: string;
+  dnsConfig: DnsConfig;
+}
+
+// Get probe description
+function getProbeDescription(probeType: string): string {
+  const descriptions: Record<string, string> = {
+    AGENT: "Monitor the health, connectivity, and performance of other agents in your network",
+    PING: "Test basic connectivity and measure round-trip time to a target",
+    MTR: "Combine traceroute and ping to diagnose network paths and identify packet loss",
+    TRAFFICSIM: "Generate simulated UDP traffic to test network throughput and performance",
+    DNS: "Monitor DNS resolution performance and availability",
+    SPEEDTEST: "Measure bandwidth performance between locations",
+    RPERF: "Advanced UDP performance testing with detailed metrics"
+  };
+  return descriptions[probeType] || 'No description available';
 }
 
 const state = reactive<ProbeState>({
@@ -41,7 +63,21 @@ const state = reactive<ProbeState>({
   agent: {} as Agent,
   selected: {} as SelectOption,
   options: [],
-  probe: {} as ProbeCreateInput,
+  probe: {
+    workspace_id: 0,
+    agent_id: 0,
+    type: '',
+    enabled: true,
+    interval_sec: 300,
+    timeout_sec: 30,
+    count: 10,
+    duration_sec: 60,
+    labels: {},
+    metadata: {},
+    server: false,
+    targets: [],
+    agent_targets: []
+  } as ProbeCreateInput,
   agents: [],
   customServer: false,
   target: {} as Target,
@@ -51,290 +87,481 @@ const state = reactive<ProbeState>({
   existingProbes: [],
   duplicateWarning: "",
   errors: [],
-  hostInput: "0.0.0.0",
-  portInput: "5000"
+  hostInput: "",
+  portInput: "5000",
+  dnsConfig: {
+    queryAll: false,
+    selectedRecordTypes: ['A', 'AAAA'],
+    dnsServer: "",
+    dnssecValidation: false
+  }
 });
 
 const router = core.router();
 
+// DNS Record Types
+const dnsRecordTypes = [
+  { value: 'A', description: 'IPv4 Address' },
+  { value: 'AAAA', description: 'IPv6 Address' },
+  { value: 'CNAME', description: 'Canonical Name' },
+  { value: 'MX', description: 'Mail Exchange' },
+  { value: 'TXT', description: 'Text Records' },
+  { value: 'NS', description: 'Name Servers' },
+  { value: 'SOA', description: 'Start of Authority' },
+  { value: 'PTR', description: 'Pointer (Reverse DNS)' },
+  { value: 'SRV', description: 'Service Records' },
+  { value: 'CAA', description: 'Certificate Authority' }
+];
+
+// Handle DNS query all change
+function handleDnsQueryAllChange() {
+  if (state.dnsConfig.queryAll) {
+    // When querying all, clear specific selections
+    state.dnsConfig.selectedRecordTypes = [];
+  } else {
+    // When not querying all, default to A and AAAA
+    state.dnsConfig.selectedRecordTypes = ['A', 'AAAA'];
+  }
+}
+
 // Computed properties
 const showTargetAgentOption = computed(() => {
   const validTypes = ['MTR', 'PING', 'RPERF', 'TRAFFICSIM', 'AGENT'];
-  return state.selected.agentAvailable
+  return validTypes.includes(state.selected.value || '');
 });
 
-const showTargetInput = computed(() => {
-  return !state.targetAgent;
+const showCustomTargetInput = computed(() => {
+  return !state.targetAgent || !showTargetAgentOption.value;
+});
+
+const availableAgentsForSelection = computed(() => {
+  // Filter out the current agent from the list
+  return state.agents.filter(agent => agent.id !== state.agent.id);
 });
 
 const isValidProbe = computed(() => {
   if (!state.selected.value) return false;
 
-  switch (state.selected.value){
+  // Common validation
+  if (state.probe.interval_sec <= 0) return false;
+
+  switch (state.selected.value) {
+    case "AGENT":
+      // For agent monitoring, we need a target agent selected
+      return state.targetAgentSelected !== null;
+
     case "MTR":
-      if (state.hostInput != "" && state.probe.interval_sec > 0){
-        // todo more complex check on backend?
-        return true
-      }
     case "PING":
-      if (state.hostInput != "" && state.probe.interval_sec > 0){
-        // todo more complex check on backend?
-        return true
+      // Need either a target agent or a custom host
+      if (state.targetAgent && showTargetAgentOption.value) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput !== "";
       }
+
+    case "TRAFFICSIM":
+      // Server mode doesn't need a target
+      if (state.probe.server) return true;
+      // Client mode needs a target
+      if (state.targetAgent) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput !== "";
+      }
+
+    case "DNS":
+      // DNS needs a domain to resolve
+      const hasValidDomain = state.hostInput !== "" && state.hostInput.includes('.');
+      const hasValidRecordTypes = state.dnsConfig.queryAll ||
+          (state.dnsConfig.selectedRecordTypes && state.dnsConfig.selectedRecordTypes.length > 0);
+      return hasValidDomain && hasValidRecordTypes;
+
+    case "RPERF":
+    case "SPEEDTEST":
+      // These might need special handling
+      if (state.targetAgent && showTargetAgentOption.value) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput !== "";
+      }
+
     default:
-      console.log("poo")
-      return false
+      return false;
   }
-
-
-
-  return false;
 });
 
-// Probe type descriptions
-const probeDescriptions = {
-  AGENT: "Monitor the health, connectivity, and performance of other agents in your network",
-  MTR: "Combine traceroute and ping to diagnose network paths and identify packet loss",
-  PING: "Test basic connectivity and measure round-trip time to a target",
-  TRAFFICSIM: "Generate simulated UDP traffic to test network throughput and performance",
-  SPEEDTEST: "Measure bandwidth performance between locations",
-  RPERF: "Advanced UDP performance testing with detailed metrics"
-};
+const probeTypeConfig = computed(() => {
+  const config: Record<string, any> = {
+    AGENT: {
+      description: "Monitor the health, connectivity, and performance of other agents in your network",
+      icon: "fa-heartbeat",
+      recommended: true,
+      requiresTargetAgent: true,
+      supportsCustomTarget: false,
+      defaultInterval: 60,
+      defaultTimeout: 30,
+      defaultCount: 1
+    },
+    PING: {
+      description: "Test basic connectivity and measure round-trip time to a target",
+      icon: "fa-signal",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      defaultInterval: 300,
+      defaultTimeout: 10,
+      defaultCount: 5
+    },
+    MTR: {
+      description: "Combine traceroute and ping to diagnose network paths and identify packet loss",
+      icon: "fa-route",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      defaultInterval: 300,
+      defaultTimeout: 30,
+      defaultCount: 10
+    },
+    TRAFFICSIM: {
+      description: "Generate simulated UDP traffic to test network throughput and performance",
+      icon: "fa-stream",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      supportsServer: true,
+      defaultInterval: 0,
+      defaultTimeout: 0,
+      defaultDuration: 60
+    },
+    DNS: {
+      description: "Monitor DNS resolution performance and availability",
+      icon: "fa-map-signs",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      requiresHostOnly: true,
+      defaultInterval: 300,
+      defaultTimeout: 10,
+      defaultCount: 1
+    },
+    SPEEDTEST: {
+      description: "Measure bandwidth performance between locations",
+      icon: "fa-tachometer-alt",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      defaultInterval: 3600,
+      defaultTimeout: 60,
+      defaultCount: 1
+    },
+    RPERF: {
+      description: "Advanced UDP performance testing with detailed metrics",
+      icon: "fa-chart-line",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      defaultInterval: 600,
+      defaultTimeout: 30,
+      defaultDuration: 30
+    }
+  };
 
-async function submit() {
-  state.errors = [];
+  return config[state.selected.value] || {};
+});
 
-  if (!isValidProbe.value) {
-    state.errors.push("Please fill in all required fields");
-    return;
+// Initialize probe type options
+function initializeOptions() {
+  state.options = [
+    {
+      value: "AGENT",
+      text: "Agent Monitoring",
+      icon: "fa-heartbeat",
+      recommended: true,
+      agentAvailable: true,
+      disabled: false
+    },
+    {
+      value: "PING",
+      text: "PING",
+      icon: "fa-signal",
+      agentAvailable: true,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "MTR",
+      text: "MTR (My Traceroute)",
+      icon: "fa-route",
+      agentAvailable: true,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "TRAFFICSIM",
+      text: "Traffic Simulator",
+      icon: "fa-stream",
+      agentAvailable: true,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "DNS",
+      text: "DNS Monitor",
+      icon: "fa-map-signs",
+      agentAvailable: false,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "SPEEDTEST",
+      text: "Speed Test",
+      icon: "fa-tachometer-alt",
+      agentAvailable: true,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "RPERF",
+      text: "RPERF (UDP Performance)",
+      icon: "fa-chart-line",
+      agentAvailable: true,
+      disabled: false,
+      recommended: false
+    }
+  ];
+}
+
+// Apply default configuration when probe type changes
+function applyProbeDefaults() {
+  const config = probeTypeConfig.value;
+  if (!config) return;
+
+  if (config.defaultInterval !== undefined) {
+    state.probe.interval_sec = config.defaultInterval;
+  }
+  if (config.defaultTimeout !== undefined) {
+    state.probe.timeout_sec = config.defaultTimeout;
+  }
+  if (config.defaultCount !== undefined) {
+    state.probe.count = config.defaultCount;
+  }
+  if (config.defaultDuration !== undefined) {
+    state.probe.duration_sec = config.defaultDuration;
   }
 
-  let newProbe = state.probe
-  newProbe.agent_id = state.agent.id
-  newProbe.workspace_id = state.workspace.id
-  newProbe.type = state.selected.value
+  // Set target mode based on probe type
+  if (config.requiresTargetAgent) {
+    state.targetAgent = true;
+  } else if (config.requiresHostOnly) {
+    state.targetAgent = false;
+  }
+}
 
-  newProbe.targets = [state.hostInput]
+// Submit probe creation
+async function submit() {
+  state.errors = [];
+  state.loading = true;
 
-  ProbeService.create(state.workspace.id, state.agent.id, newProbe).then(res => {
-    console.log(res)
-    state.loading = true;
-
-    router.push(`/workspace/${state.workspace.id}/agent/${state.agent.id}`)
-  })
-
-  /*try {
-    // Build probe targets
-    if (state.targetGroup && state.agentGroupSelected.length > 0) {
-      // Group targets
-      state.probeConfig.target = state.agentGroupSelected.map(
-          group => ({ group: group.id } as ProbeTarget)
-      );
-    } else if (state.targetAgent && state.targetAgentSelected) {
-      // Agent target
-      state.probeConfig.target = [{ agent: state.targetAgentSelected.id } as ProbeTarget];
-    } else if (!state.probeConfig.server) {
-      // Custom target
-      state.probeConfig.target = [state.probeTarget];
+  try {
+    if (!isValidProbe.value) {
+      state.errors.push("Please fill in all required fields");
+      return;
     }
 
-    // Special handling for TRAFFICSIM client mode
-    if (state.selected.value === 'TRAFFICSIM' && state.targetAgent && state.probeConfig.target.length >= 1) {
-      state.probeConfig.server = false;
+    // Prepare the probe for submission
+    const newProbe: ProbeCreateInput = {
+      ...state.probe,
+      workspace_id: state.workspace.id,
+      agent_id: state.agent.id,
+      type: state.selected.value as ProbeType
+    };
+
+    // Set targets based on selection mode
+    if (state.targetAgent && state.targetAgentSelected && showTargetAgentOption.value) {
+      // Use agent targets for agent-based monitoring
+      newProbe.agent_targets = [state.targetAgentSelected.id];
+      newProbe.targets = [];
+    } else if (!state.targetAgent || !showTargetAgentOption.value) {
+      // Use string targets for custom hosts/IPs
+      if (state.probe.server && state.selected.value === 'TRAFFICSIM') {
+        // Server mode may not need targets
+        newProbe.targets = state.hostInput ? [`${state.hostInput}:${state.portInput}`] : [];
+      } else {
+        // Regular target
+        const target = state.hostInput.includes(':') ? state.hostInput : state.hostInput;
+        newProbe.targets = [target];
+      }
+      newProbe.agent_targets = [];
     }
 
-    // Set probe configuration
-    state.probe.config = state.probeConfig;
-    state.probe.type = state.selected.value as ProbeType;
+    // Handle special cases for TRAFFICSIM
+    if (state.selected.value === 'TRAFFICSIM' && state.probe.server) {
+      newProbe.server = true;
+      // Server mode might need listening address
+      if (state.hostInput) {
+        newProbe.metadata = {
+          ...newProbe.metadata,
+          listenAddress: `${state.hostInput}:${state.portInput}`
+        };
+      }
+    }
 
-    // Create the probe
-    await probeService.createProbe(id, state.probe);
-    router.push(`/agent/${id}`);
+    // Handle DNS configuration
+    if (state.selected.value === 'DNS') {
+      // Store DNS-specific configuration in metadata
+      const dnsMetadata: any = {
+        queryAll: state.dnsConfig.queryAll,
+        dnssecValidation: state.dnsConfig.dnssecValidation
+      };
+
+      if (!state.dnsConfig.queryAll && state.dnsConfig.selectedRecordTypes.length > 0) {
+        dnsMetadata.recordTypes = state.dnsConfig.selectedRecordTypes;
+      }
+
+      if (state.dnsConfig.dnsServer) {
+        dnsMetadata.dnsServer = state.dnsConfig.dnsServer;
+      }
+
+      newProbe.metadata = {
+        ...newProbe.metadata,
+        ...dnsMetadata
+      };
+
+      // DNS probes always use the domain as the target
+      newProbe.targets = [state.hostInput];
+      newProbe.agent_targets = [];
+    }
+
+    console.log('Creating probe:', newProbe);
+
+    const response = await ProbeService.create(
+        state.workspace.id,
+        state.agent.id,
+        newProbe
+    );
+
+    console.log('Probe created successfully:', response);
+
+    // Navigate back to agent page
+    await router.push(`/workspace/${state.workspace.id}/agent/${state.agent.id}`);
 
   } catch (error) {
     console.error("Error creating probe:", error);
     state.errors.push("Failed to create probe. Please try again.");
   } finally {
     state.loading = false;
-  }*/
+  }
 }
-
-
-// Initialize component
-onMounted(async () => {
-  let agentID = router.currentRoute.value.params["aID"] as string
-  let workspaceID = router.currentRoute.value.params["wID"] as string
-  if (!agentID || !workspaceID) return
-
-  WorkspaceService.get(workspaceID).then(res => {
-    state.workspace = res as Workspace
-  })
-
-  AgentService.get(workspaceID, agentID).then(res => {
-    state.agent = res as Agent
-  })
-
-  try {
-    // Load existing probes for duplicate checking todo
-    /*const probesRes = await ProbeService.getAgentProbes(agentID);
-    state.existingProbes = probesRes.data as Probe[];*/
-
-    // Load all agents for the workspace
-    /*const agentsRes = await agentService.getWorkspaceAgents(state.agent.workspaceId.toString());
-    if (agentsRes.data.length > 0) {
-      const agents = agentsRes.data as Agent[];
-      state.agents = agents.filter(a => a.id.toString() !== agentID.toString());
-      state.ready = true;
-    }*/
-
-    // Initialize probe type options
-
-  } catch (error) {
-    console.error("Error loading data:", error);
-    state.errors.push("failed to load other agent selections");
-  }
-
-  initializeOptions();
-});
-
-// Initialize probe type options with AGENT as preferred
-function initializeOptions() {
-  state.options = [
-    //{ value: "AGENT", text: "Agent Monitoring", icon: "fa-heartbeat", recommended: true, agentAvailable: false},
-    { value: "PING", text: "PING (Packet Internet Groper)", icon: "fa-signal", agentAvailable: false},
-    { value: "MTR", text: "MTR (My Traceroute)", icon: "fa-route", agentAvailable: false},
-    //{ value: "TRAFFICSIM", text: "Simulated Traffic (UDP)", icon: "fa-stream",agentAvailable: false},
-    { value: "DNS", text: "DNS", icon: "fa-map-signs", agentAvailable: false},
-    // { value: "RPERF", text: "RPERF (UDP)", icon: "fa-chart-line" }
-  ];
-}
-
-// Watch for probe type changes
-watch(() => state.selected.value, async (newType) => {
-  /*if (newType === 'TRAFFICSIM') {
-    await getValidAgents('TRAFFICSIM');
-  } else if (newType === 'AGENT') {
-    // For AGENT type, all other agents are valid targets
-    state.validAgents = state.agents;
-  }
-
-  // Reset target selection when changing probe type
-  state.targetAgentSelected = null;
-  state.duplicateWarning = "";
-
-  // Check for duplicates when type changes
-  if (state.targetAgent && state.targetAgentSelected) {
-    checkForDuplicates();
-  }*/
-});
-
-// Watch for host/port changes to update target
-/*watch([() => state.hostInput, () => state.portInput], () => {
-  if (state.hostInput && state.portInput) {
-    state.probeTarget.target = `${state.hostInput}:${state.portInput}`;
-  }
-});*/
-
-// Watch for target changes to check duplicates
-watch([
-  () => state.targetAgentSelected,
-  () => isValidProbe, // todo is this needed?
-/*  () => state.probeTarget.target,
-  () => state.probeConfig.server*/
-], () => {
- /* checkForDuplicates();*/
-});
 
 // Check for duplicate probes
-/*function checkForDuplicates() {
+async function checkForDuplicates() {
   state.duplicateWarning = "";
 
   if (!state.selected.value) return;
 
-  const probeType = state.selected.value as ProbeType;
+  try {
+    // Get existing probes for this agent
+    const response = await ProbeService.list(state.workspace.id, state.agent.id);
+    const existingProbes = response as Probe[];
 
-  for (const existingProbe of state.existingProbes) {
-    if (existingProbe.type !== probeType) continue;
+    // Check for duplicates based on type and target
+    for (const probe of existingProbes) {
+      if (probe.type !== state.selected.value) continue;
 
-    // Check server probes
-    if (state.server && existingProbe.server) {
-      if (probeType === 'TRAFFICSIM' || probeType === 'RPERF') {
-        state.duplicateWarning = `A ${probeType} server probe already exists for this agent`;
+      // Check server mode duplicates
+      if (state.probe.server && probe.server) {
+        state.duplicateWarning = `A ${state.selected.value} server probe already exists for this agent`;
         return;
       }
-    }
 
-    // Check target-based probes
-    if (state.targetAgent && state.targetAgentSelected) {
-      const existingTargets = existingProbe.config.target || [];
-      for (const target of existingTargets) {
-        if (target.agent === state.targetAgentSelected.id) {
-          state.duplicateWarning = `A ${probeType} probe already exists for target agent: ${state.targetAgentSelected.name}`;
+      // Check target duplicates
+      if (state.targetAgent && state.targetAgentSelected) {
+        // Check if any existing probe targets this agent
+        const hasTargetAgent = probe.targets?.some(
+            t => t.agentId === state.targetAgentSelected?.id
+        );
+        if (hasTargetAgent) {
+          state.duplicateWarning = `A ${state.selected.value} probe already exists for target agent: ${state.targetAgentSelected.name}`;
+          return;
+        }
+      } else if (state.hostInput) {
+        // Check if any existing probe targets this host
+        const targetToCheck = state.hostInput;
+        const hasTargetHost = probe.targets?.some(
+            t => t.target === targetToCheck || t.target === `${targetToCheck}:${state.portInput}`
+        );
+        if (hasTargetHost) {
+          state.duplicateWarning = `A ${state.selected.value} probe already exists for target: ${targetToCheck}`;
           return;
         }
       }
     }
-
-    // Check custom target probes
-    if (!state.targetAgent && !state.targetGroup && state.probeTarget.target) {
-      const existingTargets = existingProbe.config.target || [];
-      for (const target of existingTargets) {
-        if (target.target === state.probeTarget.target) {
-          state.duplicateWarning = `A ${probeType} probe already exists for target: ${state.probeTarget.target}`;
-          return;
-        }
-      }
-    }
+  } catch (error) {
+    console.error("Error checking for duplicates:", error);
   }
-}*/
+}
 
-// Get valid agents for specific probe types
-/*
-async function getValidAgents(probeType: ProbeType) {
-  const validAgents: Agent[] = [];
-  state.loading = true;
+// Watch for probe type changes
+watch(() => state.selected.value, async (newType) => {
+  if (!newType) return;
 
-  console.log(`Getting valid agents for probe type: ${probeType}...`);
+  // Reset form state
+  state.targetAgentSelected = null;
+  state.hostInput = "";
+  state.portInput = "5000";
+  state.duplicateWarning = "";
+  state.probe.server = false;
+
+  // Reset DNS configuration
+  state.dnsConfig = {
+    queryAll: false,
+    selectedRecordTypes: ['A', 'AAAA'],
+    dnsServer: "",
+    dnssecValidation: false
+  };
+
+  // Apply defaults for the new probe type
+  applyProbeDefaults();
+
+  // Check for duplicates
+  await checkForDuplicates();
+});
+
+// Watch for target changes to check duplicates
+watch([
+  () => state.targetAgentSelected,
+  () => state.hostInput,
+  () => state.probe.server
+], () => {
+  checkForDuplicates();
+});
+
+// Initialize component
+onMounted(async () => {
+  const agentID = router.currentRoute.value.params["aID"] as string;
+  const workspaceID = router.currentRoute.value.params["wID"] as string;
+
+  if (!agentID || !workspaceID) {
+    state.errors.push("Missing agent or workspace ID");
+    return;
+  }
 
   try {
-    for (const agent of state.agents) {
-      if (agent.id === state.agent.id) continue;
+    // Load workspace
+    const workspaceResponse = await WorkspaceService.get(workspaceID);
+    state.workspace = workspaceResponse as Workspace;
 
-      try {
-        const res = await probeService.getAgentProbes(agent.id.toString());
-        const agentProbes = res.data as Probe[];
+    // Load agent
+    const agentResponse = await AgentService.get(workspaceID, agentID);
+    state.agent = agentResponse as Agent;
 
-        // For TRAFFICSIM, only agents with server enabled are valid
-        if (probeType === "TRAFFICSIM") {
-          const hasTrafficSimServer = agentProbes.some(
-              probe => probe.type === "TRAFFICSIM" && probe.config.server
-          );
-          if (hasTrafficSimServer) {
-            validAgents.push(agent);
-          }
-        }
-      } catch (error) {
-        console.error(`Error fetching probes for agent ${agent.id}:`, error);
-      }
-    }
-  } finally {
-    state.loading = false;
+    // Load all agents for target selection
+    const agentsResponse = await AgentService.list(workspaceID);
+    state.agents = agentsResponse.data as Agent[];
+
+    // Initialize probe options
+    initializeOptions();
+
+    state.ready = true;
+
+  } catch (error) {
+    console.error("Error loading data:", error);
+    state.errors.push("Failed to load agent or workspace data");
   }
-
-  state.validAgents = validAgents;
-  console.log(`Found ${validAgents.length} valid agents for ${probeType}`);
-}
-*/
-
-// Create probe
-// Helper function to get available agents based on probe type
-const availableAgentsForSelection = computed(() => {
-  if (state.selected.value === 'TRAFFICSIM') {
-    return state.validAgents;
-  } else if (state.selected.value === 'AGENT') {
-    return state.agents;
-  }
-  return state.agents;
 });
 </script>
 
@@ -360,6 +587,7 @@ const availableAgentsForSelection = computed(() => {
               <div v-for="(error, index) in state.errors" :key="index">{{ error }}</div>
             </div>
           </div>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
 
         <!-- Duplicate Warning -->
@@ -368,6 +596,7 @@ const availableAgentsForSelection = computed(() => {
             <i class="fas fa-exclamation-triangle me-2"></i>
             <span>{{ state.duplicateWarning }}</span>
           </div>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
 
         <!-- Probe Type Selection Card -->
@@ -378,16 +607,17 @@ const availableAgentsForSelection = computed(() => {
           <div class="card-body">
             <div class="row g-3">
               <div
-                v-for="option in state.options"
-                :key="option.value"
-                class="col-lg-6 col-xl-4">
+                  v-for="option in state.options"
+                  :key="option.value"
+                  class="col-lg-6 col-xl-4">
                 <div
-                  class="probe-type-card"
-                  :class="{
+                    class="probe-type-card"
+                    :class="{
                     'selected': state.selected.value === option.value,
-                    'recommended': option.recommended
+                    'recommended': option.recommended,
+                    'disabled': option.disabled
                   }"
-                  @click="state.selected = option">
+                    @click="!option.disabled && (state.selected = option)">
                   <div class="probe-type-header">
                     <div class="d-flex align-items-center justify-content-between">
                       <div class="d-flex align-items-center">
@@ -398,7 +628,7 @@ const availableAgentsForSelection = computed(() => {
                     </div>
                   </div>
                   <p class="probe-description mb-0">
-                    {{ probeDescriptions[option.value] || 'No description available' }}
+                    {{ getProbeDescription(option.value) }}
                   </p>
                   <div class="selection-indicator">
                     <i class="fas fa-check-circle"></i>
@@ -422,10 +652,35 @@ const availableAgentsForSelection = computed(() => {
             <div class="configuration-section">
               <h6 class="section-title">Target Configuration</h6>
 
-              <!-- Target Mode Toggle (if applicable) -->
+              <!-- Target Mode Toggle -->
+              <div v-if="showTargetAgentOption && probeTypeConfig.supportsCustomTarget" class="mb-4">
+                <div class="btn-group w-100" role="group">
+                  <input
+                      type="radio"
+                      class="btn-check"
+                      name="targetMode"
+                      id="targetModeAgent"
+                      :checked="state.targetAgent"
+                      @change="state.targetAgent = true">
+                  <label class="btn btn-outline-primary" for="targetModeAgent">
+                    <i class="fas fa-server me-2"></i>Target Agent
+                  </label>
+
+                  <input
+                      type="radio"
+                      class="btn-check"
+                      name="targetMode"
+                      id="targetModeCustom"
+                      :checked="!state.targetAgent"
+                      @change="state.targetAgent = false">
+                  <label class="btn btn-outline-primary" for="targetModeCustom">
+                    <i class="fas fa-globe me-2"></i>Custom Target
+                  </label>
+                </div>
+              </div>
 
               <!-- Agent Selection -->
-              <div v-if="state.selected.agentAvailable" class="mb-4">
+              <div v-if="state.targetAgent && showTargetAgentOption" class="mb-4">
                 <label class="form-label fw-semibold" for="targetAgent">
                   <i class="fas fa-server me-2"></i>Target Agent
                 </label>
@@ -433,7 +688,7 @@ const availableAgentsForSelection = computed(() => {
                     id="targetAgent"
                     v-model="state.targetAgentSelected"
                     class="form-select form-select-lg"
-                    :disabled="state.loading">
+                    :disabled="state.loading || availableAgentsForSelection.length === 0">
                   <option :value="null" disabled>Select an agent</option>
                   <option
                       v-for="agent in availableAgentsForSelection"
@@ -443,9 +698,106 @@ const availableAgentsForSelection = computed(() => {
                     <span v-if="agent.location">({{ agent.location }})</span>
                   </option>
                 </select>
-                <small v-if="state.selected.value === 'TRAFFICSIM' && state.validAgents.length === 0" class="text-warning">
-                  <i class="fas fa-info-circle me-1"></i>No agents with TrafficSim server enabled found
+                <small v-if="availableAgentsForSelection.length === 0" class="text-warning">
+                  <i class="fas fa-info-circle me-1"></i>No other agents available in this workspace
                 </small>
+              </div>
+
+              <!-- Custom Target Input for PING/MTR -->
+              <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR') && showCustomTargetInput" class="mb-4">
+                <label class="form-label fw-semibold" for="pingTarget">
+                  <i class="fas fa-bullseye me-2"></i>Target Address
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                  <input
+                      id="pingTarget"
+                      v-model="state.hostInput"
+                      class="form-control"
+                      type="text"
+                      placeholder="1.1.1.1 or google.com">
+                </div>
+                <small class="text-muted">Enter an IP address or domain name</small>
+              </div>
+
+              <!-- DNS Configuration -->
+              <div v-if="state.selected.value === 'DNS'" class="mb-4">
+                <label class="form-label fw-semibold" for="dnsTarget">
+                  <i class="fas fa-globe me-2"></i>Domain to Monitor
+                </label>
+                <div class="input-group mb-3">
+                  <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                  <input
+                      id="dnsTarget"
+                      v-model="state.hostInput"
+                      class="form-control"
+                      type="text"
+                      placeholder="example.com">
+                </div>
+
+                <!-- DNS Record Type Selection -->
+                <label class="form-label fw-semibold">
+                  <i class="fas fa-list me-2"></i>DNS Record Types
+                </label>
+                <div class="dns-record-types mb-3">
+                  <div class="form-check form-switch mb-2">
+                    <input
+                        id="dnsRecordAll"
+                        v-model="state.dnsConfig.queryAll"
+                        class="form-check-input"
+                        type="checkbox"
+                        @change="handleDnsQueryAllChange">
+                    <label class="form-check-label" for="dnsRecordAll">
+                      Query All Record Types
+                      <small class="text-muted d-block">Monitor all DNS record types for comprehensive coverage</small>
+                    </label>
+                  </div>
+
+                  <div v-if="!state.dnsConfig.queryAll" class="dns-record-grid">
+                    <div v-for="recordType in dnsRecordTypes" :key="recordType.value" class="form-check">
+                      <input
+                          :id="`dnsRecord${recordType.value}`"
+                          v-model="state.dnsConfig.selectedRecordTypes"
+                          class="form-check-input"
+                          type="checkbox"
+                          :value="recordType.value">
+                      <label :for="`dnsRecord${recordType.value}`" class="form-check-label">
+                        <span class="record-type-name">{{ recordType.value }}</span>
+                        <small class="text-muted">{{ recordType.description }}</small>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- DNS Server Configuration -->
+                <label class="form-label fw-semibold" for="dnsServer">
+                  <i class="fas fa-server me-2"></i>DNS Server (Optional)
+                </label>
+                <div class="input-group mb-2">
+                  <span class="input-group-text"><i class="fas fa-server"></i></span>
+                  <input
+                      id="dnsServer"
+                      v-model="state.dnsConfig.dnsServer"
+                      class="form-control"
+                      type="text"
+                      placeholder="8.8.8.8 or 1.1.1.1">
+                </div>
+                <small class="text-muted">Leave empty to use system default DNS server</small>
+
+                <!-- Advanced DNS Options -->
+                <div class="mt-3">
+                  <div class="form-check">
+                    <input
+                        id="dnssecValidation"
+                        v-model="state.dnsConfig.dnssecValidation"
+                        class="form-check-input"
+                        type="checkbox">
+                    <label class="form-check-label" for="dnssecValidation">
+                      Enable DNSSEC Validation
+                      <small class="text-muted d-block">Verify DNS responses are authenticated</small>
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <!-- AGENT Probe Specific Info -->
@@ -463,10 +815,9 @@ const availableAgentsForSelection = computed(() => {
                   <div class="form-check form-switch">
                     <input
                         id="trafficSimServer"
-                        v-model="state.probeConfig.server"
+                        v-model="state.probe.server"
                         class="form-check-input"
-                        type="checkbox"
-                        :disabled="state.existingProbes.some(p => p.type === 'TRAFFICSIM' && p.config.server)">
+                        type="checkbox">
                     <label class="form-check-label" for="trafficSimServer">
                       Enable Server Mode
                       <small class="text-muted d-block">Run as a traffic receiver (only one server per agent allowed)</small>
@@ -474,7 +825,8 @@ const availableAgentsForSelection = computed(() => {
                   </div>
                 </div>
 
-                <div v-if="state.probeConfig.server && showTargetInput" class="mb-4">
+                <!-- Server Listening Configuration -->
+                <div v-if="state.probe.server" class="mt-3">
                   <label class="form-label fw-semibold">
                     <i class="fas fa-network-wired me-2"></i>Server Listening Configuration
                   </label>
@@ -516,62 +868,105 @@ const availableAgentsForSelection = computed(() => {
                 </div>
               </div>
 
-              <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR'
-              || state.selected.value === 'DNS') && !state.selected.agentAvailable" class="mb-4">
-                <label class="form-label fw-semibold" for="pingTarget">
-                  <i class="fas fa-bullseye me-2"></i>Target Address
-                </label>
-                <div class="input-group">
-                  <span class="input-group-text"><i class="fas fa-globe"></i></span>
-                  <input
-                      id="pingTarget"
-                      v-model="state.hostInput"
-                      class="form-control"
-                      type="text"
-                      placeholder="1.1.1.1 or google.com">
-                </div>
-                <small class="text-muted">Enter an IP address or domain name</small>
-              </div>
+              <!-- Probe Timing Configuration -->
+              <div class="configuration-section">
+                <h6 class="section-title">Probe Settings</h6>
 
-              <!-- MTR Options -->
-              <div v-if="state.selected.value === 'MTR' || state.selected.value === 'PING'">
+                <!-- Interval -->
                 <div class="mb-4">
-                  <label class="form-label fw-semibold" for="mtrInterval">
-                    <i class="fas fa-clock me-2"></i>{{state.selected.value}} Interval
+                  <label class="form-label fw-semibold" for="probeInterval">
+                    <i class="fas fa-clock me-2"></i>Probe Interval
                   </label>
                   <div class="input-group">
                     <input
-                        id="mtrInterval"
+                        id="probeInterval"
                         v-model.number="state.probe.interval_sec"
                         class="form-control"
                         type="number"
-                        min="60"
-                        max="900">
+                        min="10"
+                        max="3600">
                     <span class="input-group-text">seconds</span>
                   </div>
-                  <small class="text-muted">How often to run the probe (recommended: 300 seconds = 5 minutes) </small>
+                  <small class="text-muted">
+                    How often to run the probe (recommended: {{ probeTypeConfig.defaultInterval }} seconds)
+                  </small>
                 </div>
-              </div>
 
-              <div v-if="state.selected.value === 'MTR'">
-                <div class="mb-4">
-                  <label class="form-label fw-semibold" for="mtrCount">
-                    <i class="fas fa-clock me-2"></i>Packet Count
+                <!-- Count (for PING/MTR) -->
+                <div v-if="['PING', 'MTR'].includes(state.selected.value)" class="mb-4">
+                  <label class="form-label fw-semibold" for="probeCount">
+                    <i class="fas fa-hashtag me-2"></i>Packet Count
                   </label>
                   <div class="input-group">
                     <input
-                        id="mtrCount"
-                        v-model.number="state.probe.interval_sec"
+                        id="probeCount"
+                        v-model.number="state.probe.count"
+                        class="form-control"
+                        type="number"
+                        min="1"
+                        max="100">
+                    <span class="input-group-text">packets</span>
+                  </div>
+                  <small class="text-muted">
+                    Number of packets to send per probe run (recommended: {{ probeTypeConfig.defaultCount }})
+                  </small>
+                </div>
+
+                <!-- Duration (for TRAFFICSIM/RPERF) -->
+                <div v-if="['TRAFFICSIM', 'RPERF'].includes(state.selected.value)" class="mb-4">
+                  <label class="form-label fw-semibold" for="probeDuration">
+                    <i class="fas fa-stopwatch me-2"></i>Test Duration
+                  </label>
+                  <div class="input-group">
+                    <input
+                        id="probeDuration"
+                        v-model.number="state.probe.duration_sec"
+                        class="form-control"
+                        type="number"
+                        min="10"
+                        max="300">
+                    <span class="input-group-text">seconds</span>
+                  </div>
+                  <small class="text-muted">
+                    How long to run each test (recommended: {{ probeTypeConfig.defaultDuration }} seconds)
+                  </small>
+                </div>
+
+                <!-- Timeout -->
+                <div class="mb-4">
+                  <label class="form-label fw-semibold" for="probeTimeout">
+                    <i class="fas fa-hourglass-half me-2"></i>Timeout
+                  </label>
+                  <div class="input-group">
+                    <input
+                        id="probeTimeout"
+                        v-model.number="state.probe.timeout_sec"
                         class="form-control"
                         type="number"
                         min="5"
-                        max="50">
-                    <span class="input-group-text">pkts</span>
+                        max="300">
+                    <span class="input-group-text">seconds</span>
                   </div>
-                  <small class="text-muted">How many packets to send per round of MTR? (recommended: 5-10 - triggered probes are 2x)</small>
+                  <small class="text-muted">
+                    Maximum time to wait for probe completion (recommended: {{ probeTypeConfig.defaultTimeout }} seconds)
+                  </small>
+                </div>
+
+                <!-- Enable/Disable -->
+                <div class="mb-4">
+                  <div class="form-check form-switch">
+                    <input
+                        id="probeEnabled"
+                        v-model="state.probe.enabled"
+                        class="form-check-input"
+                        type="checkbox">
+                    <label class="form-check-label" for="probeEnabled">
+                      Enable probe immediately after creation
+                      <small class="text-muted d-block">You can enable/disable the probe later from the agent dashboard</small>
+                    </label>
+                  </div>
                 </div>
               </div>
-
             </div>
           </div>
 
@@ -579,7 +974,7 @@ const availableAgentsForSelection = computed(() => {
           <div class="card-footer">
             <div class="d-flex justify-content-between align-items-center">
               <router-link
-                  :to="`/agent/${state.agent.id}`"
+                  :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}`"
                   class="btn btn-outline-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Cancel
               </router-link>
@@ -587,7 +982,7 @@ const availableAgentsForSelection = computed(() => {
                   class="btn btn-primary btn-lg px-5"
                   type="submit"
                   @click="submit"
-                  :disabled="!isValidProbe || state.loading">
+                  :disabled="!isValidProbe || state.loading || state.duplicateWarning">
                 <span v-if="state.loading">
                   <i class="fas fa-spinner fa-spin me-2"></i>Creating Probe...
                 </span>
@@ -639,7 +1034,7 @@ const availableAgentsForSelection = computed(() => {
   background: white;
 }
 
-.probe-type-card:hover {
+.probe-type-card:hover:not(.disabled) {
   border-color: #0d6efd;
   box-shadow: 0 0.25rem 0.5rem rgba(13, 110, 253, 0.15);
   transform: translateY(-2px);
@@ -652,6 +1047,11 @@ const availableAgentsForSelection = computed(() => {
 
 .probe-type-card.recommended {
   border-color: #198754;
+}
+
+.probe-type-card.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .probe-type-header {
@@ -693,6 +1093,10 @@ const availableAgentsForSelection = computed(() => {
   margin-bottom: 2rem;
 }
 
+.configuration-section:last-child {
+  margin-bottom: 0;
+}
+
 .section-title {
   color: #495057;
   font-weight: 600;
@@ -722,6 +1126,40 @@ const availableAgentsForSelection = computed(() => {
   padding: 1.25rem;
   border-radius: 0.5rem;
   border: 1px solid #e9ecef;
+}
+
+/* DNS Configuration Styles */
+.dns-record-types {
+  background-color: #f8f9fa;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e9ecef;
+}
+
+.dns-record-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.dns-record-grid .form-check {
+  padding: 0.5rem;
+  background-color: white;
+  border: 1px solid #e9ecef;
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.dns-record-grid .form-check:hover {
+  border-color: #0d6efd;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.record-type-name {
+  font-weight: 600;
+  color: #495057;
+  margin-right: 0.25rem;
 }
 
 /* Form Controls */
@@ -758,6 +1196,17 @@ const availableAgentsForSelection = computed(() => {
   color: #6c757d;
 }
 
+/* Button Group */
+.btn-group {
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.btn-check:checked + .btn {
+  background-color: #0d6efd;
+  color: white;
+  border-color: #0d6efd;
+}
+
 /* Alerts */
 .alert {
   border: none;
@@ -792,6 +1241,11 @@ const availableAgentsForSelection = computed(() => {
   border-color: #0a58ca;
   transform: translateY(-1px);
   box-shadow: 0 0.25rem 0.5rem rgba(13, 110, 253, 0.2);
+}
+
+.btn-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .btn-outline-secondary {
@@ -835,6 +1289,23 @@ code {
   .btn-lg {
     padding: 0.5rem 1rem;
     font-size: 1rem;
+  }
+
+  .btn-group {
+    flex-direction: column;
+  }
+
+  .btn-group .btn {
+    border-radius: 0.375rem !important;
+    margin-bottom: 0.5rem;
+  }
+
+  .btn-group .btn:last-child {
+    margin-bottom: 0;
+  }
+
+  .dns-record-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

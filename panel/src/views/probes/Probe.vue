@@ -520,7 +520,7 @@ watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
                                   class="accordion-button collapsed" 
                                   data-bs-toggle="collapse" 
                                   type="button">
-                                  {{ transformMtrData((mtr as ProbeData)).stopTimestamp }}
+                                  {{ transformMtrData((mtr as ProbeData)).stopTimestamp.toLocaleString() }}
                                   <span v-if="(mtr as ProbeData).triggered" class="badge bg-dark ms-2">TRIGGERED</span>
                                 </button>
                               </h2>
@@ -649,7 +649,7 @@ watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
                       <button :aria-controls="'collapse' + mtr.id" :aria-expanded="false"
                               :data-bs-target="'#collapse' + mtr.id"
                               class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                        {{ (mtr.created_at as Date).toLocaleString() }}
+                        {{ (mtr.payload as MtrResult).stop_timestamp.toLocaleString() }}
                         <span v-if="mtr.triggered" class="badge bg-dark">TRIGGERED</span>
                       </button>
                     </h2>

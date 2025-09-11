@@ -105,8 +105,11 @@ export interface ProbeCreateInput {
     enabled?: boolean;
     interval_sec: number;
     timeout_sec: number;
+    count: number
+    duration_sec: number
     labels: JsonObject;
     metadata: JsonObject;
+    server?: boolean
 
     /** One of:
      *  - targets: literal endpoints
@@ -263,8 +266,8 @@ export interface SpeedTestPLoss {
 }
 
 export interface MtrResult {
-    startTimestamp: Date;
-    stopTimestamp: Date;
+    start_timestamp: Date;
+    stop_timestamp: Date;
     report: {
         info: {
             target: {
