@@ -26,10 +26,7 @@ import {since} from "@/time";
 import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
-import agent from "@/views/agent/index";
 import {AgentService, ProbeService, WorkspaceService, ProbeDataService} from "@/services/apiService";
-import type ProbeVue from "../probes/Probe.vue";
-import pl from "../../../public/assets/libs/moment/src/locale/pl";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 
 interface OrganizedProbe {

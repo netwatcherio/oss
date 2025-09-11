@@ -115,7 +115,7 @@ onMounted(async () => {
           <i class="fa-solid fa-exclamation-triangle me-2"></i>View Alerts
         </router-link>
         <router-link
-          to="/workspace/new"
+          to="/workspaces/new"
           class="btn btn-primary"
         >
           <i class="fa-solid fa-plus-circle me-2"></i>Create Workspace

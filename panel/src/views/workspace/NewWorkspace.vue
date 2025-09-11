@@ -4,6 +4,7 @@ import {reactive} from "vue";
 import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
+import {WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   name: "",
@@ -22,11 +23,10 @@ function onError(response: any) {
 }
 
 function submit() {
-  siteService.createSite({
+  WorkspaceService.create({
     name: state.name,
     description: state.description,
-    location: state.location
-  } as Workspace).then(onCreate).catch(onError)
+  }).then(onCreate).catch(onError)
 }
 
 </script>
@@ -45,9 +45,7 @@ function submit() {
                   <input id="siteName" class="form-control" name="name" v-model="state.name" placeholder="name" type="text">
                   <br>
                   <input id="siteDesc" class="form-control" name="desc" v-model="state.description" placeholder="description" type="text">
-                  <br>
-                  <input id="siteLocation" class="form-control" name="name" v-model="state.location" placeholder="location" type="text">
-                </div>
+                  </div>
               </div>
             </div>
             <div class="p-3 border-top">

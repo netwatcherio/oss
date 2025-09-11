@@ -35,7 +35,7 @@ export const WorkspaceService = {
         return data;
     },
 
-    async create(body: { name: string; displayName?: string; settings?: Record<string, any> }) {
+    async create(body: { name: string; description?: string;}) {
         const { data } = await request.post<Workspace>('/workspaces', body);
         return data;
     },
