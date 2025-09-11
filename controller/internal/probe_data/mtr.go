@@ -25,8 +25,8 @@ func initMtr(db *sql.DB) {
 			}
 
 			// Store to DB / compute / alert as needed:
-			log.Printf("[mtr] id=%d probe=%d hops=%d triggered=%v",
-				data.ID, data.ProbeID, len(p.Report.Hops), data.Triggered)
+			log.Printf("[mtr] probe=%d hops=%d triggered=%v",
+				data.ProbeID, len(p.Report.Hops), data.Triggered)
 			return nil
 		},
 	))

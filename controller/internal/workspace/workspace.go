@@ -37,7 +37,7 @@ func (r Role) Valid() bool {
 type Workspace struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	Name      string         `gorm:"size:200;not null;uniqueIndex:uniq_ws_name" json:"name"`
-	OwnerID   uint           `gorm:"not null;index" json:"ownerId"`
+	OwnerID   uint           `gorm:"not null;index" json:"owner_id"`
 	Settings  datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"settings"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`

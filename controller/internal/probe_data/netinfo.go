@@ -21,8 +21,8 @@ func initNetInfo(db *sql.DB) {
 			}
 
 			// Store to DB / compute / alert as needed:
-			log.Printf("[netinfo] id=%d wan=%s lan=%s gw=%s",
-				data.ID, p.PublicAddress, p.LocalAddress, p.DefaultGateway)
+			log.Printf("[netinfo] wan=%s lan=%s gw=%s",
+				p.PublicAddress, p.LocalAddress, p.DefaultGateway)
 			return nil
 		},
 	))

@@ -31,11 +31,11 @@ var (
 
 type Agent struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time `gorm:"index" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"index" json:"updatedAt"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
 
 	// Ownership / scoping
-	WorkspaceID uint `gorm:"index:idx_ws_pin,priority:1" json:"workspaceId"`
+	WorkspaceID uint `gorm:"index:idx_ws_pin,priority:1" json:"workspace_id"`
 
 	// Identity
 	Name        string `gorm:"size:255;index" json:"name" form:"name"`
@@ -49,7 +49,7 @@ type Agent struct {
 	Version string `gorm:"size:64;index" json:"version"`
 
 	// Health
-	LastSeenAt time.Time `gorm:"index" json:"lastSeenAt"`
+	LastSeenAt time.Time `gorm:"index" json:"last_seen_at"`
 
 	// Tags / labels
 	Labels   datatypes.JSON `gorm:"type:jsonb" json:"labels"`
@@ -66,12 +66,12 @@ type Agent struct {
 // Auth One-time bootstrap PINs (plaintext never stored)
 type Auth struct {
 	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time      `gorm:"index" json:"createdAt"`
-	UpdatedAt time.Time      `gorm:"index" json:"updatedAt"`
+	CreatedAt time.Time      `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	WorkspaceID uint   `gorm:"index" json:"workspaceId"`
-	AgentID     uint   `gorm:"index" json:"agentId"`
+	WorkspaceID uint   `gorm:"index" json:"workspace_id"`
+	AgentID     uint   `gorm:"index" json:"agent_id"`
 	PinHash     string `gorm:"size:255;index" json:"-"`
 	// Unique across *active* (unconsumed) PINs
 	PinIndex  string     `gorm:"size:64;uniqueIndex" json:"-"`
@@ -97,8 +97,8 @@ type CreateInput struct {
 }
 
 type CreateOutput struct {
-	Agent *Agent
-	PIN   string // plaintext, shown ONCE
+	Agent *Agent `json:"agent,omitempty"`
+	PIN   string `json:"pin,omitempty"` // plaintext, shown ONCE
 }
 
 type BootstrapWithPINInput struct {

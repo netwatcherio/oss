@@ -24,9 +24,9 @@ type User struct {
 	Verified     bool           `json:"verified" gorm:"default:false"`
 	Labels       datatypes.JSON `json:"labels" gorm:"type:json"`
 	Metadata     datatypes.JSON `json:"metadata" gorm:"type:json"`
-	LastLoginAt  *time.Time     `json:"lastLoginAt"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
+	LastLoginAt  *time.Time     `json:"last_login_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {

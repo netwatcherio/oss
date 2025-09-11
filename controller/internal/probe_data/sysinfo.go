@@ -21,8 +21,8 @@ func initSysInfo(db *sql.DB) {
 			}
 
 			// Store to DB / compute / alert as needed:
-			log.Printf("[sysinfo] id=%d hostname=%s timezone=%s timestamp=%s",
-				data.ID, p.HostInfo.Hostname, p.HostInfo.Timezone, p.Timestamp)
+			log.Printf("[sysinfo] hostname=%s timezone=%s timestamp=%s",
+				p.HostInfo.Hostname, p.HostInfo.Timezone, p.Timestamp)
 			return nil
 		},
 	))

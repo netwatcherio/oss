@@ -14,7 +14,6 @@ import (
 // ---- Top-level meta you want at the main level ----
 
 type ProbeData struct {
-	ID              uint            `json:"id"`
 	ProbeID         uint            `json:"probe_id"`
 	ProbeAgentID    uint            `json:"probe_agent_id"` // probe ID owner - used for reverse probes
 	AgentID         uint            `json:"agent_id"`

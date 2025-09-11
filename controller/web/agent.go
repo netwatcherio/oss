@@ -15,8 +15,8 @@ import (
 
 type agentLoginRequest struct {
 	// Optional body duplicates of path params; path takes precedence if present.
-	WorkspaceID uint   `json:"workspaceId,omitempty"`
-	AgentID     uint   `json:"agentId,omitempty"`
+	WorkspaceID uint   `json:"workspace_id,omitempty"`
+	AgentID     uint   `json:"agent_id,omitempty"`
 	PSK         string `json:"psk,omitempty"`
 	PIN         string `json:"pin,omitempty"`
 }
@@ -89,7 +89,7 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 			}
 			ctx.StatusCode(http.StatusOK)
 			_ = ctx.JSON(agentLoginResponse{
-				Status: "bootstrapped",
+				Status: "success",
 				PSK:    out.PSK, // <-- show once
 				Agent:  out.Agent,
 			})
