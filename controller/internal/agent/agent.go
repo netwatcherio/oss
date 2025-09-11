@@ -55,6 +55,8 @@ type Agent struct {
 	Labels   datatypes.JSON `gorm:"type:jsonb" json:"labels"`
 	Metadata datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
 
+	Initialized bool `gorm:"default:false" json:"initialized"`
+
 	// Authentication (post-bootstrap)
 	PSKHash string `gorm:"size:255" json:"-"` // bcrypt hash of server-generated PSK
 }

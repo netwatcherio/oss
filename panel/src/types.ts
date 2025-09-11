@@ -57,6 +57,7 @@ export interface Agent {
     metadata: JsonObject;
 
     // Authentication: PSKHash is omitted (json:"-")
+    initialized: boolean;
 }
 
 /** ===== Probes ===== */

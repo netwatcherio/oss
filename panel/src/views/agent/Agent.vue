@@ -1,14 +1,18 @@
 <script lang="ts" setup>
-import {onMounted, reactive, computed} from "vue";
+import {onMounted, reactive, computed, ref} from "vue";
 import type {
   Agent,
   CPUTimes,
   HostInfo,
-  HostMemoryInfo, NetInfoPayload,
-  OSInfo, OUIEntry,
+  HostMemoryInfo,
+  NetInfoPayload,
+  OSInfo,
+  OUIEntry,
   Probe,
   ProbeData,
-  ProbeType, SysInfoPayload, Target,
+  ProbeType,
+  SysInfoPayload,
+  Target,
   Workspace
 } from "@/types";
 import core from "@/core";
@@ -50,9 +54,60 @@ interface SystemData {
   virtual: MemoryUsage
 }
 
+interface LoadingState {
+  agent: boolean
+  workspace: boolean
+  probes: boolean
+  systemInfo: boolean
+  networkInfo: boolean
+}
+
+interface ProbeGroupStats {
+  lastRun?: string
+  successRate?: number
+  avgResponseTime?: number
+  status?: 'healthy' | 'warning' | 'critical' | 'unknown'
+}
+
+// Loading state management
+const loadingState = reactive<LoadingState>({
+  agent: true,
+  workspace: true,
+  probes: true,
+  systemInfo: true,
+  networkInfo: true
+})
+
+// Overall loading computed
+const isInitializing = computed(() => {
+  return loadingState.agent || loadingState.workspace
+})
+
+const isLoadingData = computed(() => {
+  return loadingState.systemInfo || loadingState.networkInfo || loadingState.probes
+})
+
+// Data ready states
+const hasSystemData = computed(() => {
+  return state.systemInfo && state.systemInfo.hostInfo && !loadingState.systemInfo
+})
+
+const hasNetworkData = computed(() => {
+  return state.networkInfo && state.networkInfo.public_address && !loadingState.networkInfo
+})
+
+// Error states
+const errors = reactive({
+  agent: null as string | null,
+  workspace: null as string | null,
+  probes: null as string | null,
+  systemInfo: null as string | null,
+  networkInfo: null as string | null
+})
+
 // Computed properties for better organization
 const isOnline = computed(() => {
-  if (!state.agent.updatedAt) return false;
+  if (!state.agent.updatedAt || loadingState.agent) return false;
   const lastSeen = new Date(state.agent.updatedAt);
   const now = new Date();
   const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
@@ -60,12 +115,12 @@ const isOnline = computed(() => {
 });
 
 const cpuUsagePercent = computed(() => {
-  if (!state.systemData?.cpu) return 0;
+  if (!hasSystemData.value || !state.systemData?.cpu) return 0;
   return ((state.systemData.cpu.user + state.systemData.cpu.system) * 100).toFixed(1);
 });
 
 const memoryUsagePercent = computed(() => {
-  if (!state.systemData?.ram) return 0;
+  if (!hasSystemData.value || !state.systemData?.ram) return 0;
   return (state.systemData.ram.used * 100).toFixed(1);
 });
 
@@ -170,6 +225,45 @@ function formatSnakeCaseToHumanCase(name: string): string {
   return words.join(" ")
 }
 
+// Mock function to get probe group stats (replace with actual API call)
+function getProbeGroupStats(group: ProbeGroupByTarget): ProbeGroupStats {
+  // This would normally fetch real stats from your API
+  // For now, returning mock data for demonstration
+  const mockStatus = ['healthy', 'warning', 'critical', 'unknown'][Math.floor(Math.random() * 4)] as any;
+  return {
+    lastRun: new Date(Date.now() - Math.random() * 3600000).toISOString(),
+    successRate: Math.random() * 100,
+    avgResponseTime: Math.random() * 500,
+    status: mockStatus
+  };
+}
+
+function getStatusColor(status?: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'text-success';
+    case 'warning':
+      return 'text-warning';
+    case 'critical':
+      return 'text-danger';
+    default:
+      return 'text-muted';
+  }
+}
+
+function getStatusIcon(status?: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'fa-check-circle';
+    case 'warning':
+      return 'fa-exclamation-triangle';
+    case 'critical':
+      return 'fa-times-circle';
+    default:
+      return 'fa-question-circle';
+  }
+}
+
 const router = core.router()
 
 let state = reactive({
@@ -177,11 +271,13 @@ let state = reactive({
   probes: [] as Probe[],
 
   // group-driven UI
-  // groups
-// grouped by target (type-agnostic)
+  // grouped by target (type-agnostic)
   targetGroups: [] as ProbeGroupByTarget[],
   targetGroupsByKey: {} as Record<string, ProbeGroupByTarget>,
   groupKinds: [] as TargetGroupKind[],
+
+  // Group stats
+  groupStats: {} as Record<string, ProbeGroupStats>,
 
   // totals for badges
   totalProbes: 0,
@@ -190,7 +286,6 @@ let state = reactive({
   totalsByType: {} as Record<string, { probes: number; enabled: number; targets: number }>,
 
   ready: false,
-  loading: true,
   agent: {} as Agent,
   agents: [] as Agent[],
   networkInfo: {} as NetInfoPayload,
@@ -200,58 +295,96 @@ let state = reactive({
   ouiList: [] as OUIEntry[]
 })
 
-onMounted(() => {
+onMounted(async () => {
   let agentID = router.currentRoute.value.params["aID"] as string
   let workspaceID = router.currentRoute.value.params["wID"] as string
   if (!agentID || !workspaceID) return
 
-  WorkspaceService.get(workspaceID).then(res => {
-    state.workspace = res as Workspace
-  })
-
-  AgentService.get(workspaceID, agentID).then(res => {
-    state.agent = res as Agent
-  })
-
-  ProbeService.sysInfo(workspaceID, agentID).then(res => {
-    let pD = res as ProbeData
-    state.systemInfo = pD.payload as SysInfoPayload
-    console.log(state.systemInfo)
-
-    state.systemData = updateSystemData(state.systemInfo)
-  })
-
-  ProbeService.netInfo(workspaceID, agentID).then(res => {
-    let pD = res as ProbeData
-    state.networkInfo = pD.payload as NetInfoPayload
-    console.log(state.networkInfo)
-  })
-
-  // load & group
-  ProbeService.list(workspaceID, agentID).then(res => {
-    const pL = res as Probe[];
-    state.probes = pL;
-
-    const grouped = groupProbesByTarget(pL, { excludeDefaults: true });
-
-    state.targetGroups = grouped.groups;
-    state.targetGroupsByKey = grouped.byKey;
-    state.groupKinds = grouped.kinds;
-
-    state.totalProbes = grouped.totals.probes;
-    state.activeProbes = grouped.totals.enabled;
-    state.totalTargets = grouped.totals.targets;
-    state.totalsByType = grouped.totals.byType;
-  }).finally(() => {
-    state.loading = false;
-  });
-
-  state.ready = true
-  state.hasData = true
-
+  // Load OUI list early (non-blocking)
   fetch('/ouiList.json')
       .then(response => response.json())
-      .then(data => state.ouiList = data as OUIEntry[]);
+      .then(data => state.ouiList = data as OUIEntry[])
+      .catch(err => console.error('Failed to load OUI list:', err));
+
+  // Load workspace and agent info first (required for page title)
+  try {
+    const [workspaceRes, agentRes] = await Promise.all([
+      WorkspaceService.get(workspaceID),
+      AgentService.get(workspaceID, agentID)
+    ]);
+
+    state.workspace = workspaceRes as Workspace;
+    state.agent = agentRes as Agent;
+    loadingState.workspace = false;
+    loadingState.agent = false;
+  } catch (err) {
+    console.error('Failed to load workspace/agent:', err);
+    errors.workspace = 'Failed to load workspace';
+    errors.agent = 'Failed to load agent';
+    loadingState.workspace = false;
+    loadingState.agent = false;
+  }
+
+  // Load system data in parallel (non-blocking)
+  ProbeService.sysInfo(workspaceID, agentID)
+      .then(res => {
+        let pD = res as ProbeData
+        state.systemInfo = pD.payload as SysInfoPayload
+        state.systemData = updateSystemData(state.systemInfo)
+        state.hasData = true
+      })
+      .catch(err => {
+        console.error('Failed to load system info:', err);
+        errors.systemInfo = 'Failed to load system information';
+      })
+      .finally(() => {
+        loadingState.systemInfo = false;
+      });
+
+  ProbeService.netInfo(workspaceID, agentID)
+      .then(res => {
+        let pD = res as ProbeData
+        state.networkInfo = pD.payload as NetInfoPayload
+      })
+      .catch(err => {
+        console.error('Failed to load network info:', err);
+        errors.networkInfo = 'Failed to load network information';
+      })
+      .finally(() => {
+        loadingState.networkInfo = false;
+      });
+
+  // Load & group probes
+  ProbeService.list(workspaceID, agentID)
+      .then(res => {
+        const pL = res as Probe[];
+        state.probes = pL;
+
+        const grouped = groupProbesByTarget(pL, { excludeDefaults: true });
+
+        state.targetGroups = grouped.groups;
+        state.targetGroupsByKey = grouped.byKey;
+        state.groupKinds = grouped.kinds;
+
+        state.totalProbes = grouped.totals.probes;
+        state.activeProbes = grouped.totals.enabled;
+        state.totalTargets = grouped.totals.targets;
+        state.totalsByType = grouped.totals.byType;
+
+        // Load stats for each group (mock for now)
+        grouped.groups.forEach(group => {
+          state.groupStats[group.key] = getProbeGroupStats(group);
+        });
+      })
+      .catch(err => {
+        console.error('Failed to load probes:', err);
+        errors.probes = 'Failed to load probes';
+      })
+      .finally(() => {
+        loadingState.probes = false;
+      });
+
+  state.ready = true;
 })
 
 </script>
@@ -261,20 +394,26 @@ onMounted(() => {
     <Title
         :history="[
         {title: 'workspaces', link: '/workspaces'},
-        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id}`}
+        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id || ''}`}
       ]"
         :title="state.agent.name || 'Loading...'"
         :subtitle="state.agent.location || 'Agent Information'">
       <div class="d-flex flex-wrap gap-2">
-        <div class="status-badge" :class="state.loading ? 'loading' : (isOnline ? 'online' : 'offline')">
-          <i :class="state.loading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-circle'"></i>
-          {{ state.loading ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
+        <div class="status-badge" :class="isInitializing ? 'loading' : (isOnline ? 'online' : 'offline')">
+          <i :class="isInitializing ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-circle'"></i>
+          {{ isInitializing ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
         </div>
-        <router-link :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probes`" class="btn btn-outline-primary" :class="{'': state.loading}">
+        <router-link
+            v-if="state.agent.id && state.workspace.id"
+            :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probes`"
+            class="btn btn-outline-primary">
           <i class="fa-regular fa-pen-to-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
         </router-link>
-        <router-link :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probe/new`" class="btn btn-primary" :class="{'': state.loading}">
+        <router-link
+            v-if="state.agent.id && state.workspace.id"
+            :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probe/new`"
+            class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
       </div>
@@ -282,60 +421,67 @@ onMounted(() => {
 
     <!-- Quick Stats Bar - Always visible with loading state -->
     <div class="quick-stats">
-      <div class="stat-item" :class="{'loading': state.loading}">
+      <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon cpu">
           <i class="fa-solid fa-microchip"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
-            <span v-if="state.loading" class="skeleton-text">--</span>
+            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
             <span v-else>{{ cpuUsagePercent }}%</span>
           </div>
           <div class="stat-label">CPU Usage</div>
         </div>
       </div>
-      <div class="stat-item" :class="{'loading': state.loading}">
+      <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon memory">
           <i class="fa-solid fa-memory"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
-            <span v-if="state.loading" class="skeleton-text">--</span>
+            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
             <span v-else>{{ memoryUsagePercent }}%</span>
           </div>
           <div class="stat-label">Memory Usage</div>
         </div>
       </div>
-      <div class="stat-item" :class="{'loading': state.loading}">
+      <div class="stat-item" :class="{'loading': loadingState.probes}">
         <div class="stat-icon network">
           <i class="fa-solid fa-network-wired"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
-            <span v-if="state.loading" class="skeleton-text">-</span>
-            <span v-else>
-  {{ activeProbesCount }}
-</span>
+            <span v-if="loadingState.probes" class="skeleton-text">-</span>
+            <span v-else>{{ activeProbesCount }}</span>
           </div>
           <div class="stat-label">Active Probes</div>
         </div>
       </div>
-      <div class="stat-item" :class="{'loading': state.loading}">
+      <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon uptime">
           <i class="fa-solid fa-clock"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
-            <span v-if="state.loading" class="skeleton-text">--</span>
-            <span v-else>{{ since(state.systemInfo.hostInfo?.boot_time + "", false) }}</span>
+            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
+            <span v-else>{{ hasSystemData ? since(state.systemInfo.hostInfo?.boot_time + "", false) : 'N/A' }}</span>
           </div>
           <div class="stat-label">Uptime</div>
         </div>
       </div>
     </div>
 
-    <!-- Main Content - Always show layout -->
-    <div v-if="state.loading" class="empty-state">
+    <!-- Error Messages -->
+    <div v-if="Object.values(errors).some(e => e !== null)" class="alert alert-warning mt-3">
+      <i class="fa-solid fa-exclamation-triangle"></i>
+      <strong>Some data could not be loaded:</strong>
+      <ul class="mb-0 mt-2">
+        <li v-for="(error, key) in errors" v-if="error" :key="key">{{ error }}</li>
+      </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div v-if="!state.agent.initialized && !loadingState.agent" class="empty-state">
       <i class="fa-solid fa-exclamation-triangle text-warning"></i>
       <h5>Agent Not Initialized</h5>
       <p>This agent needs to be initialized before it can be used.</p>
@@ -349,15 +495,15 @@ onMounted(() => {
             <i class="fa-solid fa-diagram-project"></i>
             Monitoring Probes
           </h5>
-          <span class="badge bg-primary" v-if="!state.loading">
-  {{ activeProbesCount }}/{{ totalProbesCount }} Active ({{ probeStats.percentage }}%)
-</span>
+          <span class="badge bg-primary" v-if="!loadingState.probes">
+            {{ activeProbesCount }}/{{ totalProbesCount }} Active ({{ probeStats.percentage }}%)
+          </span>
           <span class="badge bg-secondary" v-else>
             <i class="fa-solid fa-spinner fa-spin"></i> Loading
           </span>
         </div>
 
-        <div v-if="state.loading" class="probes-grid">
+        <div v-if="loadingState.probes" class="probes-grid">
           <!-- Loading skeleton probes -->
           <div v-for="i in 3" :key="`skeleton-${i}`" class="probe-card skeleton">
             <div class="probe-link">
@@ -368,6 +514,10 @@ onMounted(() => {
                   <span class="skeleton-text probe-type-skeleton"></span>
                   <span class="skeleton-text probe-type-skeleton"></span>
                 </div>
+                <div class="probe-stats">
+                  <div class="skeleton-text probe-stat-skeleton"></div>
+                  <div class="skeleton-text probe-stat-skeleton"></div>
+                </div>
               </div>
               <i class="fa-solid fa-chevron-right probe-arrow"></i>
             </div>
@@ -375,12 +525,17 @@ onMounted(() => {
         </div>
 
         <div v-else-if="state.targetGroups.length > 0" class="probes-grid">
-          <div v-for="g in state.targetGroups" :key="g.key" class="probe-card">
+          <div v-for="g in state.targetGroups" :key="g.key" class="probe-card" :class="{'has-issues': state.groupStats[g.key]?.status === 'critical'}">
             <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/${g.probes[0]?.id || ''}`" class="probe-link">
-              <div class="probe-icon">
-                <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
-                : g.kind === 'host' ? 'fa-solid fa-diagram-project'
-                : 'fa-solid fa-microchip'"></i>
+              <div class="probe-header">
+                <div class="probe-icon">
+                  <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
+                  : g.kind === 'host' ? 'fa-solid fa-diagram-project'
+                  : 'fa-solid fa-microchip'"></i>
+                </div>
+                <div class="probe-status">
+                  <i :class="`fa-solid ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
+                </div>
               </div>
 
               <div class="probe-content">
@@ -391,13 +546,27 @@ onMounted(() => {
                 </h6>
 
                 <div class="probe-types">
-                  <!-- show types present in this target group -->
                   <span v-for="t in g.types" :key="t" class="probe-type-badge">
-            {{ t }} ({{ g.perType[t].count }})
-          </span>
-                  <span class="probe-type-badge" v-if="g.countEnabled !== g.countProbes">
-            {{ g.countEnabled }}/{{ g.countProbes }} enabled
-          </span>
+                    {{ t }} ({{ g.perType[t].count }})
+                  </span>
+                  <span class="probe-type-badge" :class="{'inactive': g.countEnabled === 0}">
+                    {{ g.countEnabled }}/{{ g.countProbes }} enabled
+                  </span>
+                </div>
+
+                <div class="probe-stats" v-if="state.groupStats[g.key]">
+                  <div class="probe-stat" v-if="state.groupStats[g.key].successRate !== undefined">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>{{ state.groupStats[g.key].successRate.toFixed(1) }}% success</span>
+                  </div>
+                  <div class="probe-stat" v-if="state.groupStats[g.key].avgResponseTime !== undefined">
+                    <i class="fa-solid fa-stopwatch"></i>
+                    <span>{{ state.groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
+                  </div>
+                  <div class="probe-stat" v-if="state.groupStats[g.key].lastRun">
+                    <i class="fa-regular fa-clock"></i>
+                    <span>{{ since(state.groupStats[g.key].lastRun, true) }}</span>
+                  </div>
                 </div>
               </div>
 
@@ -405,12 +574,15 @@ onMounted(() => {
             </router-link>
           </div>
         </div>
-        
-        <div v-else class="empty-state">
+
+        <div v-else-if="!loadingState.probes" class="empty-state">
           <i class="fa-solid fa-diagram-project"></i>
           <h5>No Probes Configured</h5>
           <p>Create your first probe to start monitoring</p>
-          <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary">
+          <router-link
+              v-if="state.agent.id && state.workspace.id"
+              :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/new`"
+              class="btn btn-primary">
             <i class="fa-solid fa-plus"></i> Create Probe
           </router-link>
         </div>
@@ -419,7 +591,7 @@ onMounted(() => {
       <!-- System Information Grid -->
       <div class="info-grid">
         <!-- Network Information -->
-        <div class="info-card" :class="{'loading': state.loading}">
+        <div class="info-card" :class="{'loading': loadingState.networkInfo}">
           <div class="card-header">
             <h5 class="card-title">
               <i class="fa-solid fa-network-wired"></i>
@@ -427,59 +599,62 @@ onMounted(() => {
             </h5>
           </div>
           <div class="card-content">
-            <div class="info-row">
-              <span class="info-label">Last data @</span>
+            <div class="info-row" v-if="hasNetworkData">
+              <span class="info-label">Last updated</span>
               <span class="info-value">
-                <span>{{state.networkInfo ? state.networkInfo.timestamp : "not found"}}</span>
+                <span>{{ since(state.networkInfo.timestamp, true) }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Hostname</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">--------------------</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">--------------------</span>
                 <span v-else>{{ state.systemInfo.hostInfo?.hostname || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Public IP</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">---------------</span>
-                <span v-else>{{ state.networkInfo.public_address || 'Loading...' }}</span>
+                <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
+                <span v-else>{{ state.networkInfo.public_address || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">ISP</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">-------------------------</span>
-                <span v-else>{{ state.networkInfo.internet_provider || 'Loading...' }}</span>
+                <span v-if="loadingState.networkInfo" class="skeleton-text">-------------------------</span>
+                <span v-else>{{ state.networkInfo.internet_provider || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Gateway</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">---------------</span>
-                <span v-else>{{ state.networkInfo.default_gateway || 'Loading...' }}</span>
+                <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
+                <span v-else>{{ state.networkInfo.default_gateway || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row expandable">
               <span class="info-label">Local IPs</span>
               <div class="info-value">
-                <div v-if="state.loading" class="skeleton-text">---------------</div>
-                <div v-else v-for="ip in getLocalAddresses(state.systemInfo.hostInfo?.IPs || [])" :key="ip">
-                  {{ ip }}
+                <div v-if="loadingState.systemInfo" class="skeleton-text">---------------</div>
+                <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.IPs">
+                  <div v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.IPs)" :key="ip">
+                    {{ ip }}
+                  </div>
                 </div>
+                <div v-else>No IPs found</div>
               </div>
             </div>
           </div>
-          <div class="card-footer">
-            <router-link :to="`/agent/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-secondary" :class="{'disabled': state.loading}">
+          <div class="card-footer" v-if="state.agent.id">
+            <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-secondary">
               <i class="fa-solid fa-gauge-high"></i> View Speedtests
             </router-link>
           </div>
         </div>
 
         <!-- System Resources -->
-        <div class="info-card" :class="{'loading': state.loading}">
+        <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
               <i class="fa-solid fa-server"></i>
@@ -487,57 +662,58 @@ onMounted(() => {
             </h5>
           </div>
           <div class="card-content">
-            <div class="info-row">
-              <span class="info-label">Last data @</span>
+            <div class="info-row" v-if="hasSystemData">
+              <span class="info-label">Last updated</span>
               <span class="info-value">
-                <span>{{state.systemInfo ? state.systemInfo.timestamp : "not found"}}</span>
+                <span>{{ since(state.systemInfo.timestamp + "", true) }}</span>
               </span>
             </div>
             <div class="resource-meter">
               <div class="resource-header">
                 <span>CPU Usage</span>
-                <span v-if="state.loading" class="skeleton-text">---%</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">---%</span>
                 <span v-else>{{ cpuUsagePercent }}%</span>
               </div>
               <div class="progress">
-                <div class="progress-bar bg-primary" :style="{width: state.loading ? '0%' : cpuUsagePercent + '%'}"></div>
+                <div class="progress-bar bg-primary" :style="{width: loadingState.systemInfo ? '0%' : cpuUsagePercent + '%'}"></div>
               </div>
               <div class="resource-details">
-                <span v-if="state.loading" class="skeleton-text">User: ---%</span>
-                <span v-else>User: {{ (state.systemData.cpu?.user * 100).toFixed(1) }}%</span>
-                <span v-if="state.loading" class="skeleton-text">System: ---%</span>
-                <span v-else>System: {{ (state.systemData.cpu?.system * 100).toFixed(1) }}%</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">User: ---%</span>
+                <span v-else>User: {{ hasSystemData ? (state.systemData.cpu?.user * 100).toFixed(1) : '0' }}%</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">System: ---%</span>
+                <span v-else>System: {{ hasSystemData ? (state.systemData.cpu?.system * 100).toFixed(1) : '0' }}%</span>
               </div>
             </div>
 
             <div class="resource-meter">
               <div class="resource-header">
                 <span>Memory Usage</span>
-                <span v-if="state.loading" class="skeleton-text">---%</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">---%</span>
                 <span v-else>{{ memoryUsagePercent }}%</span>
               </div>
               <div class="progress">
-                <div class="progress-bar bg-success" :style="{width: state.loading ? '0%' : memoryUsagePercent + '%'}"></div>
+                <div class="progress-bar bg-success" :style="{width: loadingState.systemInfo ? '0%' : memoryUsagePercent + '%'}"></div>
               </div>
               <div class="resource-details">
-                <span v-if="state.loading" class="skeleton-text">Used: --- GB</span>
-                <span v-else>Used: {{ bytesToString(state.systemInfo.memoryInfo?.usedBytes || 0) }}</span>
-                <span v-if="state.loading" class="skeleton-text">Total: --- GB</span>
-                <span v-else>Total: {{ bytesToString(state.systemInfo.memoryInfo?.totalBytes || 0) }}</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">Used: --- GB</span>
+                <span v-else>Used: {{ hasSystemData ? bytesToString(state.systemInfo.memoryInfo?.used_bytes || 0) : 'N/A' }}</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">Total: --- GB</span>
+                <span v-else>Total: {{ hasSystemData ? bytesToString(state.systemInfo.memoryInfo?.total_bytes || 0) : 'N/A' }}</span>
               </div>
             </div>
 
-            <ElementExpand title="Memory Details" code :disabled="state.loading">
+            <ElementExpand title="Memory Details" code :disabled="loadingState.systemInfo || !hasSystemData">
               <template v-slot:expanded>
                 <div class="memory-details">
-                  <div v-if="state.loading" v-for="i in 4" :key="`mem-skeleton-${i}`" class="detail-row">
+                  <div v-if="loadingState.systemInfo" v-for="i in 4" :key="`mem-skeleton-${i}`" class="detail-row">
                     <span class="skeleton-text">--------------</span>
                     <span class="skeleton-text">--- GB</span>
                   </div>
-                  <div v-else v-for="(value, key) in state.systemInfo.memoryInfo?.metrics" :key="key" class="detail-row">
+                  <div v-else-if="hasSystemData && state.systemInfo.memoryInfo?.metrics" v-for="(value, key) in state.systemInfo.memoryInfo.metrics" :key="key" class="detail-row">
                     <span>{{ formatSnakeCaseToHumanCase(key) }}</span>
                     <span>{{ bytesToString(value) }}</span>
                   </div>
+                  <div v-else class="text-muted">No memory details available</div>
                 </div>
               </template>
             </ElementExpand>
@@ -545,7 +721,7 @@ onMounted(() => {
         </div>
 
         <!-- System Information -->
-        <div class="info-card" :class="{'loading': state.loading}">
+        <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
               <i class="fa-solid fa-desktop"></i>
@@ -556,62 +732,65 @@ onMounted(() => {
             <div class="info-row">
               <span class="info-label">Operating System</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">-------------------------</span>
-                <span v-else>
-                  {{ state.systemInfo.hostInfo?.os?.name }}
-                  {{ state.systemInfo.hostInfo?.os?.version }}
+                <span v-if="loadingState.systemInfo" class="skeleton-text">-------------------------</span>
+                <span v-else-if="hasSystemData">
+                  {{ state.systemInfo.hostInfo?.os?.name || 'Unknown' }}
+                  {{ state.systemInfo.hostInfo?.os?.version || '' }}
                 </span>
+                <span v-else>Unknown</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Architecture</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">-----------</span>
-                <span v-else>{{ state.systemInfo.hostInfo?.architecture }}</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">-----------</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.architecture || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Environment</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">-----------</span>
-                <span v-else>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">-----------</span>
+                <span v-else-if="hasSystemData">
                   {{ state.systemInfo.hostInfo?.containerized ? 'Virtualized' : 'Physical' }}
                 </span>
+                <span v-else>Unknown</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Timezone</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">-------------------</span>
-                <span v-else>{{ state.systemInfo.hostInfo?.timezone }}</span>
+                <span v-if="loadingState.systemInfo" class="skeleton-text">-------------------</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.timezone || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Location</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">------------------</span>
-                <span v-else>{{ state.networkInfo.lat }}, {{ state.networkInfo.long }}</span>
+                <span v-if="loadingState.networkInfo" class="skeleton-text">------------------</span>
+                <span v-else-if="hasNetworkData">{{ state.networkInfo.lat }}, {{ state.networkInfo.long }}</span>
+                <span v-else>Unknown</span>
               </span>
             </div>
             <div class="info-row">
               <span class="info-label">Last Seen</span>
               <span class="info-value">
-                <span v-if="state.loading" class="skeleton-text">------------</span>
-                <span v-else>{{ since(state.agent.updatedAt + "", true) }}</span>
+                <span v-if="loadingState.agent" class="skeleton-text">------------</span>
+                <span v-else>{{ state.agent.updatedAt ? since(state.agent.updatedAt, true) : 'Never' }}</span>
               </span>
             </div>
           </div>
-          <hr>
-          <div class="info-row">
-            <span class="info-label">Last data @</span>
+          <hr v-if="hasSystemData">
+          <div class="info-row px-3 pb-3" v-if="hasSystemData">
+            <span class="info-label">System data from</span>
             <span class="info-value">
-                <span>{{state.systemInfo ? state.systemInfo.timestamp : "not found"}}</span>
-              </span>
+              <span>{{ since(state.systemInfo.timestamp + "", true) }}</span>
+            </span>
           </div>
         </div>
 
         <!-- Network Interfaces -->
-        <div class="info-card" :class="{'loading': state.loading}">
+        <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
               <i class="fa-solid fa-ethernet"></i>
@@ -619,21 +798,25 @@ onMounted(() => {
             </h5>
           </div>
           <div class="card-content">
-            <ElementExpand title="MAC Addresses" code :disabled="state.loading">
-              <span v-if="state.loading" class="badge bg-secondary">
+            <ElementExpand title="MAC Addresses" code :disabled="loadingState.systemInfo || !hasSystemData">
+              <span v-if="loadingState.systemInfo" class="badge bg-secondary">
                 <i class="fa-solid fa-spinner fa-spin"></i> Loading
               </span>
-              <span v-else class="badge bg-secondary">{{ Object.keys(state.systemInfo.hostInfo?.mac || {}).length }} interfaces</span>
+              <span v-else-if="hasSystemData && state.systemInfo.hostInfo?.mac" class="badge bg-secondary">
+                {{ Object.keys(state.systemInfo.hostInfo.mac).length }} interfaces
+              </span>
+              <span v-else class="badge bg-secondary">0 interfaces</span>
               <template v-slot:expanded>
                 <div class="mac-list">
-                  <div v-if="state.loading" v-for="i in 2" :key="`mac-skeleton-${i}`" class="mac-item skeleton">
+                  <div v-if="loadingState.systemInfo" v-for="i in 2" :key="`mac-skeleton-${i}`" class="mac-item skeleton">
                     <div class="mac-address skeleton-text">--:--:--:--:--:--</div>
                     <div class="mac-vendor skeleton-text">--------------------------</div>
                   </div>
-                  <div v-else v-for="(mac, iface) in state.systemInfo.hostInfo?.mac" :key="iface" class="mac-item">
+                  <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.mac" v-for="(mac, iface) in state.systemInfo.hostInfo.mac" :key="iface" class="mac-item">
                     <div class="mac-address">{{ mac }}</div>
                     <div class="mac-vendor">{{ getVendorFromMac(mac) }}</div>
                   </div>
+                  <div v-else class="text-muted">No MAC addresses found</div>
                 </div>
               </template>
             </ElementExpand>
@@ -705,6 +888,11 @@ onMounted(() => {
 .probe-type-skeleton {
   width: 60px;
   height: 18px;
+}
+
+.probe-stat-skeleton {
+  width: 80px;
+  height: 16px;
 }
 
 .stat-item.loading .stat-value {
@@ -859,7 +1047,7 @@ onMounted(() => {
 /* Probes Grid */
 .probes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1rem;
   padding: 1.25rem;
 }
@@ -869,20 +1057,39 @@ onMounted(() => {
   border-radius: 8px;
   transition: all 0.2s;
   overflow: hidden;
+  background: white;
 }
 
 .probe-card:hover:not(.skeleton) {
   border-color: #3b82f6;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.probe-card.has-issues {
+  border-color: #fee2e2;
+  background: #fef2f2;
+}
+
+.probe-card.has-issues:hover {
+  border-color: #ef4444;
 }
 
 .probe-link {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 1rem;
   padding: 1rem;
   text-decoration: none;
   color: inherit;
+  min-height: 120px;
+}
+
+.probe-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .probe-icon {
@@ -897,15 +1104,23 @@ onMounted(() => {
   font-size: 1.125rem;
 }
 
+.probe-status {
+  font-size: 0.875rem;
+}
+
 .probe-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .probe-title {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 1rem;
   font-weight: 600;
   color: #1f2937;
+  line-height: 1.4;
 }
 
 .probe-types {
@@ -924,8 +1139,34 @@ onMounted(() => {
   font-weight: 500;
 }
 
+.probe-type-badge.inactive {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.probe-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.probe-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.813rem;
+  color: #6b7280;
+}
+
+.probe-stat i {
+  font-size: 0.75rem;
+  width: 1rem;
+}
+
 .probe-arrow {
   color: #9ca3af;
+  margin-top: 0.25rem;
 }
 
 /* Info Grid */
@@ -1094,11 +1335,36 @@ onMounted(() => {
   margin-bottom: 1.5rem;
 }
 
-/* Disabled state for buttons */
-.btn.disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  pointer-events: none;
+/* Alert */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.alert i {
+  margin-top: 0.125rem;
+}
+
+.alert ul {
+  padding-left: 1.25rem;
+}
+
+/* Text utilities */
+.text-muted {
+  color: #6b7280;
+}
+
+.text-success {
+  color: #16a34a;
+}
+
+.text-warning {
+  color: #f59e0b;
+}
+
+.text-danger {
+  color: #dc2626;
 }
 
 /* Responsive */
