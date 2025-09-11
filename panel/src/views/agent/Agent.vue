@@ -13,7 +13,8 @@ import type {
   ProbeType,
   SysInfoPayload,
   Target,
-  Workspace
+  Workspace,
+  PingResult
 } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
@@ -26,7 +27,7 @@ import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import agent from "@/views/agent/index";
-import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
+import {AgentService, ProbeService, WorkspaceService, ProbeDataService} from "@/services/apiService";
 import type ProbeVue from "../probes/Probe.vue";
 import pl from "../../../public/assets/libs/moment/src/locale/pl";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
@@ -67,6 +68,16 @@ interface ProbeGroupStats {
   successRate?: number
   avgResponseTime?: number
   status?: 'healthy' | 'warning' | 'critical' | 'unknown'
+  isLoading?: boolean
+  hasData?: boolean
+}
+
+interface PingStats {
+  probeId: number
+  successRate: number
+  avgResponseTime: number
+  lastRun: string
+  status: 'healthy' | 'warning' | 'critical' | 'unknown'
 }
 
 // Loading state management
@@ -225,16 +236,131 @@ function formatSnakeCaseToHumanCase(name: string): string {
   return words.join(" ")
 }
 
-// Mock function to get probe group stats (replace with actual API call)
-function getProbeGroupStats(group: ProbeGroupByTarget): ProbeGroupStats {
-  // This would normally fetch real stats from your API
-  // For now, returning mock data for demonstration
-  const mockStatus = ['healthy', 'warning', 'critical', 'unknown'][Math.floor(Math.random() * 4)] as any;
+// Calculate probe health status based on metrics
+function calculateProbeStatus(successRate: number, avgResponseTime: number): 'healthy' | 'warning' | 'critical' | 'unknown' {
+  if (successRate >= 95 && avgResponseTime < 100) return 'healthy';
+  if (successRate >= 80 && avgResponseTime < 200) return 'warning';
+  if (successRate < 80 || avgResponseTime >= 200) return 'critical';
+  return 'unknown';
+}
+
+// Fetch real probe statistics for ping probes using latest endpoint
+async function fetchPingStats(workspaceId: string, agentId: string, probes: Probe[]): Promise<PingStats[]> {
+  const pingProbes = probes.filter(p => p.type === 'PING' && p.enabled);
+  if (pingProbes.length === 0) return [];
+
+  try {
+    // Fetch latest data for all ping probes in parallel
+    const statsPromises = pingProbes.map(async (probe) => {
+      try {
+        // Get the latest ping data for this probe
+        const latestData = await ProbeDataService.latest(
+            workspaceId,
+            {
+              type: 'PING',
+              agentId: agentId,
+              probeId: probe.id
+            }
+        );
+
+        if (!latestData || !latestData.payload) {
+          return null;
+        }
+
+        // Extract ping result from the latest data
+        const pingResult = latestData.payload as PingResult;
+
+        // Calculate success rate from the ping result
+        const successRate = pingResult.packets_sent > 0
+            ? (pingResult.packets_recv / pingResult.packets_sent) * 100
+            : 0;
+
+        const avgResponseTime = pingResult.avg_rtt || 0;
+        const lastRun = latestData.created_at;
+        const status = calculateProbeStatus(successRate, avgResponseTime);
+
+        return {
+          probeId: probe.id,
+          successRate,
+          avgResponseTime,
+          lastRun,
+          status
+        } as PingStats;
+      } catch (err) {
+        // 404 means no data yet for this probe
+        console.log(`No ping data yet for probe ${probe.id}`);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(statsPromises);
+    return results.filter(r => r !== null) as PingStats[];
+  } catch (err) {
+    console.error('Failed to fetch ping stats:', err);
+    return [];
+  }
+}
+
+// Aggregate stats for a probe group
+function aggregateGroupStats(group: ProbeGroupByTarget, pingStats: PingStats[]): ProbeGroupStats {
+  // Check if this group has any ping probes
+  const hasPingProbes = group.probes.some(p => p.type === 'PING');
+
+  if (!hasPingProbes) {
+    return {
+      hasData: false,
+      status: 'unknown',
+      isLoading: false
+    };
+  }
+
+  const groupPingStats = pingStats.filter(stat =>
+      group.probes.some(p => p.id === stat.probeId)
+  );
+
+  if (groupPingStats.length === 0) {
+    return {
+      hasData: false,
+      status: 'unknown',
+      isLoading: false
+    };
+  }
+
+  // Calculate weighted averages
+  const totalSuccessRate = groupPingStats.reduce((sum, stat) => sum + stat.successRate, 0);
+  const totalResponseTime = groupPingStats.reduce((sum, stat) => sum + stat.avgResponseTime, 0);
+  const avgSuccessRate = totalSuccessRate / groupPingStats.length;
+  const avgResponseTime = totalResponseTime / groupPingStats.length;
+
+  // Get the most recent run time
+  const lastRun = groupPingStats
+      .map(stat => new Date(stat.lastRun))
+      .sort((a, b) => b.getTime() - a.getTime())[0]
+      .toISOString();
+
+  // Determine overall status (use worst status in group)
+  const statuses = groupPingStats.map(s => s.status);
+  let overallStatus: 'healthy' | 'warning' | 'critical' | 'unknown' = 'healthy';
+  if (statuses.includes('critical')) overallStatus = 'critical';
+  else if (statuses.includes('warning')) overallStatus = 'warning';
+  else if (statuses.includes('unknown')) overallStatus = 'unknown';
+
   return {
-    lastRun: new Date(Date.now() - Math.random() * 3600000).toISOString(),
-    successRate: Math.random() * 100,
-    avgResponseTime: Math.random() * 500,
-    status: mockStatus
+    lastRun,
+    successRate: avgSuccessRate,
+    avgResponseTime,
+    status: overallStatus,
+    hasData: true,
+    isLoading: false
+  };
+}
+
+// Initialize placeholder stats for loading state
+function initializeGroupStats(group: ProbeGroupByTarget): ProbeGroupStats {
+  // This is just a placeholder while real stats are loading
+  return {
+    isLoading: true,
+    status: 'unknown'
   };
 }
 
@@ -278,6 +404,8 @@ let state = reactive({
 
   // Group stats
   groupStats: {} as Record<string, ProbeGroupStats>,
+  pingStats: [] as PingStats[],
+  loadingPingStats: true,
 
   // totals for badges
   totalProbes: 0,
@@ -356,7 +484,7 @@ onMounted(async () => {
 
   // Load & group probes
   ProbeService.list(workspaceID, agentID)
-      .then(res => {
+      .then(async (res) => {
         const pL = res as Probe[];
         state.probes = pL;
 
@@ -371,14 +499,56 @@ onMounted(async () => {
         state.totalTargets = grouped.totals.targets;
         state.totalsByType = grouped.totals.byType;
 
-        // Load stats for each group (mock for now)
+        // Initialize loading states for each group
         grouped.groups.forEach(group => {
-          state.groupStats[group.key] = getProbeGroupStats(group);
+          state.groupStats[group.key] = initializeGroupStats(group);
         });
+
+        // Fetch ping statistics if there are ping probes
+        const hasPingProbes = pL.some(p => p.type === 'PING');
+        if (hasPingProbes) {
+          state.loadingPingStats = true;
+          try {
+            const pingStats = await fetchPingStats(workspaceID, agentID, pL);
+            state.pingStats = pingStats;
+
+            // Update group stats with real data
+            grouped.groups.forEach(group => {
+              const stats = aggregateGroupStats(group, pingStats);
+              state.groupStats[group.key] = {
+                ...stats,
+                isLoading: false
+              };
+            });
+          } catch (err) {
+            console.error('Failed to load ping statistics:', err);
+            // Set all groups to error state
+            grouped.groups.forEach(group => {
+              state.groupStats[group.key] = {
+                isLoading: false,
+                hasData: false,
+                status: 'unknown'
+              };
+            });
+          } finally {
+            state.loadingPingStats = false;
+          }
+        } else {
+          // No ping probes, set all groups to no data
+          grouped.groups.forEach(group => {
+            state.groupStats[group.key] = {
+              isLoading: false,
+              hasData: false,
+              status: 'unknown'
+            };
+          });
+          state.loadingPingStats = false;
+        }
       })
       .catch(err => {
         console.error('Failed to load probes:', err);
         errors.probes = 'Failed to load probes';
+        state.loadingPingStats = false;
       })
       .finally(() => {
         loadingState.probes = false;
@@ -555,17 +725,27 @@ onMounted(async () => {
                 </div>
 
                 <div class="probe-stats" v-if="state.groupStats[g.key]">
-                  <div class="probe-stat" v-if="state.groupStats[g.key].successRate !== undefined">
-                    <i class="fa-solid fa-chart-line"></i>
-                    <span>{{ state.groupStats[g.key].successRate.toFixed(1) }}% success</span>
+                  <div v-if="state.groupStats[g.key].isLoading" class="probe-stat">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <span>Loading stats...</span>
                   </div>
-                  <div class="probe-stat" v-if="state.groupStats[g.key].avgResponseTime !== undefined">
-                    <i class="fa-solid fa-stopwatch"></i>
-                    <span>{{ state.groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
-                  </div>
-                  <div class="probe-stat" v-if="state.groupStats[g.key].lastRun">
-                    <i class="fa-regular fa-clock"></i>
-                    <span>{{ since(state.groupStats[g.key].lastRun, true) }}</span>
+                  <template v-else-if="state.groupStats[g.key].hasData">
+                    <div class="probe-stat" v-if="state.groupStats[g.key].successRate !== undefined">
+                      <i class="fa-solid fa-chart-line"></i>
+                      <span>{{ state.groupStats[g.key].successRate.toFixed(1) }}% success</span>
+                    </div>
+                    <div class="probe-stat" v-if="state.groupStats[g.key].avgResponseTime !== undefined">
+                      <i class="fa-solid fa-stopwatch"></i>
+                      <span>{{ state.groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
+                    </div>
+                    <div class="probe-stat" v-if="state.groupStats[g.key].lastRun">
+                      <i class="fa-regular fa-clock"></i>
+                      <span>{{ since(state.groupStats[g.key].lastRun, true) }}</span>
+                    </div>
+                  </template>
+                  <div v-else class="probe-stat text-muted">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <span>No ping data available</span>
                   </div>
                 </div>
               </div>
