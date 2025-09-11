@@ -20,12 +20,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     env_file:
       - .env
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
 
   postgres:
     image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
@@ -93,16 +87,3 @@ services:
       NW_GLOBAL_ENDPOINT: ${NW_GLOBAL_ENDPOINT}
     ports:
       - "3000:3000"
-    depends_on:
-      # caddy has a healthcheck; keep waiting on that
-      caddy:
-        condition: service_healthy
-        # controller has no healthcheck now—just start order is enough
-        # Use simple list to avoid waiting on health:
-        # (Compose will start panel after controller is started)
-        # If you prefer condition syntax, you can use `service_started`
-        # where supported by your Compose version.
-        # controller:
-        #   condition: service_started
-        # Simpler/most compatible:
-        # - controller
