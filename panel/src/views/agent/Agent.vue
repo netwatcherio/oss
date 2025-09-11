@@ -275,7 +275,7 @@ async function fetchPingStats(workspaceId: string, agentId: string, probes: Prob
             ? (pingResult.packets_recv / pingResult.packets_sent) * 100
             : 0;
 
-        const avgResponseTime = pingResult.avg_rtt || 0;
+        const avgResponseTime = pingResult.avg_rtt / 1000000 || 0;
         const lastRun = latestData.created_at;
         const status = calculateProbeStatus(successRate, avgResponseTime);
 
