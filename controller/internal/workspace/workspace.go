@@ -51,19 +51,19 @@ func (Workspace) TableName() string { return "workspaces" }
 
 type Member struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
-	WorkspaceID uint           `gorm:"not null;index" json:"workspaceId"`
-	UserID      uint           `gorm:"default:0;index" json:"userId"` // 0 means invited by email only
+	WorkspaceID uint           `gorm:"not null;index" json:"workspace_id"`
+	UserID      uint           `gorm:"default:0;index" json:"user_id"` // 0 means invited by email only
 	Email       string         `gorm:"size:320;default:'';index" json:"email"`
 	Role        Role           `gorm:"size:20;not null;index" json:"role"`
 	Meta        datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"meta"`
 
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	CreatedAt time.Time      `json:"created_At"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	InvitedAt  *time.Time `json:"invitedAt"`
-	AcceptedAt *time.Time `json:"acceptedAt"`
-	RevokedAt  *time.Time `json:"revokedAt"`
+	InvitedAt  *time.Time `json:"invited_at"`
+	AcceptedAt *time.Time `json:"accepted_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
 func (Member) TableName() string { return "workspace_members" }

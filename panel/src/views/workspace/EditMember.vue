@@ -4,6 +4,7 @@ import {onMounted, reactive} from "vue";
 import type {MemberInfo, Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
+import {WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   name: "",
@@ -21,10 +22,10 @@ onMounted(() => {
   let mId = router.currentRoute.value.params["userId"] as string
   if (!id) return
 
-  siteService.getSite(id).then(res => {
+  WorkspaceService.getSite(id).then(res => {
     state.site = res.data as Workspace
 
-    siteService.getMemberInfos(id).then(res => {
+    /*WorkspaceService.getMemberInfos(id).then(res => {
       if(res.data.length > 0) {
         const members = res.data as MemberInfo[];
         state.ready = true
@@ -38,7 +39,7 @@ onMounted(() => {
       }
     }).catch(res => {
       alert(res)
-    })
+    })*/
   })
 })
 
@@ -51,8 +52,8 @@ function onError(response: any) {
 }
 
 function submit() {
-  siteService.updateMember(state.site.id, state.newMember).then(onCreate).catch(onError)
-}
+  /*siteService.updateMember(state.site.id, state.newMember).then(onCreate).catch(onError)
+*/}
 
 </script>
 

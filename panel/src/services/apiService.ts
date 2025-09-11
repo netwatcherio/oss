@@ -1,5 +1,5 @@
 import request from "./request";
-import type {Agent, Probe, ProbeCreateInput, ProbeData, Workspace, WorkspaceMember} from "@/types";
+import type {Agent, Probe, ProbeCreateInput, ProbeData, Workspace, Member, Role} from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {
@@ -17,34 +17,98 @@ export const AuthService = {
     },
 };
 
-/** ===== Workspaces ===== */
+function qs(params?: Record<string, string | number | undefined>) {
+    const u = new URLSearchParams();
+    if (!params) return '';
+    for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null) continue;
+        u.set(k, String(v));
+    }
+    const s = u.toString();
+    return s ? `?${s}` : '';
+}
+
 export const WorkspaceService = {
+    // ---- Workspaces ----
     async list(params?: { q?: string; limit?: number; offset?: number }) {
-        const qs = new URLSearchParams();
-        if (params?.q) qs.set("q", params.q);
-        if (params?.limit) qs.set("limit", String(params.limit));
-        if (params?.offset) qs.set("offset", String(params.offset));
-        const { data } = await request.get<Workspace[]>(`/workspaces${qs.toString() ? `?${qs}` : ""}`);
+        const { data } = await request.get<Workspace[]>(`/workspaces${qs(params)}`);
         return data;
     },
+
     async create(body: { name: string; displayName?: string; settings?: Record<string, any> }) {
-        const { data } = await request.post<Workspace>("/workspaces", body);
+        const { data } = await request.post<Workspace>('/workspaces', body);
         return data;
     },
+
     async get(id: number | string) {
         const { data } = await request.get<Workspace>(`/workspaces/${id}`);
         return data;
     },
-    async update(id: number | string, body: Partial<Pick<Workspace, "name" | "description">>) {
+
+    // PATCH expects { displayName?, settings? }
+    async update(
+        id: number | string,
+        body: { displayName?: string; settings?: Record<string, any> }
+    ) {
         const { data } = await request.patch<Workspace>(`/workspaces/${id}`, body);
         return data;
     },
+
     async remove(id: number | string) {
         const { data } = await request.delete<{ ok: boolean }>(`/workspaces/${id}`);
         return data;
     },
-};
 
+    // ---- Members ----
+    async listMembers(workspaceId: number | string) {
+        const { data } = await request.get<Member[]>(`/workspaces/${workspaceId}/members`);
+        return data;
+    },
+
+    async addMember(
+        workspaceId: number | string,
+        body: { userId?: number; email?: string; role: Role; meta?: Record<string, any> }
+    ) {
+        const { data } = await request.post<Member>(`/workspaces/${workspaceId}/members`, body);
+        return data;
+    },
+
+    async updateMemberRole(
+        workspaceId: number | string,
+        memberId: number | string,
+        role: Exclude<Role, 'OWNER'>
+    ) {
+        const { data } = await request.patch<Member>(
+            `/workspaces/${workspaceId}/members/${memberId}`,
+            { role }
+        );
+        return data;
+    },
+
+    async removeMember(workspaceId: number | string, memberId: number | string) {
+        const { data } = await request.delete<{ ok: boolean }>(
+            `/workspaces/${workspaceId}/members/${memberId}`
+        );
+        return data;
+    },
+
+    // ---- Invitations ----
+    async acceptInvite(workspaceId: number | string, email: string) {
+        const { data } = await request.post<Member>(`/workspaces/${workspaceId}/accept-invite`, {
+            email,
+        });
+        return data;
+    },
+
+    // ---- Ownership ----
+    async transferOwnership(workspaceId: number | string, newOwnerUserId: number) {
+        const { data } = await request.post<{ ok: boolean }>(
+            `/workspaces/${workspaceId}/transfer-ownership`,
+            { newOwnerUserId }
+        );
+        return data;
+    },
+};
 /** ===== Agents (scoped to workspace) ===== */
 export const AgentService = {
     async list(workspaceId: number | string, params?: { limit?: number; offset?: number }) {

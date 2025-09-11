@@ -1,13 +1,14 @@
 <script lang="ts" setup>
 
-import type {AgentGroup, MemberInfo, Workspace, WorkspaceMember} from "@/types";
+import type {Workspace, Member} from "@/types";
 import {onMounted, reactive} from "vue";
-import Title from "@/components/Title.vue";
 import core from "@/core";
+import {WorkspaceService} from "@/services/apiService";
+import Title from "@/components/Title.vue";
 
 let state = reactive({
-  members: [] as MemberInfo[],
-  site: {} as Workspace,
+  workspace: {} as Workspace,
+  members: [] as Member[],
   ready: false
 })
 
@@ -15,11 +16,17 @@ onMounted(() => {
   let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
-  siteService.getSite(id).then(res => {
-    state.site = res.data as Workspace
+  WorkspaceService.get(id).then(res => {
+    state.workspace = res as Workspace
+
+    WorkspaceService.listMembers(state.workspace.id).then(res => {
+      state.members = res as Member[]
+
+      state.ready = true
+    })
   })
 
-  siteService.getMemberInfos(id).then(res => {
+  /*WorkspaceService(id).then(res => {
     if(res.data.length > 0) {
       state.members = res.data as MemberInfo[]
       state.ready = true
@@ -27,7 +34,7 @@ onMounted(() => {
 
   }).catch(res => {
     alert(res)
-  })
+  })*/
 })
 const router = core.router()
 
@@ -35,8 +42,8 @@ const router = core.router()
 
 <template>
   <div class="container-fluid">
-    <Title title="members" subtitle="agent groups associated with current site" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.site.name, link: `/workspace/${state.site.id}`}]">
-      <router-link :to="`/workspace/${state.site.id}/invite`" active-class="active" class="btn btn-primary"><i class="fa-solid fa-plus"></i>&nbsp;invite</router-link>
+    <Title title="members" subtitle="agent groups associated with current site" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspace/${state.workspace.id}`}]">
+      <router-link :to="`/workspace/${state.workspace.id}/members/invite`" active-class="active" class="btn btn-primary"><i class="fa-solid fa-plus"></i>&nbsp;invite</router-link>
 
       <!--      <div class="d-flex gap-1">
           <router-link to="/sites/alerts" active-class="active" class="btn btn-outline-primary"><i class="fa-solid fa-plus"></i>&nbsp;View Alerts</router-link>
@@ -55,7 +62,6 @@ const router = core.router()
             <table class="table">
               <thead>
               <tr>
-                <th class="px-0" scope="col">name</th>
                 <th class="px-0" scope="col">email</th>
                 <th class="px-0" scope="col">role</th>
                 <th class="px-0" scope="col"> </th>
@@ -65,9 +71,6 @@ const router = core.router()
               <tbody>
               <tr v-for="group in state.members">
                 <td class="px-0">
-                  {{group.firstName + " " + group.lastName}}
-                </td>
-                <td class="px-0">
                   {{ group.email }}
                 </td>
                 <td class="px-0">
@@ -75,12 +78,12 @@ const router = core.router()
                 </td>
 
                 <td class="px-0 text-end px-3">
-                  <router-link :to="`/workspace/${state.site.id}/members/edit/${group.id}`" class="">
+                  <router-link :to="`/workspace/${state.workspace.id}/members/edit/${group.id}`" class="">
                     <i class="fa-solid fa-up-right-from-square"></i> edit
                   </router-link>
                 </td>
                 <td class="px-0 text-end px-3">
-                  <router-link :to="`/workspace/${state.site.id}/members/remove/${group.id}`" class="">
+                  <router-link :to="`/workspace/${state.workspace.id}/members/remove/${group.id}`" class="">
                     <i class="fa-solid fa-up-right-from-square"></i> remove
                   </router-link>
                 </td>

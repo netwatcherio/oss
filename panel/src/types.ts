@@ -160,24 +160,24 @@ export interface Workspace {
     description: string;
 }
 
-export type Role = 'READ_ONLY' | 'READ_WRITE' | 'ADMIN' | 'OWNER';
+export type Role = 'USER' | 'ADMIN' | 'OWNER';
 
-export interface WorkspaceMember {
+export interface Member {
     id: number;
-    workspaceId: number;
+    workspace_id: number;
     /** 0 means invited by email only */
-    userId: number;
+    user_id: number;
     email: string;
     role: Role;
     meta: JsonObject;
 
-    createdAt: string;   // ISO 8601
-    updatedAt: string;   // ISO 8601
+    created_at: string;   // ISO 8601
+    updated_at: string;   // ISO 8601
     // DeletedAt omitted (json:"-")
 
-    invitedAt?: string | null;   // ISO 8601 or null
-    acceptedAt?: string | null;  // ISO 8601 or null
-    revokedAt?: string | null;   // ISO 8601 or null
+    invited_at?: string | null;   // ISO 8601 or null
+    accepted_at?: string | null;  // ISO 8601 or null
+    revoked_at?: string | null;   // ISO 8601 or null
 }
 
 
