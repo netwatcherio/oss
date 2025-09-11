@@ -5,6 +5,7 @@ import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {Agent} from "@/types";
+import {AgentService} from "@/services/apiService";
 
 const state = reactive({
   site: {} as Workspace,
@@ -33,8 +34,8 @@ function onError(response: any) {
 }
 
 function submit() {
-  agentService.createAgent(state.agent).then((res) => {
-    //router.push(`/workspace/${state.site.id}`)
+  AgentService.create(state.site.id, {}).then((res) => {
+    router.push(`/workspace/${state.site.id}`)
     console.log(res)
   }).catch(err => {
     console.log(err)
