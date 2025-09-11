@@ -5,7 +5,7 @@ import type {Workspace} from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {Agent} from "@/types";
-import {AgentService} from "@/services/apiService";
+import {AgentService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   site: {} as Workspace,
@@ -17,8 +17,8 @@ onMounted(() => {
   let id = router.currentRoute.value.params["wID"] as string
   if (!id) return
 
-  siteService.getSite(id).then(res => {
-    state.site = res.data as Workspace
+  WorkspaceService.get(id).then(res => {
+    state.site = res as Workspace
     state.agent.workspaceId = state.site.id
     state.ready = true
   })
