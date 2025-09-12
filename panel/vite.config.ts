@@ -15,6 +15,7 @@ export default defineConfig({
     envDir: "./",
     envPrefix: "NW",
     server: {
+        allowedHosts: ["localhost", "devapp.netwatcher.io", "app.netwatcher.io"],
         host: "0.0.0.0",
         port: 3000,
         hmr: {
