@@ -39,8 +39,8 @@ type Workspace struct {
 	Name      string         `gorm:"size:200;not null;uniqueIndex:uniq_ws_name" json:"name"`
 	OwnerID   uint           `gorm:"not null;index" json:"owner_id"`
 	Settings  datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"settings"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// denormalized convenience

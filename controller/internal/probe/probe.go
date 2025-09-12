@@ -66,8 +66,8 @@ func (Probe) TableName() string { return "probes" }
 // Target can be a literal host[:port], or reference another agent via AgentID.
 type Target struct {
 	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	ProbeID uint `gorm:"index;not null" json:"probe_id"`
