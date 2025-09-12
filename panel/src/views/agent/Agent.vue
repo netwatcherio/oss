@@ -572,14 +572,14 @@ onMounted(async () => {
         </div>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probes`"
+            :to="`/workspace/${state.agent.workspace_id}/agent/${state.agent.id}/probes`"
             class="btn btn-outline-primary">
           <i class="fa-regular fa-pen-to-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
         </router-link>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspace/${state.agent.workspaceId}/agent/${state.agent.id}/probe/new`"
+            :to="`/workspace/${state.agent.workspace_id}/agent/${state.agent.id}/probe/new`"
             class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
@@ -786,7 +786,7 @@ onMounted(async () => {
               <span class="info-label">Hostname</span>
               <span class="info-value">
                 <span v-if="loadingState.systemInfo" class="skeleton-text">--------------------</span>
-                <span v-else>{{ state.systemInfo.hostInfo?.hostname || 'Unknown' }}</span>
+                <span v-else>{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
               </span>
             </div>
             <div class="info-row">

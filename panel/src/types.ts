@@ -357,7 +357,7 @@ export interface HostInfo {
     architecture: string;
     boot_time: Date;
     containerized?: boolean | null;
-    hostname: string;
+    name: string;
     ip?: string[];
     kernel_version: string;
     mac: string[];
