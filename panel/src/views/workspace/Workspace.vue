@@ -67,7 +67,7 @@ const filteredAgents = computed(() => {
       case 'description':
         return (a.description || '').localeCompare(b.description || '');
       case 'updated':
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
       default:
         return 0;
     }
@@ -84,14 +84,14 @@ const offlineAgentsCount = computed(() =>
 
 function getOnlineStatus(agent: Agent) {
   const currentTime = new Date();
-  const agentTime = new Date(agent.updatedAt?.toString())
+  const agentTime = new Date(agent.updated_at)
   const timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000;
   return timeDifference <= 1;
 }
 
 function getLastSeenText(agent: Agent) {
   const now = new Date();
-  const lastSeen = new Date(agent.updatedAt?.toString());
+  const lastSeen = new Date(agent.updated_at?.toString());
   const diffMs = now.getTime() - lastSeen.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
@@ -271,7 +271,7 @@ onMounted(async () => {
           <div class="agent-actions">
             <router-link 
               v-if="agent.initialized" 
-              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}/deactivate`"
+              :to="`/workspace/${agent.workspace_id}/agent/${agent.id}/deactivate`"
               class="btn btn-sm btn-outline-warning"
               title="Deactivate agent"
             >
@@ -287,7 +287,7 @@ onMounted(async () => {
               <span class="d-none d-lg-inline">&nbsp;Edit</span>
             </router-link>
             <router-link 
-              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}`"
+              :to="`/workspace/${agent.workspace_id}/agent/${agent.id}`"
               class="btn btn-sm btn-primary"
               title="View agent details"
             >

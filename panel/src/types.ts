@@ -32,11 +32,11 @@ export interface AgentCreateInput {
 
 export interface Agent {
     id: number;
-    createdAt: string;   // ISO 8601
-    updatedAt: string;   // ISO 8601
+    created_at: string;   // ISO 8601
+    updated_at: string;   // ISO 8601
 
     // Ownership / scoping
-    workspaceId: number;
+    workspace_id: number;
 
     // Identity
     name: string;
@@ -50,7 +50,7 @@ export interface Agent {
     version: string;
 
     // Health
-    lastSeenAt: string;  // ISO 8601
+    last_seen_at: string;  // ISO 8601
 
     // Tags / labels
     labels: JsonObject;
@@ -358,7 +358,7 @@ export interface HostInfo {
     boot_time: Date;
     containerized?: boolean | null;
     hostname: string;
-    ips?: string[];
+    ip?: string[];
     kernel_version: string;
     mac: string[];
     os: OSInfo;
@@ -388,7 +388,7 @@ export interface HostMemoryInfo {
     virtual_total_bytes: number;
     virtual_used_bytes: number;
     virtual_free_bytes: number;
-    metrics?: Record<string, number>;
+    raw?: Record<string, number>;
 }
 
 export interface MeanOpinionScore {

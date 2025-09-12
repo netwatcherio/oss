@@ -814,8 +814,8 @@ onMounted(async () => {
               <span class="info-label">Local IPs</span>
               <div class="info-value">
                 <div v-if="loadingState.systemInfo" class="skeleton-text">---------------</div>
-                <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.IPs">
-                  <div v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.IPs)" :key="ip">
+                <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.ip">
+                  <div v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.ip)" :key="ip">
                     {{ ip }}
                   </div>
                 </div>
@@ -886,7 +886,7 @@ onMounted(async () => {
                     <span class="skeleton-text">--------------</span>
                     <span class="skeleton-text">--- GB</span>
                   </div>
-                  <div v-else-if="hasSystemData && state.systemInfo.memoryInfo?.metrics" v-for="(value, key) in state.systemInfo.memoryInfo.metrics" :key="key" class="detail-row">
+                  <div v-else-if="hasSystemData && state.systemInfo.memoryInfo?.raw" v-for="(value, key) in state.systemInfo.memoryInfo.raw" :key="key" class="detail-row">
                     <span>{{ formatSnakeCaseToHumanCase(key) }}</span>
                     <span>{{ bytesToString(value) }}</span>
                   </div>
