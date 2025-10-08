@@ -39,7 +39,7 @@ function onError(error: any) {
 function submit() {
   if (state.agent.id) {
     AgentService.update(state.workspace.id, state.agent.id, state.agent).then(() => {
-      router.push(`/workspace/${state.workspace.id}`);
+      router.push(`/workspaces/${state.workspace.id}`);
     }).catch(onError);
   }
 }

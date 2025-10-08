@@ -93,6 +93,10 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 			},
 
 			"version": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				var versionData = struct {
+					Version string `json:"version"`
+				}{}
+
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, ok := ctx.Values().GetUint("agent_id")
 				if (ok != nil) || (aid == 0) {
@@ -105,24 +109,17 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 					log.Error(err)
 					return err
 				}
-				if err := agent.UpdateAgentVersion(context.TODO(), db, a.ID); err != nil {
+				if err := json.Unmarshal(msg.Body, &versionData); err != nil {
 					log.Error(err)
-				}
-
-				// Fetch probes for this agent
-				// NOTE: Adjust your Probe struct if needed; this mirrors your previous logic
-				ownedP, err := probe.ListByAgent(context.TODO(), db, a.ID)
-				if err != nil {
-					log.Errorf("probe_get: %v", err)
-				}
-
-				payload, err := json.Marshal(ownedP)
-				if err != nil {
 					return err
 				}
 
+				if err := agent.UpdateAgentVersion(context.TODO(), db, a.ID, versionData.Version); err != nil {
+					log.Error(err)
+				}
+
 				// Important: nsConn.Emit returns bool; do not treat as error
-				nsConn.Emit("probe_get", payload)
+				nsConn.Emit("version", []byte("ok"))
 				return nil
 			},
 

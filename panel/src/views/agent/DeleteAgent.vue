@@ -33,7 +33,7 @@ onMounted(() => {
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push("/workspace")
+  router.push("/workspaces")
 }
 
 function onError(response: any) {
@@ -50,7 +50,7 @@ function submit() {
 }
 
 function cancel() {
-  router.push(`/workspace/${state.workspace.id}`)
+  router.push(`/workspaces/${state.workspace.id}`)
 }
 
 </script>
