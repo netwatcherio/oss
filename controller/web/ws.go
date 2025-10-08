@@ -92,6 +92,40 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				return nil
 			},
 
+			"version": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, ok := ctx.Values().GetUint("agent_id")
+				if (ok != nil) || (aid == 0) {
+					return errors.New("unauthorized: no agent in context")
+				}
+
+				// Load and update agent
+				a, err := agent.GetAgentByID(context.TODO(), db, aid)
+				if err != nil {
+					log.Error(err)
+					return err
+				}
+				if err := agent.UpdateAgentVersion(context.TODO(), db, a.ID); err != nil {
+					log.Error(err)
+				}
+
+				// Fetch probes for this agent
+				// NOTE: Adjust your Probe struct if needed; this mirrors your previous logic
+				ownedP, err := probe.ListByAgent(context.TODO(), db, a.ID)
+				if err != nil {
+					log.Errorf("probe_get: %v", err)
+				}
+
+				payload, err := json.Marshal(ownedP)
+				if err != nil {
+					return err
+				}
+
+				// Important: nsConn.Emit returns bool; do not treat as error
+				nsConn.Emit("probe_get", payload)
+				return nil
+			},
+
 			"probe_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, ok := ctx.Values().GetUint("agent_id")

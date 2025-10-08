@@ -276,6 +276,22 @@ func UpdateAgentSeen(ctx context.Context, db *gorm.DB, id uint, seenAt time.Time
 	return nil
 }
 
+// UpdateAgentVersion sets the last seen version (handled in ws events)
+func UpdateAgentVersion(ctx context.Context, db *gorm.DB, id uint, version string) error {
+	res := db.WithContext(ctx).Model(&Agent{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"version": version,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteAgent permanently deletes the row (no soft-delete on Agent)
 func DeleteAgent(ctx context.Context, db *gorm.DB, id uint) error {
 	res := db.WithContext(ctx).Delete(&Agent{}, id)
