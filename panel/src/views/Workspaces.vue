@@ -15,7 +15,7 @@ declare interface sitesList {
 }
 
 const state = reactive({
-  sites: [] as Workspace[],
+  workspaces: [] as Workspace[],
   agent_counts: [] as AgentCountInfo[],
   ready: false,
   loading: true,
@@ -27,7 +27,7 @@ const state = reactive({
 
 // Computed properties
 const filteredSites = computed(() => {
-  let filtered = state.sites.filter(site => {
+  let filtered = state.workspaces.filter(site => {
     const query = state.searchQuery.toLowerCase();
     return (
       site.name.toLowerCase().includes(query) ||
@@ -65,7 +65,7 @@ const filteredSites = computed(() => {
 });
 
 const totalMembers = computed(() => {
-  return state.sites.reduce((total, site) => total + (69 || 0), 0); // todo
+  return state.workspaces.reduce((total, site) => total + (69 || 0), 0); // todo
 });
 
 // Functions
@@ -89,7 +89,7 @@ onMounted(async () => {
     const data = res as Workspace[];
 
     if (data && data.length > 0) {
-      state.sites = data;
+      state.workspaces = data;
       state.ready = true;
     }
   } catch (error) {
@@ -148,7 +148,7 @@ onMounted(async () => {
     </div>
 
     <!-- Workspaces List -->
-    <div v-else-if="state.ready && state.sites.length > 0" class="row">
+    <div v-else-if="state.ready && state.workspaces.length > 0" class="row">
       <!-- Stats Cards -->
       <div class="col-12 mb-4">
         <div class="row g-3">
@@ -158,7 +158,7 @@ onMounted(async () => {
                 <i class="fas fa-building"></i>
               </div>
               <div class="stat-content">
-                <h3 class="stat-value">{{ state.sites.length }}</h3>
+                <h3 class="stat-value">{{ state.workspaces.length }}</h3>
                 <p class="stat-label">Total Workspaces</p>
               </div>
             </div>
@@ -208,7 +208,7 @@ onMounted(async () => {
               </div>
               <div class="col-md-6 text-md-end mt-3 mt-md-0">
                 <span class="text-muted">
-                  Showing {{ filteredSites.length }} of {{ state.sites.length }} workspaces
+                  Showing {{ filteredSites.length }} of {{ state.workspaces.length }} workspaces
                 </span>
               </div>
             </div>
@@ -260,7 +260,7 @@ onMounted(async () => {
                         </div>
                         <div>
                           <router-link
-                            :to="`/workspace/${site.id}`"
+                            :to="`/workspaces/${site.id}`"
                             class="text-decoration-none fw-semibold text-dark"
                           >
                             {{ site.name }}
@@ -296,14 +296,14 @@ onMounted(async () => {
                     <td class="text-end">
                       <div class="btn-group" role="group">
                         <router-link
-                          :to="`/workspace/${site.id}`"
+                          :to="`/workspaces/${site.id}`"
                           class="btn btn-sm btn-outline-primary"
                           title="View workspace"
                         >
                           <i class="fas fa-eye"></i>
                         </router-link>
                         <router-link
-                          :to="`/workspace/${site.id}/edit`"
+                          :to="`/workspaces/${site.id}/edit`"
                           class="btn btn-sm btn-outline-secondary"
                           title="Edit"
                         >

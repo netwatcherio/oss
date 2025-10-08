@@ -432,14 +432,17 @@ func BootstrapWithPIN(ctx context.Context, db *gorm.DB, in BootstrapWithPINInput
 	if err := db.WithContext(ctx).Model(&Agent{}).
 		Where("workspace_id = ? AND id = ?", in.WorkspaceID, in.AgentID).
 		Updates(map[string]any{
-			"psk_hash":   pskHash,
-			"updated_at": time.Now(),
+			"psk_hash":    pskHash,
+			"updated_at":  time.Now(),
+			"initialized": true, // this initializes it?
 		}).Error; err != nil {
 		return nil, err
 	}
 
 	// 4) Return fresh agent + plaintext PSK (one-time)
+
 	a, err = GetAgentByID(ctx, db, a.ID)
+
 	if err != nil {
 		return nil, err
 	}

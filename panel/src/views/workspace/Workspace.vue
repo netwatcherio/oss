@@ -131,15 +131,15 @@ onMounted(async () => {
   <div class="container-fluid">
     <Title :title="state.workspace.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
       <div class="d-flex flex-wrap gap-2">
-        <router-link :to="`/workspace/${state.workspace.id}/edit`" class="btn btn-outline-dark">
+        <router-link :to="`/workspaces/${state.workspace.id}/edit`" class="btn btn-outline-dark">
           <i class="fa-solid fa-pencil-alt"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit</span>
         </router-link>
-        <router-link :to="`/workspace/${state.workspace.id}/members`" class="btn btn-outline-dark">
+        <router-link :to="`/workspaces/${state.workspace.id}/members`" class="btn btn-outline-dark">
           <i class="fa-solid fa-users"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
-        <router-link :to="`/workspace/${state.workspace.id}/agent/new`" class="btn btn-primary">
+        <router-link :to="`/workspaces/${state.workspace.id}/agents/new`" class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
         </router-link>
       </div>
@@ -271,7 +271,7 @@ onMounted(async () => {
           <div class="agent-actions">
             <router-link 
               v-if="agent.initialized" 
-              :to="`/workspace/${agent.workspace_id}/agent/${agent.id}/deactivate`"
+              :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}/deactivate`"
               class="btn btn-sm btn-outline-warning"
               title="Deactivate agent"
             >
@@ -279,7 +279,7 @@ onMounted(async () => {
               <span class="d-none d-lg-inline">&nbsp;Deactivate</span>
             </router-link>
             <router-link 
-              :to="`/workspace/${agent.workspaceId}/agent/${agent.id}/edit`"
+              :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}/edit`"
               class="btn btn-sm btn-outline-success"
               title="Edit agent"
             >
@@ -287,7 +287,7 @@ onMounted(async () => {
               <span class="d-none d-lg-inline">&nbsp;Edit</span>
             </router-link>
             <router-link 
-              :to="`/workspace/${agent.workspace_id}/agent/${agent.id}`"
+              :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}`"
               class="btn btn-sm btn-primary"
               title="View agent details"
             >

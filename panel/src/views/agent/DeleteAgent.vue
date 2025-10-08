@@ -4,23 +4,30 @@ import {onMounted, reactive} from "vue";
 import type {Workspace} from "@/types";
 import core from "@/core";
 import {Agent} from "@/types";
+import Title from "@/components/Title.vue";
+import {AgentService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   agent: {} as Agent
 })
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["idParam"] as string
+  let id = router.currentRoute.value.params["aID"] as string
   if (!id) return
 
-  agentService.getAgent(id).then(res => {
-    state.agent = res.data as Agent
-    siteService.getSite(state.agent.site).then(res => {
-      state.site = res.data as Workspace
-      state.ready = true
-    })
+  let wID = router.currentRoute.value.params["wID"] as string
+  if (!id) return
+
+  WorkspaceService.get(wID).then(res => {
+    state.workspace = res as Workspace
+    state.ready = true
+  })
+
+  AgentService.get(wID, id).then(res => {
+    state.agent = res as Agent
+    console.log(state.agent)
   })
 })
 const router = core.router()
@@ -34,16 +41,16 @@ function onError(response: any) {
 }
 
 function submit() {
-  agentService.deleteAgent(state.agent.id).then((res) => {
-    router.push(`/workspace/${state.site.id}`)
+  /*AgentService.deleteAgent(state.agent.id).then((res) => {
+    router.push(`/workspace/${state.workspace.id}`)
     console.log(res)
   }).catch(err => {
     console.log(err)
-  })
+  })*/
 }
 
 function cancel() {
-  router.push(`/workspace/${state.site.id}`)
+  router.push(`/workspace/${state.workspace.id}`)
 }
 
 </script>
@@ -51,7 +58,7 @@ function cancel() {
 <template>
   <div class="container-fluid" v-if="state.ready">
     <Title :title="`delete agent`"
-           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` },{ title: `edit agent`, link: `/agent/${state.agent.id}/edit` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.workspace.name, link: `/workspaces/${state.workspace.id}` },{ title: `edit agent`, link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}/edit` }]">
     </Title>
     <div class="row">
       <div class="col-12">

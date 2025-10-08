@@ -115,8 +115,8 @@ const errors = reactive({
 
 // Computed properties for better organization
 const isOnline = computed(() => {
-  if (!state.agent.updatedAt || loadingState.agent) return false;
-  const lastSeen = new Date(state.agent.updatedAt);
+  if (!state.agent.updated_at || loadingState.agent) return false;
+  const lastSeen = new Date(state.agent.updated_at);
   const now = new Date();
   const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
   return diffMinutes <= 5; // Consider online if seen in last 5 minutes
@@ -561,7 +561,7 @@ onMounted(async () => {
     <Title
         :history="[
         {title: 'workspaces', link: '/workspaces'},
-        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id || ''}`}
+        {title: state.workspace.name || 'Loading...', link: `/workspaces/${state.workspace.id || ''}`}
       ]"
         :title="state.agent.name || 'Loading...'"
         :subtitle="state.agent.location || 'Agent Information'">
@@ -572,14 +572,14 @@ onMounted(async () => {
         </div>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspace/${state.agent.workspace_id}/agent/${state.agent.id}/probes`"
+            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes`"
             class="btn btn-outline-primary">
           <i class="fa-regular fa-pen-to-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
         </router-link>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspace/${state.agent.workspace_id}/agent/${state.agent.id}/probe/new`"
+            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probe/new`"
             class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
@@ -693,7 +693,7 @@ onMounted(async () => {
 
         <div v-else-if="state.targetGroups.length > 0" class="probes-grid">
           <div v-for="g in state.targetGroups" :key="g.key" class="probe-card" :class="{'has-issues': state.groupStats[g.key]?.status === 'critical'}">
-            <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/${g.probes[0]?.id || ''}`" class="probe-link">
+            <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probe/${g.probes[0]?.id || ''}`" class="probe-link">
               <div class="probe-header">
                 <div class="probe-icon">
                   <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
@@ -758,7 +758,7 @@ onMounted(async () => {
           <p>Create your first probe to start monitoring</p>
           <router-link
               v-if="state.agent.id && state.workspace.id"
-              :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/probe/new`"
+              :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probe/new`"
               class="btn btn-primary">
             <i class="fa-solid fa-plus"></i> Create Probe
           </router-link>
@@ -824,7 +824,7 @@ onMounted(async () => {
             </div>
           </div>
           <div class="card-footer" v-if="state.agent.id">
-            <router-link :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-secondary">
+            <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-secondary">
               <i class="fa-solid fa-gauge-high"></i> View Speedtests
             </router-link>
           </div>

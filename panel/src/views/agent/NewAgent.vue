@@ -8,7 +8,7 @@ import {Agent} from "@/types";
 import {AgentService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
   ready: false,
   agent: {} as Agent
 })
@@ -18,15 +18,15 @@ onMounted(() => {
   if (!id) return
 
   WorkspaceService.get(id).then(res => {
-    state.site = res as Workspace
-    state.agent.workspaceId = state.site.id
+    state.workspace = res as Workspace
+    state.agent.workspace_id = state.workspace.id
     state.ready = true
   })
 })
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push(`/workspace/${state.site.id}`)
+  router.push(`/workspace/${state.workspace.id}`)
 }
 
 function onError(response: any) {
@@ -34,8 +34,8 @@ function onError(response: any) {
 }
 
 function submit() {
-  AgentService.create(state.site.id, {}).then((res) => {
-    router.push(`/workspace/${state.site.id}`)
+  AgentService.create(state.workspace.id, state.agent).then((res) => {
+    router.push(`/workspaces/${state.workspace.id}`)
     console.log(res)
   }).catch(err => {
     console.log(err)
@@ -46,7 +46,7 @@ function submit() {
 
 <template>
   <div class="container-fluid" v-if="state.ready">
-    <Title title="Add Agent" subtitle="create a new agent" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.site.name, link: `/workspace/${state.site.id}`}]"></Title>
+    <Title title="Add Agent" subtitle="create a new agent" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspaces/${state.workspace.id}`}]"></Title>
     <div class="row">
       <div class="col-12">
         <div class="card">
