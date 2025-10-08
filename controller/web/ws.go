@@ -103,6 +103,8 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 					return errors.New("unauthorized: no agent in context")
 				}
 
+				log.Infof("[%s] received version update message [%s]: %s", nsConn, msg.Namespace, msg.Body)
+
 				// Load and update agent
 				a, err := agent.GetAgentByID(context.TODO(), db, aid)
 				if err != nil {

@@ -579,7 +579,7 @@ onMounted(async () => {
         </router-link>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probe/new`"
+            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/new`"
             class="btn btn-primary">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
@@ -758,7 +758,7 @@ onMounted(async () => {
           <p>Create your first probe to start monitoring</p>
           <router-link
               v-if="state.agent.id && state.workspace.id"
-              :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probe/new`"
+              :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`"
               class="btn btn-primary">
             <i class="fa-solid fa-plus"></i> Create Probe
           </router-link>

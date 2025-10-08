@@ -261,9 +261,9 @@ onMounted(async () => {
                 <i class="fa-solid fa-location-dot"></i>
                 <span>{{ agent.location }}</span>
               </div>
-              <div class="mini-stat">
+              <div class="mini-stat" v-if="agent.version">
                 <i class="fa-solid fa-hammer"></i>
-                <span>version TODO</span>
+                <span>{{agent.version}}</span>
               </div>
             </div>
           </div>
