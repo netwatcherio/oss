@@ -42,8 +42,8 @@ const router = core.router()
 
 <template>
   <div class="container-fluid">
-    <Title title="members" subtitle="agent groups associated with current site" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspace/${state.workspace.id}`}]">
-      <router-link :to="`/workspace/${state.workspace.id}/members/invite`" active-class="active" class="btn btn-primary"><i class="fa-solid fa-plus"></i>&nbsp;invite</router-link>
+    <Title title="members" subtitle="agent groups associated with current site" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.workspace.name, link: `/workspaces/${state.workspace.id}`}]">
+      <router-link :to="`/workspaces/${state.workspace.id}/members/invite`" active-class="active" class="btn btn-primary"><i class="fa-solid fa-plus"></i>&nbsp;invite</router-link>
 
       <!--      <div class="d-flex gap-1">
           <router-link to="/sites/alerts" active-class="active" class="btn btn-outline-primary"><i class="fa-solid fa-plus"></i>&nbsp;View Alerts</router-link>
@@ -78,12 +78,12 @@ const router = core.router()
                 </td>
 
                 <td class="px-0 text-end px-3">
-                  <router-link :to="`/workspace/${state.workspace.id}/members/edit/${group.id}`" class="">
+                  <router-link :to="`/workspaces/${state.workspace.id}/members/edit/${group.id}`" class="">
                     <i class="fa-solid fa-up-right-from-square"></i> edit
                   </router-link>
                 </td>
                 <td class="px-0 text-end px-3">
-                  <router-link :to="`/workspace/${state.workspace.id}/members/remove/${group.id}`" class="">
+                  <router-link :to="`/workspaces/${state.workspace.id}/members/remove/${group.id}`" class="">
                     <i class="fa-solid fa-up-right-from-square"></i> remove
                   </router-link>
                 </td>

@@ -32,7 +32,7 @@ function submit() {
   if (state.site.id) {
     // Call the updateSite method from the siteService
     WorkspaceService.update(state.site.id, state.site).then(() => {
-      router.push(`/workspace/${state.site.id}`);
+      router.push(`/workspaces/${state.site.id}`);
     }).catch(onError);
   }
 }
@@ -42,7 +42,7 @@ function submit() {
   <div class="container-fluid" v-if="state.ready">
     <Title title="edit workspace"
            subtitle="update site details"
-           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspaces/${state.site.id}` }]">
     </Title>
     <div class="row">
       <div class="col-12">

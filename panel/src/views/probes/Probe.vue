@@ -373,8 +373,8 @@ watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
     <Title
         :history="[
         {title: 'workspaces', link: '/workspaces'},
-        {title: state.workspace.name || 'Loading...', link: `/workspace/${state.workspace.id}`},
-        {title: state.agent.name || 'Loading...', link: `/workspace/${state.workspace.id}/agent/${state.agent.id}`},
+        {title: state.workspace.name || 'Loading...', link: `/workspaces/${state.workspace.id}`},
+        {title: state.agent.name || 'Loading...', link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}`},
       ]"
         :title="state.title"
         subtitle="information about this target">

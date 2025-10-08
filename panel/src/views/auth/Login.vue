@@ -40,7 +40,7 @@ function onLogin(payload: LoginResponse) {
   // Keep legacy session updated for compatibility with existing code
   if (legacySession) {
     legacySession.token = payload.token;
-    legacySession.data = payload.data;
+    //legacySession.data = payload.data;
   }
 
   router.push("/");

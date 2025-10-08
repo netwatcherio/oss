@@ -46,7 +46,7 @@ onMounted(() => {
 const router = core.router()
 
 function onCreate(response: any) {
-  router.push(`/workspace/${state.site.id.toString()}`)
+  router.push(`/workspaces/${state.site.id.toString()}`)
 }
 
 function onError(response: any) {
@@ -55,7 +55,7 @@ function onError(response: any) {
 
 function submit() {
   siteService.removeMember(state.site.id, state.memberInfo).then((res) => {
-    router.push(`/workspace/${state.site.id}/members`)
+    router.push(`/workspaces/${state.site.id}/members`)
     console.log(res)
   }).catch(err => {
     console.log(err)
@@ -63,7 +63,7 @@ function submit() {
 }
 
 function cancel() {
-  router.push(`/workspace/${state.site.id}`)
+  router.push(`/workspaces/${state.site.id}`)
 }
 
 </script>
@@ -71,7 +71,7 @@ function cancel() {
 <template>
   <div class="container-fluid" v-if="state.ready">
     <Title :title="`remove member`"
-           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspace/${state.site.id}` },{ title: `members`, link: `/workspace/${state.site.id}/members` }]">
+           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspaces/${state.site.id}` },{ title: `members`, link: `/workspaces/${state.site.id}/members` }]">
     </Title>
     <div class="row">
       <div class="col-12">

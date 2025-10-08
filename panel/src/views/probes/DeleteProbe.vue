@@ -14,7 +14,7 @@ const state = reactive({
 })
 
 onMounted(() => {
-  let id = router.currentRoute.value.params["idParam"] as string
+  let id = router.currentRoute.value.params["pID"] as string
   if (!id) return
 
   probeService.getProbe(id).then(res => {

@@ -26,7 +26,7 @@ onMounted(() => {
 })
 
 function onCreate(response: any) {
-  router.push("/workspace/" + state.site.id + "/members")
+  router.push("/workspaces/" + state.site.id + "/members")
 }
 
 function onError(response: any) {
@@ -44,7 +44,7 @@ function submit() {
 
 <template>
   <div class="container-fluid">
-  <Title title="invite member" :subtitle="`Invite a member to the site '${state.site.name}'`" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.site.name, link: `/workspace/${state.site.id}`}, {title: `members`, link: `/workspace/${state.site.id}/members`}]"></Title>
+  <Title title="invite member" :subtitle="`Invite a member to the site '${state.site.name}'`" :history="[{title: 'workspaces', link: '/workspaces'}, {title: state.site.name, link: `/workspaces/${state.site.id}`}, {title: `members`, link: `/workspaces/${state.site.id}/members`}]"></Title>
     <div class="row">
       <div class="col-12">
         <div class="card">

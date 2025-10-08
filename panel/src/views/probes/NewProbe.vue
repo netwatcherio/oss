@@ -437,7 +437,7 @@ async function submit() {
     console.log('Probe created successfully:', response);
 
     // Navigate back to agent page
-    await router.push(`/workspace/${state.workspace.id}/agent/${state.agent.id}`);
+    await router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
 
   } catch (error) {
     console.error("Error creating probe:", error);
@@ -570,8 +570,8 @@ onMounted(async () => {
     <Title
         :history="[
           {title: 'workspaces', link: '/workspaces'},
-          {title: state.workspace.name, link: `/workspace/${state.workspace.id}`},
-          {title: state.agent.name, link: `/workspace/${state.workspace.id}/agent/${state.agent.id}`}
+          {title: state.workspace.name, link: `/workspaces/${state.workspace.id}`},
+          {title: state.agent.name, link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}`}
         ]"
         :subtitle="`create a new probe for agent '${state.agent.name}'`"
         title="New Probe">
@@ -974,7 +974,7 @@ onMounted(async () => {
           <div class="card-footer">
             <div class="d-flex justify-content-between align-items-center">
               <router-link
-                  :to="`/workspace/${state.workspace.id}/agent/${state.agent.id}`"
+                  :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}`"
                   class="btn btn-outline-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Cancel
               </router-link>
