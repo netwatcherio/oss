@@ -84,7 +84,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 	wsID.Patch("/", func(ctx iris.Context) {
 		id := uintParam(ctx, "id")
 		var body struct {
-			DisplayName *string         `json:"displayName"`
+			Name        *string         `json:"name"`
+			Description *string         `json:"description"`
 			Settings    *map[string]any `json:"settings"`
 		}
 		if err := ctx.ReadJSON(&body); err != nil {
@@ -93,7 +94,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 			return
 		}
 		in := workspace.UpdateWorkspaceInput{
-			Description: body.DisplayName,
+			Description: body.Description,
+			Name:        body.Name,
 			Settings:    jsonPtrFromMap(body.Settings),
 		}
 		ws, err := store.UpdateWorkspace(ctx.Request().Context(), id, in)

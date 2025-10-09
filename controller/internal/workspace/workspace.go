@@ -213,6 +213,7 @@ func (s *Store) ListWorkspaces(ctx context.Context, f ListWorkspacesFilter) ([]W
 }
 
 type UpdateWorkspaceInput struct {
+	Name        *string
 	Description *string
 	Settings    *datatypes.JSON
 }
@@ -228,6 +229,9 @@ func (s *Store) UpdateWorkspace(ctx context.Context, id uint, in UpdateWorkspace
 	updates := map[string]any{}
 	if in.Description != nil {
 		updates["description"] = strings.TrimSpace(*in.Description)
+	}
+	if in.Name != nil {
+		updates["name"] = strings.TrimSpace(*in.Name)
 	}
 	if in.Settings != nil {
 		updates["settings"] = jdefault(*in.Settings)

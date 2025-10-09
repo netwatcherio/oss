@@ -139,57 +139,6 @@ const availableAgentsForSelection = computed(() => {
   return state.agents.filter(agent => agent.id !== state.agent.id);
 });
 
-const isValidProbe = computed(() => {
-  if (!state.selected.value) return false;
-
-  // Common validation
-  if (state.probe.interval_sec <= 0) return false;
-
-  switch (state.selected.value) {
-    case "AGENT":
-      // For agent monitoring, we need a target agent selected
-      return state.targetAgentSelected !== null;
-
-    case "MTR":
-    case "PING":
-      // Need either a target agent or a custom host
-      if (state.targetAgent && showTargetAgentOption.value) {
-        return state.targetAgentSelected !== null;
-      } else {
-        return state.hostInput !== "";
-      }
-
-    case "TRAFFICSIM":
-      // Server mode doesn't need a target
-      if (state.probe.server) return true;
-      // Client mode needs a target
-      if (state.targetAgent) {
-        return state.targetAgentSelected !== null;
-      } else {
-        return state.hostInput !== "";
-      }
-
-    case "DNS":
-      // DNS needs a domain to resolve
-      const hasValidDomain = state.hostInput !== "" && state.hostInput.includes('.');
-      const hasValidRecordTypes = state.dnsConfig.queryAll ||
-          (state.dnsConfig.selectedRecordTypes && state.dnsConfig.selectedRecordTypes.length > 0);
-      return hasValidDomain && hasValidRecordTypes;
-
-    case "RPERF":
-    case "SPEEDTEST":
-      // These might need special handling
-      if (state.targetAgent && showTargetAgentOption.value) {
-        return state.targetAgentSelected !== null;
-      } else {
-        return state.hostInput !== "";
-      }
-
-    default:
-      return false;
-  }
-});
-
 const probeTypeConfig = computed(() => {
   const config: Record<string, any> = {
     AGENT: {
@@ -325,33 +274,122 @@ function initializeOptions() {
   ];
 }
 
-// Apply default configuration when probe type changes
+// NEW: helpers for TRAFFICSIM server state + validation
+const isTrafficSim = computed(() => state.selected.value === 'TRAFFICSIM');
+const isTrafficSimServer = computed(() => isTrafficSim.value && state.probe.server);
+
+const isTrafficSimServerValid = computed(() => {
+  // host is optional (defaults to 0.0.0.0), but port must be 1..65535
+  const p = Number(state.portInput);
+  const portOk = Number.isInteger(p) && p >= 1 && p <= 65535;
+  // Allow blank host (we default to 0.0.0.0 in submit), or any non-empty string
+  const hostOk = state.hostInput === '' || typeof state.hostInput === 'string';
+  return portOk && hostOk;
+});
+
+// EDIT: computed - enhance isValidProbe for TRAFFICSIM server
+const isValidProbe = computed(() => {
+  if (!state.selected.value) return false;
+  if (state.probe.interval_sec <= 0 && state.selected.value !== 'TRAFFICSIM') return false;
+  // note: TRAFFICSIM defaults interval_sec to 0, so skip that strict > 0 check for that type
+
+  switch (state.selected.value) {
+    case "AGENT":
+      return state.targetAgentSelected !== null;
+
+    case "MTR":
+    case "PING":
+      if (state.targetAgent && showTargetAgentOption.value) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput.trim() !== "";
+      }
+
+    case "TRAFFICSIM":
+      // If server mode, only need host/port validation
+      if (state.probe.server) return isTrafficSimServerValid.value;
+      // client mode: needs a target of some kind
+      if (state.targetAgent) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput.trim() !== "";
+      }
+
+    case "DNS":
+    {
+      const hasValidDomain = state.hostInput.includes('.');
+      const hasValidRecordTypes = state.dnsConfig.queryAll ||
+          (state.dnsConfig.selectedRecordTypes && state.dnsConfig.selectedRecordTypes.length > 0);
+      return hasValidDomain && hasValidRecordTypes;
+    }
+
+    case "RPERF":
+    case "SPEEDTEST":
+      if (state.targetAgent && showTargetAgentOption.value) {
+        return state.targetAgentSelected !== null;
+      } else {
+        return state.hostInput.trim() !== "";
+      }
+
+    default:
+      return false;
+  }
+});
+
+// EDIT: applyProbeDefaults – also clear/force modes appropriately
 function applyProbeDefaults() {
   const config = probeTypeConfig.value;
   if (!config) return;
 
-  if (config.defaultInterval !== undefined) {
-    state.probe.interval_sec = config.defaultInterval;
-  }
-  if (config.defaultTimeout !== undefined) {
-    state.probe.timeout_sec = config.defaultTimeout;
-  }
-  if (config.defaultCount !== undefined) {
-    state.probe.count = config.defaultCount;
-  }
-  if (config.defaultDuration !== undefined) {
-    state.probe.duration_sec = config.defaultDuration;
-  }
+  if (config.defaultInterval !== undefined) state.probe.interval_sec = config.defaultInterval;
+  if (config.defaultTimeout !== undefined) state.probe.timeout_sec = config.defaultTimeout;
+  if (config.defaultCount !== undefined) state.probe.count = config.defaultCount;
+  if (config.defaultDuration !== undefined) state.probe.duration_sec = config.defaultDuration;
 
-  // Set target mode based on probe type
   if (config.requiresTargetAgent) {
     state.targetAgent = true;
   } else if (config.requiresHostOnly) {
     state.targetAgent = false;
   }
+
+  // If switching TO TRAFFICSIM, default to client mode (server off) and reset host/port
+  if (state.selected.value === 'TRAFFICSIM') {
+    state.probe.server = false;
+    state.hostInput = '';
+    state.portInput = '5000';
+  }
 }
 
-// Submit probe creation
+// NEW: when TrafficSim server toggles on, force targetAgent off and clear target selections
+watch(() => state.probe.server, (on) => {
+  if (isTrafficSim.value && on) {
+    state.targetAgent = false;           // server mode ignores agent targets
+    state.targetAgentSelected = null;    // clear any selection
+  }
+});
+
+// EDIT: when changing type, keep resets
+watch(() => state.selected.value, async (newType) => {
+  if (!newType) return;
+
+  state.targetAgentSelected = null;
+  state.hostInput = "";
+  state.portInput = "5000";
+  state.duplicateWarning = "";
+  state.probe.server = false;
+
+  state.dnsConfig = {
+    queryAll: false,
+    selectedRecordTypes: ['A', 'AAAA'],
+    dnsServer: "",
+    dnssecValidation: false
+  };
+
+  applyProbeDefaults();
+  await checkForDuplicates();
+});
+
+// EDIT: submit() – TrafficSim server defaults and stricter targets/metadata
 async function submit() {
   state.errors = [];
   state.loading = true;
@@ -362,7 +400,6 @@ async function submit() {
       return;
     }
 
-    // Prepare the probe for submission
     const newProbe: ProbeCreateInput = {
       ...state.probe,
       workspace_id: state.workspace.id,
@@ -370,63 +407,49 @@ async function submit() {
       type: state.selected.value as ProbeType
     };
 
-    // Set targets based on selection mode
-    if (state.targetAgent && state.targetAgentSelected && showTargetAgentOption.value) {
-      // Use agent targets for agent-based monitoring
-      newProbe.agent_targets = [state.targetAgentSelected.id];
-      newProbe.targets = [];
-    } else if (!state.targetAgent || !showTargetAgentOption.value) {
-      // Use string targets for custom hosts/IPs
-      if (state.probe.server && state.selected.value === 'TRAFFICSIM') {
-        // Server mode may not need targets
-        newProbe.targets = state.hostInput ? [`${state.hostInput}:${state.portInput}`] : [];
-      } else {
-        // Regular target
-        const target = state.hostInput.includes(':') ? state.hostInput : state.hostInput;
-        newProbe.targets = [target];
-      }
-      newProbe.agent_targets = [];
-    }
-
-    // Handle special cases for TRAFFICSIM
     if (state.selected.value === 'TRAFFICSIM' && state.probe.server) {
       newProbe.server = true;
-      // Server mode might need listening address
-      if (state.hostInput) {
-        newProbe.metadata = {
-          ...newProbe.metadata,
-          listenAddress: `${state.hostInput}:${state.portInput}`
-        };
-      }
-    }
-
-    // Handle DNS configuration
-    if (state.selected.value === 'DNS') {
-      // Store DNS-specific configuration in metadata
-      const dnsMetadata: any = {
-        queryAll: state.dnsConfig.queryAll,
-        dnssecValidation: state.dnsConfig.dnssecValidation
-      };
-
-      if (!state.dnsConfig.queryAll && state.dnsConfig.selectedRecordTypes.length > 0) {
-        dnsMetadata.recordTypes = state.dnsConfig.selectedRecordTypes;
-      }
-
-      if (state.dnsConfig.dnsServer) {
-        dnsMetadata.dnsServer = state.dnsConfig.dnsServer;
-      }
-
+      // Default listen host if blank
+      const listenHost = state.hostInput.trim() ? state.hostInput.trim() + ":" + state.portInput : '0.0.0.0:' + state.portInput;
+      newProbe.targets = [listenHost];
       newProbe.metadata = {
         ...newProbe.metadata,
-        ...dnsMetadata
+        listenAddress: `${listenHost}:${state.portInput}`
       };
+    } else {
+      // client/other types: set targets normally
+      if (state.targetAgent && state.targetAgentSelected && showTargetAgentOption.value) {
+        newProbe.agent_targets = [state.targetAgentSelected.id];
+        newProbe.targets = [];
+      } else {
+        if (state.hostInput) {
+          const target = state.hostInput.includes(':')
+              ? state.hostInput
+              : state.hostInput; // (kept as-is; append port only where your backend expects)
+          newProbe.targets = [target];
+        } else {
+          newProbe.targets = [];
+        }
+        newProbe.agent_targets = [];
+      }
 
-      // DNS probes always use the domain as the target
-      newProbe.targets = [state.hostInput];
-      newProbe.agent_targets = [];
+      // DNS metadata
+      if (state.selected.value === 'DNS') {
+        const dnsMetadata: any = {
+          queryAll: state.dnsConfig.queryAll,
+          dnssecValidation: state.dnsConfig.dnssecValidation
+        };
+        if (!state.dnsConfig.queryAll && state.dnsConfig.selectedRecordTypes.length > 0) {
+          dnsMetadata.recordTypes = state.dnsConfig.selectedRecordTypes;
+        }
+        if (state.dnsConfig.dnsServer) {
+          dnsMetadata.dnsServer = state.dnsConfig.dnsServer;
+        }
+        newProbe.metadata = { ...newProbe.metadata, ...dnsMetadata };
+        newProbe.targets = [state.hostInput];
+        newProbe.agent_targets = [];
+      }
     }
-
-    console.log('Creating probe:', newProbe);
 
     const response = await ProbeService.create(
         state.workspace.id,
@@ -434,11 +457,7 @@ async function submit() {
         newProbe
     );
 
-    console.log('Probe created successfully:', response);
-
-    // Navigate back to agent page
     await router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
-
   } catch (error) {
     console.error("Error creating probe:", error);
     state.errors.push("Failed to create probe. Please try again.");
@@ -653,7 +672,11 @@ onMounted(async () => {
               <h6 class="section-title">Target Configuration</h6>
 
               <!-- Target Mode Toggle -->
-              <div v-if="showTargetAgentOption && probeTypeConfig.supportsCustomTarget" class="mb-4">
+              <!-- Target Mode Toggle -->
+              <div
+                  v-if="showTargetAgentOption && probeTypeConfig.supportsCustomTarget"
+                  class="mb-4"
+              >
                 <div class="btn-group w-100" role="group">
                   <input
                       type="radio"
@@ -661,8 +684,10 @@ onMounted(async () => {
                       name="targetMode"
                       id="targetModeAgent"
                       :checked="state.targetAgent"
-                      @change="state.targetAgent = true">
-                  <label class="btn btn-outline-primary" for="targetModeAgent">
+                      :disabled="isTrafficSimServer"
+                      @change="state.targetAgent = true"
+                  />
+                  <label class="btn btn-outline-primary" :class="{'disabled': isTrafficSimServer}" for="targetModeAgent">
                     <i class="fas fa-server me-2"></i>Target Agent
                   </label>
 
@@ -672,13 +697,18 @@ onMounted(async () => {
                       name="targetMode"
                       id="targetModeCustom"
                       :checked="!state.targetAgent"
-                      @change="state.targetAgent = false">
-                  <label class="btn btn-outline-primary" for="targetModeCustom">
+                      :disabled="isTrafficSimServer"
+                      @change="state.targetAgent = false"
+                  />
+                  <label class="btn btn-outline-primary" :class="{'disabled': isTrafficSimServer}" for="targetModeCustom">
                     <i class="fas fa-globe me-2"></i>Custom Target
                   </label>
                 </div>
+                <small v-if="isTrafficSimServer" class="text-muted d-block mt-1">
+                  Server mode is enabled — target selection is disabled.
+                </small>
               </div>
-
+              <!-- Agent Selection -->
               <!-- Agent Selection -->
               <div v-if="state.targetAgent && showTargetAgentOption" class="mb-4">
                 <label class="form-label fw-semibold" for="targetAgent">
@@ -688,12 +718,14 @@ onMounted(async () => {
                     id="targetAgent"
                     v-model="state.targetAgentSelected"
                     class="form-select form-select-lg"
-                    :disabled="state.loading || availableAgentsForSelection.length === 0">
+                    :disabled="state.loading || availableAgentsForSelection.length === 0 || isTrafficSimServer"
+                >
                   <option :value="null" disabled>Select an agent</option>
                   <option
                       v-for="agent in availableAgentsForSelection"
                       :key="agent.id"
-                      :value="agent">
+                      :value="agent"
+                  >
                     {{ agent.name }}
                     <span v-if="agent.location">({{ agent.location }})</span>
                   </option>
@@ -702,7 +734,6 @@ onMounted(async () => {
                   <i class="fas fa-info-circle me-1"></i>No other agents available in this workspace
                 </small>
               </div>
-
               <!-- Custom Target Input for PING/MTR -->
               <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR') && showCustomTargetInput" class="mb-4">
                 <label class="form-label fw-semibold" for="pingTarget">
@@ -811,13 +842,15 @@ onMounted(async () => {
 
               <!-- TRAFFICSIM Options -->
               <div v-if="state.selected.value === 'TRAFFICSIM'">
-                <div v-if="!state.targetAgent && !state.targetGroup" class="mb-4">
+                <!-- Server toggle: shown always for TrafficSim -->
+                <div class="mb-4">
                   <div class="form-check form-switch">
                     <input
                         id="trafficSimServer"
                         v-model="state.probe.server"
                         class="form-check-input"
-                        type="checkbox">
+                        type="checkbox"
+                    >
                     <label class="form-check-label" for="trafficSimServer">
                       Enable Server Mode
                       <small class="text-muted d-block">Run as a traffic receiver (only one server per agent allowed)</small>
@@ -826,7 +859,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Server Listening Configuration -->
-                <div v-if="state.probe.server" class="mt-3">
+                <div v-if="isTrafficSimServer" class="mt-3">
                   <label class="form-label fw-semibold">
                     <i class="fas fa-network-wired me-2"></i>Server Listening Configuration
                   </label>
@@ -841,9 +874,10 @@ onMounted(async () => {
                               class="form-control"
                               type="text"
                               placeholder="0.0.0.0"
-                              aria-label="Host address">
+                              aria-label="Host address"
+                          >
                         </div>
-                        <small class="text-muted">Use 0.0.0.0 to listen on all interfaces</small>
+                        <small class="text-muted">Leave blank or use 0.0.0.0 to listen on all interfaces</small>
                       </div>
                       <div class="col-md-4">
                         <label class="form-label text-muted small">Port</label>
@@ -856,24 +890,27 @@ onMounted(async () => {
                               min="1"
                               max="65535"
                               placeholder="5000"
-                              aria-label="Port number">
+                              aria-label="Port number"
+                          >
                         </div>
-                        <small class="text-muted">Range: 1-65535</small>
+                        <small class="text-muted">Range: 1–65535</small>
                       </div>
                     </div>
                     <div class="mt-2">
-                      <code class="text-primary">{{ state.hostInput || '0.0.0.0' }}:{{ state.portInput || '5000' }}</code>
+                      <code class="text-primary">{{ (state.hostInput || '0.0.0.0') + ':' + (state.portInput || '5000') }}</code>
+                    </div>
+                    <div v-if="!isTrafficSimServerValid" class="text-danger mt-2">
+                      <i class="fas fa-exclamation-circle me-1"></i> Please enter a valid port (1–65535).
                     </div>
                   </div>
                 </div>
               </div>
-
               <!-- Probe Timing Configuration -->
               <div class="configuration-section">
                 <h6 class="section-title">Probe Settings</h6>
 
                 <!-- Interval -->
-                <div class="mb-4">
+                <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterval">
                     <i class="fas fa-clock me-2"></i>Probe Interval
                   </label>
@@ -913,7 +950,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Duration (for TRAFFICSIM/RPERF) -->
-                <div v-if="['TRAFFICSIM', 'RPERF'].includes(state.selected.value)" class="mb-4">
+                <div v-if="['RPERF'].includes(state.selected.value)" class="mb-4">
                   <label class="form-label fw-semibold" for="probeDuration">
                     <i class="fas fa-stopwatch me-2"></i>Test Duration
                   </label>
@@ -933,7 +970,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Timeout -->
-                <div class="mb-4">
+                <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeTimeout">
                     <i class="fas fa-hourglass-half me-2"></i>Timeout
                   </label>
@@ -980,15 +1017,16 @@ onMounted(async () => {
               </router-link>
               <button
                   class="btn btn-primary btn-lg px-5"
-                  type="submit"
+                  type="button"
                   @click="submit"
-                  :disabled="!isValidProbe || state.loading || state.duplicateWarning">
-                <span v-if="state.loading">
-                  <i class="fas fa-spinner fa-spin me-2"></i>Creating Probe...
-                </span>
+                  :disabled="!isValidProbe || state.loading || !!state.duplicateWarning"
+              >
+  <span v-if="state.loading">
+    <i class="fas fa-spinner fa-spin me-2"></i>Creating Probe...
+  </span>
                 <span v-else>
-                  <i class="fas fa-plus-circle me-2"></i>Create Probe
-                </span>
+    <i class="fas fa-plus-circle me-2"></i>Create Probe
+  </span>
               </button>
             </div>
           </div>
