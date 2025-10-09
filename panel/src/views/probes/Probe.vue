@@ -282,6 +282,7 @@ async function reloadData() {
         state.agent = ag as Agent;
       })
       .catch(() => { /* ignore */
+        console.log('failed to get agent')
       });
 
   ProbeService.get(workspaceID, agentID, probeID)
@@ -292,9 +293,11 @@ async function reloadData() {
             .then(res => {
               state.probes = findProbesByInitialTarget(state.probe, res as Probe[])
 
+              console.log(res)
+
               // Title from first target (agent ref vs literal)
               const firstTarget = (state.probe?.targets?.[0]) || {} as any;
-              if (firstTarget.agentId && !firstTarget.target) {
+              if (firstTarget.agentId) {
                 return AgentService.get(workspaceID, firstTarget.agentId).then(targ => {
                   state.probeAgent = targ as Agent;
                   state.title = targ.name || `agent:${(targ as any).id}`;

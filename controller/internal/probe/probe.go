@@ -51,7 +51,7 @@ type Probe struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	WorkspaceID uint           `gorm:"index" json:"workspace_id"`
-	AgentID     uint           `gorm:"index" json:"agentId"`
+	AgentID     uint           `gorm:"index" json:"agent_id"`
 	Type        Type           `gorm:"type:VARCHAR(64);index" json:"type"`
 	Enabled     bool           `gorm:"default:true;index" json:"enabled"`
 	IntervalSec int            `gorm:"default:60" json:"interval_sec"`
