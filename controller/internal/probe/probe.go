@@ -244,37 +244,51 @@ func ListByAgent(ctx context.Context, db *gorm.DB, agentID uint) ([]Probe, error
 
 func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([]Probe, error) {
 	var out []Probe
+
 	err := db.WithContext(ctx).
 		Preload("Targets").
 		Where("agent_id = ?", agentID).
 		Order("id DESC").
 		Find(&out).Error
+	if err != nil {
+		return nil, err
+	}
 
-	// todo
-	/*
-		Soooo:
-			- If probe type has targets as agents, cycle through the probes, and load their public IP into it
-	*/
+	// cache public IP lookups per agent to avoid repeat DB hits
+	pubIPCache := make(map[uint]string)
 
-	for _, pO := range out {
-		for _, t := range pO.Targets {
-			// check public ip for agent
+	for i := range out {
+		p := &out[i]
 
-			switch pO.Type {
+		for j := range p.Targets {
+			t := &p.Targets[j]
+
+			switch p.Type {
 			case TypeAgent:
-				// todo create multiple probes for agent type for all the ones available for the target agent?!?
+				// TODO: create multiple probes for agent type for all available target agents (left as-is)
 			case TypeMTR, TypePing:
+				// fill target when it's empty and we have a target agent
 				if t.Target == "" && t.AgentID != nil {
-					t.Target, err = getPublicIP(ctx, db, ch, *t.AgentID)
-					if err != nil {
-						log.Error(err)
+					aid := *t.AgentID
+
+					ip, ok := pubIPCache[aid]
+					if !ok {
+						var err2 error
+						ip, err2 = getPublicIP(ctx, db, ch, aid)
+						if err2 != nil {
+							log.Error(err2)
+							continue
+						}
+						pubIPCache[aid] = ip
 					}
+
+					t.Target = ip
 				}
 			}
 		}
 	}
 
-	return out, err
+	return out, nil
 }
 
 func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (string, error) {
