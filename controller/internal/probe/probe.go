@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"net"
 	"netwatcher-controller/internal/agent"
 	"strconv"
@@ -265,9 +266,11 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			case TypeMTR, TypePing:
 				if t.Target == "" && t.AgentID != nil {
 					t.Target, err = getPublicIP(ctx, db, ch, *t.AgentID)
+					if err != nil {
+						log.Error(err)
+					}
 				}
 			}
-
 		}
 	}
 
