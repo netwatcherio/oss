@@ -1,4 +1,4 @@
-package probe_data
+package probe
 
 import "time"
 

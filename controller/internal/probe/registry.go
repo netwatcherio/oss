@@ -1,4 +1,4 @@
-package probe_data
+package probe
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"netwatcher-controller/internal/probe"
 	"sync"
 	"time"
 )
@@ -21,7 +20,7 @@ type ProbeData struct {
 	TriggeredReason string          `json:"triggered_reason"`
 	CreatedAt       time.Time       `json:"created_at"`  // this is the timestamp that the agent provides
 	ReceivedAt      time.Time       `json:"received_at"` // this is the timestamp the backend provides
-	Type            probe.Type      `json:"type"`
+	Type            Type            `json:"type"`
 	Payload         json.RawMessage `json:"payload"`
 	// Optional: carry target string if you still resolve AGENT types dynamically
 	Target      string `json:"target,omitempty"`
@@ -31,7 +30,7 @@ type ProbeData struct {
 // ---- Non-generic handler interface the registry stores ----
 
 type Handler interface {
-	Kind() probe.Type
+	Kind() Type
 	DecodeAndValidate(raw json.RawMessage) (any, error)
 	Process(ctx context.Context, data ProbeData, payload any) error
 }
@@ -39,19 +38,19 @@ type Handler interface {
 // ---- Generic helper to build type-safe handlers ----
 
 type TypedHandler[T any] struct {
-	kind     probe.Type
+	kind     Type
 	validate func(T) error
 	process  func(context.Context, ProbeData, T) error
 }
 
-func NewHandler[T any](kind probe.Type,
+func NewHandler[T any](kind Type,
 	validate func(T) error,
 	process func(context.Context, ProbeData, T) error,
 ) Handler {
 	return &TypedHandler[T]{kind: kind, validate: validate, process: process}
 }
 
-func (h *TypedHandler[T]) Kind() probe.Type { return h.kind }
+func (h *TypedHandler[T]) Kind() Type { return h.kind }
 
 func (h *TypedHandler[T]) DecodeAndValidate(raw json.RawMessage) (any, error) {
 	var p T
@@ -80,11 +79,11 @@ func (h *TypedHandler[T]) Process(ctx context.Context, meta ProbeData, payload a
 
 type Registry struct {
 	mu       sync.RWMutex
-	handlers map[probe.Type]Handler
+	handlers map[Type]Handler
 }
 
 func NewRegistry() *Registry {
-	return &Registry{handlers: make(map[probe.Type]Handler)}
+	return &Registry{handlers: make(map[Type]Handler)}
 }
 
 func (r *Registry) Register(h Handler) {
@@ -93,7 +92,7 @@ func (r *Registry) Register(h Handler) {
 	r.handlers[h.Kind()] = h
 }
 
-func (r *Registry) Has(kind probe.Type) bool {
+func (r *Registry) Has(kind Type) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	_, ok := r.handlers[kind]
@@ -104,9 +103,9 @@ func (r *Registry) Dispatch(ctx context.Context, pp ProbeData) error {
 	kind := pp.Type
 
 	// Optional: if kind == AGENT, derive the real type from Target prefix "TYPE%%%..."
-	if kind == probe.TypeAgent && pp.Target != "" {
+	if kind == TypeAgent && pp.Target != "" {
 		if i := indexOf(pp.Target, "%%%"); i >= 0 {
-			kind = probe.Type(pp.Target[:i])
+			kind = Type(pp.Target[:i])
 		}
 	}
 
@@ -144,7 +143,7 @@ var Default = NewRegistry()
 func Register(h Handler) { Default.Register(h) }
 
 func Dispatch(ctx context.Context, pp ProbeData) error {
-	if !Default.Has(pp.Type) && pp.Type != probe.TypeAgent {
+	if !Default.Has(pp.Type) && pp.Type != TypeAgent {
 		return errors.New("no handler registered and not an agent-derived kind")
 	}
 	return Default.Dispatch(ctx, pp)

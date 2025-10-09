@@ -1,21 +1,20 @@
-package probe_data
+package probe
 
 import (
 	"context"
 	"database/sql"
 	log "github.com/sirupsen/logrus"
-	"netwatcher-controller/internal/probe"
 	"time"
 )
 
 func initPing(db *sql.DB) {
 	Register(NewHandler[PingPayload](
-		probe.TypePing,
+		TypePing,
 		func(p PingPayload) error {
 			return nil
 		},
 		func(ctx context.Context, data ProbeData, p PingPayload) error {
-			if err := SaveRecordCH(ctx, db, data, string(probe.TypePing), p); err != nil {
+			if err := SaveRecordCH(ctx, db, data, string(TypePing), p); err != nil {
 				log.WithError(err).Error("save ping record (CH)")
 				return err
 			}

@@ -2,9 +2,12 @@ package probe
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"netwatcher-controller/internal/agent"
 	"strconv"
 	"strings"
 	"time"
@@ -234,7 +237,77 @@ func ListByAgent(ctx context.Context, db *gorm.DB, agentID uint) ([]Probe, error
 		Where("agent_id = ?", agentID).
 		Order("id DESC").
 		Find(&out).Error
+
 	return out, err
+}
+
+func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([]Probe, error) {
+	var out []Probe
+	err := db.WithContext(ctx).
+		Preload("Targets").
+		Where("agent_id = ?", agentID).
+		Order("id DESC").
+		Find(&out).Error
+
+	// todo
+	/*
+		Soooo:
+			- If probe type has targets as agents, cycle through the probes, and load their public IP into it
+	*/
+
+	for _, pO := range out {
+		for _, t := range pO.Targets {
+			// check public ip for agent
+
+			switch pO.Type {
+			case TypeAgent:
+				// todo create multiple probes for agent type for all the ones available for the target agent?!?
+			case TypeMTR, TypePing:
+				if t.Target == "" && t.AgentID != nil {
+					t.Target, err = getPublicIP(ctx, db, ch, *t.AgentID)
+				}
+			}
+
+		}
+	}
+
+	return out, err
+}
+
+func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (string, error) {
+	var publicIP string
+
+	agentByID, err := agent.GetAgentByID(ctx, db, agentID)
+	if err != nil {
+		return "", err
+	}
+
+	if agentByID.PublicIPOverride != "" {
+		publicIP = agentByID.PublicIPOverride
+	} else {
+		netInfoPayload, err := GetLatestNetInfoForAgent(ctx, ch, uint64(agentID), nil)
+		if err != nil {
+			return "", err
+		}
+
+		var netInfo = struct {
+			LocalAddress     string    `json:"local_address" bson:"local_address"`
+			DefaultGateway   string    `json:"default_gateway" bson:"default_gateway"`
+			PublicAddress    string    `json:"public_address" bson:"public_address"`
+			InternetProvider string    `json:"internet_provider" bson:"internet_provider"`
+			Lat              string    `json:"lat" bson:"lat"`
+			Long             string    `json:"long" bson:"long"`
+			Timestamp        time.Time `json:"timestamp" bson:"timestamp"`
+		}{}
+
+		err = json.Unmarshal(netInfoPayload.Payload, &netInfo)
+		if err != nil {
+			return "", err
+		}
+
+		publicIP = netInfo.PublicAddress
+	}
+	return publicIP, nil
 }
 
 // ListByAgentWithReverse returns probes owned by agentID,

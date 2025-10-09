@@ -1,5 +1,5 @@
 // internal/probe_data/ch.go
-package probe_data
+package probe
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"netwatcher-controller/internal/probe"
 	"os"
 	"strings"
 	"time"
@@ -208,7 +207,7 @@ ORDER BY created_at ` + order
 		); err != nil {
 			return nil, err
 		}
-		r.Type = probe.Type(typeStr)
+		r.Type = Type(typeStr)
 		r.Triggered = trigBool
 		r.Payload = json.RawMessage(payloadStr)
 		out = append(out, r)
@@ -261,7 +260,7 @@ LIMIT 1
 		}
 		return nil, err
 	}
-	r.Type = probe.Type(typeStr)
+	r.Type = Type(typeStr)
 	r.Triggered = trigBool
 	r.Payload = json.RawMessage(payloadStr)
 	return &r, nil
@@ -363,7 +362,7 @@ ORDER BY created_at ` + order
 		); err != nil {
 			return nil, err
 		}
-		r.Type = probe.Type(typeStr)
+		r.Type = Type(typeStr)
 		r.Triggered = trigBool
 		r.Payload = json.RawMessage(payloadStr)
 		out = append(out, r)
@@ -394,7 +393,7 @@ func GetLatestNetInfoForAgent(
 	agentID uint64,
 	probeID *uint64, // pass nil to ignore probe_id
 ) (*ProbeData, error) {
-	typ := string(probe.TypeNetInfo) // or string(probe.TypeNetInfo) if you prefer
+	typ := string(TypeNetInfo) // or string(probe.TypeNetInfo) if you prefer
 	params := FindParams{
 		Type:    &typ,
 		AgentID: &agentID,
@@ -413,7 +412,7 @@ func GetLatestSysInfoForAgent(
 	agentID uint64,
 	probeID *uint64, // pass nil to ignore probe_id
 ) (*ProbeData, error) {
-	typ := string(probe.TypeSysInfo) // or string(probe.TypeNetInfo) if you prefer
+	typ := string(TypeSysInfo) // or string(probe.TypeNetInfo) if you prefer
 	params := FindParams{
 		Type:    &typ,
 		AgentID: &agentID,

@@ -14,7 +14,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 	registerAuthRoutes(app, db) // /auth/*
 	agentAuth(app, db)          // /agent
 
-	err := addWebSocketServer(app, db)
+	err := addWebSocketServer(app, db, ch)
 	if err != nil {
 		log.Error(err)
 	}

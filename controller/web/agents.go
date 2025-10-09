@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
-	"netwatcher-controller/internal/probe_data"
+	"netwatcher-controller/internal/probe"
 	"os"
 	"strconv"
 	"time"
@@ -96,7 +96,7 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 	aid.Get("/netinfo", func(ctx iris.Context) {
 		//wsID := uintParam(ctx, "id")
 		aID := uintParam(ctx, "agentID")
-		a, err := probe_data.GetLatestNetInfoForAgent(context.TODO(), ch, uint64(aID), nil)
+		a, err := probe.GetLatestNetInfoForAgent(context.TODO(), ch, uint64(aID), nil)
 		if err != nil || a == nil {
 			ctx.StatusCode(http.StatusNotFound)
 			return
@@ -107,7 +107,7 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 	aid.Get("/sysinfo", func(ctx iris.Context) {
 		//wsID := uintParam(ctx, "id")
 		aID := uintParam(ctx, "agentID")
-		a, err := probe_data.GetLatestSysInfoForAgent(context.TODO(), ch, uint64(aID), nil)
+		a, err := probe.GetLatestSysInfoForAgent(context.TODO(), ch, uint64(aID), nil)
 		if err != nil || a == nil {
 			ctx.StatusCode(http.StatusNotFound)
 			return

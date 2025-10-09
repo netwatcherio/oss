@@ -14,7 +14,6 @@ import (
 	"gorm.io/gorm"
 
 	"netwatcher-controller/internal/probe"
-	pd "netwatcher-controller/internal/probe_data"
 )
 
 // Wire this similarly to panelProbes:
@@ -37,7 +36,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 			_ = ctx.JSON(iris.Map{"error": bad.Error()})
 			return
 		}
-		rows, err := pd.FindProbeData(ctx.Request().Context(), ch, p)
+		rows, err := probe.FindProbeData(ctx.Request().Context(), ch, p)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -59,7 +58,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		limit := intOrDefault(ctx.URLParam("limit"), 0)
 		asc := boolOr(ctx.URLParamDefault("asc", ""), false)
 
-		rows, err := pd.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
+		rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -96,7 +95,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 				return
 			}
 		}
-		row, err := pd.GetLatestByTypeAndAgent(ctx.Request().Context(), ch, typ, agentID, probeIDPtr)
+		row, err := probe.GetLatestByTypeAndAgent(ctx.Request().Context(), ch, typ, agentID, probeIDPtr)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -149,14 +148,14 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 		// Fetch either latest points or timeseries for each probe_id
 		type bundle struct {
-			ProbeID uint           `json:"probe_id"`
-			Latest  *pd.ProbeData  `json:"latest,omitempty"`
-			Rows    []pd.ProbeData `json:"rows,omitempty"`
+			ProbeID uint              `json:"probe_id"`
+			Latest  *probe.ProbeData  `json:"latest,omitempty"`
+			Rows    []probe.ProbeData `json:"rows,omitempty"`
 		}
 		out := make([]bundle, 0, len(probeIDs))
 		for _, pid := range probeIDs {
 			if latestOnly {
-				row, err := pd.GetLatest(ctx.Request().Context(), ch, pd.FindParams{ProbeID: uint64Ptr(uint64(pid))})
+				row, err := probe.GetLatest(ctx.Request().Context(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
 				if err != nil {
 					ctx.StatusCode(http.StatusInternalServerError)
 					_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -164,7 +163,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 				}
 				out = append(out, bundle{ProbeID: pid, Latest: row})
 			} else {
-				rows, err := pd.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(pid), from, to, false, limit)
+				rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(pid), from, to, false, limit)
 				if err != nil {
 					ctx.StatusCode(http.StatusInternalServerError)
 					_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -234,8 +233,8 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		// Optionally attach latest datapoints for each similar probe (by probe_id only)
 		if withLatest {
 			type add struct {
-				ProbeID uint          `json:"probe_id"`
-				Latest  *pd.ProbeData `json:"latest"`
+				ProbeID uint             `json:"probe_id"`
+				Latest  *probe.ProbeData `json:"latest"`
 			}
 			var ids []uint
 			for _, p := range simLit {
@@ -248,7 +247,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 			latest := make([]add, 0, len(ids))
 			for _, pid := range ids {
-				row, err := pd.GetLatest(ctx.Request().Context(), ch, pd.FindParams{ProbeID: uint64Ptr(uint64(pid))})
+				row, err := probe.GetLatest(ctx.Request().Context(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
 				if err != nil {
 					ctx.StatusCode(http.StatusInternalServerError)
 					_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -265,8 +264,8 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 // ---------- helpers (parsing & Postgres lookups) ----------
 
-func readFindParams(ctx iris.Context) (pd.FindParams, error) {
-	var p pd.FindParams
+func readFindParams(ctx iris.Context) (probe.FindParams, error) {
+	var p probe.FindParams
 
 	if s := ctx.URLParam("type"); s != "" {
 		p.Type = &s

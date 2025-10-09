@@ -1,17 +1,16 @@
-package probe_data
+package probe
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	log "github.com/sirupsen/logrus"
-	"netwatcher-controller/internal/probe"
 	"time"
 )
 
 func initMtr(db *sql.DB) {
 	Register(NewHandler[mtrPayload](
-		probe.TypeMTR,
+		TypeMTR,
 		func(p mtrPayload) error {
 			if len(p.Report.Hops) == 0 {
 				return errors.New("no hops")
@@ -19,7 +18,7 @@ func initMtr(db *sql.DB) {
 			return nil
 		},
 		func(ctx context.Context, data ProbeData, p mtrPayload) error {
-			if err := SaveRecordCH(ctx, db, data, string(probe.TypeMTR), p); err != nil {
+			if err := SaveRecordCH(ctx, db, data, string(TypeMTR), p); err != nil {
 				log.WithError(err).Error("save mtr record (CH)")
 				return err
 			}

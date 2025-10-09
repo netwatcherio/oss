@@ -3,7 +3,7 @@ package main
 
 import (
 	"context"
-	"netwatcher-controller/internal/probe_data"
+	"netwatcher-controller/internal/probe"
 	"os"
 	"time"
 
@@ -29,11 +29,11 @@ func main() {
 		log.WithError(err).Fatal("db index creation failed")
 	}
 
-	ch, err := probe_data.OpenClickHouseFromEnv()
+	ch, err := probe.OpenClickHouseFromEnv()
 	if err != nil {
 		log.WithError(err).Fatal("clickhouse open failed")
 	}
-	if err := probe_data.MigrateCH(context.Background(), ch); err != nil {
+	if err := probe.MigrateCH(context.Background(), ch); err != nil {
 		log.WithError(err).Fatal("clickhouse migrate failed")
 	}
 
@@ -63,7 +63,7 @@ func main() {
 	}
 	app.UseRouter(crs)
 
-	probe_data.InitWorkers(ch)
+	probe.InitWorkers(ch)
 
 	// Routes (public + protected)
 	web.RegisterRoutes(app, db, ch)

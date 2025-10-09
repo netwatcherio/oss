@@ -227,10 +227,10 @@ const generalProbes = computed(() => {
         :history="[
         {title: 'workspaces', link: '/workspaces'},
         {title: state.workspace.name || 'Loading...', link: `/workspaces/${state.workspace.id}`},
-        {title: state.agent.name || 'Loading...', link: `/workspaces/${state.workspace.id}/agent/${state.agent.id}`}
+        {title: state.agent.name || 'Loading...', link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}`}
       ]">
       <div class="d-flex gap-2">
-        <router-link :to="`/workspaces/${state.workspace.id}/agent/${state.agent.id}/probe/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
+        <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
           <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
         </router-link>
       </div>

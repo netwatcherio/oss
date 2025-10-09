@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/kataras/iris/v12"
@@ -9,7 +10,6 @@ import (
 	"net/http"
 	"netwatcher-controller/internal/agent"
 	probe "netwatcher-controller/internal/probe"
-	"netwatcher-controller/internal/probe_data"
 	"strconv"
 	"strings"
 	"time"
@@ -26,10 +26,10 @@ import (
 //
 // If valid, we attach agent/workspace IDs to the Iris context for use in events.
 
-func addWebSocketServer(app *iris.Application, db *gorm.DB) error {
+func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 	websocketServer := websocket.New(
 		websocket.DefaultGorillaUpgrader,
-		getWebsocketEvents(app, db),
+		getWebsocketEvents(app, db, ch),
 	)
 
 	// Authenticate connection via PSK
@@ -77,7 +77,7 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB) error {
 	return nil
 }
 
-func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces {
+func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocket.Namespaces {
 	serverEvents := websocket.Namespaces{
 		"agent": websocket.Events{
 			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
@@ -144,7 +144,7 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 
 				// Fetch probes for this agent
 				// NOTE: Adjust your Probe struct if needed; this mirrors your previous logic
-				ownedP, err := probe.ListByAgent(context.TODO(), db, a.ID)
+				ownedP, err := probe.ListForAgent(context.TODO(), db, ch, a.ID)
 				if err != nil {
 					log.Errorf("probe_get: %v", err)
 				}
@@ -169,7 +169,7 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				// Unmarshal as ProbeData (top-level fields + payload)
 				log.Infof("[%s] posted message to namespace [%s]: %s", nsConn, msg.Namespace, msg.Body)
 
-				var pp probe_data.ProbeData
+				var pp probe.ProbeData
 				if err := json.Unmarshal(msg.Body, &pp); err != nil {
 					log.Error(err)
 					return err
@@ -188,7 +188,7 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB) websocket.Namespaces
 				}
 
 				// Dispatch to the registered handler for pp.Kind (or AGENT-derived)
-				if err := probe_data.Dispatch(context.TODO(), pp); err != nil {
+				if err := probe.Dispatch(context.TODO(), pp); err != nil {
 					log.Errorf("probe_post dispatch: %v", err)
 					return err
 				}

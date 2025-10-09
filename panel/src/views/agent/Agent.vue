@@ -572,7 +572,7 @@ onMounted(async () => {
         </div>
         <router-link
             v-if="state.agent.id && state.workspace.id"
-            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes`"
+            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/edit`"
             class="btn btn-outline-primary">
           <i class="fa-regular fa-pen-to-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>

@@ -1,21 +1,20 @@
-package probe_data
+package probe
 
 import (
 	"context"
 	"database/sql"
 	log "github.com/sirupsen/logrus"
-	"netwatcher-controller/internal/probe"
 	"time"
 )
 
 func initSysInfo(db *sql.DB) {
 	Register(NewHandler[sysInfoPayload](
-		probe.TypeSysInfo,
+		TypeSysInfo,
 		func(p sysInfoPayload) error {
 			return nil
 		},
 		func(ctx context.Context, data ProbeData, p sysInfoPayload) error {
-			if err := SaveRecordCH(ctx, db, data, string(probe.TypeSysInfo), p); err != nil {
+			if err := SaveRecordCH(ctx, db, data, string(TypeSysInfo), p); err != nil {
 				log.WithError(err).Error("save sysinfo record (CH)")
 				return err
 			}
