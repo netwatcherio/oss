@@ -386,3 +386,56 @@ func (s *Store) TransferOwnership(ctx context.Context, workspaceID uint, newOwne
 	}
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(ownerMember).Error
 }
+
+// --- Access Control ---
+
+// UserHasAccess checks if a user is a member of a workspace.
+// Returns true if the user is a member (any role), false otherwise.
+func (s *Store) UserHasAccess(ctx context.Context, workspaceID, userID uint) bool {
+	if workspaceID == 0 || userID == 0 {
+		return false
+	}
+	var count int64
+	s.db.WithContext(ctx).Model(&Member{}).
+		Where("workspace_id = ? AND user_id = ?", workspaceID, userID).
+		Count(&count)
+	return count > 0
+}
+
+// GetMemberByUserID returns the member record for a user in a workspace.
+// Returns ErrNotFound if the user is not a member.
+func (s *Store) GetMemberByUserID(ctx context.Context, workspaceID, userID uint) (*Member, error) {
+	if workspaceID == 0 || userID == 0 {
+		return nil, ErrInvalidInput
+	}
+	var m Member
+	if err := s.db.WithContext(ctx).
+		First(&m, "workspace_id = ? AND user_id = ?", workspaceID, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+// UserHasRole checks if a user has at least the specified role in a workspace.
+// Role hierarchy: OWNER > ADMIN > READ_WRITE > READ_ONLY
+func (s *Store) UserHasRole(ctx context.Context, workspaceID, userID uint, minRole Role) bool {
+	m, err := s.GetMemberByUserID(ctx, workspaceID, userID)
+	if err != nil {
+		return false
+	}
+	return roleAtLeast(m.Role, minRole)
+}
+
+// roleAtLeast returns true if role >= minRole in the hierarchy.
+func roleAtLeast(role, minRole Role) bool {
+	hierarchy := map[Role]int{
+		RoleReadOnly:  1,
+		RoleReadWrite: 2,
+		RoleAdmin:     3,
+		RoleOwner:     4,
+	}
+	return hierarchy[role] >= hierarchy[minRole]
+}

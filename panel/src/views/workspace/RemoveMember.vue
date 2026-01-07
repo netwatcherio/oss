@@ -1,103 +1,216 @@
 <script lang="ts" setup>
-
-import {onMounted, reactive} from "vue";
-import type {MemberInfo, Workspace} from "@/types";
+import { onMounted, reactive, computed } from "vue";
+import type { Workspace, Member } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import {Agent} from "@/types";
-import agentService from "@/services/agentService";
-import {WorkspaceService} from "@/services/apiService";
+import { WorkspaceService } from "@/services/apiService";
+
+const router = core.router();
 
 const state = reactive({
-  site: {} as Workspace,
+  workspace: {} as Workspace,
+  member: {} as Member,
   ready: false,
-  agent: {} as Agent,
-  memberInfo: {} as MemberInfo
-})
+  loading: false,
+  error: ""
+});
 
-onMounted(() => {
-  let id = router.currentRoute.value.params["wID"] as string
-  if (!id) return
+const isOwner = computed(() => state.member.role === "OWNER");
 
-  let userId = router.currentRoute.value.params["userId"] as string
-  if (!userId) return
+onMounted(async () => {
+  const workspaceId = router.currentRoute.value.params["wID"] as string;
+  const memberId = router.currentRoute.value.params["userId"] as string;
 
-  WorkspaceService.get(id).then(res => {
-      state.site = res as Workspace
-      /*state.ready = true*/
+  if (!workspaceId || !memberId) {
+    state.error = "Missing workspace or member ID";
+    return;
+  }
 
-    Workspace.getMemberInfos(id).then(res => {
-      if(res.data.length > 0) {
-        const members = res.data as MemberInfo[];
-        state.ready = true
-
-        for (let i = 0; i < members.length; i++) {
-          if (members[i].id == userId) {
-            state.memberInfo = members[i]
-            break
-          }
-        }
-      }
-    }).catch(res => {
-      alert(res)
-    })
-  })
-})
-const router = core.router()
-
-function onCreate(response: any) {
-  router.push(`/workspaces/${state.site.id.toString()}`)
-}
-
-function onError(response: any) {
-  alert(response)
-}
-
-function submit() {
-  siteService.removeMember(state.site.id, state.memberInfo).then((res) => {
-    router.push(`/workspaces/${state.site.id}/members`)
-    console.log(res)
-  }).catch(err => {
-    console.log(err)
-  })
-}
+  try {
+    const [workspace, members] = await Promise.all([
+      WorkspaceService.get(workspaceId),
+      WorkspaceService.listMembers(workspaceId)
+    ]);
+    
+    state.workspace = workspace as Workspace;
+    
+    const member = (members as Member[]).find(m => String(m.id) === memberId);
+    if (!member) {
+      state.error = "Member not found";
+      return;
+    }
+    
+    state.member = member;
+    state.ready = true;
+  } catch (err) {
+    console.error("Failed to load member:", err);
+    state.error = "Failed to load member data";
+  }
+});
 
 function cancel() {
-  router.push(`/workspaces/${state.site.id}`)
+  router.push(`/workspaces/${state.workspace.id}/members`);
 }
 
+async function submit() {
+  if (!state.member.id || !state.workspace.id || isOwner.value) {
+    return;
+  }
+
+  state.loading = true;
+  state.error = "";
+
+  try {
+    await WorkspaceService.removeMember(state.workspace.id, state.member.id);
+    router.push(`/workspaces/${state.workspace.id}/members`);
+  } catch (err: any) {
+    console.error("Failed to remove member:", err);
+    state.error = err?.response?.data?.message || "Failed to remove member. Please try again.";
+    state.loading = false;
+  }
+}
 </script>
 
 <template>
-  <div class="container-fluid" v-if="state.ready">
-    <Title :title="`remove member`"
-           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.site.name, link: `/workspaces/${state.site.id}` },{ title: `members`, link: `/workspaces/${state.site.id}/members` }]">
-    </Title>
-    <div class="row">
-      <div class="col-12">
-        <div class="card">
-          <div class="form-horizontal r-separator border-top">
+  <div class="container-fluid">
+    <!-- Error state -->
+    <div v-if="state.error && !state.ready" class="alert alert-danger mt-3">
+      <i class="bi bi-exclamation-circle me-2"></i>{{ state.error }}
+    </div>
+
+    <div v-if="state.ready">
+      <Title
+        title="Remove Member"
+        subtitle="Remove a member from this workspace"
+        :history="[
+          { title: 'Workspaces', link: '/workspaces' },
+          { title: state.workspace.name, link: `/workspaces/${state.workspace.id}` },
+          { title: 'Members', link: `/workspaces/${state.workspace.id}/members` }
+        ]"
+      />
+
+      <div class="row">
+        <div class="col-12 col-lg-8">
+          <div class="card border-danger">
+            <div class="card-header bg-danger text-white">
+              <h5 class="mb-0">
+                <i class="bi bi-person-x me-2"></i>Remove Member
+              </h5>
+            </div>
             <div class="card-body">
-              <div class="form-group row align-items-center mb-0">
-                <label class="col-3 text-end control-label col-form-label">confirm member removal</label>
-                <div class="col-9 border-start pb-2 pt-2">
-                  <p>are you sure you want to remove the member <strong>{{ state.memberInfo.email }}</strong>?</p>
+              <!-- Owner warning -->
+              <div v-if="isOwner" class="alert alert-danger mb-3">
+                <i class="bi bi-exclamation-octagon me-2"></i>
+                <strong>Cannot remove owner.</strong> 
+                Transfer ownership to another member first before removal.
+              </div>
+
+              <div v-else>
+                <div class="alert alert-warning mb-3">
+                  <i class="bi bi-exclamation-triangle me-2"></i>
+                  <strong>Warning:</strong> This action cannot be undone.
                 </div>
+
+                <p class="mb-3">
+                  Are you sure you want to remove <strong>{{ state.member.email }}</strong> from this workspace?
+                </p>
+
+                <table class="table table-sm mb-3">
+                  <tbody>
+                    <tr>
+                      <th style="width: 100px;">Email</th>
+                      <td>{{ state.member.email }}</td>
+                    </tr>
+                    <tr>
+                      <th>Role</th>
+                      <td>
+                        <span class="badge" :class="{
+                          'bg-secondary': state.member.role === 'VIEWER',
+                          'bg-success': state.member.role === 'USER',
+                          'bg-warning': state.member.role === 'ADMIN',
+                          'bg-danger': state.member.role === 'OWNER'
+                        }">{{ state.member.role }}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <p class="text-muted small mb-0">
+                  The member will lose access to all agents and probes in this workspace.
+                  They can be re-invited later if needed.
+                </p>
+              </div>
+
+              <!-- Error display -->
+              <div v-if="state.error" class="alert alert-danger mt-3 mb-0">
+                <i class="bi bi-x-circle me-2"></i>{{ state.error }}
               </div>
             </div>
-            <div class="p-3 border-top">
-              <div class="form-group mb-0 text-end">
-                <button class="btn btn-secondary px-4" @click="cancel">cancel</button>
-                <button style="margin-left: 20px" class="btn btn-danger px-4" @click="submit">remove</button>
-              </div>
+
+            <div class="card-footer d-flex justify-content-between">
+              <button 
+                class="btn btn-secondary" 
+                @click="cancel"
+                :disabled="state.loading"
+              >
+                <i class="bi bi-arrow-left me-1"></i>Cancel
+              </button>
+              <button 
+                class="btn btn-danger" 
+                @click="submit"
+                :disabled="state.loading || isOwner"
+              >
+                <span v-if="state.loading">
+                  <span class="spinner-border spinner-border-sm me-1"></span>
+                  Removing...
+                </span>
+                <span v-else>
+                  <i class="bi bi-person-x me-1"></i>Remove Member
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Info sidebar -->
+        <div class="col-12 col-lg-4 mt-3 mt-lg-0">
+          <div class="card bg-light">
+            <div class="card-body">
+              <h6 class="card-title">
+                <i class="bi bi-info-circle me-2"></i>What happens?
+              </h6>
+              <ul class="small text-muted mb-0">
+                <li>Member immediately loses access</li>
+                <li>All their permissions are revoked</li>
+                <li>They can be re-invited later</li>
+                <li>Their past actions remain in logs</li>
+              </ul>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Loading state -->
+    <div v-else-if="!state.error" class="d-flex justify-content-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+    </div>
   </div>
 </template>
 
-<style>
+<style scoped>
+.card-header {
+  border-bottom: 0;
+}
 
+.card.border-danger {
+  border-width: 2px;
+}
+
+.table th {
+  font-weight: 600;
+  color: #6c757d;
+}
 </style>

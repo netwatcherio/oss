@@ -1,32 +1,120 @@
-# Guardian NetWatcher
+# NetWatcher
 
 ## Overview
 
-Guardian NetWatcher is the backend component of the NetWatcher suite. It facilitates communication between the frontend
-client and the metrics collecting agent, storing data in MongoDB. The system uses probes to collect various metrics like
-MTR, ping, rperf (simulated traffic), which the client uses to generate graphs and other visualizations.
+NetWatcher is an open-source distributed network monitoring platform consisting of three components:
+
+- **Controller** – Go backend (Iris framework) with REST API and WebSocket server
+- **Panel** – Vue 3 frontend for dashboards, agent management, and visualization
+- **Agent** – Go daemon that executes monitoring probes and reports data
+
+The system uses **PostgreSQL** for metadata storage and **ClickHouse** for time-series probe data.
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/netwatcherio/netwatcher-oss.git
+cd netwatcher-oss
+
+# Start infrastructure with Docker
+docker-compose up -d
+
+# Configure and run controller
+cd controller
+cp .env.example .env
+# Edit .env with your settings
+go run .
+
+# In another terminal, run the panel
+cd panel
+npm install
+npm run dev
+```
+
+See [docs/development.md](./docs/development.md) for detailed setup instructions.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](./docs/architecture.md) | System design and data flow |
+| [API Reference](./docs/api-reference.md) | REST API endpoints with required roles |
+| [Data Models](./docs/data-models.md) | Database schemas and types |
+| [Deployment](./docs/deployment.md) | Production deployment guide |
+| [Development](./docs/development.md) | Setup, building, and testing |
+| [Permissions](./docs/permissions.md) | Role-based access control |
+| [Panel Architecture](./docs/panel-architecture.md) | Frontend design and patterns |
+| [Agent Probes](./docs/agent-probes.md) | Probe types and configuration |
+| [TrafficSim](./docs/trafficsim-architecture.md) | Inter-agent traffic simulation |
 
 ## Environment Variables
 
-The following environment variables are required for running the application:
+### Controller
 
+```bash
+# App settings
+LISTEN=0.0.0.0:8080
+KEY=<jwt-signing-key>       # Required: 32+ chars
+PIN_PEPPER=<pin-pepper>     # Required: random string
+
+# PostgreSQL
+DB_DRIVER=postgres
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=netwatcher
+POSTGRES_PASSWORD=<password>
+POSTGRES_DB=netwatcher
+
+# ClickHouse
+CLICKHOUSE_HOST=localhost
+CLICKHOUSE_PORT=9000
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DB=netwatcher
 ```
-LISTEN=[ip_address:port](ip_address:port)
-MONGO_URI=<mongodb_connection_string>
-MAIN_DB=<database_name>
-KEY=<your_secret_key>
+
+See [controller/.env.example](./controller/.env.example) for all options.
+
+### Panel
+
+```bash
+NW_GLOBAL_ENDPOINT=https://api.netwatcher.io
 ```
 
-**Note**: Replace the values with your actual configuration. Do not use example values in production.
-
-## Docker Compose Setup
-
-Here's an example of a Docker Compose setup for the Guardian NetWatcher:
+## Docker Compose
 
 ```yaml
-
 version: '3.8'
 services:
+  controller:
+    build: ./controller
+    environment:
+      LISTEN: "0.0.0.0:8080"
+      DB_DRIVER: "postgres"
+      POSTGRES_HOST: "postgres"
+      KEY: "${JWT_SECRET}"
+    depends_on:
+      - postgres
+      - clickhouse
+
+  panel:
+    build: ./panel
+    ports:
+      - "3000:3000"
+
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    volumes:
+      - chdata:/var/lib/clickhouse
+
   caddy:
     image: caddy:2-alpine
     ports:
@@ -34,97 +122,56 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
-    restart: unless-stopped
-
-  nw-guardian:
-    image: nw-guardian
-    environment:
-      DEBUG: "true"
-      LISTEN: "0.0.0.0:8080"
-      MONGO_URI: "mongodb://<username>:<password>@<your_mongodb_host>:27017/<database_name>"
-      MAIN_DB: "netwatcher"
-      KEY: "<your_secret_key>"
-    depends_on:
-      - mongodb
-
-  nw-client:
-    image: nw-client
-    environment:
-      NW_GLOBAL_ENDPOINT: "https://api.netwatcher.io"
-    ports:
-      - "3000:3000"
-
-  mongodb:
-    image: mongo:4.4.6
-    container_name: mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: <username>
-      MONGO_INITDB_ROOT_PASSWORD: <password>
-    volumes:
-      - mongodb_data:/data/db
 
 volumes:
-  mongodb_data:
+  pgdata:
+  chdata:
 ```
 
-**Note**: Replace `<username>`, `<password>`, `<your_mongodb_host>`, and `<database_name>` with your actual MongoDB
-credentials and details.
+## Permissions
 
-## Building the Guardian Docker Image
+NetWatcher uses role-based access control (RBAC) for workspace-scoped operations:
 
-Here's a Dockerfile for building the Guardian NetWatcher backend service:
+| Role | Level | Capabilities |
+|------|:-----:|--------------|
+| **OWNER** | 4 | Full control, delete workspace, transfer ownership |
+| **ADMIN** | 3 | Manage members, delete agents & probes |
+| **USER** | 2 | Create/edit agents and probes |
+| **VIEWER** | 1 | Read-only access |
 
-```
-# Use an official Go runtime as a parent image
-FROM golang:1.21.1-alpine
+See [docs/permissions.md](./docs/permissions.md) for the complete permission matrix.
 
-# Set the working directory inside the container
-WORKDIR /app
+## Probe Types
 
-# Copy the local package files to the container's workspace.
-COPY . /app
+| Type | Description |
+|------|-------------|
+| MTR | Multi-hop traceroute with per-hop latency and loss |
+| PING | ICMP ping with RTT statistics |
+| SPEEDTEST | Download/upload speed measurements |
+| SYSINFO | System information (CPU, memory, OS) |
+| NETINFO | Network information (public IP, gateway, ISP) |
+| TRAFFICSIM | Inter-agent traffic simulation |
 
-# Download all the dependencies
-RUN go mod download
-
-# Build the Go app
-RUN go build -o main .
-
-# Expose port 8080 to the outside world
-EXPOSE 8080
-
-# Set default environment variables (can be overridden)
-ENV DEBUG=true
-ENV LISTEN=0.0.0.0:8080
-ENV MONGO_URI=""
-ENV MAIN_DB=""
-ENV KEY=""
-
-# Command to run the executable
-CMD ["/app/main"]
-```
-
-## Caddy Configuration
-
-Here's an example Caddyfile configuration for the NetWatcher services:
+## Project Structure
 
 ```
-api.netwatcher.io {
-    reverse_proxy http://nw-guardian:8080
-}
-
-app.netwatcher.io {
-    @ws {
-	header Connection *Upgrade*
-	header Upgrade websocket
-    }
-    reverse_proxy http://nw-client:3000
-}
-
+netwatcher-oss/
+├── agent/              # Monitoring agent daemon
+├── controller/         # Backend API server
+│   ├── internal/       # Business logic
+│   └── web/            # HTTP routes & middleware
+├── panel/              # Vue.js frontend
+│   ├── src/
+│   │   ├── composables/  # Vue composables
+│   │   ├── router/       # Route guards
+│   │   ├── services/     # API services
+│   │   └── views/        # Page components
+├── docs/               # Documentation
+├── docker-compose.yml  # Production deployment
+├── docker-compose.dev.yml  # Development (DB only)
+└── Caddyfile           # Reverse proxy config
 ```
 
 ## License
 
-[`GNU Affero General Public License v3.0`
+[GNU Affero General Public License v3.0](./LICENSE.md)

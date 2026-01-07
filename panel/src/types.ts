@@ -84,19 +84,19 @@ export interface Probe {
 
 export interface Target {
     id: number;
-    createdAt: string;   // ISO 8601
-    updatedAt: string;   // ISO 8601
+    created_at: string;   // ISO 8601
+    updated_at: string;   // ISO 8601
 
-    probeId: number;
+    probe_id: number;
 
     /** ip/host[:port] (leave empty when agentId is set) */
     target: string;
 
     /** target agent (nullable in DB; may be null or omitted) */
-    agentId?: number | null;
+    agent_id?: number | null;
 
     /** optional grouping/batching (nullable) */
-    groupId?: number | null;
+    group_id?: number | null;
 }
 
 export interface ProbeCreateInput {
@@ -164,7 +164,15 @@ export interface Workspace {
     description: string;
 }
 
-export type Role = 'USER' | 'ADMIN' | 'OWNER';
+/** Standardized list response wrapper from controller */
+export interface ListResponse<T> {
+    data: T[];
+    total?: number;
+    limit?: number;
+    offset?: number;
+}
+
+export type Role = 'READ_ONLY' | 'READ_WRITE' | 'ADMIN' | 'OWNER';
 
 export interface Member {
     id: number;

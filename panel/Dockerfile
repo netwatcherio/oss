@@ -1,20 +1,36 @@
-# Use an official Node.js runtime as a parent image
-FROM node:23-alpine
+# Build stage
+FROM node:22-alpine AS builder
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json (or yarn.lock)
+# Copy package files
 COPY package*.json ./
 
-# Install any needed packages
-RUN npm install
+# Install dependencies
+RUN npm ci
 
-# Copy the rest of your app's source code
+# Copy source
 COPY . .
 
-# Make port 8080 available to the world outside this container
+# Build production bundle
+RUN npm run build
+
+# Runtime stage - serve with lightweight server
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Install serve globally
+RUN npm install -g serve
+
+# Copy built assets from builder
+COPY --from=builder /app/dist ./dist
+
+# Create non-root user
+RUN adduser -D -g '' appuser
+USER appuser
+
 EXPOSE 3000
 
-# Define command to run the app
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Serve static files
+CMD ["serve", "-s", "dist", "-l", "3000"]

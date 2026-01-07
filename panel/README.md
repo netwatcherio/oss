@@ -1,71 +1,117 @@
-# Netwatcher Client
+# NetWatcher Panel
+
+The NetWatcher Panel is a Vue 3 SPA for monitoring dashboards, agent management, and visualization.
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Development server (http://localhost:5173)
+npm run dev
+
+# Production build
+npm run build
+
+# Type check
+npm run type-check
+```
 
 ## Environment Variables
 
-### Project-level environment variables
-
-Variables that are used as defaults across all implementations of the service are decalred in the base `.env` file.
+| Variable | Description |
+|----------|-------------|
+| `NW_GLOBAL_ENDPOINT` | API base URL (e.g., `https://api.netwatcher.io`) |
 
 **.env**
-
 ```dotenv
-NW_GLOBAL_ENDPOINT=https://api.netwatcher.io:8080
+NW_GLOBAL_ENDPOINT=https://api.netwatcher.io
 ```
 
-### Implementation-level environment variables
-
-Variables intended to override global variables in `.env`, or variables related to the implementattion should be specific in a per-invocation `.env.local` file and should not be pushed to the repository.
-
-**.env.local**
-
+**.env.local** (overrides, not committed)
 ```dotenv
-NW_ENDPOINT=https://api.myguardianinstance.org:8080
+NW_GLOBAL_ENDPOINT=http://localhost:8080
 ```
+
+## Docker Build
+
+```bash
+# Build image
+docker build -t netwatcher-panel .
+
+# Run container
+docker run -d \
+  --name panel \
+  -p 3000:3000 \
+  netwatcher-panel
+```
+
+## Directory Structure
+
+```
+panel/
+├── src/
+│   ├── components/       # Reusable Vue components
+│   ├── composables/      # Vue composables (usePermissions, etc.)
+│   ├── router/           # Vue Router config with guards
+│   ├── services/         # API service layer
+│   ├── utils/            # Utility functions
+│   └── views/            # Page components
+│       ├── auth/         # Login/register
+│       ├── workspace/    # Workspace views
+│       ├── agent/        # Agent views
+│       └── probes/       # Probe views
+├── public/               # Static assets
+├── assets/               # Screenshots and images
+├── Dockerfile            # Multi-stage build
+└── vite.config.ts        # Vite configuration
+```
+
+## Permissions
+
+The panel enforces role-based access control at multiple levels:
+
+- **Route Guards**: Protected routes check `meta.requiresRole`
+- **UI Guards**: Buttons hidden based on `usePermissions` composable
+- **403 Page**: Unauthorized access redirects to `/403`
+
+| Role | Create/Edit | Delete | Manage Members |
+|------|:-----------:|:------:|:--------------:|
+| OWNER | ✅ | ✅ | ✅ |
+| ADMIN | ✅ | ✅ | ✅ |
+| USER | ✅ | ❌ | ❌ |
+| VIEWER | ❌ | ❌ | ❌ |
+
+See [Permissions](../docs/permissions.md) for details.
 
 ## Screenshots
 
+![Workspaces](assets/workspaces.png)
+![Workspace Dashboard](assets/workspaceDash.png)
+![Agent Dashboard](assets/agentDash.png)
+![Traceroute Map](assets/tracerouteMap.png)
 
+## Development
 
-![image.png](assets/workspaces.png)
-
-![image.png](assets/workspaceDash.png)
-
-![image.png](assets/agentDash.png)
-
-
-![image.png](assets/tracerouteMap.png)
-
-
-![image.png](assets/triggeredTraceroutes.png)
-
-
-
-## 
-
-
-
-
-
-Project Setup
-
-```sh
-npm install
-```
-
-### Compile and Hot-Reload for Development
-
-```sh
+```bash
+# Run dev server
 npm run dev
-```
 
-### Type-Check, Compile and Minify for Production
+# Type check
+npm run type-check
 
-```sh
+# Build for production
 npm run build
-```
 
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
-```sh
+# Run unit tests
 npm run test:unit
 ```
+
+## Build Output
+
+After `npm run build`, the `dist/` folder contains:
+- `index.html` - Entry point
+- `assets/` - JS, CSS bundles (~1.2MB gzipped: ~340KB)
+
+Serve with any static file server (nginx, Caddy, etc.).

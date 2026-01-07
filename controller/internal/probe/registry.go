@@ -154,4 +154,5 @@ func InitWorkers(ch *sql.DB) {
 	initSysInfo(ch)
 	initMtr(ch)
 	initPing(ch)
+	initSpeedtest(ch)
 }

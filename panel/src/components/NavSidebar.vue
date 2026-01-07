@@ -38,7 +38,7 @@ function logout() {
     <ul class="nav nav-pills flex-column mb-2">
       <li class="nav-item">
         <div class="nav-link nav-link-static"  @click="logout">
-          <div><i class="fa-solid fa-right-from-bracket"></i>&nbsp;logout
+          <div><i class="bi bi-box-arrow-right"></i>&nbsp;logout
           </div>
         </div>
       </li>

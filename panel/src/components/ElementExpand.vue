@@ -34,7 +34,7 @@ function click(args: any) {
     <div class="d-flex flex-row justify-content-between align-items-start pt-1">
       <div class="d-flex flex-row gap-2 align-items-center">
         <div v-if="props.icon" class="h-100 d-flex align-items-center text-primary">
-          <i :class="props.icon" class="fa-1x fa-fw" style="font-size: 1.1rem"></i>
+          <i :class="props.icon" class="bi" style="font-size: 1.1rem"></i>
         </div>
         <div class="d-flex flex-column justify-content-center align-items-center gap-1 lh-1">
           <div class="label-o0 label-c4 label-w500">{{ props.title }}</div>
@@ -47,7 +47,7 @@ function click(args: any) {
           <slot></slot>
         </div>
         <div>
-          <i :class="`${state.open?'animate-chevron':(!state.virgin?'animate-chevron-back':'')}`" class="fa-1x fa-fw fa-solid fa-chevron-left label-o5" ></i>
+          <i :class="`${state.open?'animate-chevron':(!state.virgin?'animate-chevron-back':'')}`" class="bi bi bi-chevron-left label-o5" ></i>
 
         </div>
       </div>

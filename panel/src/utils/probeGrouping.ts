@@ -1,4 +1,27 @@
-import type {Probe, ProbeType, Target} from "@/types";
+/**
+ * Probe Grouping Utilities
+ *
+ * This module provides functions for organizing and matching probes by their targets.
+ *
+ * ## Target Types
+ * - **host**: Probe targets an IP/hostname (e.g., "8.8.8.8")
+ * - **agent**: Probe targets another agent by ID (e.g., agent_id: 101)
+ * - **local**: Probe has no external targets (self-monitoring)
+ *
+ * ## Key Functions
+ * - `groupProbesByTarget()` - Group all probes by target for summary views
+ * - `findMatchingProbesByProbeId()` - Find probes with same target as given probe
+ * - `findProbesByInitialTarget()` - Find probes sharing first target (for Probe.vue)
+ * - `canonicalTargetKey()` - Create stable key like "agent:101" or "host:8.8.8.8"
+ *
+ * ## Controller Integration
+ * When a probe targets an agent (not a host), the controller resolves the IP dynamically
+ * at fetch time using `getPublicIP()`. The panel receives the filled `target` field.
+ *
+ * @module probeGrouping
+ * @see docs/panel-architecture.md
+ */
+import type { Probe, ProbeType, Target } from "@/types";
 
 export type TargetGroupKind = "host" | "agent" | "local";
 
@@ -63,7 +86,7 @@ const normHost = (h: string) => h.trim().toLowerCase();
 const isEmptyStr = (s?: string | null) => !s || s.trim() === "";
 const isEmptyAgentId = (id?: number | null) => id == null || id === 0;
 const getProbeAgentId = (p: Probe) => (p.agent_id ?? (p as any).agent_id ?? 0);
-const getTargetAgentId = (t: Target) => (t.agentId ?? (t as any).agent_id ?? null);
+const getTargetAgentId = (t: Target) => (t.agent_id ?? (t as any).agent_id ?? null);
 const makeKey = (kind: TargetGroupKind, id: string | number) => `${kind}|${String(id)}`;
 
 function buildExclusionSet(opts?: GroupOptions): Set<string> {
@@ -488,8 +511,8 @@ function canonicalTargetKey(probe: Probe): string | null {
 
     const t = probe.targets[0];
     // Prefer agentId if set (including 0 as a valid id)
-    if (t && t.agentId !== undefined && t.agentId !== null) {
-        return `agent:${t.agentId}`;
+    if (t && t.agent_id !== undefined && t.agent_id !== null) {
+        return `agent:${t.agent_id}`;
     }
 
     // Fallback to target string

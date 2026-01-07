@@ -1,5 +1,5 @@
 import request from "./request";
-import type {Agent, Probe, ProbeCreateInput, ProbeData, Workspace, Member, Role} from "@/types";
+import type { Agent, Probe, ProbeCreateInput, ProbeData, Workspace, Member, Role, ListResponse } from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {
@@ -35,7 +35,7 @@ export const WorkspaceService = {
         return data;
     },
 
-    async create(body: { name: string; description?: string;}) {
+    async create(body: { name: string; description?: string; }) {
         const { data } = await request.post<Workspace>('/workspaces', body);
         return data;
     },
@@ -61,8 +61,8 @@ export const WorkspaceService = {
 
     // ---- Members ----
     async listMembers(workspaceId: number | string) {
-        const { data } = await request.get<Member[]>(`/workspaces/${workspaceId}/members`);
-        return data;
+        const { data } = await request.get<ListResponse<Member>>(`/workspaces/${workspaceId}/members`);
+        return data.data;
     },
 
     async addMember(
@@ -145,7 +145,7 @@ export const AgentService = {
     },
     async issuePin(workspaceId: number | string, agentId: number | string, body?: { pinLength?: number; ttlSeconds?: number }) {
         const { data } = await request.post(`/workspaces/${workspaceId}/agents/${agentId}/issue-pin`, body ?? {});
-        return data as { pin: string; expiresAt?: string; [k: string]: any };
+        return data as { pin: string; expiresAt?: string;[k: string]: any };
     },
 };
 
@@ -197,10 +197,10 @@ export const ProbeDataService = {
             setIf(qs, "limit", params.limit);
             if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
         }
-        const { data } = await request.get<ProbeData[]>(
+        const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/find${qs.toString() ? `?${qs}` : ""}`
         );
-        return data;
+        return data.data;
     },
 
     /**
@@ -219,10 +219,10 @@ export const ProbeDataService = {
             setIf(qs, "limit", params.limit);
             if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
         }
-        const { data } = await request.get<ProbeData[]>(
+        const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/probes/${probeId}/data${qs.toString() ? `?${qs}` : ""}`
         );
-        return data;
+        return data.data;
     },
 
     /**
@@ -316,8 +316,8 @@ export const ProbeDataService = {
 /** ===== Probes (scoped to workspace + agent) ===== */
 export const ProbeService = {
     async list(workspaceId: number | string, agentId: number | string) {
-        const { data } = await request.get<Probe[]>(`/workspaces/${workspaceId}/agents/${agentId}/probes`);
-        return data;
+        const { data } = await request.get<ListResponse<Probe>>(`/workspaces/${workspaceId}/agents/${agentId}/probes`);
+        return data.data;
     },
     async create(workspaceId: number | string, agentId: number | string, body: Partial<ProbeCreateInput>) {
         const { data } = await request.post<Probe>(`/workspaces/${workspaceId}/agents/${agentId}/probes`, body);
@@ -361,8 +361,8 @@ export const ProbeService = {
 export const AgentBootstrap = {
     // PSK or PIN flow for the agent binary
     async authenticate(body:
-                           | { workspaceId: number; agentId: number; psk: string }
-                           | { workspaceId: number; agentId: number; pin: string }
+        | { workspaceId: number; agentId: number; psk: string }
+        | { workspaceId: number; agentId: number; pin: string }
     ) {
         // Use a raw request without JWT header; request.ts will include JWT if present,
         // but the /agent route ignores it. If you need it truly header-free, create a raw axios call.

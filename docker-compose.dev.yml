@@ -1,0 +1,97 @@
+# NetWatcher Development Docker Compose
+# Use this for local development with hot-reload
+#
+# Usage: docker compose -f docker-compose.dev.yml up
+
+version: "3.9"
+
+volumes:
+  clickhouse_data: {}
+  postgres_data: {}
+
+networks:
+  netwatcher:
+    driver: bridge
+
+services:
+  # ----- Databases -----
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    networks: [ netwatcher ]
+    environment:
+      POSTGRES_USER: netwatcher
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: netwatcher
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U netwatcher -d netwatcher" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    restart: unless-stopped
+    networks: [ netwatcher ]
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: devpassword
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    healthcheck:
+      test: [ "CMD-SHELL", "clickhouse-client --query 'SELECT 1'" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  # ----- Controller (dev mode - built locally) -----
+  # Run controller separately: cd controller && go run .
+  # Or use this container with volume mount:
+  # controller:
+  #   build: ./controller
+  #   networks: [netwatcher]
+  #   volumes:
+  #     - ./controller:/app
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_USER: netwatcher
+  #     POSTGRES_PASSWORD: devpassword
+  #     POSTGRES_DB: netwatcher
+  #     CLICKHOUSE_HOST: clickhouse
+  #     CLICKHOUSE_USER: default
+  #     CLICKHOUSE_PASSWORD: devpassword
+  #     JWT_SECRET: dev-secret-do-not-use-in-production
+  #     PIN_PEPPER: dev-pepper-do-not-use-in-production
+  #     DEBUG: "true"
+  #   ports:
+  #     - "8080:8080"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
+
+  # ----- Development Notes -----
+  #
+  # 1. Start databases:
+  #    docker compose -f docker-compose.dev.yml up postgres clickhouse
+  #
+  # 2. Run controller locally with hot-reload (in separate terminal):
+  #    cd controller
+  #    export POSTGRES_HOST=localhost POSTGRES_USER=netwatcher POSTGRES_PASSWORD=devpassword POSTGRES_DB=netwatcher
+  #    export CLICKHOUSE_HOST=localhost CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=devpassword
+  #    export JWT_SECRET=dev-secret PIN_PEPPER=dev-pepper DEBUG=true
+  #    go run .
+  #
+  # 3. Run panel locally with hot-reload (in separate terminal):
+  #    cd panel
+  #    npm run dev
+  #
+  # Panel dev server runs at: http://localhost:5173
+  # Controller API runs at: http://localhost:8080

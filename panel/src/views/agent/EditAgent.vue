@@ -1,89 +1,292 @@
 <script lang="ts" setup>
-import { onMounted, reactive, toRefs } from "vue";
+import { onMounted, reactive, computed } from "vue";
 import type { Workspace, Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import {AgentService, WorkspaceService} from "@/services/apiService";
+import { AgentService, WorkspaceService } from "@/services/apiService";
+
+const router = core.router();
 
 const state = reactive({
   workspace: {} as Workspace,
   ready: false,
-  agent: {} as Agent
+  loading: false,
+  agent: {} as Agent,
+  error: "",
+  touched: {
+    name: false
+  }
 });
 
-onMounted(() => {
-  let id = router.currentRoute.value.params["aID"] as string
-  if (!id) return
+// Validation
+const validation = computed(() => ({
+  name: {
+    valid: state.agent.name && state.agent.name.trim().length >= 2,
+    message: "Agent name must be at least 2 characters"
+  }
+}));
 
-  let wID = router.currentRoute.value.params["wID"] as string
-  if (!id) return
+const isFormValid = computed(() => validation.value.name.valid);
 
-  WorkspaceService.get(wID).then(res => {
-    state.workspace = res as Workspace
-    state.ready = true
-  })
+onMounted(async () => {
+  const agentId = router.currentRoute.value.params["aID"] as string;
+  const workspaceId = router.currentRoute.value.params["wID"] as string;
+  
+  if (!agentId || !workspaceId) {
+    state.error = "Missing agent or workspace ID";
+    return;
+  }
 
-  AgentService.get(wID, id).then(res => {
-    state.agent = res as Agent
-    console.log(state.agent)
-  })
+  try {
+    const [workspace, agent] = await Promise.all([
+      WorkspaceService.get(workspaceId),
+      AgentService.get(workspaceId, agentId)
+    ]);
+    
+    state.workspace = workspace as Workspace;
+    state.agent = agent as Agent;
+    state.ready = true;
+  } catch (err) {
+    console.error("Failed to load data:", err);
+    state.error = "Failed to load agent data";
+  }
 });
 
-const router = core.router();
-const { currentRoute } = router;
-
-function onError(error: any) {
-  alert(error);
+function markTouched(field: keyof typeof state.touched) {
+  state.touched[field] = true;
 }
 
-function submit() {
-  if (state.agent.id) {
-    AgentService.update(state.workspace.id, state.agent.id, state.agent).then(() => {
-      router.push(`/workspaces/${state.workspace.id}`);
-    }).catch(onError);
+async function submit() {
+  state.touched.name = true;
+  
+  if (!isFormValid.value || !state.agent.id) {
+    return;
+  }
+
+  state.loading = true;
+  state.error = "";
+
+  try {
+    await AgentService.update(state.workspace.id, state.agent.id, {
+      name: state.agent.name,
+      location: state.agent.location,
+      description: state.agent.description,
+      public_ip_override: state.agent.public_ip_override
+    });
+    router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
+  } catch (err: any) {
+    console.error("Failed to update agent:", err);
+    state.error = err?.response?.data?.message || "Failed to update agent. Please try again.";
+    state.loading = false;
   }
 }
 </script>
 
-
 <template>
-  <div class="container-fluid" v-if="state.ready">
-    <Title :title="`edit agent`"
-           :subtitle="`update agent details`"
-           :history="[{ title: 'workspace', link: '/workspaces' }, { title: state.workspace.name, link: `/workspaces/${state.workspace.id}` }]">
-      <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/delete`" active-class="active" class="btn btn-danger"><i class="fa-solid fa-trash"></i>&nbsp;delete</router-link>
-    </Title>
-    <div class="row">
-      <div class="col-12">
-        <div class="card">
-          <div class="form-horizontal r-separator border-top">
+  <div class="container-fluid">
+    <!-- Error state -->
+    <div v-if="state.error && !state.ready" class="alert alert-danger mt-3">
+      <i class="bi bi-exclamation-circle me-2"></i>{{ state.error }}
+    </div>
+
+    <div v-if="state.ready">
+      <Title
+        title="Edit Agent"
+        subtitle="Update agent details and configuration"
+        :history="[
+          { title: 'Workspaces', link: '/workspaces' },
+          { title: state.workspace.name, link: `/workspaces/${state.workspace.id}` },
+          { title: state.agent.name, link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}` }
+        ]"
+      >
+        <router-link 
+          :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/delete`" 
+          class="btn btn-outline-danger"
+        >
+          <i class="bi bi-trash me-1"></i>Delete
+        </router-link>
+      </Title>
+
+      <div class="row">
+        <div class="col-12 col-lg-8">
+          <div class="card">
+            <div class="card-header">
+              <h5 class="mb-0">
+                <i class="bi bi-cpu me-2"></i>Agent Details
+              </h5>
+            </div>
             <div class="card-body">
-              <div class="form-group row align-items-center mb-0">
-                <label class="col-3 text-end control-label col-form-label" for="agentName">{{state.agent.name}}</label>
-                <div class="col-9 border-start pb-2 pt-2">
-                  <input id="agentName" class="form-control" name="name" v-model="state.agent.name" placeholder="Enter agent name" type="text">
-                  <br>
-                  <input id="agentLocation" class="form-control" name="location" v-model="state.agent.location" placeholder="Enter agent location" type="text">
-                  <hr>
-                  <input title="public ip override" id="agentLocation" class="form-control" name="public_address" v-model="state.agent.public_ip_override" placeholder="Public IP Override" type="text">
+              <!-- Agent Name -->
+              <div class="mb-3">
+                <label class="form-label" for="agentName">
+                  Agent Name <span class="text-danger">*</span>
+                </label>
+                <input 
+                  id="agentName" 
+                  class="form-control" 
+                  :class="{ 
+                    'is-invalid': state.touched.name && !validation.name.valid,
+                    'is-valid': state.touched.name && validation.name.valid 
+                  }"
+                  v-model="state.agent.name" 
+                  @blur="markTouched('name')"
+                  placeholder="Agent name"
+                  type="text"
+                  :disabled="state.loading"
+                >
+                <div class="invalid-feedback" v-if="state.touched.name && !validation.name.valid">
+                  {{ validation.name.message }}
                 </div>
               </div>
-            </div>
-            <div class="p-3 border-top">
-              <div class="form-group mb-0 text-end">
-                <button class="btn btn-primary px-4" type="button" @click="submit">
-                  update agent
-                </button>
+
+              <!-- Location -->
+              <div class="mb-3">
+                <label class="form-label" for="agentLocation">Location</label>
+                <input 
+                  id="agentLocation" 
+                  class="form-control" 
+                  v-model="state.agent.location" 
+                  placeholder="e.g., New York, Building A"
+                  type="text"
+                  :disabled="state.loading"
+                >
+                <div class="form-text">Physical or logical location of this agent</div>
               </div>
+
+              <!-- Description -->
+              <div class="mb-3">
+                <label class="form-label" for="agentDescription">Description</label>
+                <textarea 
+                  id="agentDescription" 
+                  class="form-control" 
+                  v-model="state.agent.description" 
+                  placeholder="Optional notes about this agent..."
+                  rows="2"
+                  :disabled="state.loading"
+                ></textarea>
+              </div>
+
+              <hr>
+
+              <!-- Public IP Override -->
+              <div class="mb-3">
+                <label class="form-label" for="agentPublicIP">
+                  Public IP Override
+                  <span class="badge bg-secondary ms-1">Advanced</span>
+                </label>
+                <input 
+                  id="agentPublicIP" 
+                  class="form-control" 
+                  v-model="state.agent.public_ip_override" 
+                  placeholder="e.g., 203.0.113.50"
+                  type="text"
+                  :disabled="state.loading"
+                >
+                <div class="form-text">
+                  Override the auto-detected public IP. Used when other agents target this agent.
+                </div>
+              </div>
+
+              <!-- Error display -->
+              <div v-if="state.error" class="alert alert-danger mb-0">
+                <i class="bi bi-x-circle me-2"></i>{{ state.error }}
+              </div>
+            </div>
+
+            <div class="card-footer d-flex justify-content-between">
+              <router-link 
+                :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}`" 
+                class="btn btn-outline-secondary"
+              >
+                <i class="bi bi-arrow-left me-1"></i>Cancel
+              </router-link>
+              <button 
+                class="btn btn-primary" 
+                @click="submit"
+                :disabled="state.loading || !isFormValid"
+              >
+                <span v-if="state.loading">
+                  <span class="spinner-border spinner-border-sm me-1"></span>
+                  Saving...
+                </span>
+                <span v-else>
+                  <i class="bi bi-check-lg me-1"></i>Save Changes
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Info sidebar -->
+        <div class="col-12 col-lg-4 mt-3 mt-lg-0">
+          <div class="card bg-light">
+            <div class="card-body">
+              <h6 class="card-title">
+                <i class="bi bi-info-circle me-2"></i>Agent Info
+              </h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tbody>
+                  <tr>
+                    <td class="text-muted">ID</td>
+                    <td><code>{{ state.agent.id }}</code></td>
+                  </tr>
+                  <tr v-if="state.agent.version">
+                    <td class="text-muted">Version</td>
+                    <td>{{ state.agent.version }}</td>
+                  </tr>
+                  <tr v-if="state.agent.created_at">
+                    <td class="text-muted">Created</td>
+                    <td>{{ new Date(state.agent.created_at).toLocaleDateString() }}</td>
+                  </tr>
+                  <tr v-if="state.agent.updated_at">
+                    <td class="text-muted">Last Seen</td>
+                    <td>{{ new Date(state.agent.updated_at).toLocaleString() }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card bg-light mt-3">
+            <div class="card-body">
+              <h6 class="card-title">
+                <i class="bi bi-globe me-2"></i>Public IP Override
+              </h6>
+              <p class="card-text small text-muted mb-0">
+                When other agents target this agent (e.g., for PING or MTR probes), 
+                the controller resolves the target IP from NETINFO data. 
+                Set an override if auto-detection doesn't work for your network.
+              </p>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Loading state -->
+    <div v-else-if="!state.error" class="d-flex justify-content-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+    </div>
   </div>
 </template>
 
+<style scoped>
+.card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
 
-<style>
+.form-label {
+  font-weight: 500;
+}
 
+.form-text {
+  font-size: 0.875rem;
+}
+
+.table-sm td {
+  padding: 0.25rem 0;
+}
 </style>

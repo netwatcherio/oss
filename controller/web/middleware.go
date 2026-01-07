@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"netwatcher-controller/internal/users"
+
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
-	"netwatcher-controller/internal/users"
 )
 
 const (
@@ -36,13 +37,4 @@ func JWTMiddleware(db *gorm.DB) iris.Handler {
 		ctx.Values().Set(ctxSessionKey, sess)
 		ctx.Next()
 	}
-}
-
-func currentUserID(ctx iris.Context) uint {
-	if v := ctx.Values().Get(ctxUserIDKey); v != nil {
-		if id, ok := v.(uint); ok {
-			return id
-		}
-	}
-	return 0
 }

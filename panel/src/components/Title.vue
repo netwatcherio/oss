@@ -31,7 +31,7 @@ const router = core.router()
       <div class="d-flex justify-content-between fade-in">
         <div class="d-flex align-items-center gap-2">
           <div v-if="props.history" class="">
-            <router-link :to="props.history[props.history.length-1].link" class="btn btn-primary"><i class="fa-solid fa-chevron-left"></i></router-link>
+            <router-link :to="props.history[props.history.length-1].link" class="btn btn-primary"><i class="bi bi-chevron-left"></i></router-link>
           </div>
           <div class="fw-bold lh-1 h2 mb-0" >{{ props.title }}</div>
 

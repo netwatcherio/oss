@@ -1,6 +1,31 @@
 package probe
 
-import "time"
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	log "github.com/sirupsen/logrus"
+)
+
+func initSpeedtest(db *sql.DB) {
+	Register(NewHandler[SpeedTestResult](
+		TypeSpeedtest,
+		func(p SpeedTestResult) error {
+			return nil
+		},
+		func(ctx context.Context, data ProbeData, p SpeedTestResult) error {
+			if err := SaveRecordCH(ctx, db, data, string(TypeSpeedtest), p); err != nil {
+				log.WithError(err).Error("save speedtest record (CH)")
+				return err
+			}
+
+			log.Printf("[speedtest] pid=%d servers=%d timestamp=%v",
+				data.ProbeID, len(p.TestData), p.Timestamp)
+			return nil
+		},
+	))
+}
 
 type SpeedTestResult struct {
 	TestData  []SpeedTestServer `json:"test_data"`

@@ -6,10 +6,11 @@ import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
 import AgentCard from "@/components/AgentCard.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
-import type {Agent, NetInfoPayload, Workspace} from "@/types"
+import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
+import {usePermissions} from "@/composables/usePermissions";
 // --- STATE: add stores for net-info by agent ---
 const state = reactive({
-  workspace: {} as Workspace,
+  workspace: {} as Workspace & { my_role?: Role },
   agents: [] as Agent[],
   netInfoByAgent: {} as Record<number, NetInfoPayload>,
   ready: false,
@@ -18,6 +19,9 @@ const state = reactive({
   searchQuery: '',
   sortBy: 'status' as 'status' | 'name' | 'description' | 'updated'
 })
+
+// Permissions based on user's role in this workspace
+const permissions = computed(() => usePermissions(state.workspace.my_role));
 
 // Fetch all net-infos for currently loaded agents and populate state
 async function fetchAllNetInfo(workspaceId: string) {
@@ -131,16 +135,24 @@ onMounted(async () => {
   <div class="container-fluid">
     <Title :title="state.workspace.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
       <div class="d-flex flex-wrap gap-2">
-        <router-link :to="`/workspaces/${state.workspace.id}/edit`" class="btn btn-outline-dark">
-          <i class="fa-solid fa-pencil-alt"></i>
+        <router-link 
+          v-if="permissions.canManage.value" 
+          :to="`/workspaces/${state.workspace.id}/edit`" 
+          class="btn btn-outline-dark"
+        >
+          <i class="bi bi-pencil"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit</span>
         </router-link>
         <router-link :to="`/workspaces/${state.workspace.id}/members`" class="btn btn-outline-dark">
-          <i class="fa-solid fa-users"></i>
+          <i class="bi bi-people"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
-        <router-link :to="`/workspaces/${state.workspace.id}/agents/new`" class="btn btn-primary">
-          <i class="fa-solid fa-plus"></i>&nbsp;Create Agent
+        <router-link 
+          v-if="permissions.canEdit.value" 
+          :to="`/workspaces/${state.workspace.id}/agents/new`" 
+          class="btn btn-primary"
+        >
+          <i class="bi bi-plus-lg"></i>&nbsp;Create Agent
         </router-link>
       </div>
     </Title>
@@ -291,7 +303,7 @@ onMounted(async () => {
               class="btn btn-sm btn-primary"
               title="View agent details"
             >
-              View&nbsp;<i class="fa-solid fa-chevron-right"></i>
+              View&nbsp;<i class="bi bi-chevron-right"></i>
             </router-link>
           </div>
         </AgentCard>

@@ -3,12 +3,12 @@ package web
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
+
+	"netwatcher-controller/internal/workspace"
 
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
-	"netwatcher-controller/internal/workspace"
 )
 
 func panelWorkspaces(api iris.Party, db *gorm.DB) {
@@ -68,20 +68,38 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 	// /workspaces/{id}
 	wsID := wsParty.Party("/{id:uint}")
 
-	// GET /workspaces/{id}
+	// Apply permission middleware to all workspace ID routes
+	wsID.Use(RequireWorkspaceAccess(store))
+
+	// GET /workspaces/{id} - requires CanView (any member)
 	wsID.Get("/", func(ctx iris.Context) {
 		id := uintParam(ctx, "id")
+		userID := currentUserID(ctx)
 		ws, err := store.GetWorkspace(ctx.Request().Context(), id)
-		if err != nil || ws == nil || ws.OwnerID != currentUserID(ctx) {
+		if err != nil || ws == nil {
 			ctx.StatusCode(http.StatusNotFound)
 			_ = ctx.JSON(iris.Map{"error": "not found"})
 			return
 		}
-		_ = ctx.JSON(ws)
+		// Add user's role to response
+		member, _ := store.GetMemberByUserID(ctx.Request().Context(), id, userID)
+		response := iris.Map{
+			"id":          ws.ID,
+			"name":        ws.Name,
+			"description": ws.Description,
+			"owner_id":    ws.OwnerID,
+			"settings":    ws.Settings,
+			"created_at":  ws.CreatedAt,
+			"updated_at":  ws.UpdatedAt,
+		}
+		if member != nil {
+			response["my_role"] = member.Role
+		}
+		_ = ctx.JSON(response)
 	})
 
-	// PATCH /workspaces/{id}
-	wsID.Patch("/", func(ctx iris.Context) {
+	// PATCH /workspaces/{id} - requires CanManage (ADMIN+)
+	wsID.Patch("/", RequireRole(store, CanManage), func(ctx iris.Context) {
 		id := uintParam(ctx, "id")
 		var body struct {
 			Name        *string         `json:"name"`
@@ -111,8 +129,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 		_ = ctx.JSON(ws)
 	})
 
-	// DELETE /workspaces/{id}
-	wsID.Delete("/", func(ctx iris.Context) {
+	// DELETE /workspaces/{id} - requires CanOwn (OWNER only)
+	wsID.Delete("/", RequireRole(store, CanOwn), func(ctx iris.Context) {
 		id := uintParam(ctx, "id")
 		err := store.DeleteWorkspace(ctx.Request().Context(), id)
 		if err != nil {
@@ -138,11 +156,11 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(ms)
+		_ = ctx.JSON(NewListResponse(ms))
 	})
 
-	// POST /workspaces/{id}/members
-	wsID.Post("/members", func(ctx iris.Context) {
+	// POST /workspaces/{id}/members - requires CanManage (ADMIN+)
+	wsID.Post("/members", RequireRole(store, CanManage), func(ctx iris.Context) {
 		wsIDv := uintParam(ctx, "id")
 		var body struct {
 			UserID uint           `json:"userId"`
@@ -182,8 +200,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 		_ = ctx.JSON(m)
 	})
 
-	// PATCH /workspaces/{id}/members/{memberId}
-	wsID.Patch("/members/{memberId:uint}", func(ctx iris.Context) {
+	// PATCH /workspaces/{id}/members/{memberId} - requires CanManage (ADMIN+)
+	wsID.Patch("/members/{memberId:uint}", RequireRole(store, CanManage), func(ctx iris.Context) {
 		memberID := uintParamName(ctx, "memberId")
 		var body struct {
 			Role workspace.Role `json:"role"`
@@ -208,8 +226,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 		_ = ctx.JSON(m)
 	})
 
-	// DELETE /workspaces/{id}/members/{memberId}
-	wsID.Delete("/members/{memberId:uint}", func(ctx iris.Context) {
+	// DELETE /workspaces/{id}/members/{memberId} - requires CanManage (ADMIN+)
+	wsID.Delete("/members/{memberId:uint}", RequireRole(store, CanManage), func(ctx iris.Context) {
 		memberID := uintParamName(ctx, "memberId")
 		if err := store.RemoveMember(ctx.Request().Context(), memberID); err != nil {
 			status := http.StatusBadRequest
@@ -275,20 +293,4 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 		}
 		_ = ctx.JSON(iris.Map{"ok": true})
 	})
-}
-
-func uintParam(ctx iris.Context, name string) uint {
-	v, _ := strconv.Atoi(ctx.Params().Get(name))
-	if v < 0 {
-		return 0
-	}
-	return uint(v)
-}
-
-func uintParamName(ctx iris.Context, name string) uint {
-	v, _ := strconv.Atoi(ctx.Params().Get(name))
-	if v < 0 {
-		return 0
-	}
-	return uint(v)
 }

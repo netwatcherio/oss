@@ -42,7 +42,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(rows)
+		_ = ctx.JSON(NewListResponse(rows))
 	})
 
 	// ------------------------------------------
@@ -64,7 +64,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(rows)
+		_ = ctx.JSON(NewListResponse(rows))
 	})
 
 	// ------------------------------------------

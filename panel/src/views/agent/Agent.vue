@@ -14,8 +14,10 @@ import type {
   SysInfoPayload,
   Target,
   Workspace,
-  PingResult
+  PingResult,
+  Role
 } from "@/types";
+import {usePermissions} from "@/composables/usePermissions";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Chart from "@/components/Chart.vue"
@@ -390,7 +392,7 @@ function getStatusIcon(status?: string): string {
 const router = core.router()
 
 let state = reactive({
-  workspace: {} as Workspace,
+  workspace: {} as Workspace & { my_role?: Role },
   probes: [] as Probe[],
 
   // group-driven UI
@@ -419,6 +421,9 @@ let state = reactive({
   hasData: false,
   ouiList: [] as OUIEntry[]
 })
+
+// Permissions based on user's role in this workspace
+const permissions = computed(() => usePermissions(state.workspace.my_role));
 
 onMounted(async () => {
   let agentID = router.currentRoute.value.params["aID"] as string
@@ -571,17 +576,17 @@ onMounted(async () => {
           {{ isInitializing ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
         </div>
         <router-link
-            v-if="state.agent.id && state.workspace.id"
+            v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
             :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/edit`"
             class="btn btn-outline-primary">
-          <i class="fa-regular fa-pen-to-square"></i>
+          <i class="bi bi-pencil-square"></i>
           <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
         </router-link>
         <router-link
-            v-if="state.agent.id && state.workspace.id"
+            v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
             :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/new`"
             class="btn btn-primary">
-          <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
+          <i class="bi bi-plus-lg"></i>&nbsp;Add Probe
         </router-link>
       </div>
     </Title>
@@ -686,7 +691,7 @@ onMounted(async () => {
                   <div class="skeleton-text probe-stat-skeleton"></div>
                 </div>
               </div>
-              <i class="fa-solid fa-chevron-right probe-arrow"></i>
+              <i class="bi bi-chevron-right probe-arrow"></i>
             </div>
           </div>
         </div>
@@ -747,7 +752,7 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <i class="fa-solid fa-chevron-right probe-arrow"></i>
+              <i class="bi bi-chevron-right probe-arrow"></i>
             </router-link>
           </div>
         </div>

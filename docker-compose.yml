@@ -1,3 +1,5 @@
+# NetWatcher Production Docker Compose
+# For development, use: docker compose -f docker-compose.dev.yml up
 version: "3.9"
 
 volumes:
@@ -12,7 +14,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    networks: [netwatcher]
+    networks: [ netwatcher ]
     ports:
       - "80:80"
       - "443:443"
@@ -24,7 +26,7 @@ services:
   postgres:
     image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
     restart: on-failure
-    networks: [netwatcher]
+    networks: [ netwatcher ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -34,7 +36,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -43,7 +45,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG}
     restart: unless-stopped
-    networks: [netwatcher]
+    networks: [ netwatcher ]
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     environment:
@@ -53,7 +55,7 @@ services:
       - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
       - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --port 9000 --user ${CLICKHOUSE_USER} --password ${CLICKHOUSE_PASSWORD} --query 'SELECT 1' >/dev/null 2>&1"]
+      test: [ "CMD-SHELL", "clickhouse-client --host 127.0.0.1 --port 9000 --user ${CLICKHOUSE_USER} --password ${CLICKHOUSE_PASSWORD} --query 'SELECT 1' >/dev/null 2>&1" ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -69,7 +71,7 @@ services:
   controller:
     image: netwatcher-controller
     restart: unless-stopped
-    networks: [netwatcher]
+    networks: [ netwatcher ]
     env_file:
       - .env
     depends_on:
@@ -82,7 +84,7 @@ services:
   panel:
     image: netwatcher-panel
     restart: unless-stopped
-    networks: [netwatcher]
+    networks: [ netwatcher ]
     environment:
       NW_GLOBAL_ENDPOINT: ${NW_GLOBAL_ENDPOINT}
     ports:

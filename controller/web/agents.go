@@ -6,18 +6,23 @@ import (
 	"database/sql"
 	"net/http"
 	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/workspace"
 	"os"
-	"strconv"
 	"time"
+
+	"netwatcher-controller/internal/agent"
 
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
-	"netwatcher-controller/internal/agent"
 )
 
 func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 	ws := api.Party("/workspaces/{id:uint}")
+	wsStore := workspace.NewStore(db)
+
+	// Apply workspace access check to all agent routes
 	as := ws.Party("/agents")
+	as.Use(RequireWorkspaceAccess(wsStore))
 
 	// GET /workspaces/{id}/agents
 	as.Get("/", func(ctx iris.Context) {
@@ -33,8 +38,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		_ = ctx.JSON(iris.Map{"data": list, "total": total, "limit": limit, "offset": offset})
 	})
 
-	// POST /workspaces/{id}/agents  (returns agent + bootstrap PIN)
-	as.Post("/", func(ctx iris.Context) {
+	// POST /workspaces/{id}/agents - requires CanEdit (USER+)
+	as.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		wsID := uintParam(ctx, "id")
 		var body struct {
 			Name             string         `json:"name"`
@@ -115,8 +120,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		_ = ctx.JSON(a)
 	})
 
-	// PATCH /workspaces/{id}/agents/{agentID}
-	aid.Patch("/", func(ctx iris.Context) {
+	// PATCH /workspaces/{id}/agents/{agentID} - requires CanEdit (USER+)
+	aid.Patch("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")
 		var body struct {
 			Name             *string         `json:"name"`
@@ -163,8 +168,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		_ = ctx.JSON(a)
 	})
 
-	// DELETE /workspaces/{id}/agents/{agentID}
-	aid.Delete("/", func(ctx iris.Context) {
+	// DELETE /workspaces/{id}/agents/{agentID} - requires CanManage (ADMIN+)
+	aid.Delete("/", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")
 		if err := agent.DeleteAgent(ctx.Request().Context(), db, aID); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
@@ -186,8 +191,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		_ = ctx.JSON(iris.Map{"ok": true, "ts": now})
 	})
 
-	// POST /workspaces/{id}/agents/{agentID}/issue-pin
-	aid.Post("/issue-pin", func(ctx iris.Context) {
+	// POST /workspaces/{id}/agents/{agentID}/issue-pin - requires CanEdit (USER+)
+	aid.Post("/issue-pin", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		wsID := uintParam(ctx, "id")
 		aID := uintParam(ctx, "agentID")
 		var body struct {
@@ -209,24 +214,4 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		}
 		_ = ctx.JSON(iris.Map{"pin": pin})
 	})
-}
-
-func intParam(ctx iris.Context, name string, def, min, max int) int {
-	if v, err := strconv.Atoi(ctx.URLParamDefault(name, "")); err == nil {
-		if v < min {
-			return min
-		}
-		if v > max {
-			return max
-		}
-		return v
-	}
-	return def
-}
-
-func ifZero(v, def int) int {
-	if v == 0 {
-		return def
-	}
-	return v
 }

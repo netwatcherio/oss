@@ -17,7 +17,7 @@ function logout() {
     <div class="container-fluid">
       <!-- Logo Section -->
       <router-link to="/" class="navbar-brand">
-        <i class="fa-solid fa-eye brand-icon"></i>
+        <i class="bi bi-eye brand-icon"></i>
         <span class="brand-text">netwatcher.io</span>
       </router-link>
 
@@ -25,12 +25,12 @@ function logout() {
       <div class="navbar-actions">
         <!-- Theme Toggle -->
         <button class="nav-icon-btn" title="Toggle theme">
-          <i class="fa-solid fa-moon"></i>
+          <i class="bi bi-moon"></i>
         </button>
 
         <!-- Notifications -->
         <button class="nav-icon-btn" title="Notifications">
-          <i class="fa-solid fa-bell"></i>
+          <i class="bi bi-bell"></i>
           <span class="notification-badge">3</span>
         </button>
 
@@ -46,7 +46,7 @@ function logout() {
             aria-expanded="false"
           >
             <div class="user-avatar">
-              <i class="fa-solid fa-user"></i>
+              <i class="bi bi-person"></i>
             </div>
             <div class="user-info">
               <span class="user-name">
@@ -54,25 +54,25 @@ function logout() {
               </span>
               <span class="user-role">Administrator</span>
             </div>
-            <i class="fa-solid fa-chevron-down dropdown-indicator"></i>
+            <i class="bi bi-chevron-down dropdown-indicator"></i>
           </button>
           
           <!-- Dropdown Menu -->
           <ul class="dropdown-menu dropdown-menu-end">
             <li>
               <router-link to="/profile" class="dropdown-item">
-                <i class="fa-solid fa-user-circle"></i> Profile
+                <i class="bi bi-person-circle"></i> Profile
               </router-link>
             </li>
             <li>
               <router-link to="/settings" class="dropdown-item">
-                <i class="fa-solid fa-cog"></i> Settings
+                <i class="bi bi-gear"></i> Settings
               </router-link>
             </li>
             <li><hr class="dropdown-divider"></li>
             <li>
               <button @click="logout" class="dropdown-item text-danger">
-                <i class="fa-solid fa-sign-out-alt"></i> Logout
+                <i class="bi bi-box-arrow-right"></i> Logout
               </button>
             </li>
           </ul>

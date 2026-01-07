@@ -128,30 +128,37 @@ function generateTable(probeData: ProbeData) {
 }
 
 // Helper function to add probe data without duplicates
+// Helper: safely add probe data without duplicates or Vue reactivity issues
 function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
-  // Ensure we give the record a stable key for Vue
-  if (!newData.id || newData.id == 0) {
-    // Prefer real UUID if available
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      (newData as any).id = crypto.randomUUID();
-    } else {
-      // fallback: pseudo-UUID
-      (newData as any).id =
-          "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === "x" ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-          });
-    }
+  if (!newData) return;
+
+  // --- ensure stable unique key ---
+  // Many backends reuse `id=0` or null; generate UUID if missing or falsy
+  if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
+    (newData as any).id = (crypto as any).randomUUID();
+  } else {
+    (newData as any).id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
   }
 
-  // Only push if not already in array
-  const exists = targetArray.some(item => item.id === newData.id);
+  // --- deduplication logic ---
+  // Use a stable composite key instead of only `id` when data sources overlap
+  const key = `${newData.id}-${(newData as any).timestamp ?? ""}-${(newData as any).type ?? ""}`;
+
+  const exists = targetArray.some(
+      (item) =>
+          item.id === newData.id ||
+          `${item.id}-${(item as any).timestamp ?? ""}-${(item as any).type ?? ""}` === key
+  );
+
   if (!exists) {
+    // Use .push() to preserve reactivity in Vue arrays
     targetArray.push(newData);
   }
 }
-
 // --------- Adapters for graphs (expecting your components’ input shapes) ---------
 
 // PING: flatten rows -> PingResult[]
@@ -159,7 +166,6 @@ function transformPingDataMulti(rows: ProbeData[]): PingResult[] {
   return rows
       .map((r) => {
         // Normalize likely fields: ts/created_at, avg/latency, loss, min/max
-        console.log(r)
         return r.payload as PingResult
       })
 }
@@ -250,6 +256,9 @@ if (!agentID || !workspaceID || !probeID) {
 
 async function reloadData() {
   state.loading = true;
+  state.ready = false;
+
+  // reset buckets
   state.pingData = [];
   state.mtrData = [];
   state.rperfData = [];
@@ -258,94 +267,62 @@ async function reloadData() {
   state.similarProbes = [];
   state.agentPairData = [];
   state.isAgentProbe = false;
-  // optional extras for UI chips
   (state as any).similarByHost = [];
   (state as any).similarByAgent = [];
   (state as any).matchedGroupKeys = [];
 
-  if (!workspaceID || !probeID) {
-    state.loading = false;
-    state.ready = false;
-    return;
-  }
+  try {
+    if (!workspaceID || !probeID) {
+      state.ready = false;
+      return;
+    }
 
-  // 1) Load workspace & agent metadata in parallel (untouched)
-  WorkspaceService.get(workspaceID)
-      .then(ws => {
-        state.workspace = ws as Workspace;
-      })
-      .catch(() => { /* ignore */
-      });
+    // 1) Load workspace & agent metadata in parallel (non-fatal if they fail)
+    const [wsRes, agRes] = await Promise.allSettled([
+      WorkspaceService.get(workspaceID),
+      AgentService.get(workspaceID, agentID),
+    ]);
+    if (wsRes.status === "fulfilled") state.workspace = wsRes.value as Workspace;
+    if (agRes.status === "fulfilled") state.agent = agRes.value as Agent;
 
-  AgentService.get(workspaceID, agentID)
-      .then(ag => {
-        state.agent = ag as Agent;
-      })
-      .catch(() => { /* ignore */
-        console.log('failed to get agent')
-      });
+    // 2) Load the main probe
+    state.probe = (await ProbeService.get(workspaceID, agentID, probeID)) as Probe;
 
-  ProbeService.get(workspaceID, agentID, probeID)
-      .then(res => {
-        state.probe = res as Probe;
+    // 3) Load related probe list and filter
+    const allProbes = (await ProbeService.list(workspaceID, agentID)) as Probe[];
+    state.probes = findProbesByInitialTarget(state.probe, allProbes);
+    console.log("probes:", state.probes);
 
-        ProbeService.list(workspaceID, agentID)
-            .then(res => {
-              state.probes = findProbesByInitialTarget(state.probe, res as Probe[])
+    // 4) Title from first target (agent ref vs literal)
+    const firstTarget = (state.probe?.targets?.[0] ?? {}) as any;
+    if (firstTarget.agent_id != null) {
+      try {
+        const targ = (await AgentService.get(workspaceID, firstTarget.agent_id as number)) as Agent;
+        state.probeAgent = targ;
+        state.title = targ.name || `agent:${(targ as any).id}`;
+      } catch {
+        state.title = `${state.probe.type} #${state.probe.id}`;
+      }
+    } else if (firstTarget.target) {
+      const split = String(firstTarget.target).split(":");
+      state.title = split[0] || String(firstTarget.target);
+    } else {
+      state.title = `${state.probe.type} #${state.probe.id}`;
+    }
 
-              console.log(res)
+    // 5) Pull series for each probe (await so ready/loading are correct)
+    await loadProbeData();
 
-              // Title from first target (agent ref vs literal)
-              const firstTarget = (state.probe?.targets?.[0]) || {} as any;
-              if (firstTarget.agentId) {
-                return AgentService.get(workspaceID, firstTarget.agentId).then(targ => {
-                  state.probeAgent = targ as Agent;
-                  state.title = targ.name || `agent:${(targ as any).id}`;
-                }).catch(() => {
-                  state.title = `${state.probe.type} #${state.probe.id}`;
-                });
-              } else if (firstTarget.target) {
-                const split = String(firstTarget.target).split(":");
-                state.title = split[0] || String(firstTarget.target);
-              } else {
-                state.title = `${state.probe.type} #${state.probe.id}`;
-              }
-
-              state.probes.forEach(p => {
-                  // 3) Pull series for this probe from ClickHouse (untouched)
-                  const [from, to] = state.timeRange;
-                  return ProbeDataService.byProbe(
-                      workspaceID,
-                      p.id,
-                      { from, to, limit: 5000, asc: false }
-                  ).then(rows => {
-                    for (const d of rows) {
-                      addProbeDataUnique(state.probeData, d);
-                      const t = (d as any).type as ProbeType;
-                      if (t === "PING") addProbeDataUnique(state.pingData, d);
-                      if (t === "MTR") addProbeDataUnique(state.mtrData, d);
-                      if (t === "RPERF" && !(state.probe as any).server) addProbeDataUnique(state.rperfData, d);
-                      if (t === "TRAFFICSIM") addProbeDataUnique(state.trafficSimData, d);
-                    }
-                    return true;
-                  });
-                })
-              })
-            }).then(() => {
     state.ready = true;
-  })
-      .catch((e) => {
-        console.error(e);
-        state.ready = false;
-      })
-      .finally(() => {
-        state.loading = false;
-        console.log(state.pingData);
-      });
-  // load probe
-
-  // 2) Load probe → title, then series → bucket by typ
+  } catch (e) {
+    console.error(e);
+    state.ready = false;
+  } finally {
+    state.loading = false;
+    console.log("pingData len:", state.pingData.length);
+  }
 }
+
 // ---------- Guards / helpers ----------
 function containsProbeType(type: ProbeType): boolean {
   switch(type) {
@@ -357,6 +334,41 @@ function containsProbeType(type: ProbeType): boolean {
   }
 }
 
+async function loadProbeData(): Promise<void> {
+  const [from, to] = state.timeRange;
+
+  console.log("loading probe data")
+
+  const tasks = state.probes.map(async (p) => {
+    try {
+      const rows = await ProbeDataService.byProbe(
+          workspaceID,
+          p.id,
+          { from, to, limit: 5000, asc: false }
+      );
+
+      for (const d of rows) {
+        // common bucket
+        addProbeDataUnique(state.probeData, d);
+
+        // per-type buckets
+        const t = (d as any).type as ProbeType;
+        if (t === "PING") addProbeDataUnique(state.pingData, d);
+        if (t === "MTR") addProbeDataUnique(state.mtrData, d);
+        if (t === "RPERF" && !(state.probe as any).server) addProbeDataUnique(state.rperfData, d);
+        if (t === "TRAFFICSIM") addProbeDataUnique(state.trafficSimData, d);
+      }
+    } catch (err) {
+      console.error(`probe ${p.id} fetch failed:`, err);
+    }
+  });
+
+  console.log("loaded probe data")
+
+  // run them all in parallel, but don't throw if one fails
+  await Promise.allSettled(tasks);
+}
+
 function onCreate(_: any) { router.push("/workspace"); }
 function onError(response: any) { alert(response); }
 function submit() {}
@@ -364,11 +376,10 @@ function submit() {}
 onMounted(() => {
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
-  reloadData();
 });
 
 // Watch for timeRange changes
-watch(() => state.timeRange, () => { reloadData(); }, { deep: true });
+watch(() => state.timeRange, () => { reloadData() }, { deep: true });
 </script>
 
 <template>

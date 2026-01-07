@@ -4,15 +4,21 @@ package web
 import (
 	"net/http"
 
+	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/workspace"
+
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
-	"netwatcher-controller/internal/probe"
 )
 
 func panelProbes(api iris.Party, db *gorm.DB) {
 	base := api.Party("/workspaces/{id:uint}/agents/{agentID:uint}/probes")
+	wsStore := workspace.NewStore(db)
 
-	// GET /workspaces/{id}/agents/{agentID}/probes
+	// Apply workspace access check to all probe routes
+	base.Use(RequireWorkspaceAccess(wsStore))
+
+	// GET /workspaces/{id}/agents/{agentID}/probes - requires CanView (any member)
 	base.Get("/", func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")
 		list, err := probe.ListByAgent(ctx.Request().Context(), db, aID)
@@ -21,12 +27,11 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(list)
+		_ = ctx.JSON(NewListResponse(list))
 	})
 
-	// POST /workspaces/{id}/agents/{agentID}/probes
-	base.Post("/", func(ctx iris.Context) {
-		// todo validate workspace id permissions and such
+	// POST /workspaces/{id}/agents/{agentID}/probes - requires CanEdit (USER+)
+	base.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		var input probe.CreateInput
 
 		if err := ctx.ReadJSON(&input); err != nil {
@@ -46,7 +51,7 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 	// /workspaces/{id}/agents/{agentID}/probes/{probeID}
 	pid := base.Party("/{probeID:uint}")
 
-	// GET
+	// GET /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanView (any member)
 	pid.Get("/", func(ctx iris.Context) {
 		id := uintParam(ctx, "probeID")
 		p, err := probe.GetByID(ctx.Request().Context(), db, id)
@@ -57,8 +62,8 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 		_ = ctx.JSON(p)
 	})
 
-	// PATCH
-	pid.Patch("/", func(ctx iris.Context) {
+	// PATCH /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanEdit (USER+)
+	pid.Patch("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		id := uintParam(ctx, "probeID")
 		var body struct {
 			Enabled             *bool           `json:"enabled"`
@@ -92,8 +97,8 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 		_ = ctx.JSON(p)
 	})
 
-	// DELETE
-	pid.Delete("/", func(ctx iris.Context) {
+	// DELETE /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanManage (ADMIN+)
+	pid.Delete("/", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
 		id := uintParam(ctx, "probeID")
 		if err := probe.Delete(ctx.Request().Context(), db, id); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
