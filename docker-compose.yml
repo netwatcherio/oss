@@ -69,6 +69,9 @@ services:
   # === App services ===
 
   controller:
+    build:
+      context: ./controller
+      dockerfile: Dockerfile
     image: netwatcher-controller
     restart: unless-stopped
     networks: [ netwatcher ]
@@ -82,6 +85,9 @@ services:
     # (healthcheck intentionally removed)
 
   panel:
+    build:
+      context: ./panel
+      dockerfile: Dockerfile
     image: netwatcher-panel
     restart: unless-stopped
     networks: [ netwatcher ]
