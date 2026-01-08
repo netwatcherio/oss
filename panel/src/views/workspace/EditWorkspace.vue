@@ -10,6 +10,7 @@ const router = core.router();
 const state = reactive({
   workspace: {} as Workspace,
   originalName: "",
+  originalDescription: "",
   ready: false,
   loading: false,
   error: "",
@@ -29,7 +30,7 @@ const validation = computed(() => ({
 const isFormValid = computed(() => validation.value.name.valid);
 const hasChanges = computed(() => 
   state.workspace.name !== state.originalName || 
-  state.workspace.description !== state.workspace.description
+  state.workspace.description !== state.originalDescription
 );
 
 onMounted(async () => {
@@ -43,6 +44,7 @@ onMounted(async () => {
     const workspace = await WorkspaceService.get(wID);
     state.workspace = workspace as Workspace;
     state.originalName = state.workspace.name;
+    state.originalDescription = state.workspace.description || "";
     state.ready = true;
   } catch (err) {
     console.error("Failed to load workspace:", err);
@@ -66,8 +68,8 @@ async function submit() {
 
   try {
     await WorkspaceService.update(state.workspace.id, {
-      displayName: state.workspace.name,
-      settings: { description: state.workspace.description }
+      name: state.workspace.name,
+      description: state.workspace.description
     });
     router.push(`/workspaces/${state.workspace.id}`);
   } catch (err: any) {

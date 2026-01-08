@@ -216,27 +216,31 @@ function getMtrRouteSignature(mtr: ProbeData): string {
     .join('->');
 }
 
-// MTR: check if trace has notable packet loss (>0% on any hop)
+// MTR: check if trace has notable packet loss (>1% on any known hop)
 function hasHighLoss(mtr: ProbeData): boolean {
   const payload = mtr.payload as MtrResult;
   if (!payload?.report?.hops) return false;
   return payload.report.hops.some(hop => {
+    // Skip unknown hops (no hosts = "*" row)
+    if (!hop.hosts || hop.hosts.length === 0) return false;
     // loss_pct can be "5.0%" or "5.0" - strip % if present
     const lossStr = String(hop.loss_pct || '0').replace('%', '').trim();
     const loss = parseFloat(lossStr);
-    return loss > 0; // Any packet loss is notable
+    return !isNaN(loss) && loss > 1; // >1% to avoid noise
   });
 }
 
-// MTR: check if trace has high latency (>100ms avg on any hop)
+// MTR: check if trace has high latency (>150ms avg on any known hop)
 function hasHighLatency(mtr: ProbeData): boolean {
   const payload = mtr.payload as MtrResult;
   if (!payload?.report?.hops) return false;
   return payload.report.hops.some(hop => {
+    // Skip unknown hops
+    if (!hop.hosts || hop.hosts.length === 0) return false;
     // avg can be "45.2 ms" or "45.2" - extract number
     const avgStr = String(hop.avg || '0').replace(/[^\d.]/g, '');
     const avg = parseFloat(avgStr);
-    return avg > 100;
+    return !isNaN(avg) && avg > 150; // >150ms is high
   });
 }
 

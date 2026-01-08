@@ -234,10 +234,10 @@ All views in `panel/src/views/`:
 | View | Purpose |
 |------|---------|
 | `Agent.vue` | Comprehensive agent dashboard (1588 lines) |
-| `NewAgent.vue` | Create new agent |
+| `NewAgent.vue` | Create new agent with setup modal showing PIN and installation commands |
 | `EditAgent.vue` | Update agent name/location/IP override |
 | `DeleteAgent.vue` | Delete agent with confirmation |
-| `DeactivateAgent.vue` | Temporarily disable agent |
+| `DeactivateAgent.vue` | Temporarily disable agent (sets `active: false`) |
 | `ProbesEdit.vue` | Manage agent probes |
 | `Speedtests.vue` | Speedtest history |
 | `NewSpeedtest.vue` | Trigger manual speedtest |
@@ -308,6 +308,30 @@ Delete views use danger zone pattern:
     <!-- Confirmation content -->
   </div>
 </div>
+```
+
+### Agent Creation Flow
+
+When creating a new agent, `NewAgent.vue` displays a modal with setup instructions:
+
+1. User fills in agent details (name, location, description)
+2. Form submits to `AgentService.create(workspaceId, agentData)`
+3. API returns `{ agent: {...}, pin: "123456789" }`
+4. Modal appears with:
+   - Prominent PIN display with copy button
+   - Docker installation command
+   - Binary installation command
+   - Agent details (ID, name, workspace)
+5. User clicks "Done" to navigate to workspace
+
+```typescript
+// Response handling
+const result = await AgentService.create(workspace.id, agent);
+if (result && 'pin' in result) {
+  state.createdAgent = result.agent;
+  state.agentPin = result.pin;
+  state.showSetupModal = true;
+}
 ```
 
 ---

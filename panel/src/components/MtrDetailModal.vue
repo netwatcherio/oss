@@ -157,22 +157,29 @@ const routeChanges = computed(() => {
   return changes;
 });
 
-// Time range display
+// Time range display - show actual date range
 const timeRange = computed(() => {
   if (filteredResults.value.length === 0) return '-';
   
   const oldest = filteredResults.value[filteredResults.value.length - 1];
   const newest = filteredResults.value[0];
   
+  if (!oldest || !newest) return '-';
+  
   const oldestTime = new Date(oldest.payload?.stop_timestamp || oldest.created_at);
   const newestTime = new Date(newest.payload?.stop_timestamp || newest.created_at);
   
-  const diffMs = newestTime.getTime() - oldestTime.getTime();
-  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+  // Format as "Jan 5 - Jan 8" or "Jan 5, 10:30 - 14:45" for same day
+  const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   
-  if (diffHours < 1) return '< 1 hour';
-  if (diffHours < 24) return `${diffHours} hours`;
-  return `${Math.round(diffHours / 24)} days`;
+  const sameDay = oldestTime.toDateString() === newestTime.toDateString();
+  
+  if (sameDay) {
+    return `${formatDate(oldestTime)}, ${formatTime(oldestTime)} - ${formatTime(newestTime)}`;
+  } else {
+    return `${formatDate(oldestTime)} - ${formatDate(newestTime)}`;
+  }
 });
 
 const formatTimestamp = (result: ProbeData): string => {
@@ -188,7 +195,8 @@ const formatTimestamp = (result: ProbeData): string => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -197,115 +205,143 @@ const formatTimestamp = (result: ProbeData): string => {
 }
 
 .mtr-modal {
-  background: #1e1e2e;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #1a1b26 0%, #16161e 100%);
+  border-radius: 16px;
   width: 100%;
-  max-width: 1000px;
+  max-width: 1100px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 25px 80px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(122, 162, 247, 0.1);
+  border: 1px solid #2a2b3d;
 }
 
 .mtr-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid #313244;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
+  border-bottom: 1px solid #2a2b3d;
+  border-radius: 16px 16px 0 0;
 }
 
 .mtr-modal-title {
   margin: 0;
-  color: #cdd6f4;
-  font-size: 1.1rem;
+  color: #c0caf5;
+  font-size: 1.15rem;
+  font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+}
+
+.mtr-modal-title i {
+  color: #7aa2f7;
 }
 
 .node-badge {
-  background: #45475a;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  background: linear-gradient(135deg, #3d59a1 0%, #2a3f73 100%);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
   font-size: 0.85rem;
-  font-weight: normal;
+  font-weight: 500;
+  color: #c0caf5;
 }
 
 .close-btn {
   background: transparent;
-  border: none;
-  color: #6c7086;
-  font-size: 1.2rem;
+  border: 1px solid transparent;
+  color: #565f89;
+  font-size: 1.25rem;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 8px;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .close-btn:hover {
-  background: #313244;
-  color: #cdd6f4;
+  background: rgba(247, 118, 142, 0.1);
+  border-color: rgba(247, 118, 142, 0.2);
+  color: #f7768e;
 }
 
 .mtr-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem 1.5rem;
+  padding: 1.25rem 1.5rem;
 }
 
 .no-data {
   text-align: center;
-  padding: 3rem;
-  color: #6c7086;
+  padding: 4rem 2rem;
+  color: #565f89;
 }
 
 .no-data i {
-  font-size: 3rem;
+  font-size: 3.5rem;
   margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.no-data p {
+  font-size: 1rem;
+  margin: 0;
 }
 
 .summary-bar {
   display: flex;
-  gap: 1.5rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  background: #2a2a3e;
-  border-radius: 8px;
+  gap: 2rem;
+  margin-bottom: 1.25rem;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
+  border-radius: 12px;
+  border: 1px solid #2a2b3d;
 }
 
 .summary-stat {
   display: flex;
   flex-direction: column;
+  gap: 0.15rem;
 }
 
 .summary-stat.warning .stat-value {
-  color: #fab387;
+  color: #ff9e64;
 }
 
 .stat-value {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #cdd6f4;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #c0caf5;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
-  font-size: 0.75rem;
-  color: #6c7086;
+  font-size: 0.7rem;
+  color: #565f89;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
 }
 
 .route-change-alert {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  background: rgba(250, 179, 135, 0.15);
-  border: 1px solid rgba(250, 179, 135, 0.3);
-  border-radius: 6px;
-  color: #fab387;
-  margin-bottom: 1rem;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem;
+  background: rgba(255, 158, 100, 0.08);
+  border: 1px solid rgba(255, 158, 100, 0.2);
+  border-radius: 10px;
+  color: #ff9e64;
+  margin-bottom: 1.25rem;
   font-size: 0.9rem;
+}
+
+.route-change-alert i {
+  font-size: 1.1rem;
 }
 
 .traceroute-list {
@@ -315,42 +351,55 @@ const formatTimestamp = (result: ProbeData): string => {
 }
 
 .traceroute-item {
-  border: 1px solid #313244;
-  border-radius: 8px;
+  border: 1px solid #2a2b3d;
+  border-radius: 12px;
   overflow: hidden;
+  transition: all 0.2s;
+}
+
+.traceroute-item:hover {
+  border-color: #3d59a1;
 }
 
 .traceroute-item.route-changed {
-  border-color: rgba(250, 179, 135, 0.5);
-  box-shadow: 0 0 0 1px rgba(250, 179, 135, 0.2);
+  border-color: rgba(255, 158, 100, 0.4);
+  box-shadow: 0 0 0 1px rgba(255, 158, 100, 0.1), inset 0 0 20px rgba(255, 158, 100, 0.02);
 }
 
 .traceroute-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 1rem;
-  background: #2a2a3e;
-  border-bottom: 1px solid #313244;
+  padding: 0.65rem 1.25rem;
+  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
+  border-bottom: 1px solid #2a2b3d;
 }
 
 .traceroute-time {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  color: #a6adc8;
+  gap: 0.5rem;
+  color: #7aa2f7;
   font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.traceroute-time i {
+  opacity: 0.7;
 }
 
 .route-change-badge {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.5rem;
-  background: rgba(250, 179, 135, 0.2);
-  color: #fab387;
-  border-radius: 4px;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  background: rgba(255, 158, 100, 0.15);
+  color: #ff9e64;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 </style>
+

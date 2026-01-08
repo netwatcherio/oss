@@ -262,10 +262,10 @@ async function submit() {
   <div class="container-fluid">
     <Title
         :history="[
-          {title: 'workspaces', link: '/workspaces'},
-          {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`}, 
-          {title: state.agent.name || 'Loading...', link: `/agent/${state.agent.id}`}, 
-          {title: 'Speedtests', link: `/agent/${state.agent.id}/speedtests`}
+          {title: 'Workspaces', link: '/workspaces'},
+          {title: state.site.name || 'Loading...', link: `/workspaces/${state.site.id}`}, 
+          {title: state.agent.name || 'Loading...', link: `/workspaces/${state.site.id}/agents/${state.agent.id}`}, 
+          {title: 'Speedtests', link: `/workspaces/${state.site.id}/agents/${state.agent.id}/speedtests`}
         ]"
         :subtitle="`Configure and run a network speed test`"
         title="New Speedtest">

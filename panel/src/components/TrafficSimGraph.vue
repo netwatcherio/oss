@@ -82,10 +82,10 @@ export default {
     const showAnnotations = ref(true);
     
     // Calculate the maximum allowed gap dynamically based on probe interval
-    // Use 1.5x the interval + 30s buffer to allow for timing variations
+    // Use 3x the interval to avoid breaking lines with sparse data
     const maxAllowedGap = computed(() => {
       const intervalMs = (props.intervalSec || 60) * 1000;
-      return Math.max(intervalMs * 1.5 + 30000, 90000); // At least 90 seconds minimum
+      return Math.max(intervalMs * 3, 180000); // At least 3 minutes minimum
     });
     
     const timeRanges = [
@@ -295,26 +295,44 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   const bucketSize = getTrafficBucketSize(sortedData, timeRange);
   const processedData = bucketSize > 0 ? aggregateTrafficData(sortedData, bucketSize) : sortedData;
 
+  // Build series with gap detection - insert nulls to break lines at gaps
+  const buildSeriesData = (getValue: (d: TrafficSimResult) => number) => {
+    const result: { x: number; y: number | null }[] = [];
+    processedData.forEach((d, i) => {
+      const currentTime = new Date(d.reportTime).getTime();
+      if (i > 0) {
+        const prevTime = new Date(processedData[i - 1].reportTime).getTime();
+        const gap = currentTime - prevTime;
+        if (gap > maxAllowedGap) {
+          // Insert null to break the line
+          result.push({ x: prevTime + 1, y: null });
+        }
+      }
+      result.push({ x: currentTime, y: getValue(d) });
+    });
+    return result;
+  };
+
   const series = [
     {
       name: 'Min RTT',
       type: 'line',
-      data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.minRTT }))
+      data: buildSeriesData(d => d.minRTT)
     },
     {
       name: 'Avg RTT',
       type: 'line',
-      data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.averageRTT }))
+      data: buildSeriesData(d => d.averageRTT)
     },
     {
       name: 'Max RTT',
       type: 'line',
-      data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.maxRTT }))
+      data: buildSeriesData(d => d.maxRTT)
     },
     {
       name: 'Packet Loss',
       type: 'area',
-      data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: (d.lostPackets / d.totalPackets) * 100 }))
+      data: buildSeriesData(d => (d.lostPackets / d.totalPackets) * 100)
     },
     {
       name: 'Out of Sequence',
@@ -323,50 +341,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     }
   ];
 
-  // Initialize empty annotations
+  // Initialize empty annotations (gaps are handled by null values in series data)
   const annotations: ApexAnnotations = {
     xaxis: [],
     yaxis: [],
     points: []
   };
-
-  // Gap annotations - always show these
-  // Check gaps in original data, not decimated data
-  sortedData.forEach((current, index, array) => {
-    if (index > 0) {
-      const prev = array[index - 1];
-      const gap = new Date(current.reportTime).getTime() - new Date(prev.reportTime).getTime();
-      if (gap > maxAllowedGap) {
-        // Find the corresponding points in decimated data
-        const prevTime = new Date(prev.reportTime).getTime();
-        const currentTime = new Date(current.reportTime).getTime();
-        
-        // Only add annotation if both points exist in processed data
-        const prevExists = processedData.some(d => Math.abs(new Date(d.reportTime).getTime() - prevTime) < bucketSize);
-        const currentExists = processedData.some(d => Math.abs(new Date(d.reportTime).getTime() - currentTime) < bucketSize);
-        
-        if (prevExists || currentExists || bucketSize === 0) {
-          annotations.xaxis.push({
-            x: prevTime,
-            x2: currentTime,
-            strokeDashArray: 8,
-            fillColor: '#64748b',
-            opacity: 0.1,
-            label: {
-              style: {
-                fontSize: '11px',
-                color: '#64748b',
-                background: 'transparent',
-              },
-              text: 'Data Gap',
-              position: 'top',
-              orientation: 'horizontal'
-            }
-          });
-        }
-      }
-    }
-  });
 
   // Only add other annotations if showAnnotations is true
   if (showAnnotations) {
@@ -580,27 +560,30 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   return {
     series,
     chart: {
-      height: 400,
+      height: 380,
       type: 'line',
-      background: '#ffffff',
+      background: 'transparent',
       foreColor: '#374151',
+      fontFamily: 'Inter, system-ui, sans-serif',
       stacked: false,
       animations: {
         enabled: true,
         easing: 'easeinout',
-        speed: 800,
+        speed: 400,
         animateGradually: {
           enabled: true,
-          delay: 150
+          delay: 100
         }
       },
       zoom: {
         type: 'x',
         enabled: true,
-        autoScaleYaxis: false // Keep Y-axis fixed
+        autoScaleYaxis: false
       },
       toolbar: {
         show: true,
+        offsetX: -5,
+        offsetY: -5,
         tools: {
           download: true,
           selection: true,
@@ -609,28 +592,38 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
           zoomout: true,
           pan: true,
           reset: true
-        }
+        },
+        autoSelected: 'zoom'
+      },
+      dropShadow: {
+        enabled: true,
+        top: 3,
+        left: 0,
+        blur: 4,
+        opacity: 0.1
       }
     },
-    colors: ['#10b981', '#3b82f6', '#ef4444', '#f59e0b', '#8b5cf6'],
+    colors: ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#a855f7'],
     stroke: {
       width: [2, 3, 2, 0, 0],
       curve: 'smooth',
-      dashArray: [5, 0, 5, 0, 0]
+      dashArray: [0, 0, 0, 0, 0]
     },
     fill: {
       type: ['solid', 'solid', 'solid', 'gradient', 'solid'],
       gradient: {
         shadeIntensity: 1,
-        opacityFrom: 0.5,
-        opacityTo: 0.2,
+        opacityFrom: 0.4,
+        opacityTo: 0.1,
         stops: [0, 90, 100]
       }
     },
     markers: {
-      size: [0, 0, 0, 0, 4],
+      size: [3, 4, 3, 0, 5],
+      strokeWidth: 1,
+      strokeColors: '#fff',
       hover: {
-        sizeOffset: 6
+        sizeOffset: 4
       }
     },
     xaxis: {

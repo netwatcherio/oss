@@ -1,9 +1,8 @@
 <script lang="ts" setup>
-import { onMounted, reactive, computed } from "vue";
-import type { Workspace } from "@/types";
+import { onMounted, reactive, computed, ref } from "vue";
+import type { Workspace, Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import { Agent } from "@/types";
 import { AgentService, WorkspaceService } from "@/services/apiService";
 
 const router = core.router();
@@ -20,7 +19,13 @@ const state = reactive({
   error: "",
   touched: {
     name: false
-  }
+  },
+  // Modal state
+  showSetupModal: false,
+  createdAgent: null as Agent | null,
+  agentPin: "",
+  pinExpiresAt: "",
+  copied: false
 });
 
 // Validation
@@ -32,6 +37,29 @@ const validation = computed(() => ({
 }));
 
 const isFormValid = computed(() => validation.value.name.valid);
+
+// Installation command with PIN
+const installCommand = computed(() => {
+  if (!state.createdAgent || !state.agentPin) return "";
+  const baseUrl = window.location.origin;
+  return `docker run -d --name netwatcher-agent \\
+  -e CONTROLLER_URL="${baseUrl}" \\
+  -e WORKSPACE_ID="${state.workspace.id}" \\
+  -e AGENT_ID="${state.createdAgent.id}" \\
+  -e AGENT_PIN="${state.agentPin}" \\
+  --restart unless-stopped \\
+  netwatcher/agent:latest`;
+});
+
+const binaryCommand = computed(() => {
+  if (!state.createdAgent || !state.agentPin) return "";
+  const baseUrl = window.location.origin;
+  return `./netwatcher-agent \\
+  --controller-url "${baseUrl}" \\
+  --workspace-id ${state.workspace.id} \\
+  --agent-id ${state.createdAgent.id} \\
+  --pin "${state.agentPin}"`;
+});
 
 onMounted(async () => {
   const id = router.currentRoute.value.params["wID"] as string;
@@ -55,6 +83,23 @@ function markTouched(field: keyof typeof state.touched) {
   state.touched[field] = true;
 }
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    state.copied = true;
+    setTimeout(() => {
+      state.copied = false;
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy:", err);
+  }
+}
+
+function closeModal() {
+  state.showSetupModal = false;
+  router.push(`/workspaces/${state.workspace.id}`);
+}
+
 async function submit() {
   // Mark all fields as touched to show validation
   state.touched.name = true;
@@ -71,11 +116,16 @@ async function submit() {
     
     // Check if we got a PIN back for bootstrap
     if (result && typeof result === 'object' && 'pin' in result) {
-      // Store PIN for display on agent page
-      sessionStorage.setItem(`agent_pin_${(result as any).agent?.id}`, (result as any).pin);
+      const bundledResult = result as { agent: Agent; pin: string; expiresAt?: string };
+      state.createdAgent = bundledResult.agent;
+      state.agentPin = bundledResult.pin;
+      state.pinExpiresAt = bundledResult.expiresAt || "";
+      state.showSetupModal = true;
+      state.loading = false;
+    } else {
+      // No PIN returned, redirect directly
+      router.push(`/workspaces/${state.workspace.id}`);
     }
-    
-    router.push(`/workspaces/${state.workspace.id}`);
   } catch (err: any) {
     console.error("Failed to create agent:", err);
     state.error = err?.response?.data?.message || "Failed to create agent. Please try again.";
@@ -229,6 +279,96 @@ async function submit() {
         <span class="visually-hidden">Loading...</span>
       </div>
     </div>
+
+    <!-- Agent Setup Modal -->
+    <div v-if="state.showSetupModal" class="setup-modal-overlay" @click.self="closeModal">
+      <div class="setup-modal">
+        <div class="setup-modal-header">
+          <div class="setup-modal-icon">
+            <i class="bi bi-check-circle-fill text-success"></i>
+          </div>
+          <h4 class="setup-modal-title">Agent Created Successfully!</h4>
+          <p class="setup-modal-subtitle">
+            Use the information below to connect your agent to NetWatcher.
+          </p>
+        </div>
+        
+        <div class="setup-modal-body">
+          <!-- Agent PIN -->
+          <div class="setup-section">
+            <h6><i class="bi bi-key me-2"></i>Agent PIN</h6>
+            <div class="pin-display">
+              <code class="pin-code">{{ state.agentPin }}</code>
+              <button 
+                class="btn btn-sm btn-outline-primary"
+                @click="copyToClipboard(state.agentPin)"
+              >
+                <i class="bi" :class="state.copied ? 'bi-check' : 'bi-clipboard'"></i>
+              </button>
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+              <i class="bi bi-clock me-1"></i>
+              This PIN expires in 24 hours. Use it to authenticate your agent.
+            </p>
+          </div>
+
+          <!-- Docker Command -->
+          <div class="setup-section">
+            <h6><i class="bi bi-box me-2"></i>Docker Installation</h6>
+            <div class="command-block">
+              <pre class="command-code">{{ installCommand }}</pre>
+              <button 
+                class="btn btn-sm btn-outline-secondary copy-btn"
+                @click="copyToClipboard(installCommand)"
+              >
+                <i class="bi bi-clipboard"></i> Copy
+              </button>
+            </div>
+          </div>
+
+          <!-- Binary Command -->
+          <div class="setup-section">
+            <h6><i class="bi bi-terminal me-2"></i>Binary Installation</h6>
+            <div class="command-block">
+              <pre class="command-code">{{ binaryCommand }}</pre>
+              <button 
+                class="btn btn-sm btn-outline-secondary copy-btn"
+                @click="copyToClipboard(binaryCommand)"
+              >
+                <i class="bi bi-clipboard"></i> Copy
+              </button>
+            </div>
+          </div>
+
+          <!-- Agent Details -->
+          <div class="setup-section">
+            <h6><i class="bi bi-info-circle me-2"></i>Agent Details</h6>
+            <table class="table table-sm mb-0">
+              <tbody>
+                <tr>
+                  <td class="text-muted">Agent ID</td>
+                  <td><code>{{ state.createdAgent?.id }}</code></td>
+                </tr>
+                <tr>
+                  <td class="text-muted">Name</td>
+                  <td>{{ state.createdAgent?.name }}</td>
+                </tr>
+                <tr>
+                  <td class="text-muted">Workspace ID</td>
+                  <td><code>{{ state.workspace.id }}</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="setup-modal-footer">
+          <button class="btn btn-primary" @click="closeModal">
+            <i class="bi bi-check-lg me-1"></i>Done
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -244,5 +384,137 @@ async function submit() {
 
 .form-text {
   font-size: 0.875rem;
+}
+
+/* Modal Styles */
+.setup-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050;
+  backdrop-filter: blur(4px);
+}
+
+.setup-modal {
+  background: white;
+  border-radius: 12px;
+  max-width: 640px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.setup-modal-header {
+  padding: 24px;
+  text-align: center;
+  border-bottom: 1px solid #e9ecef;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.setup-modal-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.setup-modal-title {
+  margin: 0;
+  font-weight: 600;
+  color: #212529;
+}
+
+.setup-modal-subtitle {
+  margin: 8px 0 0 0;
+  color: #6c757d;
+}
+
+.setup-modal-body {
+  padding: 24px;
+}
+
+.setup-section {
+  margin-bottom: 24px;
+}
+
+.setup-section:last-child {
+  margin-bottom: 0;
+}
+
+.setup-section h6 {
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 12px;
+}
+
+.pin-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8f9fa;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.pin-code {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #0d6efd;
+  flex: 1;
+}
+
+.command-block {
+  position: relative;
+  background: #1e1e1e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.command-code {
+  padding: 16px;
+  margin: 0;
+  color: #d4d4d4;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #d4d4d4;
+}
+
+.copy-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.setup-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e9ecef;
+  text-align: center;
+  background: #f8f9fa;
+  border-radius: 0 0 12px 12px;
+}
+
+.setup-modal-footer .btn {
+  min-width: 120px;
+}
+
+.table td {
+  padding: 8px 0;
 }
 </style>

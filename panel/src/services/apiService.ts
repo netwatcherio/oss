@@ -45,10 +45,10 @@ export const WorkspaceService = {
         return data;
     },
 
-    // PATCH expects { displayName?, settings? }
+    // PATCH expects { name?, description?, settings? }
     async update(
         id: number | string,
-        body: { displayName?: string; settings?: Record<string, any> }
+        body: { name?: string; description?: string; settings?: Record<string, any> }
     ) {
         const { data } = await request.patch<Workspace>(`/workspaces/${id}`, body);
         return data;

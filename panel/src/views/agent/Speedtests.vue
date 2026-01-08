@@ -269,9 +269,9 @@ onMounted(async () => {
   <div class="container-fluid">
     <Title
         :history="[
-          {title: 'workspaces', link: '/workspaces'},
-          {title: state.site.name || 'Loading...', link: `/workspace/${state.site.id}`}, 
-          {title: state.agent.name || 'Loading...', link: `/agent/${state.agent.id}`}
+          {title: 'Workspaces', link: '/workspaces'},
+          {title: state.site.name || 'Loading...', link: `/workspaces/${state.site.id}`}, 
+          {title: state.agent.name || 'Loading...', link: `/workspaces/${state.site.id}/agents/${state.agent.id}`}
         ]"
         :title="state.title"
         subtitle="Network performance history">

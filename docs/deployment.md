@@ -153,6 +153,32 @@ curl https://api.example.com/healthz
 open https://app.example.com
 ```
 
+### 5. Agent Setup
+
+After creating an agent in the panel, a setup modal displays the bootstrap PIN and installation commands:
+
+**Docker Installation:**
+```bash
+docker run -d --name netwatcher-agent \
+  -e CONTROLLER_URL="https://api.example.com" \
+  -e WORKSPACE_ID="1" \
+  -e AGENT_ID="10" \
+  -e AGENT_PIN="123456789" \
+  --restart unless-stopped \
+  netwatcher/agent:latest
+```
+
+**Binary Installation:**
+```bash
+./netwatcher-agent \
+  --controller-url "https://api.example.com" \
+  --workspace-id 1 \
+  --agent-id 10 \
+  --pin "123456789"
+```
+
+The PIN is valid for 24 hours. After successful bootstrap, the agent receives a PSK for persistent authentication.
+
 ---
 
 ## Configuration Reference

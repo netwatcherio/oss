@@ -2,35 +2,53 @@
   <div class="latency-graph-container">
     <!-- Statistics Summary -->
     <div class="stats-row" v-if="statistics">
-      <div class="stat-card">
-        <div class="stat-label">Current Latency</div>
-        <div class="stat-value" :class="getLatencyClass(statistics.current)">
-          {{ statistics.current.toFixed(1) }} ms
+      <div class="stat-card" :class="'status-' + getLatencyClass(statistics.current)">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-content">
+          <div class="stat-label">Current</div>
+          <div class="stat-value" :class="getLatencyClass(statistics.current)">
+            {{ statistics.current.toFixed(1) }} ms
+          </div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Average</div>
-        <div class="stat-value">{{ statistics.average.toFixed(1) }} ms</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Min / Max</div>
-        <div class="stat-value">{{ statistics.min.toFixed(1) }} / {{ statistics.max.toFixed(1) }} ms</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">P95 Latency</div>
-        <div class="stat-value" :class="getLatencyClass(statistics.p95)">
-          {{ statistics.p95.toFixed(1) }} ms
+        <div class="stat-icon">📊</div>
+        <div class="stat-content">
+          <div class="stat-label">Average</div>
+          <div class="stat-value">{{ statistics.average.toFixed(1) }} ms</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Packet Loss</div>
-        <div class="stat-value" :class="getPacketLossClass(statistics.avgPacketLoss)">
-          {{ statistics.avgPacketLoss.toFixed(1) }}%
+        <div class="stat-icon">↕️</div>
+        <div class="stat-content">
+          <div class="stat-label">Range</div>
+          <div class="stat-value">{{ statistics.min.toFixed(1) }} – {{ statistics.max.toFixed(1) }} ms</div>
+        </div>
+      </div>
+      <div class="stat-card" :class="'status-' + getLatencyClass(statistics.p95)">
+        <div class="stat-icon">📈</div>
+        <div class="stat-content">
+          <div class="stat-label">P95</div>
+          <div class="stat-value" :class="getLatencyClass(statistics.p95)">
+            {{ statistics.p95.toFixed(1) }} ms
+          </div>
+        </div>
+      </div>
+      <div class="stat-card" :class="'status-' + getPacketLossClass(statistics.avgPacketLoss)">
+        <div class="stat-icon">📦</div>
+        <div class="stat-content">
+          <div class="stat-label">Packet Loss</div>
+          <div class="stat-value" :class="getPacketLossClass(statistics.avgPacketLoss)">
+            {{ statistics.avgPacketLoss.toFixed(1) }}%
+          </div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Jitter</div>
-        <div class="stat-value">{{ statistics.jitter.toFixed(1) }} ms</div>
+        <div class="stat-icon">〰️</div>
+        <div class="stat-content">
+          <div class="stat-label">Jitter</div>
+          <div class="stat-value">{{ statistics.jitter.toFixed(1) }} ms</div>
+        </div>
       </div>
     </div>
 
@@ -102,10 +120,10 @@ export default defineComponent({
     const showAnnotations = ref(true);
 
     // Calculate the maximum allowed gap dynamically based on probe interval
-    // Use 1.5x the interval + 30s buffer to allow for timing variations
+    // Use 3x the interval to avoid breaking lines with sparse data
     const maxAllowedGap = computed(() => {
       const intervalMs = (props.intervalSec || 60) * 1000;
-      return Math.max(intervalMs * 1.5 + 30000, 90000); // At least 90 seconds minimum
+      return Math.max(intervalMs * 3, 180000); // At least 3 minutes minimum
     });
 
     const timeRanges = [
@@ -120,6 +138,13 @@ export default defineComponent({
     const statistics = computed(() => {
       const rows = props.pingResults ?? [];
       if (rows.length === 0) return null;
+
+      // Find the most recent entry by timestamp first
+      const sortedByTime = [...rows].sort((a, b) => 
+        new Date(b.stop_timestamp).getTime() - new Date(a.stop_timestamp).getTime()
+      );
+      const mostRecent = sortedByTime[0];
+      const currentLatency = mostRecent ? toMs(mostRecent.avg_rtt) : 0;
 
       const avgRtts = rows.map(d => toMs(d.avg_rtt)).sort((a, b) => a - b);
       const minRtts = rows.map(d => toMs(d.min_rtt));
@@ -137,7 +162,7 @@ export default defineComponent({
       const totalRecv = rows.reduce((sum, d) => sum + (d.packets_recv || 0), 0);
 
       return {
-        current: avgRtts[avgRtts.length - 1] || 0,
+        current: currentLatency,
         average: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
         min: Math.min(...minRtts),
         max: Math.max(...maxRtts),
@@ -199,67 +224,55 @@ export default defineComponent({
       const step = Math.max(1, Math.ceil(sortedData.length / maxPoints));
       const decimated = sortedData.filter((_, i) => i % step === 0);
 
+      // Build series with gap detection - insert nulls to break lines at gaps
+      const buildSeriesData = (getValue: (d: PingResult) => number) => {
+        const result: { x: number; y: number | null }[] = [];
+        decimated.forEach((d, i) => {
+          if (i > 0) {
+            const gap = ts(d) - ts(decimated[i - 1]);
+            if (gap > maxAllowedGap.value) {
+              // Insert null to break the line
+              result.push({ x: ts(decimated[i - 1]) + 1, y: null });
+            }
+          }
+          result.push({ x: ts(d), y: getValue(d) });
+        });
+        return result;
+      };
+
       // Build series
       const series: ApexCharts.ApexOptions['series'] = [
         {
           name: 'Min RTT',
           type: 'line',
-          data: decimated.map(d => ({ x: ts(d), y: toMs(d.min_rtt) }))
+          data: buildSeriesData(d => toMs(d.min_rtt))
         },
         {
           name: 'Avg RTT',
           type: 'line',
-          data: decimated.map(d => ({ x: ts(d), y: toMs(d.avg_rtt) }))
+          data: buildSeriesData(d => toMs(d.avg_rtt))
         },
         {
           name: 'Max RTT',
           type: 'line',
-          data: decimated.map(d => ({ x: ts(d), y: toMs(d.max_rtt) }))
+          data: buildSeriesData(d => toMs(d.max_rtt))
         },
         {
           name: 'Packet Loss',
           type: 'area',
-          // IMPORTANT: map to yAxisIndex 1 so it uses the right axis
-          data: decimated.map(d => ({ x: ts(d), y: Number(d.packet_loss) || 0 })),
+          data: buildSeriesData(d => Number(d.packet_loss) || 0),
         } as any
       ];
 
       // yAxisIndex for packet loss
-      // (Type cast due to ApexCharts TS generics; safe in practice.)
       (series![3] as any).yAxisIndex = 1;
 
-      // Annotations
+      // Annotations (only for anomalies, gaps are handled by null values in series data)
       const annotations: ApexCharts.ApexAnnotations = {
         xaxis: [],
         yaxis: [],
         points: []
       };
-
-      // Gap annotations (on original data set, not decimated)
-      sortedData.forEach((cur, i, arr) => {
-        if (i === 0) return;
-        const prev = arr[i - 1];
-        const gap = ts(cur) - ts(prev);
-        if (gap > maxAllowedGap.value) {
-          annotations.xaxis!.push({
-            x: ts(prev),
-            x2: ts(cur),
-            strokeDashArray: 8,
-            fillColor: '#64748b',
-            opacity: 0.1,
-            label: {
-              style: {
-                fontSize: '11px',
-                color: '#64748b',
-                background: 'transparent',
-              },
-              text: 'Data Gap',
-              position: 'top',
-              orientation: 'horizontal'
-            }
-          });
-        }
-      });
 
       // Y-axis scaling (based on 90th percentile of Avg RTT)
       const avgVals = decimated.map(d => toMs(d.avg_rtt)).sort((a, b) => a - b);
@@ -268,72 +281,85 @@ export default defineComponent({
 
       if (showAll) {
         const anomalyThreshold = 300; // ms
-        decimated.forEach(d => {
+        // Group consecutive anomalies into regions instead of individual markers
+        let currentRegion: { start: number; end: number } | null = null;
+        
+        decimated.forEach((d, i) => {
           const avgMs = toMs(d.avg_rtt);
           const maxMs = toMs(d.max_rtt);
-          if (avgMs > anomalyThreshold || maxMs > anomalyThreshold) {
-            annotations.points!.push({
-              x: ts(d),
-              y: Math.min(avgMs, yMax),
-              seriesIndex: 1,
-              marker: {
-                size: 8,
-                fillColor: '#ef4444',
-                strokeColor: '#fff',
-                strokeWidth: 2,
-                radius: 2
-              },
-              label: {
-                borderColor: '#ef4444',
-                style: { color: '#fff', background: '#ef4444', fontSize: '12px', fontWeight: 'bold' },
-                text: `Anomaly: ${avgMs.toFixed(0)}ms`,
-                offsetY: -10
-              }
-            } as any);
-
+          const isAnomaly = avgMs > anomalyThreshold || maxMs > anomalyThreshold;
+          
+          if (isAnomaly) {
+            const timestamp = ts(d);
+            if (!currentRegion) {
+              currentRegion = { start: timestamp, end: timestamp };
+            } else {
+              currentRegion.end = timestamp;
+            }
+          } else if (currentRegion) {
+            // End of anomaly region - add subtle shaded annotation
             annotations.xaxis!.push({
-              x: ts(d),
-              strokeDashArray: 0,
+              x: currentRegion.start,
+              x2: currentRegion.end,
+              fillColor: '#fecaca',
               borderColor: '#ef4444',
-              opacity: 0.3,
-              label: {
-                borderColor: '#ef4444',
-                style: { color: '#fff', background: '#ef4444' },
-                text: 'High Latency',
-                position: 'top',
-                orientation: 'horizontal'
-              }
-            });
+              opacity: 0.15,
+              strokeDashArray: 0
+            } as any);
+            currentRegion = null;
           }
         });
+        
+        // Handle final region if data ends with anomaly
+        if (currentRegion) {
+          annotations.xaxis!.push({
+            x: currentRegion.start,
+            x2: currentRegion.end,
+            fillColor: '#fecaca',
+            borderColor: '#ef4444',
+            opacity: 0.15,
+            strokeDashArray: 0
+          } as any);
+        }
       }
 
       return {
         series,
         chart: {
-          height: 400,
+          height: 380,
           type: 'line',
-          background: '#ffffff',
+          background: 'transparent',
           foreColor: '#374151',
+          fontFamily: 'Inter, system-ui, sans-serif',
           animations: {
             enabled: true,
             easing: 'easeinout',
-            speed: 800,
-            animateGradually: { enabled: true, delay: 150 }
+            speed: 400,
+            animateGradually: { enabled: true, delay: 100 }
           },
           zoom: { type: 'x', enabled: true, autoScaleYaxis: false },
           toolbar: {
             show: true,
-            tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true }
+            offsetX: -5,
+            offsetY: -5,
+            tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true },
+            autoSelected: 'zoom'
+          },
+          dropShadow: {
+            enabled: true,
+            top: 3,
+            left: 0,
+            blur: 4,
+            opacity: 0.1
           }
         },
-        colors: ['#10b981', '#3b82f6', '#ef4444', '#f59e0b'],
-        stroke: { width: [2, 3, 2, 0], curve: 'smooth', dashArray: [5, 0, 5, 0] },
+        colors: ['#22c55e', '#3b82f6', '#f97316', '#eab308'],
+        stroke: { width: [2, 3, 2, 0], curve: 'smooth', dashArray: [0, 0, 0, 0] },
         fill: {
           type: ['solid', 'solid', 'solid', 'gradient'],
-          gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.2, stops: [0, 90, 100] }
+          gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.1, stops: [0, 90, 100] }
         },
-        markers: { size: 0, hover: { sizeOffset: 6 } },
+        markers: { size: [3, 4, 3, 0], strokeWidth: 1, strokeColors: '#fff', hover: { sizeOffset: 4 } },
         xaxis: {
           type: 'datetime',
           labels: { style: { colors: '#6b7280', fontSize: '12px' }, datetimeUTC: false },
@@ -361,6 +387,12 @@ export default defineComponent({
           shared: true,
           intersect: false,
           theme: 'light',
+          fixed: {
+            enabled: true,
+            position: 'topLeft',
+            offsetX: 10,
+            offsetY: 10
+          },
           x: { format: 'dd MMM HH:mm:ss' },
           y: {
             formatter: (y: number, { seriesIndex }: { seriesIndex: number }) =>
@@ -374,6 +406,7 @@ export default defineComponent({
             html += '<div class="tooltip-body">';
             w.config.series.forEach((s: any, idx: number) => {
               const value = series[idx][dataPointIndex];
+              if (value === null || value === undefined) return;
               const color = w.config.colors[idx];
               const name = s.name;
               const formattedValue = idx <= 2 ? `${Number(value).toFixed(1)} ms` : `${Number(value).toFixed(1)}%`;
@@ -462,53 +495,96 @@ export default defineComponent({
 <style scoped>
 .latency-graph-container {
   background: white;
-  border-radius: 8px;
-  padding: 1rem;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
 }
 
 .stat-card {
-  background: #f9fafb;
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.75rem;
-  text-align: center;
+  border-radius: 10px;
+  padding: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.stat-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.stat-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.125rem;
 }
 
 .stat-value {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status-based card backgrounds */
+.stat-card.status-good {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #a7f3d0;
+}
+
+.stat-card.status-fair {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #bfdbfe;
+}
+
+.stat-card.status-poor {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fde68a;
+}
+
+.stat-card.status-critical {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fecaca;
 }
 
 .stat-value.good {
-  color: #10b981;
+  color: #059669;
 }
 
 .stat-value.fair {
-  color: #3b82f6;
+  color: #2563eb;
 }
 
 .stat-value.poor {
-  color: #f59e0b;
+  color: #d97706;
 }
 
 .stat-value.critical {
-  color: #ef4444;
+  color: #dc2626;
 }
 
 .controls-row {

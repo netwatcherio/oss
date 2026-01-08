@@ -205,8 +205,8 @@ Create a new workspace.
 **Request Body:**
 ```json
 {
-  "name": "my-workspace",
-  "displayName": "My Workspace",
+  "name": "My Workspace",
+  "description": "Optional description",
   "settings": {}
 }
 ```

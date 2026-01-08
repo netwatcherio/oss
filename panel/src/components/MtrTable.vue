@@ -8,7 +8,58 @@
       </button>
     </div>
     <div class="mtr-table-wrapper">
-      <pre class="mtr-ascii" v-html="coloredTable"></pre>
+      <table class="mtr-data-table">
+        <thead>
+          <tr>
+            <th class="col-hop">Hop</th>
+            <th class="col-host">Host</th>
+            <th class="col-metric">Loss%</th>
+            <th class="col-metric">Snt</th>
+            <th class="col-metric">Recv</th>
+            <th class="col-metric">Avg</th>
+            <th class="col-metric">Best</th>
+            <th class="col-metric">Worst</th>
+            <th class="col-metric">StDev</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="(hop, hopIndex) in mtrPayload?.report?.hops" :key="hopIndex">
+            <tr v-if="!hop.hosts || hop.hosts.length === 0" class="unknown-hop">
+              <td class="col-hop">{{ hopIndex + 1 }}</td>
+              <td class="col-host"><span class="unknown-marker">*</span></td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+              <td class="col-metric">*</td>
+            </tr>
+            <tr v-else v-for="(host, hostIndex) in hop.hosts" :key="`${hopIndex}-${hostIndex}`">
+              <td class="col-hop">{{ hostIndex === 0 ? hopIndex + 1 : '' }}</td>
+              <td class="col-host">
+                <span class="host-name">{{ host.hostname || host.ip }}</span>
+                <span class="host-ip">({{ host.ip }})</span>
+              </td>
+              <td class="col-metric" :class="getLossClass(parseFloat(hop.loss_pct || '0'))">
+                {{ hop.loss_pct || '0.00' }}
+              </td>
+              <td class="col-metric">{{ hop.sent || '-' }}</td>
+              <td class="col-metric">{{ hop.recv || '-' }}</td>
+              <td class="col-metric" :class="getLatencyClass(parseFloat(hop.avg || '0'))">
+                {{ hop.avg || '-' }}
+              </td>
+              <td class="col-metric" :class="getLatencyClass(parseFloat(hop.best || '0'))">
+                {{ hop.best || '-' }}
+              </td>
+              <td class="col-metric" :class="getLatencyClass(parseFloat(hop.worst || '0'))">
+                {{ hop.worst || '-' }}
+              </td>
+              <td class="col-metric">{{ hop.stddev || '-' }}</td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
     </div>
   </div>
 </template>
@@ -41,17 +92,17 @@ const title = computed(() => {
 
 // Color thresholds
 const getLossClass = (lossPct: number): string => {
-  if (lossPct === 0) return 'loss-excellent';
-  if (lossPct <= 5) return 'loss-good';
-  if (lossPct <= 20) return 'loss-warning';
-  return 'loss-critical';
+  if (lossPct === 0) return 'metric-excellent';
+  if (lossPct <= 5) return 'metric-good';
+  if (lossPct <= 20) return 'metric-warning';
+  return 'metric-critical';
 };
 
 const getLatencyClass = (latencyMs: number): string => {
-  if (latencyMs < 30) return 'latency-excellent';
-  if (latencyMs < 80) return 'latency-good';
-  if (latencyMs < 150) return 'latency-warning';
-  return 'latency-critical';
+  if (latencyMs < 30) return 'metric-excellent';
+  if (latencyMs < 80) return 'metric-good';
+  if (latencyMs < 150) return 'metric-warning';
+  return 'metric-critical';
 };
 
 // Generate raw ASCII table (for copy)
@@ -90,55 +141,6 @@ const rawTable = computed(() => {
   return table.toString();
 });
 
-// Generate colored HTML table
-const coloredTable = computed(() => {
-  const payload = mtrPayload.value;
-  if (!payload?.report?.hops) return '<span class="mtr-no-data">No MTR data available</span>';
-
-  const lines: string[] = [];
-  
-  // Header
-  lines.push('<span class="mtr-header-row">┌──────┬────────────────────────────────────────────────┬────────┬──────┬──────┬────────┬────────┬────────┬────────┐</span>');
-  lines.push('<span class="mtr-header-row">│ Hop  │ Host                                           │ Loss%  │ Snt  │ Recv │ Avg    │ Best   │ Worst  │ StDev  │</span>');
-  lines.push('<span class="mtr-header-row">├──────┼────────────────────────────────────────────────┼────────┼──────┼──────┼────────┼────────┼────────┼────────┤</span>');
-
-  payload.report.hops.forEach((hop: any, hopIndex: number) => {
-    const hopNum = (hopIndex + 1).toString().padStart(4);
-    
-    if (!hop.hosts || hop.hosts.length === 0) {
-      // Unknown hop
-      lines.push(`<span class="mtr-unknown-hop">│ ${hopNum} │ ${'*'.padEnd(46)} │ ${'*'.padStart(6)} │ ${'*'.padStart(4)} │ ${'*'.padStart(4)} │ ${'*'.padStart(6)} │ ${'*'.padStart(6)} │ ${'*'.padStart(6)} │ ${'*'.padStart(6)} │</span>`);
-    } else {
-      hop.hosts.forEach((host: any, hostIndex: number) => {
-        const hostDisplay = `${host.hostname || host.ip} (${host.ip})`.substring(0, 46).padEnd(46);
-        const lossPct = parseFloat(hop.loss_pct || '0');
-        const avgLatency = parseFloat(hop.avg || '0');
-        
-        const lossClass = getLossClass(lossPct);
-        const latencyClass = getLatencyClass(avgLatency);
-        
-        const lossStr = (hop.loss_pct || '0').toString().padStart(6);
-        const sntStr = (hop.sent?.toString?.() || '-').padStart(4);
-        const recvStr = (hop.recv?.toString?.() || '-').padStart(4);
-        const avgStr = (hop.avg || '-').toString().padStart(6);
-        const bestStr = (hop.best || '-').toString().padStart(6);
-        const worstStr = (hop.worst || '-').toString().padStart(6);
-        const stddevStr = (hop.stddev || '-').toString().padStart(6);
-        
-        const hopDisplay = hostIndex === 0 ? hopNum : '    ';
-        
-        lines.push(
-          `│ ${hopDisplay} │ <span class="mtr-host">${hostDisplay}</span> │ <span class="${lossClass}">${lossStr}</span> │ ${sntStr} │ ${recvStr} │ <span class="${latencyClass}">${avgStr}</span> │ <span class="${latencyClass}">${bestStr}</span> │ <span class="${latencyClass}">${worstStr}</span> │ ${stddevStr} │`
-        );
-      });
-    }
-  });
-
-  lines.push('<span class="mtr-header-row">└──────┴────────────────────────────────────────────────┴────────┴──────┴──────┴────────┴────────┴────────┴────────┘</span>');
-
-  return lines.join('\n');
-});
-
 const copyToClipboard = async () => {
   try {
     await navigator.clipboard.writeText(rawTable.value);
@@ -154,23 +156,24 @@ const copyToClipboard = async () => {
 
 <style scoped>
 .mtr-table-container {
-  background: #1e1e2e;
-  border-radius: 8px;
+  background: #1a1b26;
+  border-radius: 10px;
   overflow: hidden;
   margin: 0.5rem 0;
+  border: 1px solid #2a2b3d;
 }
 
 .mtr-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
-  background: #2a2a3e;
-  border-bottom: 1px solid #3a3a4e;
+  padding: 0.875rem 1.25rem;
+  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
+  border-bottom: 1px solid #2a2b3d;
 }
 
 .mtr-title {
-  color: #cdd6f4;
+  color: #a9b1d6;
   font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
   font-size: 0.85rem;
   font-weight: 500;
@@ -180,91 +183,128 @@ const copyToClipboard = async () => {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.4rem 0.8rem;
-  background: #45475a;
-  color: #cdd6f4;
+  padding: 0.45rem 0.9rem;
+  background: #3d59a1;
+  color: #c0caf5;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .copy-btn:hover {
-  background: #585b70;
+  background: #5a7dcf;
+  transform: translateY(-1px);
 }
 
 .copy-btn.copied {
-  background: #a6e3a1;
-  color: #1e1e2e;
+  background: #9ece6a;
+  color: #1a1b26;
 }
 
 .mtr-table-wrapper {
   overflow-x: auto;
-  padding: 1rem;
+  padding: 0.5rem;
 }
 
-.mtr-ascii {
+.mtr-data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
   font-size: 0.8rem;
-  line-height: 1.4;
-  color: #cdd6f4;
-  margin: 0;
-  white-space: pre;
 }
 
-/* Loss percentage colors */
-:deep(.loss-excellent) {
-  color: #a6e3a1;
+.mtr-data-table th {
+  background: #24253a;
+  color: #565f89;
   font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 2px solid #414868;
 }
 
-:deep(.loss-good) {
-  color: #f9e2af;
+.mtr-data-table th:first-child {
+  border-radius: 6px 0 0 0;
 }
 
-:deep(.loss-warning) {
-  color: #fab387;
+.mtr-data-table th:last-child {
+  border-radius: 0 6px 0 0;
 }
 
-:deep(.loss-critical) {
-  color: #f38ba8;
+.mtr-data-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid #2a2b3d;
+  color: #a9b1d6;
+}
+
+.mtr-data-table tbody tr:hover {
+  background: rgba(61, 89, 161, 0.1);
+}
+
+.mtr-data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.col-hop {
+  width: 50px;
+  text-align: center;
   font-weight: 600;
+  color: #7aa2f7 !important;
 }
 
-/* Latency colors */
-:deep(.latency-excellent) {
-  color: #a6e3a1;
+.col-host {
+  min-width: 200px;
 }
 
-:deep(.latency-good) {
-  color: #f9e2af;
+.host-name {
+  color: #7dcfff;
+  font-weight: 500;
 }
 
-:deep(.latency-warning) {
-  color: #fab387;
+.host-ip {
+  color: #565f89;
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
 }
 
-:deep(.latency-critical) {
-  color: #f38ba8;
+.col-metric {
+  text-align: right;
+  min-width: 60px;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Other styling */
-:deep(.mtr-header-row) {
-  color: #6c7086;
-}
-
-:deep(.mtr-unknown-hop) {
-  color: #6c7086;
+/* Unknown hop styling */
+.unknown-hop td {
+  color: #565f89;
   font-style: italic;
 }
 
-:deep(.mtr-host) {
-  color: #89b4fa;
+.unknown-marker {
+  color: #565f89;
 }
 
-:deep(.mtr-no-data) {
-  color: #6c7086;
-  font-style: italic;
+/* Metric color classes */
+.metric-excellent {
+  color: #9ece6a !important;
+  font-weight: 600;
+}
+
+.metric-good {
+  color: #e0af68 !important;
+}
+
+.metric-warning {
+  color: #ff9e64 !important;
+}
+
+.metric-critical {
+  color: #f7768e !important;
+  font-weight: 600;
 }
 </style>
