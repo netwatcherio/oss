@@ -225,20 +225,13 @@ const routes: RouteRecordRaw[] = [
                                     },
 
                                     // speedtests
+                                    { path: 'speedtests', name: 'agentSpeedtests', component: Speedtests, props: true },
                                     {
-                                        path: 'speedtests',
-                                        component: Shell,
+                                        path: 'speedtests/new',
+                                        name: 'agentSpeedtestNew',
+                                        component: NewSpeedtest,
                                         props: true,
-                                        children: [
-                                            { path: '', name: 'agentSpeedtests', component: Speedtests, props: true },
-                                            {
-                                                path: 'new',
-                                                name: 'agentSpeedtestNew',
-                                                component: NewSpeedtest,
-                                                props: true,
-                                                meta: { requiresRole: 'USER' }
-                                            },
-                                        ],
+                                        meta: { requiresRole: 'USER' }
                                     },
                                 ],
                             },
