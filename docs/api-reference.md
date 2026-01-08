@@ -681,6 +681,134 @@ X-Agent-PSK: <psk_token>
 
 ---
 
+## GeoIP Endpoints
+
+IP geolocation and ASN lookup using MaxMind GeoLite2 databases.
+
+> **Note:** These endpoints require GeoIP databases to be configured. Check `/geoip/status` for availability.
+
+### `GET /geoip/lookup`
+
+Look up geographic and ASN information for a single IP address.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ip` | string | Yes | IP address to look up |
+
+**Response:**
+```json
+{
+  "ip": "8.8.8.8",
+  "city": {
+    "name": "Mountain View",
+    "subdivision": "CA"
+  },
+  "country": {
+    "code": "US",
+    "name": "United States"
+  },
+  "asn": {
+    "number": 15169,
+    "organization": "GOOGLE"
+  },
+  "coordinates": {
+    "latitude": 37.4056,
+    "longitude": -122.0775,
+    "accuracy_radius": 1000
+  }
+}
+```
+
+---
+
+### `POST /geoip/lookup`
+
+Bulk IP lookup (maximum 100 IPs per request).
+
+**Request Body:**
+```json
+{
+  "ips": ["8.8.8.8", "1.1.1.1", "208.67.222.222"]
+}
+```
+
+**Response:**
+```json
+{
+  "data": [
+    { "ip": "8.8.8.8", "city": {...}, "country": {...}, "asn": {...} },
+    { "ip": "1.1.1.1", "country": {...}, "asn": {...} }
+  ],
+  "total": 2
+}
+```
+
+---
+
+### `GET /geoip/status`
+
+Check which GeoIP databases are loaded.
+
+**Response:**
+```json
+{
+  "city": true,
+  "country": true,
+  "asn": true
+}
+```
+
+---
+
+## WHOIS Endpoints
+
+WHOIS lookup for IP addresses and domain names.
+
+### `GET /whois/lookup`
+
+Perform a WHOIS query for an IP address or domain name.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | IP address or domain name |
+| `ip` | string | No | Alternative to `query` for IP lookups |
+
+**Input Validation:**
+- IP addresses are validated with `net.ParseIP()`
+- Domain names are validated against a strict regex pattern
+- Invalid input returns 400 error before any command execution
+
+**Response:**
+```json
+{
+  "query": "8.8.8.8",
+  "raw_output": "NetRange: 8.8.8.0 - 8.8.8.255\nCIDR: 8.8.8.0/24\n...",
+  "parsed": {
+    "netname": "LVLT-GOGL-8-8-8",
+    "netrange": "8.8.8.0 - 8.8.8.255",
+    "organization": "Google LLC",
+    "country": "US"
+  },
+  "lookup_time_ms": 450
+}
+```
+
+**Parsed Fields:**
+| Field | Description |
+|-------|-------------|
+| `netname` | Network name |
+| `netrange` | IP range (CIDR or range format) |
+| `organization` | Organization name |
+| `country` | Country code |
+| `registrar` | Domain registrar |
+| `created` | Creation date |
+| `updated` | Last update date |
+| `abuse_email` | Abuse contact email |
+
+---
+
 ## Health Check
 
 ### `GET /healthz`

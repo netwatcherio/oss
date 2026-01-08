@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import {onMounted, reactive, computed} from "vue";
+import { useRouter } from "vue-router";
 import type {
   Agent,
   Probe,
@@ -15,7 +16,9 @@ import core from "@/core";
 import Title from "@/components/Title.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
-import { AgentService, WorkspaceService, ProbeService, ProbeDataService } from "@/services/apiService";
+import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService  } from "@/services/apiService";
+
+const router = useRouter();
 
 const state = reactive({
   site: {} as Workspace,
@@ -238,20 +241,28 @@ onMounted(async () => {
           const convD = convertToSpeedTestResult(data.payload);
           state.speedtestData.push(convD);
         }
-        
-        state.ready = true;
-        state.loading = false;
       } else if (probe.type === "SPEEDTEST_SERVERS") {
         state.speedtestServerProbe = probe;
       }
     }
+
+    // Also load queue items
+    try {
+      const queueRes = await SpeedtestService.listQueue(workspaceId, agentId);
+      // Store queue items if needed
+    } catch (e) {
+      // Queue API might not have data yet, ignore
+    }
+
+    state.ready = true;
+    state.loading = false;
   } catch (error) {
     console.error('Error loading speedtest data:', error);
+    state.ready = true; // Still show the page to allow running tests
     state.loading = false;
   }
 })
 
-const router = core.router()
 </script>
 
 <template>

@@ -3,8 +3,10 @@ package web
 
 import (
 	"net/http"
+	"time"
 
 	"netwatcher-controller/internal/geoip"
+	"netwatcher-controller/internal/whois"
 
 	"github.com/kataras/iris/v12"
 )
@@ -76,5 +78,44 @@ func panelGeoIP(api iris.Party, geoStore *geoip.Store) {
 			"country": geoStore.HasCountry(),
 			"asn":     geoStore.HasASN(),
 		})
+	})
+}
+
+// panelWhois registers WHOIS lookup endpoints.
+// Routes: /whois/*
+func panelWhois(api iris.Party) {
+	ws := api.Party("/whois")
+
+	// GET /whois/lookup?query={ip_or_domain}
+	// Single WHOIS lookup
+	ws.Get("/lookup", func(ctx iris.Context) {
+		query := ctx.URLParam("query")
+		if query == "" {
+			// Also accept 'ip' param for backwards compatibility
+			query = ctx.URLParam("ip")
+		}
+		if query == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "query parameter is required"})
+			return
+		}
+
+		// Validate input before running command
+		sanitized, err := whois.ValidateQuery(query)
+		if err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// Perform lookup with 15-second timeout
+		result, err := whois.LookupWithTimeout(sanitized, 15*time.Second)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(result)
 	})
 }

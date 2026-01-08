@@ -179,6 +179,10 @@ open https://app.example.com
 | **Security** |||
 | `JWT_SECRET` | - | JWT signing key (32+ chars) |
 | `PIN_PEPPER` | - | Agent PIN pepper |
+| **GeoIP** |||
+| `GEOIP_CITY_PATH` | - | Path to GeoLite2-City.mmdb |
+| `GEOIP_COUNTRY_PATH` | - | Path to GeoLite2-Country.mmdb |
+| `GEOIP_ASN_PATH` | - | Path to GeoLite2-ASN.mmdb |
 | **Panel** |||
 | `CONTROLLER_ENDPOINT` | - | Public API URL |
 | **Debug** |||

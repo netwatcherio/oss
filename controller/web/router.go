@@ -36,6 +36,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelProbeData(api, db, ch)
 	panelSpeedtest(api, db, ch) // /workspaces/{id}/agents/{agentID}/speedtest-*
 	panelGeoIP(api, geoStore)   // /geoip/*
+	panelWhois(api)             // /whois/*
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })
