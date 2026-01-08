@@ -89,7 +89,7 @@ Panel runs at: http://localhost:5173
 
 | Variable | Description |
 |----------|-------------|
-| `NW_GLOBAL_ENDPOINT` | API URL for production (set in container) |
+| `CONTROLLER_ENDPOINT` | API URL for production (set in container) |
 
 ---
 

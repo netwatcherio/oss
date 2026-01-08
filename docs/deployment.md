@@ -112,7 +112,7 @@ nano .env
 | `CLICKHOUSE_PASSWORD` | Strong ClickHouse password |
 | `JWT_SECRET` | 32+ character random string |
 | `PIN_PEPPER` | Random string for PIN hashing |
-| `NW_GLOBAL_ENDPOINT` | Public API URL for panel |
+| `CONTROLLER_ENDPOINT` | Public API URL for panel |
 
 **Generate secrets:**
 ```bash
@@ -180,7 +180,7 @@ open https://app.example.com
 | `JWT_SECRET` | - | JWT signing key (32+ chars) |
 | `PIN_PEPPER` | - | Agent PIN pepper |
 | **Panel** |||
-| `NW_GLOBAL_ENDPOINT` | - | Public API URL |
+| `CONTROLLER_ENDPOINT` | - | Public API URL |
 | **Debug** |||
 | `DEBUG` | `false` | Enable debug logging |
 | `GORM_LOG_LEVEL` | `warn` | Database log level |
@@ -221,7 +221,7 @@ docker compose logs controller
 ```
 
 ### Panel Blank Page
-- Verify `NW_GLOBAL_ENDPOINT` is set correctly
+- Verify `CONTROLLER_ENDPOINT` is set correctly
 - Check browser console for CORS errors
 - Ensure API is accessible from browser
 

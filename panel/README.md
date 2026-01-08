@@ -22,16 +22,16 @@ npm run type-check
 
 | Variable | Description |
 |----------|-------------|
-| `NW_GLOBAL_ENDPOINT` | API base URL (e.g., `https://api.netwatcher.io`) |
+| `CONTROLLER_ENDPOINT` | API base URL (e.g., `https://api.netwatcher.io`) |
 
 **.env**
 ```dotenv
-NW_GLOBAL_ENDPOINT=https://api.netwatcher.io
+CONTROLLER_ENDPOINT=https://api.netwatcher.io
 ```
 
 **.env.local** (overrides, not committed)
 ```dotenv
-NW_GLOBAL_ENDPOINT=http://localhost:8080
+CONTROLLER_ENDPOINT=http://localhost:8080
 ```
 
 ## Docker Build

@@ -86,6 +86,6 @@ services:
     restart: unless-stopped
     networks: [ netwatcher ]
     environment:
-      NW_GLOBAL_ENDPOINT: ${NW_GLOBAL_ENDPOINT}
+      CONTROLLER_ENDPOINT: ${CONTROLLER_ENDPOINT}
     ports:
       - "3000:3000"

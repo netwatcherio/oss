@@ -5,10 +5,10 @@ import { getSession } from "@/session";
 function baseURL(): string {
     // Prefer a global override if present (e.g., set on index.html)
     const anyWindow = window as any;
-    if (anyWindow?.NW_GLOBAL_ENDPOINT) return anyWindow.NW_GLOBAL_ENDPOINT as string;
+    if (anyWindow?.CONTROLLER_ENDPOINT) return anyWindow.CONTROLLER_ENDPOINT as string;
 
     // Fallback env or default
-    const envUrl = (import.meta as any)?.env?.NW_GLOBAL_ENDPOINT;
+    const envUrl = (import.meta as any)?.env?.CONTROLLER_ENDPOINT;
     if (envUrl) return envUrl as string;
 
     return "http://localhost:8080";

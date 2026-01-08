@@ -79,7 +79,7 @@ See [controller/.env.example](./controller/.env.example) for all options.
 ### Panel
 
 ```bash
-NW_GLOBAL_ENDPOINT=https://api.netwatcher.io
+CONTROLLER_ENDPOINT=https://api.netwatcher.io
 ```
 
 ## Docker Compose
