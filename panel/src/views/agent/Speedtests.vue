@@ -277,7 +277,7 @@ onMounted(async () => {
         subtitle="Network performance history">
       <div class="d-flex gap-2">
         <router-link 
-          :to="`/agent/${state.speedtestServerProbe.id}/speedtest/new`" 
+          :to="`/workspaces/${state.site.id}/agents/${state.agent.id}/speedtests/new`" 
           class="btn btn-primary"
         >
           <i class="bi bi-speedometer2"></i>&nbsp;Run Speedtest
@@ -368,7 +368,7 @@ onMounted(async () => {
         <h5>No Speedtest Results</h5>
         <p>Run your first speedtest to start tracking network performance.</p>
         <router-link 
-          :to="`/agent/${state.speedtestServerProbe.id}/speedtest/new`" 
+          :to="`/workspaces/${state.site.id}/agents/${state.agent.id}/speedtests/new`" 
           class="btn btn-primary"
         >
           <i class="bi bi-plus-lg"></i> Run First Speedtest

@@ -130,22 +130,29 @@ onMounted(async () => {
     state.agent = agent;
 
     // Load cached speedtest servers from controller
-    const serversRes = await SpeedtestService.listServers(wID, aID);
-    state.servers = serversRes.data;
+    try {
+      const serversRes = await SpeedtestService.listServers(wID, aID);
+      state.servers = serversRes.data || [];
 
-    // Build dropdown options
-    for (const srv of state.servers) {
-      const displayText = `${srv.distance.toFixed(1)}km - ${srv.sponsor} (${srv.name}, ${srv.country})`;
-      state.options.push({ value: srv.server_id, text: displayText });
+      // Build dropdown options
+      for (const srv of state.servers) {
+        const displayText = `${srv.distance.toFixed(1)}km - ${srv.sponsor} (${srv.name}, ${srv.country})`;
+        state.options.push({ value: srv.server_id, text: displayText });
+      }
+      filteredOptions.value = state.options;
+    } catch (serverError) {
+      // No servers cached yet - this is OK, the agent just hasn't reported yet
+      console.log('No cached servers yet (agent may not have connected)');
+      state.servers = [];
     }
 
-    // Already sorted by distance from API
+    // Page is ready even if no servers - user can still use custom server
     state.ready = true;
     state.loading = false;
-    filteredOptions.value = state.options;
   } catch (error: any) {
     console.error('Error loading data:', error);
     state.error = error?.message || 'Failed to load data';
+    state.ready = true; // Still show the page
     state.loading = false;
   }
 
