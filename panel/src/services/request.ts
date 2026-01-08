@@ -8,7 +8,7 @@ function baseURL(): string {
     if (anyWindow?.CONTROLLER_ENDPOINT) return anyWindow.CONTROLLER_ENDPOINT as string;
 
     // Fallback env or default
-    const envUrl = (import.meta as any)?.env?.CONTROLLER_ENDPOINT;
+    const envUrl = import.meta.env?.CONTROLLER_ENDPOINT;
     if (envUrl) return envUrl as string;
 
     return "http://localhost:8080";

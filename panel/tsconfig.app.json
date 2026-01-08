@@ -7,7 +7,8 @@
   ],
   "exclude": [
     "src/**/__tests__/*",
-    "src/lib/ascii-table3/*"
+    "src/lib/ascii-table3/*",
+    ".git"
   ],
   "compilerOptions": {
     "composite": true,

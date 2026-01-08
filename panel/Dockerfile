@@ -12,6 +12,10 @@ RUN npm ci
 # Copy source
 COPY . .
 
+# Build-time configuration for Vite
+ARG CONTROLLER_ENDPOINT
+ENV CONTROLLER_ENDPOINT=${CONTROLLER_ENDPOINT}
+
 # Build production bundle
 RUN npm run build
 
