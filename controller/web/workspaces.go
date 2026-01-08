@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/workspace"
 
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
 )
 
-func panelWorkspaces(api iris.Party, db *gorm.DB) {
+func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore) {
 	wsParty := api.Party("/workspaces")
 	store := workspace.NewStore(db)
 
@@ -160,8 +161,11 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 	})
 
 	// POST /workspaces/{id}/members - requires CanManage (ADMIN+)
+	// If userId is provided, add existing user directly
+	// If only email is provided, create an invite and send email
 	wsID.Post("/members", RequireRole(store, CanManage), func(ctx iris.Context) {
 		wsIDv := uintParam(ctx, "id")
+		userID := currentUserID(ctx)
 		var body struct {
 			UserID uint           `json:"userId"`
 			Email  string         `json:"email"`
@@ -173,6 +177,40 @@ func panelWorkspaces(api iris.Party, db *gorm.DB) {
 			_ = ctx.JSON(iris.Map{"error": "invalid json"})
 			return
 		}
+
+		// If only email provided (no userId), use invite flow
+		if body.UserID == 0 && strings.TrimSpace(body.Email) != "" {
+			// Get workspace name for email
+			ws, err := store.GetWorkspace(ctx.Request().Context(), wsIDv)
+			if err != nil {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "workspace not found"})
+				return
+			}
+
+			m, err := InviteMemberWithEmail(ctx, db, store, emailStore, wsIDv, ws.Name, body.Email, body.Role, userID)
+			if err != nil {
+				status := http.StatusBadRequest
+				switch err {
+				case workspace.ErrEmailRequired, workspace.ErrInvalidInput, workspace.ErrInvalidRole:
+					status = http.StatusBadRequest
+				case workspace.ErrAlreadyExists:
+					status = http.StatusConflict
+				case workspace.ErrNotFound:
+					status = http.StatusNotFound
+				case workspace.ErrForbidden:
+					status = http.StatusForbidden
+				}
+				ctx.StatusCode(status)
+				_ = ctx.JSON(iris.Map{"error": err.Error()})
+				return
+			}
+			ctx.StatusCode(http.StatusCreated)
+			_ = ctx.JSON(m)
+			return
+		}
+
+		// Direct add (userId provided)
 		m, err := store.AddMember(ctx.Request().Context(), workspace.AddMemberInput{
 			WorkspaceID: wsIDv,
 			UserID:      body.UserID,

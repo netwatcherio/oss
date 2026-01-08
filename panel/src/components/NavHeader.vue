@@ -60,11 +60,6 @@ function logout() {
           <!-- Dropdown Menu -->
           <ul class="dropdown-menu dropdown-menu-end">
             <li>
-              <router-link to="/profile" class="dropdown-item">
-                <i class="bi bi-person-circle"></i> Profile
-              </router-link>
-            </li>
-            <li>
               <router-link to="/settings" class="dropdown-item">
                 <i class="bi bi-gear"></i> Settings
               </router-link>

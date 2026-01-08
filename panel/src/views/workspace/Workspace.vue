@@ -161,7 +161,7 @@ onMounted(async () => {
     <div class="stats-container mb-4" v-if="!state.loading">
       <div class="stat-card">
         <div class="stat-icon">
-          <i class="fa-solid fa-server"></i>
+          <i class="bi bi-server"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">{{ state.agents.length }}</div>
@@ -170,7 +170,7 @@ onMounted(async () => {
       </div>
       <div class="stat-card success">
         <div class="stat-icon">
-          <i class="fa-solid fa-circle-check"></i>
+          <i class="bi bi-check-circle-fill"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">{{ onlineAgentsCount }}</div>
@@ -179,7 +179,7 @@ onMounted(async () => {
       </div>
       <div class="stat-card danger">
         <div class="stat-icon">
-          <i class="fa-solid fa-circle-xmark"></i>
+          <i class="bi bi-x-circle-fill"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">{{ offlineAgentsCount }}</div>
@@ -191,7 +191,7 @@ onMounted(async () => {
     <!-- Search and Filter Bar -->
     <div class="filter-bar mb-3" v-if="state.agents.length > 0">
       <div class="search-box">
-        <i class="fa-solid fa-search search-icon"></i>
+        <i class="bi bi-search search-icon"></i>
         <input 
           v-model="state.searchQuery" 
           type="text" 
@@ -219,19 +219,19 @@ onMounted(async () => {
     <!-- Empty State -->
     <div v-else-if="state.agents.length === 0" class="empty-state card">
       <div class="empty-state-icon">
-        <i class="fa-solid fa-server"></i>
+        <i class="bi bi-server"></i>
       </div>
       <h5>No agents yet</h5>
       <p class="text-muted">Create your first agent to start monitoring your network.</p>
-      <router-link :to="`/agents/${state.workspace.id}/new`" class="btn btn-primary">
-        <i class="fa-solid fa-plus"></i>&nbsp;Create First Agent
+      <router-link :to="`/workspaces/${state.workspace.id}/agents/new`" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i>&nbsp;Create First Agent
       </router-link>
     </div>
 
     <!-- No Results State -->
     <div v-else-if="filteredAgents.length === 0" class="empty-state card">
       <div class="empty-state-icon">
-        <i class="fa-solid fa-search"></i>
+        <i class="bi bi-search"></i>
       </div>
       <h5>No agents found</h5>
       <p class="text-muted">Try adjusting your search criteria.</p>
@@ -246,7 +246,7 @@ onMounted(async () => {
         <AgentCard
           :title="agent.name"
           :subtitle="(agent.version?' ':'') + agent.location"
-          :icon="getOnlineStatus(agent)?'fa-solid fa-circle-check text-success fa-fw':'fa-solid fa-circle-xmark text-danger fa-fw'"
+          :icon="getOnlineStatus(agent)?'bi bi-check-circle-fill text-success':'bi bi-x-circle-fill text-danger'"
           class="h-100"
         >
 
@@ -261,20 +261,20 @@ onMounted(async () => {
             
             <div class="agent-stats">
               <div class="mini-stat" v-if="(state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider">
-                <i class="fa-solid fa-map-signs"></i>
+                <i class="bi bi-signpost"></i>
                 <span>{{ (state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider}} </span>
               </div>
 
               <div class="mini-stat">
-                <i class="fa-solid fa-clock"></i>
+                <i class="bi bi-clock"></i>
                 <span>{{ getLastSeenText(agent) }}</span>
               </div>
               <div class="mini-stat" v-if="agent.location">
-                <i class="fa-solid fa-location-dot"></i>
+                <i class="bi bi-geo-alt-fill"></i>
                 <span>{{ agent.location }}</span>
               </div>
               <div class="mini-stat" v-if="agent.version">
-                <i class="fa-solid fa-hammer"></i>
+                <i class="bi bi-hammer"></i>
                 <span>{{agent.version}}</span>
               </div>
             </div>
@@ -287,7 +287,7 @@ onMounted(async () => {
               class="btn btn-sm btn-outline-warning"
               title="Deactivate agent"
             >
-              <i class="fa-solid fa-bed"></i>
+              <i class="bi bi-moon-stars"></i>
               <span class="d-none d-lg-inline">&nbsp;Deactivate</span>
             </router-link>
             <router-link 
@@ -295,7 +295,7 @@ onMounted(async () => {
               class="btn btn-sm btn-outline-success"
               title="Edit agent"
             >
-              <i class="fa-solid fa-pencil-alt"></i>
+              <i class="bi bi-pencil"></i>
               <span class="d-none d-lg-inline">&nbsp;Edit</span>
             </router-link>
             <router-link 

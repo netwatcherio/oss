@@ -79,8 +79,8 @@ function toggleSort(column: "name" | "location" | "members") {
 }
 
 function getSortIcon(column: string) {
-  if (state.sortBy !== column) return "fa-sort";
-  return state.sortOrder === "asc" ? "fa-sort-up" : "fa-sort-down";
+  if (state.sortBy !== column) return "bi-filter";
+  return state.sortOrder === "asc" ? "bi-sort-up" : "bi-sort-down";
 }
 
 onMounted(async () => {
@@ -112,13 +112,13 @@ onMounted(async () => {
           to="/workspaces/alerts"
           class="btn btn-outline-danger"
         >
-          <i class="fa-solid fa-exclamation-triangle me-2"></i>View Alerts
+          <i class="bi bi-exclamation-triangle me-2"></i>View Alerts
         </router-link>
         <router-link
           to="/workspaces/new"
           class="btn btn-primary"
         >
-          <i class="fa-solid fa-plus-circle me-2"></i>Create Workspace
+          <i class="bi bi-plus-circle me-2"></i>Create Workspace
         </router-link>
       </div>
     </Title>
@@ -141,7 +141,7 @@ onMounted(async () => {
     <div v-else-if="state.error" class="row">
       <div class="col-12">
         <div class="alert alert-danger d-flex align-items-center" role="alert">
-          <i class="fas fa-exclamation-circle me-2"></i>
+          <i class="bi bi-exclamation-circle me-2"></i>
           <div>{{ state.error }}</div>
         </div>
       </div>
@@ -155,7 +155,7 @@ onMounted(async () => {
           <div class="col-md-4">
             <div class="stat-card">
               <div class="stat-icon bg-primary bg-gradient">
-                <i class="fas fa-building"></i>
+                <i class="bi bi-building"></i>
               </div>
               <div class="stat-content">
                 <h3 class="stat-value">{{ state.workspaces.length }}</h3>
@@ -166,7 +166,7 @@ onMounted(async () => {
           <div class="col-md-4">
             <div class="stat-card">
               <div class="stat-icon bg-success bg-gradient">
-                <i class="fas fa-users"></i>
+                <i class="bi bi-people"></i>
               </div>
               <div class="stat-content">
                 <h3 class="stat-value">{{ totalMembers }}</h3>
@@ -177,7 +177,7 @@ onMounted(async () => {
           <div class="col-md-4">
             <div class="stat-card">
               <div class="stat-icon bg-info bg-gradient">
-                <i class="fas fa-network-wired"></i>
+                <i class="bi bi-diagram-3"></i>
               </div>
               <div class="stat-content">
                 <h3 class="stat-value">Active</h3>
@@ -196,7 +196,7 @@ onMounted(async () => {
               <div class="col-md-6">
                 <div class="input-group">
                   <span class="input-group-text bg-light border-end-0">
-                    <i class="fas fa-search text-muted"></i>
+                    <i class="bi bi-search text-muted"></i>
                   </span>
                   <input
                     v-model="state.searchQuery"
@@ -227,20 +227,20 @@ onMounted(async () => {
                     <th class="sortable" @click="toggleSort('name')">
                       <div class="d-flex align-items-center">
                         <span>Name</span>
-                        <i :class="`fas ${getSortIcon('name')} ms-2 text-muted`"></i>
+                        <i :class="`bi ${getSortIcon('name')} ms-2 text-muted`"></i>
                       </div>
                     </th>
                     <th>Description</th>
                     <th class="sortable" @click="toggleSort('location')">
                       <div class="d-flex align-items-center">
                         <span>Location</span>
-                        <i :class="`fas ${getSortIcon('location')} ms-2 text-muted`"></i>
+                        <i :class="`bi ${getSortIcon('location')} ms-2 text-muted`"></i>
                       </div>
                     </th>
                     <th class="sortable text-center" @click="toggleSort('members')">
                       <div class="d-flex align-items-center justify-content-center">
                         <span>Members</span>
-                        <i :class="`fas ${getSortIcon('members')} ms-2 text-muted`"></i>
+                        <i :class="`bi ${getSortIcon('members')} ms-2 text-muted`"></i>
                       </div>
                     </th>
                     <th>Status</th>
@@ -256,7 +256,7 @@ onMounted(async () => {
                     <td>
                       <div class="d-flex align-items-center">
                         <div class="workspace-icon me-3">
-                          <i class="fas fa-building"></i>
+                          <i class="bi bi-building"></i>
                         </div>
                         <div>
                           <router-link
@@ -278,7 +278,7 @@ onMounted(async () => {
                     </td>
                     <td>
                       <div class="d-flex align-items-center">
-                        <i class="fas fa-map-marker-alt text-muted me-2"></i>
+                        <i class="bi bi-geo-alt text-muted me-2"></i>
                         {{ site.location || "Not specified" }}
                       </div>
                     </td>
@@ -289,7 +289,7 @@ onMounted(async () => {
                     </td>
                     <td>
                       <span class="badge bg-success-subtle text-success">
-                        <i class="fas fa-circle me-1" style="font-size: 0.5rem;"></i>
+                        <i class="bi bi-circle-fill me-1" style="font-size: 0.5rem;"></i>
                         Active
                       </span>
                     </td>
@@ -300,14 +300,14 @@ onMounted(async () => {
                           class="btn btn-sm btn-outline-primary"
                           title="View workspace"
                         >
-                          <i class="fas fa-eye"></i>
+                          <i class="bi bi-eye"></i>
                         </router-link>
                         <router-link
                           :to="`/workspaces/${site.id}/edit`"
                           class="btn btn-sm btn-outline-secondary"
                           title="Edit"
                         >
-                          <i class="fas fa-cog"></i>
+                          <i class="bi bi-gear"></i>
                         </router-link>
                       </div>
                     </td>
@@ -322,7 +322,7 @@ onMounted(async () => {
       <!-- No Results -->
       <div v-if="filteredSites.length === 0 && state.searchQuery" class="col-12 mt-3">
         <div class="alert alert-info d-flex align-items-center" role="alert">
-          <i class="fas fa-info-circle me-2"></i>
+          <i class="bi bi-info-circle me-2"></i>
           <div>No workspaces found matching "{{ state.searchQuery }}"</div>
         </div>
       </div>
@@ -334,14 +334,14 @@ onMounted(async () => {
         <div class="card">
           <div class="card-body text-center py-5">
             <div class="empty-state-icon mb-4">
-              <i class="fas fa-building text-muted"></i>
+              <i class="bi bi-building text-muted"></i>
             </div>
             <h3 class="mb-3">No Workspaces Yet</h3>
             <p class="text-muted mb-4">
               Get started by creating your first workspace to begin monitoring your network infrastructure.
             </p>
             <router-link to="/workspace/new" class="btn btn-primary btn-lg">
-              <i class="fas fa-plus-circle me-2"></i>Create Your First Workspace
+              <i class="bi bi-plus-circle me-2"></i>Create Your First Workspace
             </router-link>
           </div>
         </div>

@@ -7,6 +7,8 @@ import {AsciiTable3} from "@/lib/ascii-table3/ascii-table3";
 import LatencyGraph from "@/components/PingGraph.vue";
 import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import NetworkMap from "@/components/NetworkMap.vue";
+import MtrTable from "@/components/MtrTable.vue";
+import MtrDetailModal from "@/components/MtrDetailModal.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 
@@ -16,6 +18,20 @@ import {findMatchingProbesByProbeId, findProbesByInitialTarget} from "@/utils/pr
 
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
+
+// Modal state for MTR detail view
+const showMtrModal = ref(false);
+const selectedNode = ref<{ id: string; hostname?: string; ip?: string; hopNumber: number } | null>(null);
+
+const onNodeSelect = (node: any) => {
+  selectedNode.value = node;
+  showMtrModal.value = true;
+};
+
+const closeMtrModal = () => {
+  showMtrModal.value = false;
+  selectedNode.value = null;
+};
 
 // Reactive state to hold parsed groups and UI data
 const state = reactive({
@@ -178,6 +194,92 @@ function transformMtrData(data: ProbeData): MtrResult {
 // MTR: multiple rows -> MtrResult[]
 function transformMtrDataMulti(rows: ProbeData[]): MtrResult[] {
   return rows.map(r => transformMtrData((r as any)));
+}
+
+// MTR: format timestamp for accordion header
+function formatMtrTimestamp(mtr: ProbeData): string {
+  const payload = mtr.payload as MtrResult;
+  const timestamp = payload?.stop_timestamp || mtr.created_at;
+  try {
+    return new Date(timestamp).toLocaleString();
+  } catch {
+    return 'Unknown time';
+  }
+}
+
+// MTR: get route signature for comparison
+function getMtrRouteSignature(mtr: ProbeData): string {
+  const payload = mtr.payload as MtrResult;
+  if (!payload?.report?.hops) return '';
+  return payload.report.hops
+    .map(hop => hop.hosts?.[0]?.ip || '*')
+    .join('->');
+}
+
+// MTR: check if trace has notable packet loss (>0% on any hop)
+function hasHighLoss(mtr: ProbeData): boolean {
+  const payload = mtr.payload as MtrResult;
+  if (!payload?.report?.hops) return false;
+  return payload.report.hops.some(hop => {
+    // loss_pct can be "5.0%" or "5.0" - strip % if present
+    const lossStr = String(hop.loss_pct || '0').replace('%', '').trim();
+    const loss = parseFloat(lossStr);
+    return loss > 0; // Any packet loss is notable
+  });
+}
+
+// MTR: check if trace has high latency (>100ms avg on any hop)
+function hasHighLatency(mtr: ProbeData): boolean {
+  const payload = mtr.payload as MtrResult;
+  if (!payload?.report?.hops) return false;
+  return payload.report.hops.some(hop => {
+    // avg can be "45.2 ms" or "45.2" - extract number
+    const avgStr = String(hop.avg || '0').replace(/[^\d.]/g, '');
+    const avg = parseFloat(avgStr);
+    return avg > 100;
+  });
+}
+
+// MTR: filter to only notable results (triggered, high loss, route changes)
+function getNotableMtrResults(mtrData: ProbeData[]): { data: ProbeData; reason: string }[] {
+  if (!mtrData || mtrData.length === 0) return [];
+  
+  // Sort by timestamp
+  const sorted = [...mtrData].sort((a, b) => {
+    const timeA = new Date(a.payload?.stop_timestamp || a.created_at).getTime();
+    const timeB = new Date(b.payload?.stop_timestamp || b.created_at).getTime();
+    return timeB - timeA;
+  });
+  
+  const notable: { data: ProbeData; reason: string }[] = [];
+  let prevSignature = '';
+  
+  // Process in reverse (oldest first) to detect route changes properly
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const mtr = sorted[i];
+    const reasons: string[] = [];
+    
+    // Check if triggered
+    if (mtr.triggered) reasons.push('triggered');
+    
+    // Check packet loss (any loss is notable)
+    if (hasHighLoss(mtr)) reasons.push('packet-loss');
+    
+    // Check high latency
+    if (hasHighLatency(mtr)) reasons.push('high-latency');
+    
+    // Check route change
+    const signature = getMtrRouteSignature(mtr);
+    if (prevSignature && signature !== prevSignature) reasons.push('route-change');
+    prevSignature = signature;
+    
+    if (reasons.length > 0) {
+      notable.push({ data: mtr, reason: reasons.join(',') });
+    }
+  }
+  
+  // Return in newest-first order
+  return notable.reverse();
 }
 
 // TRAFFICSIM: normalize series
@@ -467,7 +569,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                         <h6 class="mb-0">Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
                       </div>
                       <div class="card-body">
-                        <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" />
+                        <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
                       </div>
                     </div>
                   </div>
@@ -493,7 +595,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                         <h6 class="mb-0">Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
                       </div>
                       <div class="card-body">
-                        <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" />
+                        <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
                       </div>
                     </div>
                   </div>
@@ -534,8 +636,8 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                                   class="accordion-button collapsed" 
                                   data-bs-toggle="collapse" 
                                   type="button">
-                                  {{ transformMtrData((mtr as ProbeData)).stopTimestamp.toLocaleString() }}
-                                  <span v-if="(mtr as ProbeData).triggered" class="badge bg-dark ms-2">TRIGGERED</span>
+                                  {{ formatMtrTimestamp(mtr as ProbeData) }}
+                                  <span v-if="(mtr as ProbeData).triggered" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
                                 </button>
                               </h2>
                               <div 
@@ -543,8 +645,8 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                                 :aria-labelledby="`heading-${index}-${mtr.id}`"
                                 :data-bs-parent="`#mtrAccordion-${index}`"
                                 class="accordion-collapse collapse">
-                                <div class="accordion-body">
-                                  <pre style="text-align: center">{{ generateTable(mtr as ProbeData) }}</pre>
+                                <div class="accordion-body p-0">
+                                  <MtrTable :probe-data="mtr as ProbeData" />
                                 </div>
                               </div>
                             </div>
@@ -605,7 +707,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
               <p class="text-muted">No ping data found for the selected time range</p>
             </div>
             <div v-else>
-              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" />
+              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
             </div>
           </div>
         </div>
@@ -630,7 +732,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
               <p class="text-muted">No traffic simulation data found for the selected time range</p>
             </div>
             <div v-else>
-              <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" />
+              <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
             </div>
           </div>
         </div>
@@ -655,23 +757,49 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
               <p class="text-muted">No MTR data found for the selected time range</p>
             </div>
             <div v-else>
-              <NetworkMap :mtrResults="transformMtrDataMulti(state.mtrData)" />
-              <div id="mtrAccordion" class="accordion">
-                <div v-for="(mtr, index) in state.mtrData" :key="`${mtr.id}-${index}`">
-                  <div class="accordion-item">
-                    <h2 :id="'heading' + mtr.id" class="accordion-header">
-                      <button :aria-controls="'collapse' + mtr.id" :aria-expanded="false"
-                              :data-bs-target="'#collapse' + mtr.id"
-                              class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                        {{ (mtr.payload as MtrResult).stop_timestamp.toLocaleString() }}
-                        <span v-if="mtr.triggered" class="badge bg-dark">TRIGGERED</span>
-                      </button>
-                    </h2>
-                    <div :id="'collapse' + mtr.id" :aria-labelledby="'heading' + mtr.id"
-                         class="accordion-collapse collapse"
-                         data-bs-parent="#mtrAccordion">
-                      <div class="accordion-body">
-                        <pre style="text-align: center">{{ generateTable(mtr) }}</pre>
+              <NetworkMap :mtrResults="transformMtrDataMulti(state.mtrData)" @node-select="onNodeSelect" />
+              <div class="mtr-help-text">
+                <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
+              </div>
+              
+              <!-- Notable traces section -->
+              <div class="notable-traces mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0">
+                    <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+                    Notable Traces
+                    <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(state.mtrData).length }}</span>
+                  </h6>
+                  <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true">
+                    <i class="bi bi-list-ul"></i> View All ({{ state.mtrData.length }})
+                  </button>
+                </div>
+                
+                <div v-if="getNotableMtrResults(state.mtrData).length === 0" class="text-muted text-center py-3">
+                  <i class="bi bi-check-circle text-success me-2"></i>
+                  No issues detected in the selected time range
+                </div>
+                
+                <div v-else id="mtrAccordion" class="accordion">
+                  <div v-for="(item, index) in getNotableMtrResults(state.mtrData)" :key="`${item.data.id}-${index}`">
+                    <div class="accordion-item">
+                      <h2 :id="'heading' + item.data.id" class="accordion-header">
+                        <button :aria-controls="'collapse' + item.data.id" :aria-expanded="false"
+                                :data-bs-target="'#collapse' + item.data.id"
+                                class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
+                          {{ formatMtrTimestamp(item.data) }}
+                          <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
+                          <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
+                          <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
+                          <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
+                        </button>
+                      </h2>
+                      <div :id="'collapse' + item.data.id" :aria-labelledby="'heading' + item.data.id"
+                           class="accordion-collapse collapse"
+                           data-bs-parent="#mtrAccordion">
+                        <div class="accordion-body p-0">
+                          <MtrTable :probe-data="item.data" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -698,6 +826,14 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
   </div>
   
   <!-- Error state -->
+
+  <!-- MTR Detail Modal -->
+  <MtrDetailModal 
+    :visible="showMtrModal" 
+    :node="selectedNode" 
+    :mtr-results="state.mtrData" 
+    @close="closeMtrModal" 
+  />
 </div>
 </template>
 
@@ -729,5 +865,24 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
   vertical-align: -.125em;
   background-repeat: no-repeat;
   background-size: 1rem 1rem;
+}
+
+/* MTR help text */
+.mtr-help-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 6px;
+  color: #3b82f6;
+  font-size: 0.85rem;
+}
+
+/* Custom badge colors */
+.badge.bg-orange {
+  background-color: #f97316 !important;
+  color: white;
 }
 </style>

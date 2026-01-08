@@ -373,3 +373,82 @@ export const AgentBootstrap = {
             | { error: string };
     },
 };
+
+/** ===== Speedtest Queue (scoped to workspace + agent) ===== */
+
+export interface SpeedtestQueueItem {
+    id: number;
+    workspace_id: number;
+    agent_id: number;
+    server_id: string;
+    server_name: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    requested_by: number;
+    requested_at: string;
+    started_at?: string;
+    completed_at?: string;
+    error?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface SpeedtestServer {
+    id: number;
+    agent_id: number;
+    server_id: string;
+    name: string;
+    sponsor: string;
+    host: string;
+    url: string;
+    country: string;
+    lat: string;
+    lon: string;
+    distance: number;
+    last_seen_at: string;
+}
+
+export const SpeedtestService = {
+    // ---- Queue Management ----
+    async listQueue(workspaceId: number | string, agentId: number | string, status?: string) {
+        const qs = new URLSearchParams();
+        if (status) qs.set("status", status);
+        const { data } = await request.get<{ data: SpeedtestQueueItem[]; total: number }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/speedtest-queue${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
+
+    async queueTest(
+        workspaceId: number | string,
+        agentId: number | string,
+        body: { server_id?: string; server_name?: string }
+    ) {
+        const { data } = await request.post<SpeedtestQueueItem>(
+            `/workspaces/${workspaceId}/agents/${agentId}/speedtest-queue`,
+            body
+        );
+        return data;
+    },
+
+    async getQueueItem(workspaceId: number | string, agentId: number | string, queueId: number | string) {
+        const { data } = await request.get<SpeedtestQueueItem>(
+            `/workspaces/${workspaceId}/agents/${agentId}/speedtest-queue/${queueId}`
+        );
+        return data;
+    },
+
+    async cancelQueueItem(workspaceId: number | string, agentId: number | string, queueId: number | string) {
+        const { data } = await request.delete<{ ok: boolean }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/speedtest-queue/${queueId}`
+        );
+        return data;
+    },
+
+    // ---- Cached Servers ----
+    async listServers(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.get<{ data: SpeedtestServer[]; total: number }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/speedtest-servers`
+        );
+        return data;
+    },
+};

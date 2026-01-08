@@ -143,7 +143,7 @@ const probeTypeConfig = computed(() => {
   const config: Record<string, any> = {
     AGENT: {
       description: "Monitor the health, connectivity, and performance of other agents in your network",
-      icon: "fa-heartbeat",
+      icon: "bi-heart-pulse",
       recommended: true,
       requiresTargetAgent: true,
       supportsCustomTarget: false,
@@ -153,7 +153,7 @@ const probeTypeConfig = computed(() => {
     },
     PING: {
       description: "Test basic connectivity and measure round-trip time to a target",
-      icon: "fa-signal",
+      icon: "bi-broadcast",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       defaultInterval: 300,
@@ -162,7 +162,7 @@ const probeTypeConfig = computed(() => {
     },
     MTR: {
       description: "Combine traceroute and ping to diagnose network paths and identify packet loss",
-      icon: "fa-route",
+      icon: "bi-signpost-split",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       defaultInterval: 300,
@@ -171,7 +171,7 @@ const probeTypeConfig = computed(() => {
     },
     TRAFFICSIM: {
       description: "Generate simulated UDP traffic to test network throughput and performance",
-      icon: "fa-stream",
+      icon: "bi-activity",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       supportsServer: true,
@@ -181,7 +181,7 @@ const probeTypeConfig = computed(() => {
     },
     DNS: {
       description: "Monitor DNS resolution performance and availability",
-      icon: "fa-map-signs",
+      icon: "bi-signpost",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       requiresHostOnly: true,
@@ -191,7 +191,7 @@ const probeTypeConfig = computed(() => {
     },
     SPEEDTEST: {
       description: "Measure bandwidth performance between locations",
-      icon: "fa-tachometer-alt",
+      icon: "bi-speedometer2",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       defaultInterval: 3600,
@@ -200,7 +200,7 @@ const probeTypeConfig = computed(() => {
     },
     RPERF: {
       description: "Advanced UDP performance testing with detailed metrics",
-      icon: "fa-chart-line",
+      icon: "bi-graph-up",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
       defaultInterval: 600,
@@ -218,7 +218,7 @@ function initializeOptions() {
     {
       value: "AGENT",
       text: "Agent Monitoring",
-      icon: "fa-heartbeat",
+      icon: "bi-heart-pulse",
       recommended: true,
       agentAvailable: true,
       disabled: false
@@ -226,7 +226,7 @@ function initializeOptions() {
     {
       value: "PING",
       text: "PING",
-      icon: "fa-signal",
+      icon: "bi-broadcast",
       agentAvailable: true,
       disabled: false,
       recommended: false
@@ -234,7 +234,7 @@ function initializeOptions() {
     {
       value: "MTR",
       text: "MTR (My Traceroute)",
-      icon: "fa-route",
+      icon: "bi-signpost-split",
       agentAvailable: true,
       disabled: false,
       recommended: false
@@ -242,7 +242,7 @@ function initializeOptions() {
     {
       value: "TRAFFICSIM",
       text: "Traffic Simulator",
-      icon: "fa-stream",
+      icon: "bi-activity",
       agentAvailable: true,
       disabled: false,
       recommended: false
@@ -250,7 +250,7 @@ function initializeOptions() {
     {
       value: "DNS",
       text: "DNS Monitor",
-      icon: "fa-map-signs",
+      icon: "bi-signpost",
       agentAvailable: false,
       disabled: false,
       recommended: false
@@ -258,7 +258,7 @@ function initializeOptions() {
     {
       value: "SPEEDTEST",
       text: "Speed Test",
-      icon: "fa-tachometer-alt",
+      icon: "bi-speedometer2",
       agentAvailable: true,
       disabled: false,
       recommended: false
@@ -266,7 +266,7 @@ function initializeOptions() {
     {
       value: "RPERF",
       text: "RPERF (UDP Performance)",
-      icon: "fa-chart-line",
+      icon: "bi-graph-up",
       agentAvailable: true,
       disabled: false,
       recommended: false
@@ -601,7 +601,7 @@ onMounted(async () => {
         <!-- Error Messages -->
         <div v-if="state.errors.length > 0" class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
           <div class="d-flex align-items-center">
-            <i class="fas fa-exclamation-circle me-2"></i>
+            <i class="bi bi-exclamation-circle me-2"></i>
             <div>
               <div v-for="(error, index) in state.errors" :key="index">{{ error }}</div>
             </div>
@@ -612,7 +612,7 @@ onMounted(async () => {
         <!-- Duplicate Warning -->
         <div v-if="state.duplicateWarning" class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
           <div class="d-flex align-items-center">
-            <i class="fas fa-exclamation-triangle me-2"></i>
+            <i class="bi bi-exclamation-triangle me-2"></i>
             <span>{{ state.duplicateWarning }}</span>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -621,7 +621,7 @@ onMounted(async () => {
         <!-- Probe Type Selection Card -->
         <div class="card mb-4">
           <div class="card-header bg-primary text-white">
-            <h5 class="mb-0"><i class="fas fa-list-check me-2"></i>Select Probe Type</h5>
+            <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Select Probe Type</h5>
           </div>
           <div class="card-body">
             <div class="row g-3">
@@ -640,7 +640,7 @@ onMounted(async () => {
                   <div class="probe-type-header">
                     <div class="d-flex align-items-center justify-content-between">
                       <div class="d-flex align-items-center">
-                        <i :class="`fas ${option.icon} probe-icon`"></i>
+                        <i :class="`bi ${option.icon} probe-icon`"></i>
                         <h6 class="mb-0">{{ option.text }}</h6>
                       </div>
                       <span v-if="option.recommended" class="badge bg-success">Recommended</span>
@@ -650,7 +650,7 @@ onMounted(async () => {
                     {{ getProbeDescription(option.value) }}
                   </p>
                   <div class="selection-indicator">
-                    <i class="fas fa-check-circle"></i>
+                    <i class="bi bi-check-circle"></i>
                   </div>
                 </div>
               </div>
@@ -662,7 +662,7 @@ onMounted(async () => {
         <div v-if="state.selected && state.selected.value" class="card">
           <div class="card-header">
             <h5 class="mb-0">
-              <i :class="`fas ${state.selected.icon} me-2`"></i>
+              <i :class="`bi ${state.selected.icon} me-2`"></i>
               {{ state.selected.text }} Configuration
             </h5>
           </div>
@@ -688,7 +688,7 @@ onMounted(async () => {
                       @change="state.targetAgent = true"
                   />
                   <label class="btn btn-outline-primary" :class="{'disabled': isTrafficSimServer}" for="targetModeAgent">
-                    <i class="fas fa-server me-2"></i>Target Agent
+                    <i class="bi bi-server me-2"></i>Target Agent
                   </label>
 
                   <input
@@ -701,7 +701,7 @@ onMounted(async () => {
                       @change="state.targetAgent = false"
                   />
                   <label class="btn btn-outline-primary" :class="{'disabled': isTrafficSimServer}" for="targetModeCustom">
-                    <i class="fas fa-globe me-2"></i>Custom Target
+                    <i class="bi bi-globe me-2"></i>Custom Target
                   </label>
                 </div>
                 <small v-if="isTrafficSimServer" class="text-muted d-block mt-1">
@@ -712,7 +712,7 @@ onMounted(async () => {
               <!-- Agent Selection -->
               <div v-if="state.targetAgent && showTargetAgentOption" class="mb-4">
                 <label class="form-label fw-semibold" for="targetAgent">
-                  <i class="fas fa-server me-2"></i>Target Agent
+                  <i class="bi bi-server me-2"></i>Target Agent
                 </label>
                 <select
                     id="targetAgent"
@@ -731,16 +731,16 @@ onMounted(async () => {
                   </option>
                 </select>
                 <small v-if="availableAgentsForSelection.length === 0" class="text-warning">
-                  <i class="fas fa-info-circle me-1"></i>No other agents available in this workspace
+                  <i class="bi bi-info-circle me-1"></i>No other agents available in this workspace
                 </small>
               </div>
               <!-- Custom Target Input for PING/MTR -->
               <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR') && showCustomTargetInput" class="mb-4">
                 <label class="form-label fw-semibold" for="pingTarget">
-                  <i class="fas fa-bullseye me-2"></i>Target Address
+                  <i class="bi bi-bullseye me-2"></i>Target Address
                 </label>
                 <div class="input-group">
-                  <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                  <span class="input-group-text"><i class="bi bi-globe"></i></span>
                   <input
                       id="pingTarget"
                       v-model="state.hostInput"
@@ -754,10 +754,10 @@ onMounted(async () => {
               <!-- DNS Configuration -->
               <div v-if="state.selected.value === 'DNS'" class="mb-4">
                 <label class="form-label fw-semibold" for="dnsTarget">
-                  <i class="fas fa-globe me-2"></i>Domain to Monitor
+                  <i class="bi bi-globe me-2"></i>Domain to Monitor
                 </label>
                 <div class="input-group mb-3">
-                  <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                  <span class="input-group-text"><i class="bi bi-globe"></i></span>
                   <input
                       id="dnsTarget"
                       v-model="state.hostInput"
@@ -768,7 +768,7 @@ onMounted(async () => {
 
                 <!-- DNS Record Type Selection -->
                 <label class="form-label fw-semibold">
-                  <i class="fas fa-list me-2"></i>DNS Record Types
+                  <i class="bi bi-list me-2"></i>DNS Record Types
                 </label>
                 <div class="dns-record-types mb-3">
                   <div class="form-check form-switch mb-2">
@@ -802,10 +802,10 @@ onMounted(async () => {
 
                 <!-- DNS Server Configuration -->
                 <label class="form-label fw-semibold" for="dnsServer">
-                  <i class="fas fa-server me-2"></i>DNS Server (Optional)
+                  <i class="bi bi-server me-2"></i>DNS Server (Optional)
                 </label>
                 <div class="input-group mb-2">
-                  <span class="input-group-text"><i class="fas fa-server"></i></span>
+                  <span class="input-group-text"><i class="bi bi-server"></i></span>
                   <input
                       id="dnsServer"
                       v-model="state.dnsConfig.dnsServer"
@@ -833,7 +833,7 @@ onMounted(async () => {
 
               <!-- AGENT Probe Specific Info -->
               <div v-if="state.selected.value === 'AGENT'" class="info-box mb-4">
-                <i class="fas fa-info-circle me-2"></i>
+                <i class="bi bi-info-circle me-2"></i>
                 <div>
                   <strong>Agent Monitoring</strong> will continuously check the health, connectivity, and performance
                   metrics of the selected target agent. This includes uptime, response times, and system resources.
@@ -861,14 +861,14 @@ onMounted(async () => {
                 <!-- Server Listening Configuration -->
                 <div v-if="isTrafficSimServer" class="mt-3">
                   <label class="form-label fw-semibold">
-                    <i class="fas fa-network-wired me-2"></i>Server Listening Configuration
+                    <i class="bi bi-diagram-3 me-2"></i>Server Listening Configuration
                   </label>
                   <div class="host-port-input">
                     <div class="row g-3">
                       <div class="col-md-8">
                         <label class="form-label text-muted small">Host / IP Address</label>
                         <div class="input-group">
-                          <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                          <span class="input-group-text"><i class="bi bi-globe"></i></span>
                           <input
                               v-model="state.hostInput"
                               class="form-control"
@@ -882,7 +882,7 @@ onMounted(async () => {
                       <div class="col-md-4">
                         <label class="form-label text-muted small">Port</label>
                         <div class="input-group">
-                          <span class="input-group-text"><i class="fas fa-ethernet"></i></span>
+                          <span class="input-group-text"><i class="bi bi-ethernet"></i></span>
                           <input
                               v-model="state.portInput"
                               class="form-control"
@@ -900,7 +900,7 @@ onMounted(async () => {
                       <code class="text-primary">{{ (state.hostInput || '0.0.0.0') + ':' + (state.portInput || '5000') }}</code>
                     </div>
                     <div v-if="!isTrafficSimServerValid" class="text-danger mt-2">
-                      <i class="fas fa-exclamation-circle me-1"></i> Please enter a valid port (1–65535).
+                      <i class="bi bi-exclamation-circle me-1"></i> Please enter a valid port (1–65535).
                     </div>
                   </div>
                 </div>
@@ -912,7 +912,7 @@ onMounted(async () => {
                 <!-- Interval -->
                 <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterval">
-                    <i class="fas fa-clock me-2"></i>Probe Interval
+                    <i class="bi bi-clock me-2"></i>Probe Interval
                   </label>
                   <div class="input-group">
                     <input
@@ -932,7 +932,7 @@ onMounted(async () => {
                 <!-- Count (for PING/MTR) -->
                 <div v-if="['PING', 'MTR'].includes(state.selected.value)" class="mb-4">
                   <label class="form-label fw-semibold" for="probeCount">
-                    <i class="fas fa-hashtag me-2"></i>Packet Count
+                    <i class="bi bi-hash me-2"></i>Packet Count
                   </label>
                   <div class="input-group">
                     <input
@@ -952,7 +952,7 @@ onMounted(async () => {
                 <!-- Duration (for TRAFFICSIM/RPERF) -->
                 <div v-if="['RPERF'].includes(state.selected.value)" class="mb-4">
                   <label class="form-label fw-semibold" for="probeDuration">
-                    <i class="fas fa-stopwatch me-2"></i>Test Duration
+                    <i class="bi bi-stopwatch me-2"></i>Test Duration
                   </label>
                   <div class="input-group">
                     <input
@@ -972,7 +972,7 @@ onMounted(async () => {
                 <!-- Timeout -->
                 <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeTimeout">
-                    <i class="fas fa-hourglass-half me-2"></i>Timeout
+                    <i class="bi bi-hourglass-split me-2"></i>Timeout
                   </label>
                   <div class="input-group">
                     <input
@@ -1013,7 +1013,7 @@ onMounted(async () => {
               <router-link
                   :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}`"
                   class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left me-2"></i>Cancel
+                <i class="bi bi-arrow-left me-2"></i>Cancel
               </router-link>
               <button
                   class="btn btn-primary btn-lg px-5"
@@ -1022,10 +1022,10 @@ onMounted(async () => {
                   :disabled="!isValidProbe || state.loading || !!state.duplicateWarning"
               >
   <span v-if="state.loading">
-    <i class="fas fa-spinner fa-spin me-2"></i>Creating Probe...
+    <i class="bi bi-arrow-repeat spin-animation me-2"></i>Creating Probe...
   </span>
                 <span v-else>
-    <i class="fas fa-plus-circle me-2"></i>Create Probe
+    <i class="bi bi-plus-circle me-2"></i>Create Probe
   </span>
               </button>
             </div>
@@ -1345,5 +1345,15 @@ code {
   .dns-record-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Spin Animation for Bootstrap Icons */
+.spin-animation {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

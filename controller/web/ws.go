@@ -5,14 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/kataras/iris/v12"
-	"gorm.io/gorm"
 	"net/http"
 	"netwatcher-controller/internal/agent"
 	probe "netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/speedtest"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kataras/iris/v12"
+	"gorm.io/gorm"
 
 	_ "github.com/kataras/iris/v12"
 	"github.com/kataras/iris/v12/websocket"
@@ -195,6 +197,119 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 
 				// Optionally ACK
 				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))
+				return nil
+			},
+
+			// ================== Speedtest Events ==================
+
+			// speedtest_servers: Agent submits available speedtest.net servers
+			"speedtest_servers": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, ok := ctx.Values().GetUint("agent_id")
+				if (ok != nil) || (aid == 0) {
+					return errors.New("unauthorized: no agent in context")
+				}
+
+				log.Infof("[%s] received speedtest_servers from agent %d", nsConn, aid)
+
+				var servers []speedtest.ServerInput
+				if err := json.Unmarshal(msg.Body, &servers); err != nil {
+					log.Errorf("speedtest_servers unmarshal: %v", err)
+					return err
+				}
+
+				if err := speedtest.UpsertServersForAgent(context.TODO(), db, aid, servers); err != nil {
+					log.Errorf("speedtest_servers upsert: %v", err)
+					return err
+				}
+
+				log.Infof("[%s] stored %d speedtest servers for agent %d", nsConn, len(servers), aid)
+				nsConn.Emit("speedtest_servers_ok", []byte(`{"ok":true}`))
+				return nil
+			},
+
+			// speedtest_queue_get: Agent requests pending speedtest items
+			"speedtest_queue_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, ok := ctx.Values().GetUint("agent_id")
+				if (ok != nil) || (aid == 0) {
+					return errors.New("unauthorized: no agent in context")
+				}
+
+				items, err := speedtest.ListPendingForAgent(context.TODO(), db, aid)
+				if err != nil {
+					log.Errorf("speedtest_queue_get: %v", err)
+					return err
+				}
+
+				payload, err := json.Marshal(items)
+				if err != nil {
+					return err
+				}
+
+				nsConn.Emit("speedtest_queue", payload)
+				return nil
+			},
+
+			// speedtest_result: Agent submits completed speedtest result
+			"speedtest_result": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, ok := ctx.Values().GetUint("agent_id")
+				if (ok != nil) || (aid == 0) {
+					return errors.New("unauthorized: no agent in context")
+				}
+
+				log.Infof("[%s] received speedtest_result from agent %d: %s", nsConn, aid, msg.Body)
+
+				// Unmarshal the result which includes queue_id and the speedtest data
+				var result struct {
+					QueueID uint            `json:"queue_id"`
+					Success bool            `json:"success"`
+					Error   string          `json:"error,omitempty"`
+					Data    json.RawMessage `json:"data,omitempty"`
+				}
+				if err := json.Unmarshal(msg.Body, &result); err != nil {
+					log.Errorf("speedtest_result unmarshal: %v", err)
+					return err
+				}
+
+				if result.Success {
+					// Mark queue item as completed
+					if err := speedtest.MarkCompleted(context.TODO(), db, result.QueueID); err != nil {
+						log.Errorf("speedtest_result mark completed: %v", err)
+					}
+
+					// Dispatch the speedtest data to ClickHouse via existing probe handler
+					if len(result.Data) > 0 {
+						// Get queue item to find the probe ID (or create one if needed)
+						queueItem, err := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
+						if err != nil {
+							log.Errorf("speedtest_result get queue item: %v", err)
+							return err
+						}
+
+						pp := probe.ProbeData{
+							Type:       probe.TypeSpeedtest,
+							AgentID:    aid,
+							ProbeID:    result.QueueID, // Use queue ID as probe ID for tracing
+							Payload:    result.Data,
+							CreatedAt:  time.Now(),
+							ReceivedAt: time.Now(),
+							Target:     queueItem.ServerID,
+						}
+
+						if err := probe.Dispatch(context.TODO(), pp); err != nil {
+							log.Errorf("speedtest_result dispatch: %v", err)
+						}
+					}
+				} else {
+					// Mark as failed
+					if err := speedtest.MarkFailed(context.TODO(), db, result.QueueID, result.Error); err != nil {
+						log.Errorf("speedtest_result mark failed: %v", err)
+					}
+				}
+
+				nsConn.Emit("speedtest_result_ok", []byte(`{"ok":true}`))
 				return nil
 			},
 		},

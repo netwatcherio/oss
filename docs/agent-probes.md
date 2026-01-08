@@ -101,10 +101,18 @@ type PingPayload struct {
 }
 ```
 
+**Configuration Fields:**
+| Field | Default | Description |
+|-------|---------|-------------|
+| `count` | 10 | Number of ICMP packets to send per probe run |
+| `timeout_sec` | 30 | Maximum time to wait for all packets |
+| `interval_sec` | 300 | Time between probe runs (scheduling) |
+
 **Execution:**
-- Default: 60 packets at 1-second intervals
+- Sends `count` packets at 1-second intervals
 - Uses privileged mode (raw ICMP sockets)
 - Platform-aware (Windows payload size: 548 bytes)
+- Sleeps for `interval_sec` between probe runs (minimum 60 seconds)
 
 ---
 
@@ -291,6 +299,18 @@ type ProbeTarget struct {
     AgentID *uint  // For agent-to-agent probes
 }
 ```
+
+**Configuration Field Usage:**
+
+| Field | PING | MTR | TRAFFICSIM | SPEEDTEST |
+|-------|------|-----|------------|----------|
+| `interval_sec` | Scheduling delay | Scheduling delay | N/A | N/A |
+| `timeout_sec` | Pinger timeout | Trippy timeout | N/A | N/A |
+| `count` | ICMP packets | MTR cycles | N/A | N/A |
+| `duration_sec` | N/A | N/A | Run duration | N/A |
+| `server` | N/A | N/A | Server/Client mode | N/A |
+
+> **Note:** `interval_sec` controls **scheduling** (time between probe runs), not the interval between individual packets within a single probe execution.
 
 ---
 

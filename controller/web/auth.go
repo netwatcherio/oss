@@ -3,13 +3,17 @@ package web
 
 import (
 	"net/http"
+	"os"
+	"strings"
+
+	"netwatcher-controller/internal/email"
+	"netwatcher-controller/internal/users"
 
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
-	"netwatcher-controller/internal/users"
 )
 
-func registerAuthRoutes(app *iris.Application, db *gorm.DB) {
+func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.QueueStore) {
 	auth := app.Party("/auth")
 
 	// POST /auth/register
@@ -40,6 +44,12 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
+
+		// Send registration confirmation email if enabled
+		if emailStore != nil && shouldSendRegistrationConfirmation() {
+			_ = emailStore.EnqueueRegistrationConfirmation(ctx.Request().Context(), u.Email, u.Name)
+		}
+
 		_ = ctx.JSON(iris.Map{"token": token, "data": u})
 	})
 
@@ -62,4 +72,10 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB) {
 		}
 		_ = ctx.JSON(iris.Map{"token": token, "data": u})
 	})
+}
+
+// shouldSendRegistrationConfirmation checks if registration confirmation emails should be sent
+func shouldSendRegistrationConfirmation() bool {
+	v := strings.ToLower(os.Getenv("EMAIL_SEND_REGISTRATION_CONFIRMATION"))
+	return v == "true" || v == "1" || v == "yes"
 }

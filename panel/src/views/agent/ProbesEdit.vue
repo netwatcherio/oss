@@ -13,8 +13,33 @@ const state = reactive({
   agent: {} as Agent,
   agents: [] as Agent[],
   searchQuery: '',
-  selectedType: 'all'
+  selectedType: 'all',
+  // Modal state
+  showProbeModal: false,
+  selectedProbe: null as Probe | null
 })
+
+// Modal functions
+function openProbeDetails(probe: Probe) {
+  state.selectedProbe = probe;
+  state.showProbeModal = true;
+}
+
+function closeProbeModal() {
+  state.showProbeModal = false;
+  state.selectedProbe = null;
+}
+
+function formatInterval(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return 'N/A';
+  return new Date(dateStr).toLocaleString();
+}
 
 
 // todo load other
@@ -65,15 +90,15 @@ function getProbeTypeLabel(probe: Probe): string {
 
 function getProbeIcon(probe: Probe): string {
   switch (probe.type) {
-    case 'SYSINFO': return 'fa-solid fa-microchip';
-    case 'NETINFO': return 'fa-solid fa-network-wired';
-    case 'MTR': return 'fa-solid fa-route';
-    case 'PING': return 'fa-solid fa-satellite-dish';
-    /*case 'RPERF': return probe.config?.server ? 'fa-solid fa-server' : 'fa-solid fa-gauge-high';
-    case 'TRAFFICSIM': return probe.config?.server ? 'fa-solid fa-tower-broadcast' : 'fa-solid fa-chart-line';*/
-    case 'SPEEDTEST': return 'fa-solid fa-gauge-high';
-    case 'SPEEDTEST_SERVERS': return 'fa-solid fa-list-check';
-    default: return 'fa-solid fa-cube';
+    case 'SYSINFO': return 'bi bi-cpu';
+    case 'NETINFO': return 'bi bi-diagram-3';
+    case 'MTR': return 'bi bi-signpost-split';
+    case 'PING': return 'bi bi-broadcast';
+    /*case 'RPERF': return probe.config?.server ? 'bi bi-server' : 'bi bi-speedometer2';
+    case 'TRAFFICSIM': return probe.config?.server ? 'bi bi-broadcast-pin' : 'bi bi-graph-up';*/
+    case 'SPEEDTEST': return 'bi bi-speedometer2';
+    case 'SPEEDTEST_SERVERS': return 'bi bi-list-check';
+    default: return 'bi bi-box';
   }
 }
 
@@ -107,36 +132,56 @@ function getProbeDescription(probe: Probe): string {
   }
 }
 
-function getTargetDisplay(probe: Probe): { type: string, name: string, value: string } | null {
- /* if (!probe.config?.target?.[0]) return null;
+interface TargetInfo {
+  type: 'agent' | 'group' | 'literal';
+  label: string;
+  value: string;
+  icon: string;
+}
 
-  const target = probe.config.target[0];*/
+function getTargetInfos(probe: Probe): TargetInfo[] {
+  if (!probe.targets || probe.targets.length === 0) return [];
 
-  /*if (target.agent && target.agent !== '000000000000000000000000') {
-    return {
-      type: 'agent',
-      name: getAgentName(target.agent),
-      value: target.target || 'N/A'
-    };
-  }*/
+  const results: TargetInfo[] = [];
 
-  /*if (target.group && target.group !== '000000000000000000000000') {
-    return {
-      type: 'group',
-      name: getGroupName(target.group),
-      value: target.target || 'N/A'
-    };
-  }*/
-
-  /*if (target.target) {
-    return {
-      type: 'target',
-      name: 'Direct',
-      value: target.target
-    };
+  for (const t of probe.targets) {
+    if (t.agent_id && t.agent_id !== 0) {
+      // Agent target
+      results.push({
+        type: 'agent',
+        label: 'Agent',
+        value: getAgentName(t.agent_id),
+        icon: 'bi bi-cpu'
+      });
+    } else if (t.group_id && t.group_id !== 0) {
+      // Group target
+      results.push({
+        type: 'group',
+        label: 'Group',
+        value: `Group #${t.group_id}`,
+        icon: 'bi bi-collection'
+      });
+    } else if (t.target) {
+      // Literal target (IP/host)
+      results.push({
+        type: 'literal',
+        label: 'Target',
+        value: t.target,
+        icon: 'bi bi-bullseye'
+      });
+    }
   }
-*/
-  return null;
+
+  return results;
+}
+
+function hasTargets(probe: Probe): boolean {
+  return probe.targets && probe.targets.length > 0;
+}
+
+function truncateText(text: string, maxLength: number = 24): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength - 1) + '…';
 }
 
 function isBuiltInProbe(probe: Probe): boolean {
@@ -231,7 +276,7 @@ const generalProbes = computed(() => {
       ]">
       <div class="d-flex gap-2">
         <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
-          <i class="fa-solid fa-plus"></i>&nbsp;Add Probe
+          <i class="bi bi-plus-lg"></i>&nbsp;Add Probe
         </router-link>
       </div>
     </Title>
@@ -243,7 +288,7 @@ const generalProbes = computed(() => {
       <div class="filters-section">
         <div class="filters-row">
           <div class="search-box">
-            <i class="fa-solid fa-search search-icon"></i>
+            <i class="bi bi-search search-icon"></i>
             <input
                 v-model="state.searchQuery"
                 type="text"
@@ -265,22 +310,22 @@ const generalProbes = computed(() => {
 
         <div class="stats-row">
           <div class="stat-chip" :class="{'loading': state.loading}">
-            <i class="fa-solid fa-cube"></i>
+            <i class="bi bi-box"></i>
             <span v-if="state.loading" class="skeleton-text">-- Total</span>
             <span v-else>{{ filteredProbes.length }} Total Probes</span>
           </div>
           <div class="stat-chip" :class="{'loading': state.loading}">
-            <i class="fa-solid fa-cog"></i>
+            <i class="bi bi-gear"></i>
             <span v-if="state.loading" class="skeleton-text">-- Built-in</span>
             <span v-else>{{ builtInProbes.length }} Built-in</span>
           </div>
           <div class="stat-chip" :class="{'loading': state.loading}">
-            <i class="fa-solid fa-server"></i>
+            <i class="bi bi-server"></i>
             <span v-if="state.loading" class="skeleton-text">-- Servers</span>
             <span v-else>{{ serverProbes.length }} Servers</span>
           </div>
           <div class="stat-chip" :class="{'loading': state.loading}">
-            <i class="fa-solid fa-cubes"></i>
+            <i class="bi bi-boxes"></i>
             <span v-if="state.loading" class="skeleton-text">-- General</span>
             <span v-else>{{ generalProbes.length }} General</span>
           </div>
@@ -292,7 +337,7 @@ const generalProbes = computed(() => {
         <!-- Built-in Section Skeleton -->
         <div class="probe-section">
           <h6 class="section-title">
-            <i class="fa-solid fa-cog"></i>
+            <i class="bi bi-gear"></i>
             Built-in
           </h6>
           <div class="probes-grid">
@@ -312,7 +357,7 @@ const generalProbes = computed(() => {
         <!-- General Section Skeleton -->
         <div class="probe-section">
           <h6 class="section-title">
-            <i class="fa-solid fa-cubes"></i>
+            <i class="bi bi-boxes"></i>
             Probes
           </h6>
           <div class="probes-grid">
@@ -336,11 +381,11 @@ const generalProbes = computed(() => {
       <!-- Empty State -->
       <div v-else-if="state.probes.length === 0" class="empty-state-card">
         <div class="empty-state">
-          <i class="fa-solid fa-cube"></i>
+          <i class="bi bi-box"></i>
           <h5>No Probes Configured</h5>
           <p>Add probes to start monitoring this agent's performance and connectivity.</p>
           <router-link :to="`/probe/${state.agent.id}/new`" class="btn btn-primary">
-            <i class="fa-solid fa-plus"></i> Add First Probe
+            <i class="bi bi-plus-lg"></i> Add First Probe
           </router-link>
         </div>
       </div>
@@ -348,7 +393,7 @@ const generalProbes = computed(() => {
       <!-- No Results State -->
       <div v-else-if="filteredProbes.length === 0" class="empty-state-card">
         <div class="empty-state">
-          <i class="fa-solid fa-search"></i>
+          <i class="bi bi-search"></i>
           <h5>No Probes Found</h5>
           <p>Try adjusting your search or filter criteria.</p>
           <button @click="state.searchQuery = ''; state.selectedType = 'all'" class="btn btn-outline-primary">
@@ -362,7 +407,7 @@ const generalProbes = computed(() => {
         <!-- Built-in/Agent Probes -->
         <div v-if="builtInProbes.length > 0" class="probe-section">
           <h6 class="section-title">
-            <i class="fa-solid fa-cog"></i>
+            <i class="bi bi-gear"></i>
             Built-in
             <span class="section-count">{{ builtInProbes.length }}</span>
           </h6>
@@ -378,7 +423,7 @@ const generalProbes = computed(() => {
                 </div>
                 <div class="probe-badge">
                   <span class="badge badge-secondary">
-                    <i class="fa-solid fa-lock"></i>
+                    <i class="bi bi-lock"></i>
                     System
                   </span>
                 </div>
@@ -390,7 +435,7 @@ const generalProbes = computed(() => {
         <!-- Server/Collector Probes -->
         <div v-if="serverProbes.length > 0" class="probe-section">
           <h6 class="section-title">
-            <i class="fa-solid fa-server"></i>
+            <i class="bi bi-server"></i>
             Servers & Collectors
             <span class="section-count">{{ serverProbes.length }}</span>
           </h6>
@@ -404,14 +449,14 @@ const generalProbes = computed(() => {
                   <h6 class="probe-type">{{ getProbeTypeLabel(probe) }}</h6>
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
                   <div v-if="probe.config?.port" class="probe-target">
-                    <i class="fa-solid fa-ethernet"></i>
+                    <i class="bi bi-ethernet"></i>
                     <span class="target-label">Port:</span>
                     <span class="target-value">{{ probe.config.port }}</span>
                   </div>
                 </div>
                 <div class="probe-badge">
                   <span class="badge badge-primary">
-                    <i class="fa-solid fa-tower-broadcast"></i>
+                    <i class="bi bi-broadcast-pin"></i>
                     Server
                   </span>
                 </div>
@@ -423,12 +468,12 @@ const generalProbes = computed(() => {
         <!-- General Probes -->
         <div v-if="generalProbes.length > 0" class="probe-section">
           <h6 class="section-title">
-            <i class="fa-solid fa-cubes"></i>
+            <i class="bi bi-boxes"></i>
             Probes
             <span class="section-count">{{ generalProbes.length }}</span>
           </h6>
           <div class="probes-grid">
-            <div v-for="probe in generalProbes" :key="probe.id" class="probe-card">
+            <div v-for="probe in generalProbes" :key="probe.id" class="probe-card" @click="openProbeDetails(probe)">
               <div class="probe-header">
                 <div class="probe-icon" :class="`icon-${getProbeColor(probe)}`">
                   <i :class="getProbeIcon(probe)"></i>
@@ -436,25 +481,157 @@ const generalProbes = computed(() => {
                 <div class="probe-info">
                   <h6 class="probe-type">{{ getProbeTypeLabel(probe) }}</h6>
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
-                  <div v-if="getTargetDisplay(probe)" class="probe-target">
-                    <i :class="getTargetDisplay(probe).type === 'agent' ? 'fa-solid fa-robot' : 'fa-solid fa-bullseye'"></i>
-                    <span class="target-label">{{ getTargetDisplay(probe).name }}:</span>
-                    <span class="target-value">{{ getTargetDisplay(probe).value }}</span>
+                  <!-- Target display section -->
+                  <div v-if="hasTargets(probe)" class="probe-targets">
+                    <div 
+                      v-for="(targetInfo, idx) in getTargetInfos(probe).slice(0, 2)" 
+                      :key="idx" 
+                      class="target-pill"
+                      :class="`target-${targetInfo.type}`"
+                      :title="targetInfo.value"
+                    >
+                      <i :class="targetInfo.icon"></i>
+                      <span class="target-type">{{ targetInfo.label }}:</span>
+                      <span class="target-text">{{ truncateText(targetInfo.value) }}</span>
+                    </div>
+                    <div v-if="getTargetInfos(probe).length > 2" class="target-pill target-more">
+                      +{{ getTargetInfos(probe).length - 2 }} more
+                    </div>
                   </div>
                 </div>
-                <router-link
-                    :to="`/probe/${probe.id}/delete`"
-                    class="probe-action delete"
-                    title="Remove probe"
-                >
-                  <i class="fa-solid fa-trash"></i>
-                </router-link>
+                <div class="probe-actions">
+                  <button 
+                    class="probe-action info" 
+                    title="View details"
+                    @click.stop="openProbeDetails(probe)"
+                  >
+                    <i class="bi bi-info-circle"></i>
+                  </button>
+                  <router-link
+                      :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${probe.id}/delete`"
+                      class="probe-action delete"
+                      title="Remove probe"
+                      @click.stop
+                  >
+                    <i class="bi bi-trash"></i>
+                  </router-link>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Probe Details Modal -->
+    <Teleport to="body">
+      <div v-if="state.showProbeModal && state.selectedProbe" class="modal-backdrop" @click="closeProbeModal">
+        <div class="modal-dialog" @click.stop>
+          <div class="modal-header">
+            <div class="modal-title-row">
+              <div class="modal-icon" :class="`icon-${getProbeColor(state.selectedProbe)}`">
+                <i :class="getProbeIcon(state.selectedProbe)"></i>
+              </div>
+              <div>
+                <h5 class="modal-title">{{ getProbeTypeLabel(state.selectedProbe) }}</h5>
+                <p class="modal-subtitle">{{ getProbeDescription(state.selectedProbe) }}</p>
+              </div>
+            </div>
+            <button class="modal-close" @click="closeProbeModal">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          
+          <div class="modal-body">
+            <!-- Status Badge -->
+            <div class="detail-section">
+              <div class="status-badge" :class="state.selectedProbe.enabled ? 'enabled' : 'disabled'">
+                <i :class="state.selectedProbe.enabled ? 'bi bi-check-circle-fill' : 'bi bi-pause-circle-fill'"></i>
+                {{ state.selectedProbe.enabled ? 'Enabled' : 'Disabled' }}
+              </div>
+            </div>
+
+            <!-- Configuration Details -->
+            <div class="detail-section">
+              <h6 class="detail-label">Configuration</h6>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-key">Interval</span>
+                  <span class="detail-value">{{ formatInterval(state.selectedProbe.interval_sec) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-key">Timeout</span>
+                  <span class="detail-value">{{ state.selectedProbe.timeout_sec }}s</span>
+                </div>
+                <div v-if="state.selectedProbe.count" class="detail-item">
+                  <span class="detail-key">Count</span>
+                  <span class="detail-value">{{ state.selectedProbe.count }}</span>
+                </div>
+                <div v-if="state.selectedProbe.duration_sec" class="detail-item">
+                  <span class="detail-key">Duration</span>
+                  <span class="detail-value">{{ state.selectedProbe.duration_sec }}s</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Targets -->
+            <div v-if="hasTargets(state.selectedProbe)" class="detail-section">
+              <h6 class="detail-label">Targets ({{ state.selectedProbe.targets.length }})</h6>
+              <div class="targets-list">
+                <div 
+                  v-for="(targetInfo, idx) in getTargetInfos(state.selectedProbe)" 
+                  :key="idx" 
+                  class="target-row"
+                  :class="`target-${targetInfo.type}`"
+                >
+                  <i :class="targetInfo.icon"></i>
+                  <span class="target-label-modal">{{ targetInfo.label }}</span>
+                  <span class="target-value-modal">{{ targetInfo.value }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Timestamps -->
+            <div class="detail-section">
+              <h6 class="detail-label">Timestamps</h6>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-key">Created</span>
+                  <span class="detail-value">{{ formatDate(state.selectedProbe.created_at) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-key">Updated</span>
+                  <span class="detail-value">{{ formatDate(state.selectedProbe.updated_at) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Probe ID -->
+            <div class="detail-section">
+              <div class="detail-item">
+                <span class="detail-key">Probe ID</span>
+                <span class="detail-value mono">{{ state.selectedProbe.id }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <p class="modal-hint">
+              <i class="bi bi-info-circle"></i>
+              To modify this probe, delete it and create a new one.
+            </p>
+            <router-link
+                :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${state.selectedProbe.id}/delete`"
+                class="btn btn-outline-danger"
+                @click="closeProbeModal"
+            >
+              <i class="bi bi-trash"></i> Delete Probe
+            </router-link>
+            <button class="btn btn-secondary" @click="closeProbeModal">Close</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>
@@ -831,6 +1008,79 @@ const generalProbes = computed(() => {
   line-height: 1.4;
 }
 
+/* Target display - container for multiple targets */
+.probe-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+/* Target pill base styles */
+.target-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  max-width: 220px;
+  cursor: default;
+  transition: all 0.15s ease;
+}
+
+.target-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.target-pill i {
+  font-size: 0.625rem;
+  flex-shrink: 0;
+}
+
+.target-type {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.target-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Agent targets - blue theme */
+.target-agent {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.target-agent i {
+  color: #3b82f6;
+}
+
+/* Group targets - purple theme */
+.target-group {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.target-group i {
+  color: #7c3aed;
+}
+
+/* Literal targets - gray/neutral theme */
+.target-literal {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.target-literal i {
+  color: #6b7280;
+}
+
+/* Legacy single target display (keep for backward compatibility) */
 .probe-target {
   display: flex;
   align-items: center;
@@ -956,5 +1206,300 @@ const generalProbes = computed(() => {
   .empty-state-card {
     padding: 3rem 1.5rem;
   }
+}
+
+/* Probe Actions Container */
+.probe-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.probe-action.info {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.probe-action.info:hover {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+/* More pill for truncated targets */
+.target-more {
+  background: #f9fafb;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Modal Styles */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-dialog {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.25rem;
+  border-bottom: 1px solid #e5e7eb;
+  gap: 1rem;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.modal-subtitle {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.813rem;
+  color: #6b7280;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  cursor: pointer;
+  color: #9ca3af;
+  border-radius: 6px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.modal-close:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.detail-section {
+  margin-bottom: 1.25rem;
+}
+
+.detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.detail-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.5rem 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.detail-key {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.detail-value.mono {
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 0.813rem;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.813rem;
+  font-weight: 500;
+}
+
+.status-badge.enabled {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.disabled {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge i {
+  font-size: 0.875rem;
+}
+
+/* Targets List in Modal */
+.targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.813rem;
+}
+
+.target-row i {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.target-label-modal {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.target-value-modal {
+  flex: 1;
+  word-break: break-all;
+}
+
+/* Target row colors */
+.target-row.target-agent {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.target-row.target-agent i {
+  color: #3b82f6;
+}
+
+.target-row.target-group {
+  background: #f5f3ff;
+  color: #5b21b6;
+}
+
+.target-row.target-group i {
+  color: #7c3aed;
+}
+
+.target-row.target-literal {
+  background: #f9fafb;
+  color: #374151;
+}
+
+.target-row.target-literal i {
+  color: #6b7280;
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.modal-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.modal-hint i {
+  color: #9ca3af;
+}
+
+.modal-footer .btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+/* Make probe cards clickable */
+.probe-card:not(.skeleton) {
+  cursor: pointer;
 }
 </style>

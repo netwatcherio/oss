@@ -2,37 +2,29 @@
 import { onMounted, onUnmounted, reactive, ref, watch, computed } from "vue";
 import type {
   Agent,
-  AgentGroup,
-  Probe,
-  ProbeConfig, 
-  ProbeData, 
-  ProbeDataRequest,
-  ProbeTarget,
-  ProbeType,
-  SelectOption,
   Workspace,
-  SpeedTestPLoss,
-  SpeedTestServer, 
-  SpeedTestTestDuration
+  SelectOption,
 } from "@/types";
-import core from "@/core";
+import { useRouter } from "vue-router";
 import Title from "@/components/Title.vue";
+import { AgentService, WorkspaceService, SpeedtestService, type SpeedtestServer } from "@/services/apiService";
+
+const router = useRouter();
 
 const state = reactive({
   site: {} as Workspace,
   ready: false,
   loading: true,
   agent: {} as Agent,
+  workspaceId: '' as string,
+  agentId: '' as string,
   selected: null as SelectOption | null,
   options: [] as SelectOption[],
-  probe: {} as Probe,
-  probeConfig: {} as ProbeConfig,
-  probeTarget: {} as ProbeTarget,
-  speedTestServers: {} as SpeedTestServer[],
+  servers: [] as SpeedtestServer[],
   customServerEnable: false,
   customServer: '',
-  speedtestProbe: {} as Probe,
-  submitting: false
+  submitting: false,
+  error: '' as string
 })
 
 // Refs for the searchable dropdown
@@ -115,56 +107,45 @@ function clearSelection() {
   isDropdownOpen.value = false;
 }
 
-const router = core.router()
-
 onMounted(async () => {
-  let id = router.currentRoute.value.params["idParam"] as string
-  if (!id) return
+  const wID = router.currentRoute.value.params["wID"] as string;
+  const aID = router.currentRoute.value.params["aID"] as string;
+  if (!wID || !aID) {
+    state.error = 'Missing workspace or agent ID';
+    state.loading = false;
+    return;
+  }
+
+  state.workspaceId = wID;
+  state.agentId = aID;
 
   try {
-    const probeRes = await probeService.getProbe(id);
-    let pps = probeRes.data as Probe[]
-    state.probe = pps[0]
+    // Load workspace and agent info
+    const [workspace, agent] = await Promise.all([
+      WorkspaceService.get(wID),
+      AgentService.get(wID, aID),
+    ]);
 
-    const agentRes = await agentService.getAgent(state.probe.agent);
-    state.agent = agentRes.data as Agent
+    state.site = workspace;
+    state.agent = agent;
 
-    const siteRes = await siteService.getSite(state.agent.site);
-    state.site = siteRes.data as Workspace
+    // Load cached speedtest servers from controller
+    const serversRes = await SpeedtestService.listServers(wID, aID);
+    state.servers = serversRes.data;
 
-    let req = {limit: 1, recent: true} as ProbeDataRequest
-    const dataRes = await probeService.getProbeData(state.probe.id, req);
-    let probeData = dataRes.data as ProbeData[]
-
-    if (probeData[0]?.data) {
-      for(let item in probeData[0].data){
-        let srv = convertToSpeedTestServer(probeData[0].data[item])
-        let displayText = `${srv.distance}km - ${srv.sponsor} (${srv.name}, ${srv.country})`
-        state.options.push({value: srv.id, text: displayText} as SelectOption)
-      }
+    // Build dropdown options
+    for (const srv of state.servers) {
+      const displayText = `${srv.distance.toFixed(1)}km - ${srv.sponsor} (${srv.name}, ${srv.country})`;
+      state.options.push({ value: srv.server_id, text: displayText });
     }
 
-    // Sort options by distance
-    state.options.sort((a, b) => {
-      const distA = parseInt(a.text.split('km')[0]);
-      const distB = parseInt(b.text.split('km')[0]);
-      return distA - distB;
-    });
-
-    const probesRes = await probeService.getAgentProbes(state.agent.id);
-    let probes = probesRes.data as Probe[]
-    for(let item in probes){
-      if(probes[item].type == "SPEEDTEST"){
-        state.speedtestProbe = probes[item]
-        break
-      }
-    }
-
-    state.ready = true
-    state.loading = false
+    // Already sorted by distance from API
+    state.ready = true;
+    state.loading = false;
     filteredOptions.value = state.options;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error loading data:', error);
+    state.error = error?.message || 'Failed to load data';
     state.loading = false;
   }
 
@@ -229,27 +210,41 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
 })
 
-function onCreate(response: any) {
-  router.push("/agent/" + state.agent.id + "/speedtests")
+function onCreate() {
+  router.push(`/workspaces/${state.workspaceId}/agents/${state.agentId}/speedtests`);
 }
 
-function onError(response: any) {
+function onError(error: any) {
   state.submitting = false;
-  alert('Error: ' + response)
+  state.error = typeof error === 'string' ? error : (error?.message || 'An error occurred');
 }
 
 async function submit() {
   if (!isFormValid.value || state.submitting) return;
 
   state.submitting = true;
+  state.error = '';
 
   try {
+    // Get server info for display name
+    let serverId = '';
+    let serverName = '';
+
     if (state.customServerEnable) {
-      await probeService.updateFirstProbeTarget(state.speedtestProbe.id, state.customServer.trim());
+      serverId = state.customServer.trim();
+      serverName = 'Custom Server';
     } else if (state.selected) {
-      await probeService.updateFirstProbeTarget(state.speedtestProbe.id, state.selected.value);
+      serverId = state.selected.value;
+      serverName = state.selected.text;
     }
-    onCreate(null);
+
+    // Queue the speedtest
+    await SpeedtestService.queueTest(state.workspaceId, state.agentId, {
+      server_id: serverId,
+      server_name: serverName,
+    });
+
+    onCreate();
   } catch (error) {
     onError(error);
   }
@@ -268,7 +263,7 @@ async function submit() {
         :subtitle="`Configure and run a network speed test`"
         title="New Speedtest">
       <div class="status-indicator">
-        <i class="fa-solid fa-gauge-high"></i>
+        <i class="bi bi-speedometer2"></i>
         Ready to Test
       </div>
     </Title>
@@ -287,7 +282,7 @@ async function submit() {
       <div class="form-section" :class="{ 'disabled': state.customServerEnable }">
         <div class="section-header">
           <h5 class="section-title">
-            <i class="fa-solid fa-server"></i>
+            <i class="bi bi-server"></i>
             Select Test Server
           </h5>
           <span class="server-count" v-if="state.options.length > 0">
@@ -297,7 +292,7 @@ async function submit() {
 
         <div class="server-selector" ref="dropdownRef">
           <div class="search-container">
-            <i class="fa-solid fa-search search-icon"></i>
+            <i class="bi bi-search search-icon"></i>
             <input
                 ref="inputRef"
                 type="text"
@@ -313,19 +308,19 @@ async function submit() {
               class="clear-btn"
               type="button"
             >
-              <i class="fa-solid fa-times"></i>
+              <i class="bi bi-x-lg"></i>
             </button>
           </div>
 
           <!-- Selected Server Display -->
           <div v-if="state.selected && !state.customServerEnable" class="selected-server">
             <div class="server-icon">
-              <i class="fa-solid fa-server"></i>
+              <i class="bi bi-server"></i>
             </div>
             <div class="server-details">
               <div class="server-name">{{ selectedServer?.sponsor }}</div>
               <div class="server-location">
-                <i class="fa-solid fa-location-dot"></i>
+                <i class="bi bi-geo-alt-fill"></i>
                 {{ selectedServer?.location }}
                 <span class="server-distance">{{ selectedServer?.distance }} away</span>
               </div>
@@ -335,7 +330,7 @@ async function submit() {
           <!-- Dropdown Menu -->
           <div class="dropdown-menu custom-dropdown" :class="{ show: isDropdownOpen && !state.customServerEnable }">
             <div v-if="filteredOptions.length === 0" class="no-results">
-              <i class="fa-solid fa-search"></i>
+              <i class="bi bi-search"></i>
               <p>No servers found matching "{{ searchQuery }}"</p>
             </div>
             <div v-else class="dropdown-list">
@@ -349,7 +344,7 @@ async function submit() {
               >
                 <div class="option-content">
                   <div class="option-main">
-                    <i class="fa-solid fa-server"></i>
+                    <i class="bi bi-server"></i>
                     <span>{{ option.text.split(' - ')[1] || option.text }}</span>
                   </div>
                   <div class="option-distance">
@@ -366,7 +361,7 @@ async function submit() {
       <div class="form-section">
         <div class="section-header">
           <h5 class="section-title">
-            <i class="fa-solid fa-cog"></i>
+            <i class="bi bi-gear"></i>
             Custom Server Configuration
           </h5>
         </div>
@@ -389,7 +384,7 @@ async function submit() {
             <div v-if="state.customServerEnable" class="custom-input-container">
               <div class="input-group">
                 <span class="input-group-text">
-                  <i class="fa-solid fa-hashtag"></i>
+                  <i class="bi bi-hash"></i>
                 </span>
                 <input 
                   id="serverID" 
@@ -413,7 +408,7 @@ async function submit() {
           :to="`/agent/${state.agent.id}/speedtests`" 
           class="btn btn-outline-secondary"
         >
-          <i class="fa-solid fa-times"></i>
+          <i class="bi bi-x-lg"></i>
           Cancel
         </router-link>
         <button 
@@ -422,7 +417,7 @@ async function submit() {
           :disabled="!isFormValid || state.submitting"
         >
           <span v-if="!state.submitting">
-            <i class="fa-solid fa-play"></i>
+            <i class="bi bi-play-fill"></i>
             Run Speedtest
           </span>
           <span v-else>

@@ -17,6 +17,12 @@
         <div class="stat-value">{{ statistics.min.toFixed(1) }} / {{ statistics.max.toFixed(1) }} ms</div>
       </div>
       <div class="stat-card">
+        <div class="stat-label">P95 Latency</div>
+        <div class="stat-value" :class="getLatencyClass(statistics.p95)">
+          {{ statistics.p95.toFixed(1) }} ms
+        </div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">Packet Loss</div>
         <div class="stat-value" :class="getPacketLossClass(statistics.avgPacketLoss)">
           {{ statistics.avgPacketLoss.toFixed(1) }}%
@@ -68,7 +74,6 @@ import type { PropType } from 'vue';
 import type { PingResult } from '@/types';
 
 const NS_TO_MS = 1e-6;
-const maxAllowedGap = 1000 * 90; // 90 seconds
 
 function toMs(ns: number): number {
   return ns * NS_TO_MS;
@@ -84,6 +89,10 @@ export default defineComponent({
     pingResults: {
       type: Array as PropType<PingResult[]>,
       required: true
+    },
+    intervalSec: {
+      type: Number,
+      default: 60 // Default to 60 seconds if not provided
     }
   },
   setup(props) {
@@ -91,6 +100,13 @@ export default defineComponent({
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref<'all' | '1h' | '6h' | '24h' | '7d'>('all');
     const showAnnotations = ref(true);
+
+    // Calculate the maximum allowed gap dynamically based on probe interval
+    // Use 1.5x the interval + 30s buffer to allow for timing variations
+    const maxAllowedGap = computed(() => {
+      const intervalMs = (props.intervalSec || 60) * 1000;
+      return Math.max(intervalMs * 1.5 + 30000, 90000); // At least 90 seconds minimum
+    });
 
     const timeRanges = [
       { label: '1H', value: '1h' as const },
@@ -105,19 +121,34 @@ export default defineComponent({
       const rows = props.pingResults ?? [];
       if (rows.length === 0) return null;
 
-      const avgRtts = rows.map(d => toMs(d.avg_rtt));
+      const avgRtts = rows.map(d => toMs(d.avg_rtt)).sort((a, b) => a - b);
       const minRtts = rows.map(d => toMs(d.min_rtt));
       const maxRtts = rows.map(d => toMs(d.max_rtt));
       const packetLosses = rows.map(d => Number(d.packet_loss) || 0);
       const jitter = rows.reduce((sum, d) => sum + toMs(d.std_dev_rtt), 0) / rows.length;
+      
+      // Calculate percentiles for better insights
+      const p50Idx = Math.floor(avgRtts.length * 0.5);
+      const p95Idx = Math.floor(avgRtts.length * 0.95);
+      const p99Idx = Math.floor(avgRtts.length * 0.99);
+      
+      // Total packets for context
+      const totalSent = rows.reduce((sum, d) => sum + (d.packets_sent || 0), 0);
+      const totalRecv = rows.reduce((sum, d) => sum + (d.packets_recv || 0), 0);
 
       return {
         current: avgRtts[avgRtts.length - 1] || 0,
         average: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
         min: Math.min(...minRtts),
         max: Math.max(...maxRtts),
+        p50: avgRtts[p50Idx] || 0,
+        p95: avgRtts[p95Idx] || 0,
+        p99: avgRtts[p99Idx] || 0,
         avgPacketLoss: packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length,
-        jitter
+        jitter,
+        totalSent,
+        totalRecv,
+        samples: rows.length
       };
     });
 
@@ -209,7 +240,7 @@ export default defineComponent({
         if (i === 0) return;
         const prev = arr[i - 1];
         const gap = ts(cur) - ts(prev);
-        if (gap > maxAllowedGap) {
+        if (gap > maxAllowedGap.value) {
           annotations.xaxis!.push({
             x: ts(prev),
             x2: ts(cur),

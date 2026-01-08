@@ -379,13 +379,13 @@ function getStatusColor(status?: string): string {
 function getStatusIcon(status?: string): string {
   switch (status) {
     case 'healthy':
-      return 'fa-check-circle';
+      return 'bi-check-circle-fill';
     case 'warning':
-      return 'fa-exclamation-triangle';
+      return 'bi-exclamation-triangle-fill';
     case 'critical':
-      return 'fa-times-circle';
+      return 'bi-x-circle-fill';
     default:
-      return 'fa-question-circle';
+      return 'bi-question-circle';
   }
 }
 
@@ -572,7 +572,7 @@ onMounted(async () => {
         :subtitle="state.agent.location || 'Agent Information'">
       <div class="d-flex flex-wrap gap-2">
         <div class="status-badge" :class="isInitializing ? 'loading' : (isOnline ? 'online' : 'offline')">
-          <i :class="isInitializing ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-circle'"></i>
+          <i :class="isInitializing ? 'bi bi-arrow-repeat spin-animation' : 'bi bi-circle-fill'"></i>
           {{ isInitializing ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
         </div>
         <router-link
@@ -595,7 +595,7 @@ onMounted(async () => {
     <div class="quick-stats">
       <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon cpu">
-          <i class="fa-solid fa-microchip"></i>
+          <i class="bi bi-cpu"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
@@ -607,7 +607,7 @@ onMounted(async () => {
       </div>
       <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon memory">
-          <i class="fa-solid fa-memory"></i>
+          <i class="bi bi-memory"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
@@ -619,7 +619,7 @@ onMounted(async () => {
       </div>
       <div class="stat-item" :class="{'loading': loadingState.probes}">
         <div class="stat-icon network">
-          <i class="fa-solid fa-network-wired"></i>
+          <i class="bi bi-diagram-3"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
@@ -631,7 +631,7 @@ onMounted(async () => {
       </div>
       <div class="stat-item" :class="{'loading': loadingState.systemInfo}">
         <div class="stat-icon uptime">
-          <i class="fa-solid fa-clock"></i>
+          <i class="bi bi-clock"></i>
         </div>
         <div class="stat-content">
           <div class="stat-value">
@@ -645,7 +645,7 @@ onMounted(async () => {
 
     <!-- Error Messages -->
     <div v-if="Object.values(errors).some(e => e !== null)" class="alert alert-warning mt-3">
-      <i class="fa-solid fa-exclamation-triangle"></i>
+      <i class="bi bi-exclamation-triangle"></i>
       <strong>Some data could not be loaded:</strong>
       <ul class="mb-0 mt-2">
         <li v-for="(error, key) in errors" v-if="error" :key="key">{{ error }}</li>
@@ -654,7 +654,7 @@ onMounted(async () => {
 
     <!-- Main Content -->
     <div v-if="!state.agent.initialized && !loadingState.agent" class="empty-state">
-      <i class="fa-solid fa-exclamation-triangle text-warning"></i>
+      <i class="bi bi-exclamation-triangle-fill text-warning"></i>
       <h5>Agent Not Initialized</h5>
       <p>This agent needs to be initialized before it can be used.</p>
     </div>
@@ -664,14 +664,14 @@ onMounted(async () => {
       <div class="content-section probes-section">
         <div class="section-header">
           <h5 class="section-title">
-            <i class="fa-solid fa-diagram-project"></i>
+            <i class="bi bi-diagram-2"></i>
             Monitoring Probes
           </h5>
           <span class="badge bg-primary" v-if="!loadingState.probes">
             {{ activeProbesCount }}/{{ totalProbesCount }} Active ({{ probeStats.percentage }}%)
           </span>
           <span class="badge bg-secondary" v-else>
-            <i class="fa-solid fa-spinner fa-spin"></i> Loading
+            <i class="bi bi-arrow-repeat spin-animation"></i> Loading
           </span>
         </div>
 
@@ -701,12 +701,12 @@ onMounted(async () => {
             <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${g.probes[0]?.id || ''}`" class="probe-link">
               <div class="probe-header">
                 <div class="probe-icon">
-                  <i :class="g.kind === 'agent' ? 'fa-solid fa-robot'
-                  : g.kind === 'host' ? 'fa-solid fa-diagram-project'
-                  : 'fa-solid fa-microchip'"></i>
+                  <i :class="g.kind === 'agent' ? 'bi bi-robot'
+                  : g.kind === 'host' ? 'bi bi-diagram-2'
+                  : 'bi bi-cpu'"></i>
                 </div>
                 <div class="probe-status">
-                  <i :class="`fa-solid ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
+                  <i :class="`bi ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
                 </div>
               </div>
 
@@ -728,25 +728,25 @@ onMounted(async () => {
 
                 <div class="probe-stats" v-if="state.groupStats[g.key]">
                   <div v-if="state.groupStats[g.key].isLoading" class="probe-stat">
-                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <i class="bi bi-arrow-repeat spin-animation"></i>
                     <span>Loading stats...</span>
                   </div>
                   <template v-else-if="state.groupStats[g.key].hasData">
                     <div class="probe-stat" v-if="state.groupStats[g.key].successRate !== undefined">
-                      <i class="fa-solid fa-chart-line"></i>
+                      <i class="bi bi-graph-up"></i>
                       <span>{{ state.groupStats[g.key].successRate.toFixed(1) }}% success</span>
                     </div>
                     <div class="probe-stat" v-if="state.groupStats[g.key].avgResponseTime !== undefined">
-                      <i class="fa-solid fa-stopwatch"></i>
+                      <i class="bi bi-stopwatch"></i>
                       <span>{{ state.groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
                     </div>
                     <div class="probe-stat" v-if="state.groupStats[g.key].lastRun">
-                      <i class="fa-regular fa-clock"></i>
+                      <i class="bi bi-clock"></i>
                       <span>{{ since(state.groupStats[g.key].lastRun, true) }}</span>
                     </div>
                   </template>
                   <div v-else class="probe-stat text-muted">
-                    <i class="fa-solid fa-info-circle"></i>
+                    <i class="bi bi-info-circle"></i>
                     <span>No ping data available</span>
                   </div>
                 </div>
@@ -758,14 +758,14 @@ onMounted(async () => {
         </div>
 
         <div v-else-if="!loadingState.probes" class="empty-state">
-          <i class="fa-solid fa-diagram-project"></i>
+          <i class="bi bi-diagram-2"></i>
           <h5>No Probes Configured</h5>
           <p>Create your first probe to start monitoring</p>
           <router-link
               v-if="state.agent.id && state.workspace.id"
               :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`"
               class="btn btn-primary">
-            <i class="fa-solid fa-plus"></i> Create Probe
+            <i class="bi bi-plus-lg"></i> Create Probe
           </router-link>
         </div>
       </div>
@@ -776,7 +776,7 @@ onMounted(async () => {
         <div class="info-card" :class="{'loading': loadingState.networkInfo}">
           <div class="card-header">
             <h5 class="card-title">
-              <i class="fa-solid fa-network-wired"></i>
+              <i class="bi bi-diagram-3"></i>
               Network Information
             </h5>
           </div>
@@ -830,7 +830,7 @@ onMounted(async () => {
           </div>
           <div class="card-footer" v-if="state.agent.id">
             <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-secondary">
-              <i class="fa-solid fa-gauge-high"></i> View Speedtests
+              <i class="bi bi-speedometer2"></i> View Speedtests
             </router-link>
           </div>
         </div>
@@ -839,7 +839,7 @@ onMounted(async () => {
         <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
-              <i class="fa-solid fa-server"></i>
+              <i class="bi bi-server"></i>
               System Resources
             </h5>
           </div>
@@ -906,7 +906,7 @@ onMounted(async () => {
         <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
-              <i class="fa-solid fa-desktop"></i>
+              <i class="bi bi-display"></i>
               System Information
             </h5>
           </div>
@@ -975,14 +975,14 @@ onMounted(async () => {
         <div class="info-card" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
-              <i class="fa-solid fa-ethernet"></i>
+              <i class="bi bi-ethernet"></i>
               Network Interfaces
             </h5>
           </div>
           <div class="card-content">
             <ElementExpand title="MAC Addresses" code :disabled="loadingState.systemInfo || !hasSystemData">
               <span v-if="loadingState.systemInfo" class="badge bg-secondary">
-                <i class="fa-solid fa-spinner fa-spin"></i> Loading
+                <i class="bi bi-arrow-repeat spin-animation"></i> Loading
               </span>
               <span v-else-if="hasSystemData && state.systemInfo.hostInfo?.mac" class="badge bg-secondary">
                 {{ Object.keys(state.systemInfo.hostInfo.mac).length }} interfaces
@@ -1589,5 +1589,15 @@ onMounted(async () => {
   .probes-grid {
     padding: 1rem;
   }
+}
+
+/* Spin Animation for Bootstrap Icons */
+.spin-animation {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

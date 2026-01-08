@@ -104,7 +104,7 @@ async function submit(e: MouseEvent) {
           <div class="col-md-7 col-lg-12 col-xl-9">
             <div>
               <router-link to="/" class="navbar-brand">
-        <i class="fa-solid fa-eye brand-icon"></i>
+        <i class="bi bi-eye brand-icon"></i>
         <span class="brand-text">netwatcher.io</span>
       </router-link>
             </div>

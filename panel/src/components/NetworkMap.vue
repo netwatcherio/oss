@@ -28,10 +28,22 @@ export default {
       required: true,
     },
   },
-  setup(props) {
+  emits: ['node-select'],
+  setup(props, { emit }) {
     const containerRef = ref<HTMLElement | null>(null);
     const colorMode = ref<'combined' | 'latency' | 'packetLoss'>('combined');
     const layoutMode = ref<'force' | 'hierarchical'>('hierarchical');
+    
+    const onNodeClick = (node: any) => {
+      emit('node-select', {
+        id: node.id,
+        hostname: node.hostname,
+        ip: node.ip,
+        hopNumber: node.hopNumber,
+        latency: node.latency,
+        packetLoss: node.packetLoss,
+      });
+    };
     
     let visualization: NetworkVisualization | null = null;
 
@@ -59,7 +71,8 @@ export default {
         containerRef.value,
         props.mtrResults,
         colorMode.value,
-        layoutMode.value
+        layoutMode.value,
+        onNodeClick
       );
     };
 
@@ -88,25 +101,28 @@ export default {
 // Separate the D3 logic into a class for better organization
 class NetworkVisualization {
   private container: HTMLElement;
-  private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-  private g: d3.Selection<SVGGElement, unknown, null, undefined>;
-  private simulation: d3.Simulation<Node, Link>;
-  private zoom: d3.ZoomBehavior<Element, unknown>;
-  private tooltip: d3.Selection<HTMLDivElement, unknown, null, undefined>;
+  private svg!: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+  private g!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private simulation!: d3.Simulation<Node, Link>;
+  private zoom!: d3.ZoomBehavior<Element, unknown>;
+  private tooltip!: d3.Selection<HTMLDivElement, unknown, null, undefined>;
   private nodes: Node[] = [];
   private links: Link[] = [];
   private width: number;
   private height: number;
   private nodeRadius = 22;
   private margin = { top: 60, right: 20, bottom: 100, left: 20 };
+  private onNodeClick?: (node: Node) => void;
 
   constructor(
     container: HTMLElement,
     mtrResults: MtrResult[],
     private colorMode: 'combined' | 'latency' | 'packetLoss',
-    private layoutMode: 'force' | 'hierarchical'
+    private layoutMode: 'force' | 'hierarchical',
+    onNodeClick?: (node: Node) => void
   ) {
     this.container = container;
+    this.onNodeClick = onNodeClick;
     this.width = container.clientWidth - this.margin.left - this.margin.right;
     this.height = 600 - this.margin.top - this.margin.bottom;
     
@@ -287,11 +303,15 @@ class NetworkVisualization {
       .style('pointer-events', 'none')
       .text(d => d.label);
 
-    // Add hover interactions
+    // Add hover and click interactions
     nodeSelection
       .on('mouseenter', (event, d) => this.showTooltip(event, d))
       .on('mousemove', (event) => this.moveTooltip(event))
-      .on('mouseleave', () => this.hideTooltip());
+      .on('mouseleave', () => this.hideTooltip())
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        if (this.onNodeClick) this.onNodeClick(d);
+      });
 
     // Update positions on tick
     this.simulation.on('tick', () => {

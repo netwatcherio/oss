@@ -319,6 +319,116 @@ func Delete(ctx context.Context, db *gorm.DB, id uint) error {
 }
 
 // -----------------------------
+// Invite-related functions
+// -----------------------------
+
+// IsPendingUser checks if a user is in pending state (no password set)
+func IsPendingUser(u *User) bool {
+	return u.PasswordHash == ""
+}
+
+// CreatePendingUser creates a user without a password (invited state)
+// This user cannot login until they complete registration
+func CreatePendingUser(ctx context.Context, db *gorm.DB, email, name string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, errors.New("email is required")
+	}
+
+	// Check if user already exists
+	var existing User
+	if err := db.WithContext(ctx).Where("email = ?", email).First(&existing).Error; err == nil {
+		// User exists - return them
+		return &existing, nil
+	}
+
+	user := &User{
+		Email:        email,
+		PasswordHash: "", // empty = pending
+		Name:         strings.TrimSpace(name),
+		Role:         "USER",
+		Labels:       coalesceJSON(nil),
+		Metadata:     coalesceJSON(nil),
+	}
+
+	if err := db.WithContext(ctx).Create(user).Error; err != nil {
+		// Handle unique constraint race
+		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "unique") {
+			// Try to get the existing user
+			if err := db.WithContext(ctx).Where("email = ?", email).First(&existing).Error; err == nil {
+				return &existing, nil
+			}
+			return nil, ErrDuplicateEmail
+		}
+		return nil, err
+	}
+
+	return user, nil
+}
+
+// GetOrCreatePendingUser gets an existing user by email or creates a pending one
+func GetOrCreatePendingUser(ctx context.Context, db *gorm.DB, email, name string) (*User, bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, false, errors.New("email is required")
+	}
+
+	// Try to get existing user
+	var existing User
+	if err := db.WithContext(ctx).Where("email = ?", email).First(&existing).Error; err == nil {
+		return &existing, false, nil // false = not created
+	}
+
+	// Create pending user
+	user, err := CreatePendingUser(ctx, db, email, name)
+	if err != nil {
+		return nil, false, err
+	}
+	return user, true, nil // true = created
+}
+
+// CompleteRegistration sets the password and name for a pending user
+func CompleteRegistration(ctx context.Context, db *gorm.DB, id uint, name, password string) error {
+	if strings.TrimSpace(password) == "" {
+		return errors.New("password cannot be empty")
+	}
+
+	var u User
+	if err := db.WithContext(ctx).First(&u, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	// Only allow completing registration if user has no password
+	if u.PasswordHash != "" {
+		return errors.New("user already has a password set")
+	}
+
+	pwHash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	updates := map[string]any{
+		"password_hash": pwHash,
+	}
+	if strings.TrimSpace(name) != "" {
+		updates["name"] = strings.TrimSpace(name)
+	}
+
+	res := db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// -----------------------------
 // Small util
 // -----------------------------
 

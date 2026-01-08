@@ -15,6 +15,7 @@ import core from "@/core";
 import Title from "@/components/Title.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
+import { AgentService, WorkspaceService, ProbeService, ProbeDataService } from "@/services/apiService";
 
 const state = reactive({
   site: {} as Workspace,
@@ -201,46 +202,53 @@ function formatTimeUntil(date: Date): string {
   return 'in less than a minute';
 }
 
-onMounted(() => {
-  let checkId = router.currentRoute.value.params["idParam"] as string
-  if (!checkId) return
+onMounted(async () => {
+  const workspaceId = router.currentRoute.value.params["wID"] as string;
+  const agentId = router.currentRoute.value.params["aID"] as string;
+  if (!workspaceId || !agentId) return;
 
-  agentService.getAgent(checkId).then(res => {
-    state.agent = res.data as Agent
+  try {
+    // Load workspace
+    const workspace = await WorkspaceService.get(workspaceId) as Workspace;
+    state.site = workspace;
 
-    siteService.getSite(state.agent.site).then(res => {
-      state.site = res.data as Workspace
-    })
+    // Load agent
+    const agent = await AgentService.get(workspaceId, agentId) as Agent;
+    state.agent = agent;
 
-    probeService.getAgentProbes(state.agent.id).then(res => {
-      let probes = res.data as Probe[]
-      for (let item in probes) {
-        if (probes[item].type == "SPEEDTEST") {
-          state.speedtestProbe = probes[item]
-          
-          // Check if there's a pending test
-          if (state.speedtestProbe.config?.target?.[0]?.target !== "ok") {
-            state.pendingTest = {
-              target: state.speedtestProbe.config.target[0].target,
-              time: state.speedtestProbe.config.pending ? new Date(state.speedtestProbe.config.pending) : new Date()
-            };
-          }
-          
-          let req = {limit: 25, recent: true} as ProbeDataRequest
-          probeService.getProbeData(state.speedtestProbe.id, req).then(res => {
-            for (let i in res.data as ProbeData[]) {
-              let convD = convertToSpeedTestResult(res.data[i].data)
-              state.speedtestData.push(convD)
-            }
-            state.ready = true
-            state.loading = false
-          })
-        } else if (probes[item].type == "SPEEDTEST_SERVERS") {
-          state.speedtestServerProbe = probes[item]
+    // Load probes for this agent
+    const probes = await ProbeService.list(workspaceId, agentId) as Probe[];
+    
+    for (const probe of probes) {
+      if (probe.type === "SPEEDTEST") {
+        state.speedtestProbe = probe;
+        
+        // Check if there's a pending test (using metadata instead of config)
+        const pendingTarget = probe.metadata?.pending_target as string | undefined;
+        if (pendingTarget && pendingTarget !== "ok") {
+          state.pendingTest = {
+            target: pendingTarget,
+            time: probe.metadata?.pending_time ? new Date(probe.metadata.pending_time as string) : new Date()
+          };
         }
+        
+        // Load speedtest data using ProbeDataService
+        const probeData = await ProbeDataService.byProbe(workspaceId, probe.id, { limit: 25 }) as ProbeData[];
+        for (const data of probeData) {
+          const convD = convertToSpeedTestResult(data.payload);
+          state.speedtestData.push(convD);
+        }
+        
+        state.ready = true;
+        state.loading = false;
+      } else if (probe.type === "SPEEDTEST_SERVERS") {
+        state.speedtestServerProbe = probe;
       }
-    })
-  })
+    }
+  } catch (error) {
+    console.error('Error loading speedtest data:', error);
+    state.loading = false;
+  }
 })
 
 const router = core.router()
@@ -261,7 +269,7 @@ const router = core.router()
           :to="`/agent/${state.speedtestServerProbe.id}/speedtest/new`" 
           class="btn btn-primary"
         >
-          <i class="fa-solid fa-gauge-high"></i>&nbsp;Run Speedtest
+          <i class="bi bi-speedometer2"></i>&nbsp;Run Speedtest
         </router-link>
       </div>
     </Title>
@@ -269,7 +277,7 @@ const router = core.router()
     <!-- Pending Test Notification -->
     <div v-if="state.pendingTest" class="pending-test-card">
       <div class="pending-icon">
-        <i class="fa-solid fa-clock"></i>
+        <i class="bi bi-clock"></i>
       </div>
       <div class="pending-content">
         <h6 class="pending-title">Speedtest Scheduled</h6>
@@ -277,13 +285,13 @@ const router = core.router()
           A speedtest is pending for server <strong>{{ state.pendingTest.target }}</strong>
         </p>
         <div class="pending-time">
-          <i class="fa-regular fa-clock"></i>
+          <i class="bi bi-clock"></i>
           Starting {{ formatTimeUntil(state.pendingTest.time) }}
         </div>
       </div>
       <div class="pending-actions">
         <button class="btn btn-sm btn-outline-secondary" disabled>
-          <i class="fa-solid fa-hourglass-half"></i>
+          <i class="bi bi-hourglass-split"></i>
           Waiting...
         </button>
       </div>
@@ -293,7 +301,7 @@ const router = core.router()
     <div class="stats-grid" v-if="state.ready && state.speedtestData.length > 0">
       <div class="stat-card">
         <div class="stat-icon download">
-          <i class="fa-solid fa-download"></i>
+          <i class="bi bi-download"></i>
         </div>
         <div class="stat-content">
           <div class="stat-label">Average Download</div>
@@ -303,7 +311,7 @@ const router = core.router()
       
       <div class="stat-card">
         <div class="stat-icon upload">
-          <i class="fa-solid fa-upload"></i>
+          <i class="bi bi-upload"></i>
         </div>
         <div class="stat-content">
           <div class="stat-label">Average Upload</div>
@@ -313,7 +321,7 @@ const router = core.router()
       
       <div class="stat-card">
         <div class="stat-icon latency">
-          <i class="fa-solid fa-stopwatch"></i>
+          <i class="bi bi-stopwatch"></i>
         </div>
         <div class="stat-content">
           <div class="stat-label">Average Latency</div>
@@ -323,7 +331,7 @@ const router = core.router()
       
       <div class="stat-card">
         <div class="stat-icon tests">
-          <i class="fa-solid fa-list-check"></i>
+          <i class="bi bi-list-check"></i>
         </div>
         <div class="stat-content">
           <div class="stat-label">Total Tests</div>
@@ -345,14 +353,14 @@ const router = core.router()
     <!-- Empty State -->
     <div v-else-if="state.ready && state.speedtestData.length === 0" class="content-card">
       <div class="empty-state">
-        <i class="fa-solid fa-gauge-high"></i>
+        <i class="bi bi-speedometer2"></i>
         <h5>No Speedtest Results</h5>
         <p>Run your first speedtest to start tracking network performance.</p>
         <router-link 
           :to="`/agent/${state.speedtestServerProbe.id}/speedtest/new`" 
           class="btn btn-primary"
         >
-          <i class="fa-solid fa-plus"></i> Run First Speedtest
+          <i class="bi bi-plus-lg"></i> Run First Speedtest
         </router-link>
       </div>
     </div>
@@ -377,11 +385,11 @@ const router = core.router()
           >
             <div class="test-info">
               <div class="test-time">
-                <i class="fa-regular fa-clock"></i>
+                <i class="bi bi-clock"></i>
                 {{ formatDate(test.timestamp) }}
               </div>
               <div class="test-server">
-                <i class="fa-solid fa-server"></i>
+                <i class="bi bi-server"></i>
                 {{ test.test_data[0].sponsor }} 
                 <span class="server-location">
                   ({{ test.test_data[0].name }}, {{ test.test_data[0].country }})
@@ -392,21 +400,21 @@ const router = core.router()
             
             <div class="test-metrics">
               <div class="metric" :class="'speed-' + getSpeedClass(test.test_data[0].dl_speed)">
-                <i class="fa-solid fa-download"></i>
+                <i class="bi bi-download"></i>
                 <span>{{ formatSpeed(test.test_data[0].dl_speed) }} Mbps</span>
               </div>
               <div class="metric" :class="'speed-' + getSpeedClass(test.test_data[0].ul_speed)">
-                <i class="fa-solid fa-upload"></i>
+                <i class="bi bi-upload"></i>
                 <span>{{ formatSpeed(test.test_data[0].ul_speed) }} Mbps</span>
               </div>
               <div class="metric" :class="'latency-' + getLatencyClass(test.test_data[0].latency)">
-                <i class="fa-solid fa-stopwatch"></i>
+                <i class="bi bi-stopwatch"></i>
                 <span>{{ formatLatency(test.test_data[0].latency) }} ms</span>
               </div>
             </div>
             
             <div class="test-toggle">
-              <i :class="isExpanded(state.speedtestProbe.id + test.timestamp.getTime()) ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'"></i>
+              <i :class="isExpanded(state.speedtestProbe.id + test.timestamp.getTime()) ? 'bi bi-chevron-up' : 'bi bi-chevron-down'"></i>
             </div>
           </div>
           

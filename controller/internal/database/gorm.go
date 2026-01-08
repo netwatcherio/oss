@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/speedtest"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 	"os"
@@ -170,6 +171,9 @@ func CreateIndexes(db *gorm.DB) error {
 
 		&probe.Probe{},  // TableName(): "probes"
 		&probe.Target{}, // TableName(): "probe_targets"
+
+		&speedtest.QueueItem{},    // TableName(): "speedtest_queue"
+		&speedtest.CachedServer{}, // TableName(): "agent_speedtest_servers"
 	); err != nil {
 		return fmt.Errorf("automigrate: %w", err)
 	}
@@ -206,6 +210,15 @@ func CreateIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_probe_targets_agent ON probe_targets (agent_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_targets_group ON probe_targets (group_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_targets_probe_agent ON probe_targets (probe_id, agent_id);`,
+
+		// speedtest_queue
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_agent ON speedtest_queue (agent_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_status ON speedtest_queue (status);`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_agent_status ON speedtest_queue (agent_id, status);`,
+
+		// agent_speedtest_servers
+		`CREATE UNIQUE INDEX IF NOT EXISTS ux_speedtest_servers_agent_server ON agent_speedtest_servers (agent_id, server_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_servers_agent ON agent_speedtest_servers (agent_id);`,
 	}
 
 	for _, sql := range stmts {

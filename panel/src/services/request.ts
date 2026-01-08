@@ -1,6 +1,6 @@
 import type { AxiosInstance, AxiosRequestConfig } from "axios";
 import axios from "axios";
-import { getSession } from "@/session";
+import { getSession, clearSession } from "@/session";
 
 function baseURL(): string {
     // Prefer a global override if present (e.g., set on index.html)
@@ -27,6 +27,23 @@ client.interceptors.request.use((config) => {
     }
     return config;
 });
+
+// Response interceptor to handle 401 (unauthorized/session expired)
+client.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            // Clear the invalid session
+            clearSession();
+            // Redirect to login page (preserve intended destination)
+            const currentPath = window.location.pathname;
+            if (currentPath !== '/auth/login' && currentPath !== '/auth/register') {
+                window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+            }
+        }
+        return Promise.reject(error);
+    }
+);
 
 export default {
     get<T = any>(url: string, config?: AxiosRequestConfig) {

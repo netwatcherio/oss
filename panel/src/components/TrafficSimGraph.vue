@@ -70,12 +70,23 @@ export default {
   name: 'TrafficGraph',
   props: {
     trafficResults: Array as () => TrafficSimResult[],
+    intervalSec: {
+      type: Number,
+      default: 60 // Default to 60 seconds if not provided
+    }
   },
-  setup(props: { trafficResults: TrafficSimResult[]; }) {
+  setup(props: { trafficResults: TrafficSimResult[]; intervalSec: number }) {
     const trafficGraph = ref(null);
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref('all');
     const showAnnotations = ref(true);
+    
+    // Calculate the maximum allowed gap dynamically based on probe interval
+    // Use 1.5x the interval + 30s buffer to allow for timing variations
+    const maxAllowedGap = computed(() => {
+      const intervalMs = (props.intervalSec || 60) * 1000;
+      return Math.max(intervalMs * 1.5 + 30000, 90000); // At least 90 seconds minimum
+    });
     
     const timeRanges = [
       { label: '1H', value: '1h' },
@@ -154,9 +165,9 @@ export default {
       const filteredData = filterDataByTimeRange(props.trafficResults);
       
       if (chart.value) {
-        chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value));
+        chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value));
       } else {
-        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value));
+        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value));
         chart.value.render();
       }
     };
@@ -198,7 +209,7 @@ export default {
   },
 };
 
-const maxAllowedGap = 1000 * 90; // 90 seconds
+const DEFAULT_MAX_GAP = 90000; // 90 seconds fallback
 
 function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): TrafficSimResult[] {
   if (bucketSizeMs === 0) return data; // No aggregation needed
@@ -277,7 +288,7 @@ function getTrafficBucketSize(data: TrafficSimResult[], timeRange: string): numb
   return bucketSize;
 }
 
-function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnnotations: boolean): ApexCharts.ApexOptions {
+function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnnotations: boolean, maxAllowedGap: number = DEFAULT_MAX_GAP): ApexCharts.ApexOptions {
   const sortedData = data.sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
   
   // Determine aggregation bucket size based on time range

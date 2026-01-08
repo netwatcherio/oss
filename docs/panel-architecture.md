@@ -141,10 +141,21 @@ Each tab shows data from one agent's perspective to the target.
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `LatencyGraph` | `PingGraph.vue` | Ping RTT visualization |
+| `LatencyGraph` | `PingGraph.vue` | Ping RTT visualization with P95 stats |
 | `TrafficSimGraph` | `TrafficSimGraph.vue` | Traffic simulation metrics |
 | `NetworkMap` | `NetworkMap.vue` | MTR hop visualization |
 | `AgentCard` | `AgentCard.vue` | Agent status card |
+
+### Graph Component Props
+
+Both `PingGraph.vue` and `TrafficSimGraph.vue` accept:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `pingResults` / `trafficResults` | Array | required | Time-series data from probe |
+| `intervalSec` | Number | 60 | Probe's scheduling interval for gap detection |
+
+**Gap Detection:** Graphs calculate gap threshold as `1.5 × intervalSec + 30s` to avoid false "Data Gap" annotations when probe interval is longer than the default 90s threshold.
 
 ---
 

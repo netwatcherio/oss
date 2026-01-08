@@ -64,6 +64,11 @@ type Member struct {
 	InvitedAt  *time.Time `json:"invited_at"`
 	AcceptedAt *time.Time `json:"accepted_at"`
 	RevokedAt  *time.Time `json:"revoked_at"`
+
+	// Invite token fields
+	InviteToken       string     `gorm:"size:64;index" json:"-"`
+	InviteTokenExpiry *time.Time `json:"-"`
+	InviteEmailSent   bool       `gorm:"default:false" json:"invite_email_sent"`
 }
 
 func (Member) TableName() string { return "workspace_members" }
