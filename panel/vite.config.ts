@@ -1,6 +1,6 @@
-import {fileURLToPath, URL} from 'url'
+import { fileURLToPath, URL } from 'url'
 
-import {defineConfig} from 'vite'
+import { defineConfig } from 'vite'
 // @ts-ignore
 import vue from '@vitejs/plugin-vue'
 
@@ -12,8 +12,9 @@ export default defineConfig({
             '@': fileURLToPath(new URL('./src', import.meta.url))
         }
     },
-    envDir: "./",
-    envPrefix: "NW",
+    define: {
+        'import.meta.env.CONTROLLER_ENDPOINT': JSON.stringify(process.env.CONTROLLER_ENDPOINT || 'http://localhost:8080'),
+    },
     server: {
         allowedHosts: ["localhost", "devapp.netwatcher.io", "app.netwatcher.io"],
         host: "0.0.0.0",
