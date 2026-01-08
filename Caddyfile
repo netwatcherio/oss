@@ -22,7 +22,7 @@
 		header Connection *Upgrade*
 		header Upgrade websocket
 	}
-	reverse_proxy {$CLIENT_UPSTREAM} {
+	reverse_proxy {$PANEL_UPSTREAM} {
 		import common_cf_headers
 	}
 }
