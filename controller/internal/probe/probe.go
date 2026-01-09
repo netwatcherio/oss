@@ -171,6 +171,7 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		Enabled:     boolOr(&in.Enabled, true),
 		IntervalSec: ifZero(in.IntervalSec, 60),
 		TimeoutSec:  ifZero(in.TimeoutSec, 10),
+		Server:      in.Server, // TRAFFICSIM server mode
 		Labels:      coalesceJSON(in.Labels),
 		Metadata:    coalesceJSON(in.Metadata),
 		CreatedAt:   now,

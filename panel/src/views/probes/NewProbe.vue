@@ -414,7 +414,7 @@ async function submit() {
       newProbe.targets = [listenHost];
       newProbe.metadata = {
         ...newProbe.metadata,
-        listenAddress: `${listenHost}:${state.portInput}`
+        listenAddress: listenHost
       };
     } else {
       // client/other types: set targets normally
