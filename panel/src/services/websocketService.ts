@@ -44,7 +44,7 @@ class WebSocketService {
     private getWebSocketUrl(token: string): string {
         const anyWindow = window as any;
         let baseUrl = anyWindow?.CONTROLLER_ENDPOINT
-            || import.meta.env.VITE_CONTROLLER_ENDPOINT
+            || import.meta.env.CONTROLLER_ENDPOINT
             || '';
 
         // If no endpoint configured, use current host
