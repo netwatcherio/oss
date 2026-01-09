@@ -50,7 +50,7 @@ class WebSocketService {
     /**
      * Get the WebSocket URL based on the controller endpoint
      */
-    private getWebSocketUrl(): string {
+    private getWebSocketUrl(token: string): string {
         const anyWindow = window as any;
         let baseUrl = anyWindow?.CONTROLLER_ENDPOINT
             || import.meta.env?.CONTROLLER_ENDPOINT
@@ -58,7 +58,9 @@ class WebSocketService {
 
         // Convert HTTP URL to WebSocket URL
         baseUrl = baseUrl.replace(/^http/, 'ws');
-        return `${baseUrl}/ws`;
+
+        // Use /ws/panel endpoint with token as query param (browsers can't send headers)
+        return `${baseUrl}/ws/panel?token=${encodeURIComponent(token)}`;
     }
 
     /**
@@ -75,13 +77,11 @@ class WebSocketService {
             return;
         }
 
-        const url = this.getWebSocketUrl();
-        console.log('[WebSocket] Connecting to', url);
+        const url = this.getWebSocketUrl(session.token);
+        console.log('[WebSocket] Connecting to', url.replace(/token=[^&]+/, 'token=***'));
 
         try {
-            // Create WebSocket with Authorization header via URL protocol
-            // Note: WebSocket API doesn't support custom headers, so we'll use a subprotocol
-            // The actual auth happens via the neffos connect message
+            // Connect with token in query param (browsers can't send Authorization header)
             this.ws = new WebSocket(url);
 
             this.ws.onopen = () => {

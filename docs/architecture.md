@@ -248,8 +248,8 @@ flowchart LR
 
 | Variable | Description |
 |----------|-------------|
-| `CONTROLLER_URL` | Controller HTTP base URL |
-| `CONTROLLER_WS_URL` | Controller WebSocket URL |
+| `CONTROLLER_HOST` | Controller host:port (without protocol) |
+| `CONTROLLER_SSL` | Use HTTPS/WSS instead of HTTP/WS (true/false) |
 | `WORKSPACE_ID` | Target workspace ID |
 | `AGENT_ID` | This agent's ID |
-| `PIN` or `PSK` | Authentication credential |
+| `AGENT_PIN` or `AGENT_PSK` | Authentication credential |

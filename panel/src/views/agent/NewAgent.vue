@@ -41,9 +41,11 @@ const isFormValid = computed(() => validation.value.name.valid);
 // Installation command with PIN
 const installCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const baseUrl = window.location.origin;
+  const host = window.location.host; // host:port without protocol
+  const useSSL = window.location.protocol === 'https:';
   return `docker run -d --name netwatcher-agent \\
-  -e CONTROLLER_URL="${baseUrl}" \\
+  -e CONTROLLER_HOST="${host}" \\
+  -e CONTROLLER_SSL="${useSSL}" \\
   -e WORKSPACE_ID="${state.workspace.id}" \\
   -e AGENT_ID="${state.createdAgent.id}" \\
   -e AGENT_PIN="${state.agentPin}" \\
@@ -53,12 +55,14 @@ const installCommand = computed(() => {
 
 const binaryCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const baseUrl = window.location.origin;
-  return `./netwatcher-agent \\
-  --controller-url "${baseUrl}" \\
-  --workspace-id ${state.workspace.id} \\
-  --agent-id ${state.createdAgent.id} \\
-  --pin "${state.agentPin}"`;
+  const host = window.location.host;
+  const useSSL = window.location.protocol === 'https:';
+  return `CONTROLLER_HOST="${host}" \\
+CONTROLLER_SSL="${useSSL}" \\
+WORKSPACE_ID="${state.workspace.id}" \\
+AGENT_ID="${state.createdAgent.id}" \\
+AGENT_PIN="${state.agentPin}" \\
+./netwatcher-agent`;
 });
 
 onMounted(async () => {
