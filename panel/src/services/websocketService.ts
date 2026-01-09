@@ -1,10 +1,11 @@
 /**
  * WebSocket Service for NetWatcher Panel
  * 
- * Connects to the controller's WebSocket server using the neffos protocol
+ * Connects to the controller's WebSocket server using the official neffos.js client
  * for real-time probe data updates.
  */
 
+import * as neffos from 'neffos.js';
 import { getSession } from "@/session";
 
 // Event types for the panel namespace
@@ -23,16 +24,9 @@ export type ProbeDataHandler = (data: ProbeDataEvent) => void;
 export type ConnectionHandler = () => void;
 export type ErrorHandler = (error: Event | Error) => void;
 
-interface NeffosMessage {
-    Namespace: string;
-    Event: string;
-    Body?: string;
-    isConnect?: boolean;
-    isDisconnect?: boolean;
-}
-
 class WebSocketService {
-    private ws: WebSocket | null = null;
+    private conn: neffos.Conn | null = null;
+    private nsConn: neffos.NSConn | null = null;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 10;
@@ -43,7 +37,6 @@ class WebSocketService {
     private onDisconnectHandlers: Set<ConnectionHandler> = new Set();
     private onErrorHandlers: Set<ErrorHandler> = new Set();
 
-    private pendingSubscriptions: Array<{ workspaceId: number; probeId: number }> = [];
     private activeSubscriptions: Set<string> = new Set();
     private namespaceConnected = false;
 
@@ -53,27 +46,40 @@ class WebSocketService {
     private getWebSocketUrl(token: string): string {
         const anyWindow = window as any;
         let baseUrl = anyWindow?.CONTROLLER_ENDPOINT
-            || import.meta.env?.CONTROLLER_ENDPOINT
-            || "http://localhost:8080";
+            || import.meta.env.VITE_CONTROLLER_ENDPOINT
+            || '';
 
-        // Convert HTTP URL to WebSocket URL
-        baseUrl = baseUrl.replace(/^http/, 'ws');
+        // If no endpoint configured, use current host
+        if (!baseUrl) {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            baseUrl = `${proto}//${window.location.host}`;
+        } else {
+            // Convert http(s) to ws(s)
+            baseUrl = baseUrl.replace(/^http/, 'ws');
+        }
 
-        // Use /ws/panel endpoint with token as query param (browsers can't send headers)
+        // Ensure we have ws:// or wss://
+        if (!baseUrl.startsWith('ws://') && !baseUrl.startsWith('wss://')) {
+            const proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            baseUrl = proto + baseUrl;
+        }
+
+        // Token passed as query param (browsers can't send custom headers)
         return `${baseUrl}/ws/panel?token=${encodeURIComponent(token)}`;
     }
 
     /**
-     * Connect to the WebSocket server
+     * Connect to the WebSocket server using neffos.js
      */
-    connect(): void {
-        if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    async connect(): Promise<void> {
+        const session = getSession();
+        if (!session?.token) {
+            console.log('[WebSocket] No session token, skipping connection');
             return;
         }
 
-        const session = getSession();
-        if (!session?.token) {
-            console.warn('[WebSocket] No session token, cannot connect');
+        if (this.conn) {
+            console.log('[WebSocket] Already connected');
             return;
         }
 
@@ -81,133 +87,50 @@ class WebSocketService {
         console.log('[WebSocket] Connecting to', url.replace(/token=[^&]+/, 'token=***'));
 
         try {
-            // Connect with token in query param (browsers can't send Authorization header)
-            this.ws = new WebSocket(url);
-
-            this.ws.onopen = () => {
-                console.log('[WebSocket] Connected');
-                this.reconnectAttempts = 0;
-
-                // Send neffos connection handshake with JWT
-                // neffos expects: {"Namespace":"panel","Event":"_OnNamespaceConnected"}
-                this.sendNeffosConnect(session.token);
+            // Define namespace events
+            const panelNamespace: neffos.Events = {
+                _OnNamespaceConnected: (nsConn: neffos.NSConn, msg: neffos.Message) => {
+                    console.log('[WebSocket] Panel namespace connected');
+                    this.namespaceConnected = true;
+                    this.reconnectAttempts = 0;
+                    this.onConnectHandlers.forEach(h => h());
+                    this.restoreSubscriptions();
+                },
+                _OnNamespaceDisconnect: (nsConn: neffos.NSConn, msg: neffos.Message) => {
+                    console.log('[WebSocket] Panel namespace disconnected');
+                    this.namespaceConnected = false;
+                    this.onDisconnectHandlers.forEach(h => h());
+                },
+                subscribe_ok: (nsConn: neffos.NSConn, msg: neffos.Message) => {
+                    console.log('[WebSocket] Subscription confirmed');
+                },
+                probe_data: (nsConn: neffos.NSConn, msg: neffos.Message) => {
+                    try {
+                        const data: ProbeDataEvent = JSON.parse(new TextDecoder().decode(msg.Body));
+                        this.notifyProbeDataHandlers(data);
+                    } catch (e) {
+                        console.error('[WebSocket] Failed to parse probe_data:', e);
+                    }
+                }
             };
 
-            this.ws.onmessage = (event) => {
-                this.handleMessage(event.data);
-            };
+            // Dial with neffos
+            this.conn = await neffos.dial(url, { panel: panelNamespace });
+            console.log('[WebSocket] Connected to server');
 
-            this.ws.onerror = (error) => {
-                console.error('[WebSocket] Error:', error);
-                this.onErrorHandlers.forEach(h => h(error));
-            };
+            // Set up connection close handler
+            this.conn.wasReconnected().then(() => {
+                console.log('[WebSocket] Reconnection handler triggered');
+            });
 
-            this.ws.onclose = (event) => {
-                console.log('[WebSocket] Disconnected', event.code, event.reason);
-                this.namespaceConnected = false;
-                this.onDisconnectHandlers.forEach(h => h());
-                this.scheduleReconnect();
-            };
+            // Connect to the panel namespace
+            this.nsConn = await this.conn.connect("panel");
+            console.log('[WebSocket] Joined panel namespace');
+
         } catch (error) {
             console.error('[WebSocket] Connection error:', error);
+            this.onErrorHandlers.forEach(h => h(error as Error));
             this.scheduleReconnect();
-        }
-    }
-
-    /**
-     * Send neffos protocol connect message with JWT auth
-     */
-    private sendNeffosConnect(token: string): void {
-        // neffos protocol: first message is the ack message
-        // Format: 4{} where 4 is the ACK message type
-        if (this.ws?.readyState === WebSocket.OPEN) {
-            // neffos expects the client to send ack first
-            this.ws.send('4{}');
-
-            // Then join the panel namespace with auth in header simulation
-            // We'll include auth info in a special connect payload
-            const connectMsg: NeffosMessage = {
-                Namespace: "panel",
-                Event: "_OnNamespaceConnect",
-                Body: JSON.stringify({ token })
-            };
-
-            // neffos message format: namespace;event;body
-            this.sendNeffosMessage("panel", "_OnNamespaceConnect", "");
-        }
-    }
-
-    /**
-     * Send a neffos-formatted message
-     */
-    private sendNeffosMessage(namespace: string, event: string, body: string): void {
-        if (this.ws?.readyState !== WebSocket.OPEN) {
-            console.warn('[WebSocket] Cannot send message, not connected');
-            return;
-        }
-
-        // neffos message format: namespace;event;body (with ; separator)
-        // Using message type 0 (default) 
-        const msg = `${namespace};${event};${body}`;
-        console.log('[WebSocket] Sending:', msg);
-        this.ws.send(msg);
-    }
-
-    /**
-     * Handle incoming WebSocket messages
-     */
-    private handleMessage(data: string): void {
-        console.log('[WebSocket] Received:', data);
-
-        // neffos protocol messages
-        if (data === '4{}') {
-            // ACK response - namespace connection in progress
-            console.log('[WebSocket] ACK received');
-            return;
-        }
-
-        // Parse neffos message format: namespace;event;body
-        const parts = data.split(';');
-        if (parts.length < 2) {
-            console.warn('[WebSocket] Invalid message format:', data);
-            return;
-        }
-
-        const namespace = parts[0];
-        const event = parts[1];
-        const body = parts.slice(2).join(';'); // Body may contain semicolons
-
-        if (namespace !== 'panel') return;
-
-        switch (event) {
-            case '_OnNamespaceConnected':
-                console.log('[WebSocket] Panel namespace connected');
-                this.namespaceConnected = true;
-                this.onConnectHandlers.forEach(h => h());
-                // Restore pending subscriptions
-                this.restoreSubscriptions();
-                break;
-
-            case 'subscribe_ok':
-                console.log('[WebSocket] Subscription confirmed');
-                break;
-
-            case 'probe_data':
-                try {
-                    const probeData: ProbeDataEvent = JSON.parse(body);
-                    this.notifyProbeDataHandlers(probeData);
-                } catch (e) {
-                    console.error('[WebSocket] Failed to parse probe_data:', e);
-                }
-                break;
-
-            case '_OnNamespaceDisconnect':
-                console.log('[WebSocket] Panel namespace disconnected');
-                this.namespaceConnected = false;
-                break;
-
-            default:
-                console.log('[WebSocket] Unhandled event:', event);
         }
     }
 
@@ -238,6 +161,8 @@ class WebSocketService {
 
         this.reconnectTimer = setTimeout(() => {
             this.reconnectAttempts++;
+            this.conn = null;
+            this.nsConn = null;
             this.connect();
         }, delay);
     }
@@ -260,8 +185,14 @@ class WebSocketService {
      * Send subscribe message
      */
     private sendSubscribe(workspaceId: number, probeId: number): void {
+        if (!this.nsConn || !this.namespaceConnected) {
+            console.warn('[WebSocket] Cannot send subscribe, not connected to namespace');
+            return;
+        }
+
         const body = JSON.stringify({ workspace_id: workspaceId, probe_id: probeId });
-        this.sendNeffosMessage('panel', 'subscribe', body);
+        this.nsConn.emit("subscribe", new TextEncoder().encode(body));
+        console.log(`[WebSocket] Subscribed to workspace ${workspaceId} probe ${probeId}`);
     }
 
     /**
@@ -291,9 +222,9 @@ class WebSocketService {
                 this.activeSubscriptions.delete(key);
 
                 // Send unsubscribe if connected
-                if (this.namespaceConnected) {
+                if (this.namespaceConnected && this.nsConn) {
                     const body = JSON.stringify({ workspace_id: workspaceId, probe_id: probeId });
-                    this.sendNeffosMessage('panel', 'unsubscribe', body);
+                    this.nsConn.emit("unsubscribe", new TextEncoder().encode(body));
                 }
             }
         };
@@ -332,9 +263,10 @@ class WebSocketService {
             this.reconnectTimer = null;
         }
 
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
+        if (this.conn) {
+            this.conn.close();
+            this.conn = null;
+            this.nsConn = null;
         }
 
         this.namespaceConnected = false;

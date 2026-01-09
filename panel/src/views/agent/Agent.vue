@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {onMounted, reactive, computed, ref} from "vue";
+import {onMounted, reactive, computed, ref, watch} from "vue";
 import type {
   Agent,
   CPUTimes,
@@ -18,6 +18,7 @@ import type {
   Role
 } from "@/types";
 import {usePermissions} from "@/composables/usePermissions";
+import {useWebSocket, type ProbeDataEvent} from "@/composables/useWebSocket";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Chart from "@/components/Chart.vue"
@@ -428,6 +429,92 @@ let state = reactive({
 // Permissions based on user's role in this workspace
 const permissions = computed(() => usePermissions(state.workspace.my_role));
 
+// Real-time data state
+const liveUpdating = ref(false);
+const lastLiveUpdate = ref<Date | null>(null);
+
+// Get workspace/agent IDs as refs for the WebSocket composable
+const workspaceIdRef = computed(() => state.workspace.id);
+
+// WebSocket for real-time updates - subscribe to all probes in workspace (probeId=0)
+const { connected: wsConnected, subscribe: wsSubscribe } = useWebSocket({ autoConnect: true });
+
+// Handle real-time probe data updates
+function handleLiveProbeData(data: ProbeDataEvent) {
+  // Only process data for this agent
+  if (data.agent_id !== state.agent.id) return;
+
+  liveUpdating.value = true;
+  lastLiveUpdate.value = new Date();
+
+  // Update agent's last seen (shows it's still active)
+  state.agent.updated_at = new Date().toISOString();
+
+  // Handle different probe types
+  switch (data.type) {
+    case 'SYSINFO':
+      const sysPayload = data.payload as unknown as SysInfoPayload;
+      if (sysPayload) {
+        state.systemInfo = sysPayload;
+        state.systemData = updateSystemData(sysPayload);
+        state.hasData = true;
+        loadingState.systemInfo = false;
+      }
+      break;
+
+    case 'NETINFO':
+      const netPayload = data.payload as unknown as NetInfoPayload;
+      if (netPayload) {
+        state.networkInfo = netPayload;
+        loadingState.networkInfo = false;
+      }
+      break;
+
+    case 'PING':
+      // Update ping stats for the relevant probe
+      const pingPayload = data.payload as unknown as PingResult;
+      if (pingPayload && data.probe_id) {
+        const existingIdx = state.pingStats.findIndex(s => s.probeId === data.probe_id);
+        const successRate = pingPayload.packets_sent > 0
+          ? (pingPayload.packets_recv / pingPayload.packets_sent) * 100
+          : 0;
+        const avgResponseTime = pingPayload.avg_rtt / 1000000 || 0;
+        const newStat: PingStats = {
+          probeId: data.probe_id,
+          successRate,
+          avgResponseTime,
+          lastRun: data.created_at,
+          status: calculateProbeStatus(successRate, avgResponseTime)
+        };
+
+        if (existingIdx >= 0) {
+          state.pingStats[existingIdx] = newStat;
+        } else {
+          state.pingStats.push(newStat);
+        }
+
+        // Re-aggregate group stats
+        state.targetGroups.forEach(group => {
+          const stats = aggregateGroupStats(group, state.pingStats);
+          state.groupStats[group.key] = { ...stats, isLoading: false };
+        });
+      }
+      break;
+  }
+
+  // Clear the live updating indicator after a short delay
+  setTimeout(() => {
+    liveUpdating.value = false;
+  }, 500);
+}
+
+// Subscribe to workspace updates when workspace ID is available
+watch(workspaceIdRef, (wsId) => {
+  if (wsId) {
+    wsSubscribe(wsId, 0, handleLiveProbeData);
+  }
+}, { immediate: true });
+
 onMounted(async () => {
   let agentID = router.currentRoute.value.params["aID"] as string
   let workspaceID = router.currentRoute.value.params["wID"] as string
@@ -591,6 +678,15 @@ onMounted(async () => {
         <div class="status-badge" :class="isInitializing ? 'loading' : (isOnline ? 'online' : 'offline')">
           <i :class="isInitializing ? 'bi bi-arrow-repeat spin-animation' : 'bi bi-circle-fill'"></i>
           {{ isInitializing ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
+        </div>
+        <!-- Live Data Indicator -->
+        <div v-if="wsConnected" class="status-badge live" :class="{ 'pulse': liveUpdating }">
+          <i class="bi bi-broadcast"></i>
+          Live
+        </div>
+        <div v-else class="status-badge offline" title="WebSocket disconnected - data may be stale">
+          <i class="bi bi-wifi-off"></i>
+          Disconnected
         </div>
         <router-link
             v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
@@ -1130,6 +1226,28 @@ onMounted(async () => {
 .status-badge.loading {
   background: #f3f4f6;
   color: #6b7280;
+}
+
+.status-badge.live {
+  background: #ecfdf5;
+  color: #059669;
+  transition: all 0.3s ease;
+}
+
+.status-badge.live.pulse {
+  background: #34d399;
+  color: white;
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.3);
+}
+
+.status-badge.live i {
+  font-size: 0.75rem;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
 }
 
 .status-badge i {
