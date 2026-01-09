@@ -215,6 +215,7 @@ func CreateIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_agent ON speedtest_queue (agent_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_status ON speedtest_queue (status);`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_agent_status ON speedtest_queue (agent_id, status);`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_queue_expires ON speedtest_queue (expires_at);`,
 
 		// agent_speedtest_servers
 		`CREATE UNIQUE INDEX IF NOT EXISTS ux_speedtest_servers_agent_server ON agent_speedtest_servers (agent_id, server_id);`,

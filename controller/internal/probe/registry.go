@@ -155,4 +155,5 @@ func InitWorkers(ch *sql.DB) {
 	initMtr(ch)
 	initPing(ch)
 	initSpeedtest(ch)
+	initTrafficSim(ch)
 }

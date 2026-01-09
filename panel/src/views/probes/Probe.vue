@@ -398,6 +398,9 @@ async function reloadData() {
     const allProbes = (await ProbeService.list(workspaceID, agentID)) as Probe[];
     state.probes = findProbesByInitialTarget(state.probe, allProbes);
     console.log("probes:", state.probes);
+    
+    // 3a) Detect if this is an AGENT probe type for bidirectional display
+    state.isAgentProbe = state.probe?.type === 'AGENT';
 
     // 4) Title from first target (agent ref vs literal)
     const firstTarget = (state.probe?.targets?.[0] ?? {}) as any;

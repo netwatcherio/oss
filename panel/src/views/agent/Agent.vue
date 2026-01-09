@@ -245,7 +245,8 @@ function calculateProbeStatus(successRate: number, avgResponseTime: number): 'he
 
 // Fetch real probe statistics for ping probes using latest endpoint
 async function fetchPingStats(workspaceId: string, agentId: string, probes: Probe[]): Promise<PingStats[]> {
-  const pingProbes = probes.filter(p => p.type === 'PING' && p.enabled);
+  // Include PING probes and AGENT probes (which expand to include PING)
+  const pingProbes = probes.filter(p => (p.type === 'PING' || p.type === 'AGENT') && p.enabled);
   if (pingProbes.length === 0) return [];
 
   try {
@@ -302,10 +303,11 @@ async function fetchPingStats(workspaceId: string, agentId: string, probes: Prob
 
 // Aggregate stats for a probe group
 function aggregateGroupStats(group: ProbeGroupByTarget, pingStats: PingStats[]): ProbeGroupStats {
-  // Check if this group has any ping probes
+  // Check if this group has any ping or agent probes (AGENT expands to include PING)
   const hasPingProbes = group.probes.some(p => p.type === 'PING');
+  const hasAgentProbes = group.probes.some(p => p.type === 'AGENT');
 
-  if (!hasPingProbes) {
+  if (!hasPingProbes && !hasAgentProbes) {
     return {
       hasData: false,
       status: 'unknown',
@@ -506,8 +508,8 @@ onMounted(async () => {
           state.groupStats[group.key] = initializeGroupStats(group);
         });
 
-        // Fetch ping statistics if there are ping probes
-        const hasPingProbes = pL.some(p => p.type === 'PING');
+        // Fetch ping statistics if there are ping or agent probes
+        const hasPingProbes = pL.some(p => p.type === 'PING' || p.type === 'AGENT');
         if (hasPingProbes) {
           state.loadingPingStats = true;
           try {

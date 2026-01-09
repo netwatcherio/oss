@@ -244,17 +244,16 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 				}
 
 				// Check if agent is online (seen within last 2 minutes)
+				// If LastSeenAt is zero or before threshold, the agent making this request is clearly online
 				a, err := agent.GetAgentByID(context.TODO(), db, aid)
 				if err != nil {
 					log.Errorf("speedtest_queue_get: get agent: %v", err)
 					return err
 				}
-				onlineThreshold := 2 * time.Minute
-				if time.Since(a.LastSeenAt) > onlineThreshold {
-					// Agent is not considered online, return empty queue
-					log.Debugf("speedtest_queue_get: agent %d not online (last seen %v ago)", aid, time.Since(a.LastSeenAt))
-					nsConn.Emit("speedtest_queue", []byte("[]"))
-					return nil
+
+				// Update LastSeenAt since agent is clearly online if making this request
+				if err := agent.UpdateAgentSeen(context.TODO(), db, a.ID, time.Now()); err != nil {
+					log.Warnf("speedtest_queue_get: update seen: %v", err)
 				}
 
 				items, err := speedtest.ListPendingForAgent(context.TODO(), db, aid)
