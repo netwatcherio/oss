@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import {nextTick, onMounted, reactive, ref, watch} from "vue";
 import core from "@/core";
-import type {Agent, MtrResult, PingResult, Probe, ProbeData, ProbeType, Workspace,} from "@/types";
+import type {Agent, MtrResult, PingResult, Probe, ProbeData, ProbeType, TrafficSimResult, Workspace,} from "@/types";
 import Title from "@/components/Title.vue";
 import {AsciiTable3} from "@/lib/ascii-table3/ascii-table3";
 import LatencyGraph from "@/components/PingGraph.vue";
@@ -293,20 +293,20 @@ function getNotableMtrResults(mtrData: ProbeData[]): { data: ProbeData; reason: 
   return notable.reverse();
 }
 
-// TRAFFICSIM: normalize series
-function transformToTrafficSimResult(rows: ProbeData[]) {
+// TRAFFICSIM: normalize series to match TrafficSimGraph component expectations
+function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
   return rows.map((r) => {
-    const p = (r as any).payload;
+    const p = r.payload as any;
     return {
-      ts: new Date(p?.timestamp ?? r.created_at ?? (r as any).createdAt).getTime(),
-      bitrate: p?.bitrate_bps ?? p?.throughput_bps ?? 0,
-      loss: p?.loss ?? p?.loss_pct ?? 0,
-      jitter: p?.jitter_ms ?? 0,
-      probeId: r.probe_id,
-      agentId: r.agent_id,
-      target: r.target || p?.target,
+      averageRTT: p?.averageRTT ?? 0,
+      minRTT: p?.minRTT ?? 0,
+      maxRTT: p?.maxRTT ?? 0,
+      lostPackets: p?.lostPackets ?? 0,
+      totalPackets: p?.totalPackets ?? 0,
+      outOfSequence: p?.outOfOrder ?? 0,  // Agent uses outOfOrder, graph expects outOfSequence
+      reportTime: p?.timestamp ?? r.created_at,
     };
-  }).sort((a,b) => a.ts - b.ts);
+  }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
 }
 
 // ---------- Agent pair parsing (kept; expects grouped data if you add that later) ----------
@@ -767,6 +767,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                         <NetworkMap 
                           :key="`mtr-map-${index}-${activeTabIndex}`"
                           :mtrResults="transformMtrDataMulti(pair.mtrData)"
+                          @nodeSelect="onNodeSelect"
                         />
                         <div :id="`mtrAccordion-${index}`" class="accordion mt-3">
                           <div v-for="(mtr, mtrIndex) in pair.mtrData" :key="`${mtr.id}-${index}-${mtrIndex}`">

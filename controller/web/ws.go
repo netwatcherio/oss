@@ -352,10 +352,31 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 							return err
 						}
 
+						// Look up the actual SPEEDTEST probe for this agent
+						probes, err := probe.ListByAgent(context.TODO(), db, aid)
+						if err != nil {
+							log.Errorf("speedtest_result list probes: %v", err)
+							return err
+						}
+
+						// Find the SPEEDTEST probe
+						var speedtestProbeID uint
+						for _, p := range probes {
+							if p.Type == probe.TypeSpeedtest {
+								speedtestProbeID = p.ID
+								break
+							}
+						}
+
+						if speedtestProbeID == 0 {
+							log.Warnf("speedtest_result: no SPEEDTEST probe found for agent %d, using queue ID", aid)
+							speedtestProbeID = result.QueueID // Fallback to queue ID if probe not found
+						}
+
 						pp := probe.ProbeData{
 							Type:       probe.TypeSpeedtest,
 							AgentID:    aid,
-							ProbeID:    result.QueueID,
+							ProbeID:    speedtestProbeID,
 							Payload:    result.Data,
 							CreatedAt:  time.Now(),
 							ReceivedAt: time.Now(),

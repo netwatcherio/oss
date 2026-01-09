@@ -319,6 +319,16 @@ export interface PingResult {
     std_dev_rtt: number;
 }
 
+export interface TrafficSimResult {
+    averageRTT: number;
+    minRTT: number;
+    maxRTT: number;
+    lostPackets: number;
+    totalPackets: number;
+    outOfSequence: number;
+    reportTime: string;  // ISO 8601 timestamp
+}
+
 export interface ProbeDataRequest {
     limit: number;
     startTimestamp: Date;
