@@ -455,6 +455,34 @@ async function reloadData() {
     // 5) Pull series for each probe (await so ready/loading are correct)
     await loadProbeData();
 
+    // 6) For AGENT probes, build agentPairData from collected data
+    if (state.isAgentProbe && firstTarget?.agent_id != null) {
+      const targetAgentId = firstTarget.agent_id as number;
+      const sourceAgentId = Number(agentID);
+      
+      // Get agent names
+      let sourceAgentName = state.agent?.name || `Agent ${sourceAgentId}`;
+      let targetAgentName = state.probeAgent?.name || `Agent ${targetAgentId}`;
+      
+      // Build the agent pair data from loaded data
+      state.agentPairData = [{
+        direction: 'forward' as const,
+        probeId: state.probe.id,
+        sourceAgentId: sourceAgentId,
+        targetAgentId: targetAgentId,
+        sourceAgentName: sourceAgentName,
+        targetAgentName: targetAgentName,
+        pingData: state.pingData,
+        mtrData: state.mtrData,
+        trafficSimData: state.trafficSimData,
+        rperfData: state.rperfData
+      }];
+      
+      console.log("Built agentPairData:", state.agentPairData.length, "pairs with", 
+        state.pingData.length, "ping,", state.mtrData.length, "mtr,", 
+        state.trafficSimData.length, "trafficsim");
+    }
+
     state.ready = true;
   } catch (e) {
     console.error(e);

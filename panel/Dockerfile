@@ -27,15 +27,16 @@ WORKDIR /app
 # Install serve globally
 RUN npm install -g serve
 
-# Copy built assets from builder
-COPY --from=builder /app/dist ./dist
+# Create non-root user first
+RUN adduser -D -g '' appuser
+
+# Copy built assets from builder and set ownership
+COPY --from=builder --chown=appuser:appuser /app/dist ./dist
 
 # Copy the entrypoint script
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY --chown=appuser:appuser docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Create non-root user
-RUN adduser -D -g '' appuser
 USER appuser
 
 EXPOSE 3000
