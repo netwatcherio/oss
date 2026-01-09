@@ -303,24 +303,28 @@ onMounted(async () => {
             time: probe.metadata?.pending_time ? new Date(probe.metadata.pending_time as string) : new Date()
           };
         }
-        
-        // Load speedtest data using ProbeDataService
-        const probeData = await ProbeDataService.byProbe(workspaceId, probe.id, { limit: 25 }) as ProbeData[];
-        console.log('[Speedtest] Loaded probeData:', probeData?.length ?? 0, 'items for probe', probe.id);
-        if (probeData && Array.isArray(probeData)) {
-          for (const data of probeData) {
-            console.log('[Speedtest] Converting payload:', data.payload);
-            try {
-              const convD = convertToSpeedTestResult(data.payload);
-              state.speedtestData.push(convD);
-            } catch (e) {
-              console.error('[Speedtest] Conversion error:', e, 'for payload:', data.payload);
-            }
-          }
-        }
       } else if (probe.type === "SPEEDTEST_SERVERS") {
         state.speedtestServerProbe = probe;
       }
+    }
+
+    // Load speedtest data using agent ID + type query (works for both old and new data)
+    // This bypasses the broken probe_id in historical ClickHouse records
+    try {
+      const probeData = await ProbeDataService.speedtestsByAgent(workspaceId, agentId, 25) as ProbeData[];
+      console.log('[Speedtest] Loaded probeData:', probeData?.length ?? 0, 'items for agent', agentId);
+      if (probeData && Array.isArray(probeData)) {
+        for (const data of probeData) {
+          try {
+            const convD = convertToSpeedTestResult(data.payload);
+            state.speedtestData.push(convD);
+          } catch (e) {
+            console.error('[Speedtest] Conversion error:', e, 'for payload:', data.payload);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Speedtest] Failed to load speedtest data:', err);
     }
 
     // Load pending queue items

@@ -46,6 +46,30 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	})
 
 	// ------------------------------------------
+	// GET /workspaces/{id}/probe-data/agents/{agentID}/speedtests
+	// Speedtest data for an agent (queries by agent_id + type, NOT probe_id)
+	// This works around historical data having incorrect probe_id values
+	// Query: limit (default 25)
+	// ------------------------------------------
+	base.Get("/agents/{agentID:uint}/speedtests", func(ctx iris.Context) {
+		agentID := uint64(uintParam(ctx, "agentID"))
+		limit := intOrDefault(ctx.URLParam("limit"), 25)
+
+		typ := string(probe.TypeSpeedtest)
+		rows, err := probe.FindProbeData(ctx.Request().Context(), ch, probe.FindParams{
+			Type:    &typ,
+			AgentID: &agentID,
+			Limit:   limit,
+		})
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+		_ = ctx.JSON(NewListResponse(rows))
+	})
+
+	// ------------------------------------------
 	// GET /workspaces/{id}/probe-data/probes/{probeID}/data
 	// Timeseries for one probe (ClickHouse)
 	// Query: from, to, limit, asc=true|false

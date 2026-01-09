@@ -311,6 +311,19 @@ export const ProbeDataService = {
     async latestSysInfo(workspaceId: number | string, agentId: number | string, probeId?: number | string) {
         return this.latest(workspaceId, { type: "SYSINFO", agentId, probeId });
     },
+    /**
+     * Speedtest results for an agent (queries by agent_id + type, NOT probe_id).
+     * This works around historical data having incorrect probe_id values.
+     * GET /workspaces/{id}/probe-data/agents/{agentID}/speedtests
+     */
+    async speedtestsByAgent(workspaceId: number | string, agentId: number | string, limit?: number) {
+        const qs = new URLSearchParams();
+        if (limit) qs.set("limit", String(limit));
+        const { data } = await request.get<ListResponse<ProbeData>>(
+            `/workspaces/${workspaceId}/probe-data/agents/${agentId}/speedtests${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data?.data || [];
+    },
 };
 
 /** ===== Probes (scoped to workspace + agent) ===== */
