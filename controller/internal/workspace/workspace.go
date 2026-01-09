@@ -17,15 +17,15 @@ import (
 type Role string
 
 const (
-	RoleReadOnly  Role = "READ_ONLY"
-	RoleReadWrite Role = "READ_WRITE"
-	RoleAdmin     Role = "ADMIN"
-	RoleOwner     Role = "OWNER"
+	RoleViewer Role = "VIEWER"
+	RoleUser   Role = "USER"
+	RoleAdmin  Role = "ADMIN"
+	RoleOwner  Role = "OWNER"
 )
 
 func (r Role) Valid() bool {
 	switch r {
-	case RoleReadOnly, RoleReadWrite, RoleAdmin, RoleOwner:
+	case RoleViewer, RoleUser, RoleAdmin, RoleOwner:
 		return true
 	default:
 		return false
@@ -288,10 +288,50 @@ func (s *Store) AddMember(ctx context.Context, in AddMemberInput) (*Member, erro
 		}
 		return nil, err
 	}
+
+	email := normEmail(in.Email)
+
+	// Check for existing member (including soft-deleted) - for re-adding removed members
+	var existing Member
+	query := s.db.WithContext(ctx).Unscoped().Where("workspace_id = ?", in.WorkspaceID)
+	if in.UserID != 0 {
+		query = query.Where("user_id = ?", in.UserID)
+	} else if email != "" {
+		query = query.Where("email = ?", email)
+	}
+
+	if err := query.First(&existing).Error; err == nil {
+		// Member found - check if soft-deleted
+		if existing.DeletedAt.Valid {
+			// Restore the soft-deleted member with new role
+			now := time.Now()
+			updates := map[string]any{
+				"deleted_at":  nil,
+				"role":        in.Role,
+				"revoked_at":  nil,
+				"accepted_at": &now, // Re-accepting
+			}
+			if in.UserID != 0 && existing.UserID == 0 {
+				updates["user_id"] = in.UserID
+			}
+			if err := s.db.WithContext(ctx).Unscoped().Model(&existing).Updates(updates).Error; err != nil {
+				return nil, err
+			}
+			existing.DeletedAt = gorm.DeletedAt{}
+			existing.Role = in.Role
+			return &existing, nil
+		}
+		// Member exists and is not deleted
+		return nil, ErrAlreadyExists
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// Create new member
 	m := &Member{
 		WorkspaceID: in.WorkspaceID,
 		UserID:      in.UserID,
-		Email:       normEmail(in.Email),
+		Email:       email,
 		Role:        in.Role,
 		Meta:        jdefault(in.Meta),
 	}
@@ -437,10 +477,10 @@ func (s *Store) UserHasRole(ctx context.Context, workspaceID, userID uint, minRo
 // roleAtLeast returns true if role >= minRole in the hierarchy.
 func roleAtLeast(role, minRole Role) bool {
 	hierarchy := map[Role]int{
-		RoleReadOnly:  1,
-		RoleReadWrite: 2,
-		RoleAdmin:     3,
-		RoleOwner:     4,
+		RoleViewer: 1,
+		RoleUser:   2,
+		RoleAdmin:  3,
+		RoleOwner:  4,
 	}
 	return hierarchy[role] >= hierarchy[minRole]
 }

@@ -26,6 +26,10 @@
         <div class="stat-label">Out of Sequence</div>
         <div class="stat-value">{{ statistics.totalOutOfSequence }}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-label">Duplicates</div>
+        <div class="stat-value">{{ statistics.totalDuplicates }}</div>
+      </div>
     </div>
 
     <!-- Chart Container -->
@@ -105,6 +109,7 @@ export default {
       const maxRtts = props.trafficResults.map(d => d.maxRTT);
       const packetLosses = props.trafficResults.map(d => (d.lostPackets / d.totalPackets) * 100);
       const outOfSequence = props.trafficResults.map(d => d.outOfSequence);
+      const duplicates = props.trafficResults.map(d => d.duplicates ?? 0);
       
       return {
         currentRtt: avgRtts[avgRtts.length - 1] || 0,
@@ -112,7 +117,8 @@ export default {
         minRtt: Math.min(...minRtts),
         maxRtt: Math.max(...maxRtts),
         avgPacketLoss: packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length,
-        totalOutOfSequence: outOfSequence.reduce((a, b) => a + b, 0)
+        totalOutOfSequence: outOfSequence.reduce((a, b) => a + b, 0),
+        totalDuplicates: duplicates.reduce((a, b) => a + b, 0)
       };
     });
 

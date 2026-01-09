@@ -326,6 +326,7 @@ export interface TrafficSimResult {
     lostPackets: number;
     totalPackets: number;
     outOfSequence: number;
+    duplicates: number;  // Duplicate packets received
     reportTime: string;  // ISO 8601 timestamp
 }
 

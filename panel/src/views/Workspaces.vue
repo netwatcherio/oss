@@ -340,7 +340,7 @@ onMounted(async () => {
             <p class="text-muted mb-4">
               Get started by creating your first workspace to begin monitoring your network infrastructure.
             </p>
-            <router-link to="/workspace/new" class="btn btn-primary btn-lg">
+            <router-link to="/workspaces/new" class="btn btn-primary btn-lg">
               <i class="bi bi-plus-circle me-2"></i>Create Your First Workspace
             </router-link>
           </div>

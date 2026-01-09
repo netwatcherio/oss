@@ -304,6 +304,7 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
       lostPackets: p?.lostPackets ?? 0,
       totalPackets: p?.totalPackets ?? 0,
       outOfSequence: p?.outOfOrder ?? 0,  // Agent uses outOfOrder, graph expects outOfSequence
+      duplicates: p?.duplicates ?? 0,  // Duplicate packets
       reportTime: p?.timestamp ?? r.created_at,
     };
   }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
@@ -478,6 +479,43 @@ async function reloadData() {
         rperfData: state.rperfData
       }];
       
+      // If reciprocal probe exists, load its data too for in-page direction switching
+      if (state.reciprocalProbe) {
+        try {
+          const recipProbe = state.reciprocalProbe;
+          const [fromTime, toTime] = state.timeRange;
+          const recipData = await ProbeDataService.byProbe(
+            workspaceID, 
+            recipProbe.id, 
+            { from: toRFC3339(fromTime), to: toRFC3339(toTime) }
+          ) as ProbeData[];
+          
+          // Sort reciprocal data by type
+          const recipPing = recipData.filter(d => d.type === 'PING');
+          const recipMtr = recipData.filter(d => d.type === 'MTR');
+          const recipTraffic = recipData.filter(d => d.type === 'TRAFFICSIM');
+          const recipRperf = recipData.filter(d => d.type === 'RPERF');
+          
+          // Add reverse direction to agentPairData
+          state.agentPairData.push({
+            direction: 'reverse' as const,
+            probeId: recipProbe.id,
+            sourceAgentId: targetAgentId,
+            targetAgentId: sourceAgentId,
+            sourceAgentName: targetAgentName,
+            targetAgentName: sourceAgentName,
+            pingData: recipPing,
+            mtrData: recipMtr,
+            trafficSimData: recipTraffic,
+            rperfData: recipRperf
+          });
+          
+          console.log("Loaded reciprocal probe data:", recipPing.length, "ping,", recipMtr.length, "mtr,", recipTraffic.length, "trafficsim");
+        } catch (e) {
+          console.error("Failed to load reciprocal probe data:", e);
+        }
+      }
+      
       console.log("Built agentPairData:", state.agentPairData.length, "pairs with", 
         state.pingData.length, "ping,", state.mtrData.length, "mtr,", 
         state.trafficSimData.length, "trafficsim");
@@ -543,13 +581,10 @@ function onCreate(_: any) { router.push("/workspace"); }
 function onError(response: any) { alert(response); }
 function submit() {}
 
-// Navigate to the reciprocal probe (reverse direction)
+// Toggle to reciprocal direction (in-page, no navigation)
 function switchToReciprocal() {
   if (!state.reciprocalProbe) return;
-  const rp = state.reciprocalProbe;
-  const wsId = state.workspace.id;
-  const targetAgentId = rp.agent_id;
-  router.push(`/workspaces/${wsId}/agents/${targetAgentId}/probes/${rp.id}`);
+  state.selectedDirection = state.selectedDirection === 0 ? 1 : 0;
 }
 
 onMounted(() => {
@@ -678,13 +713,13 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
             <ul class="nav nav-tabs" role="tablist">
               <li v-for="(pair, index) in state.agentPairData" :key="`tab-${index}`" class="nav-item" role="presentation">
                 <button 
-                  :class="['nav-link', index === 0 ? 'active' : '']"
+                  :class="['nav-link', index === state.selectedDirection ? 'active' : '']"
                   :id="`pair-tab-${index}`"
                   :data-bs-target="`#pair-content-${index}`"
                   data-bs-toggle="tab"
                   type="button"
                   role="tab"
-                  @click="onTabChange(index)">
+                  @click="state.selectedDirection = index; onTabChange(index)">
                   {{ pair.sourceAgentName }} → {{ pair.targetAgentName }}
                 </button>
               </li>
@@ -695,7 +730,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
               <div v-for="(pair, index) in state.agentPairData" 
                    :key="`content-${index}`"
                    :id="`pair-content-${index}`"
-                   :class="['tab-pane', 'fade', index === 0 ? 'show active' : '']"
+                   :class="['tab-pane', 'fade', index === state.selectedDirection ? 'show active' : '']"
                    role="tabpanel">
                 
                 <!-- Agent Pair Information -->
@@ -791,6 +826,47 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                                 class="accordion-collapse collapse">
                                 <div class="accordion-body p-0">
                                   <MtrTable :probe-data="mtr as ProbeData" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <!-- Notable Traces section for AGENT probes -->
+                        <div class="notable-traces mt-3">
+                          <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0">
+                              <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+                              Notable Traces
+                              <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(pair.mtrData).length }}</span>
+                            </h6>
+                          </div>
+                          
+                          <div v-if="getNotableMtrResults(pair.mtrData).length === 0" class="text-muted text-center py-3">
+                            <i class="bi bi-check-circle text-success me-2"></i>
+                            No issues detected in the selected time range
+                          </div>
+                          
+                          <div v-else :id="`notableAccordion-${index}`" class="accordion">
+                            <div v-for="(item, notableIdx) in getNotableMtrResults(pair.mtrData)" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
+                              <div class="accordion-item">
+                                <h2 :id="`notable-heading-${index}-${item.data.id}`" class="accordion-header">
+                                  <button :aria-controls="`notable-collapse-${index}-${item.data.id}`" :aria-expanded="false"
+                                          :data-bs-target="`#notable-collapse-${index}-${item.data.id}`"
+                                          class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
+                                    {{ formatMtrTimestamp(item.data) }}
+                                    <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
+                                    <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
+                                    <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
+                                    <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
+                                  </button>
+                                </h2>
+                                <div :id="`notable-collapse-${index}-${item.data.id}`" :aria-labelledby="`notable-heading-${index}-${item.data.id}`"
+                                     class="accordion-collapse collapse"
+                                     :data-bs-parent="`#notableAccordion-${index}`">
+                                  <div class="accordion-body p-0">
+                                    <MtrTable :probe-data="item.data" />
+                                  </div>
                                 </div>
                               </div>
                             </div>

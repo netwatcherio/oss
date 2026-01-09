@@ -10,10 +10,10 @@ import (
 
 // Permission levels for code clarity
 const (
-	CanView   = workspace.RoleReadOnly  // VIEWER - read-only access
-	CanEdit   = workspace.RoleReadWrite // USER - create/edit agents and probes
-	CanManage = workspace.RoleAdmin     // ADMIN - manage members, delete resources
-	CanOwn    = workspace.RoleOwner     // OWNER - full control, workspace deletion
+	CanView   = workspace.RoleViewer // VIEWER - read-only access
+	CanEdit   = workspace.RoleUser   // USER - create/edit agents and probes
+	CanManage = workspace.RoleAdmin  // ADMIN - manage members, delete resources
+	CanOwn    = workspace.RoleOwner  // OWNER - full control, workspace deletion
 )
 
 // RequireRole returns middleware that checks if the user has at least the specified role

@@ -147,7 +147,9 @@ func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.
 	})
 }
 
-// InviteMemberWithEmail creates an invite and queues the email
+// InviteMemberWithEmail adds a member to workspace
+// If user already has an account, adds them directly
+// If user doesn't exist, creates invite and queues email
 func InviteMemberWithEmail(
 	ctx iris.Context,
 	db *gorm.DB,
@@ -159,7 +161,24 @@ func InviteMemberWithEmail(
 	role workspace.Role,
 	invitedByUserID uint,
 ) (*workspace.Member, error) {
-	// Create invite
+	// Check if user already exists with this email
+	existingUser, err := users.GetByEmail(ctx.Request().Context(), db, inviteeEmail)
+	if err == nil && existingUser != nil {
+		// User exists - add them directly to workspace (no invite needed)
+		member, err := store.AddMember(ctx.Request().Context(), workspace.AddMemberInput{
+			WorkspaceID: wsID,
+			UserID:      existingUser.ID,
+			Email:       inviteeEmail,
+			Role:        role,
+		})
+		if err != nil {
+			return nil, err
+		}
+		// Note: No invite email sent for existing users - they're added directly
+		return member, nil
+	}
+
+	// User doesn't exist - create invite with token
 	member, token, err := store.CreateInvite(ctx.Request().Context(), workspace.CreateInviteInput{
 		WorkspaceID: wsID,
 		Email:       inviteeEmail,
@@ -170,8 +189,8 @@ func InviteMemberWithEmail(
 		return nil, err
 	}
 
-	// Queue email (pass token, the template builds the URL from PANEL_ENDPOINT)
-	if emailStore != nil {
+	// Queue invite email (pass token, the template builds the URL from PANEL_ENDPOINT)
+	if emailStore != nil && token != "" {
 		if err := emailStore.EnqueueInvite(
 			ctx.Request().Context(),
 			member.Email,
