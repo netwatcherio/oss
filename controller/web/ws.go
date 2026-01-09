@@ -341,17 +341,32 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 
 				if result.Success {
-					if err := speedtest.MarkCompleted(context.TODO(), db, result.QueueID); err != nil {
-						log.Errorf("speedtest_result mark completed: %v", err)
+					// Get queue item first - we need workspace info for broadcasting
+					queueItem, err := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
+					if err != nil {
+						log.Errorf("speedtest_result get queue item %d: %v", result.QueueID, err)
+						// Still try to mark completed even if we can't get the queue item
 					}
 
-					if len(result.Data) > 0 {
-						queueItem, err := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
-						if err != nil {
-							log.Errorf("speedtest_result get queue item: %v", err)
-							return err
-						}
+					if err := speedtest.MarkCompleted(context.TODO(), db, result.QueueID); err != nil {
+						log.Errorf("speedtest_result mark completed for queue %d: %v", result.QueueID, err)
+					} else {
+						log.Infof("speedtest_result: marked queue item %d as completed", result.QueueID)
+					}
 
+					// Broadcast update to panel clients
+					if queueItem != nil {
+						GetRawPanelHub().BroadcastSpeedtestUpdate(SpeedtestUpdate{
+							QueueID:     result.QueueID,
+							WorkspaceID: queueItem.WorkspaceID,
+							AgentID:     aid,
+							Status:      "completed",
+							ServerID:    queueItem.ServerID,
+							ServerName:  queueItem.ServerName,
+						})
+					}
+
+					if len(result.Data) > 0 && queueItem != nil {
 						// Look up the actual SPEEDTEST probe for this agent
 						probes, err := probe.ListByAgent(context.TODO(), db, aid)
 						if err != nil {
@@ -388,8 +403,26 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 						}
 					}
 				} else {
+					// Failed test - mark as failed and broadcast
+					queueItem, _ := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
+
 					if err := speedtest.MarkFailed(context.TODO(), db, result.QueueID, result.Error); err != nil {
-						log.Errorf("speedtest_result mark failed: %v", err)
+						log.Errorf("speedtest_result mark failed for queue %d: %v", result.QueueID, err)
+					} else {
+						log.Infof("speedtest_result: marked queue item %d as failed: %s", result.QueueID, result.Error)
+					}
+
+					// Broadcast failure to panel clients
+					if queueItem != nil {
+						GetRawPanelHub().BroadcastSpeedtestUpdate(SpeedtestUpdate{
+							QueueID:     result.QueueID,
+							WorkspaceID: queueItem.WorkspaceID,
+							AgentID:     aid,
+							Status:      "failed",
+							Error:       result.Error,
+							ServerID:    queueItem.ServerID,
+							ServerName:  queueItem.ServerName,
+						})
 					}
 				}
 

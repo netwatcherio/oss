@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {onMounted, reactive, computed} from "vue";
+import {onMounted, onUnmounted, reactive, computed} from "vue";
 import { useRouter } from "vue-router";
 import type {
   Agent,
@@ -17,6 +17,11 @@ import Title from "@/components/Title.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
 import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService, type SpeedtestQueueItem } from "@/services/apiService";
+import websocketService, { type SpeedtestUpdateEvent } from "@/services/websocketService";
+
+// Cleanup function for WebSocket subscription
+let unsubscribeSpeedtest: (() => void) | null = null;
+
 
 const router = useRouter();
 
@@ -338,10 +343,54 @@ onMounted(async () => {
 
     state.ready = true;
     state.loading = false;
+
+    // Subscribe to WebSocket speedtest updates for real-time refresh
+    const wsId = parseInt(workspaceId, 10);
+    const aId = parseInt(agentId, 10);
+    if (!isNaN(wsId) && !isNaN(aId)) {
+      // Connect to WebSocket if not already connected
+      websocketService.connect();
+      
+      // Subscribe to speedtest updates for this agent
+      unsubscribeSpeedtest = websocketService.onSpeedtestUpdate(wsId, aId, async (update: SpeedtestUpdateEvent) => {
+        console.log('[Speedtest] WebSocket update:', update);
+        
+        // Remove from pending items if completed or failed
+        if (update.status === 'completed' || update.status === 'failed') {
+          state.pendingItems = state.pendingItems.filter(item => item.id !== update.queue_id);
+          
+          // Reload speedtest data to show the new result
+          if (update.status === 'completed') {
+            try {
+              const probeData = await ProbeDataService.speedtestsByAgent(workspaceId, agentId, 25) as ProbeData[];
+              state.speedtestData = [];
+              for (const data of probeData) {
+                try {
+                  const convD = convertToSpeedTestResult(data.payload);
+                  state.speedtestData.push(convD);
+                } catch (e) {
+                  console.error('[Speedtest] Conversion error:', e);
+                }
+              }
+            } catch (err) {
+              console.error('[Speedtest] Failed to reload data:', err);
+            }
+          }
+        }
+      });
+    }
   } catch (error) {
     console.error('Error loading speedtest data:', error);
     state.ready = true; // Still show the page to allow running tests
     state.loading = false;
+  }
+})
+
+// Cleanup WebSocket subscription on unmount
+onUnmounted(() => {
+  if (unsubscribeSpeedtest) {
+    unsubscribeSpeedtest();
+    unsubscribeSpeedtest = null;
   }
 })
 

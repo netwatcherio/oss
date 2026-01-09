@@ -19,7 +19,19 @@ export interface ProbeDataEvent {
     triggered?: boolean;
 }
 
+// Event type for speedtest queue updates
+export interface SpeedtestUpdateEvent {
+    queue_id: number;
+    workspace_id: number;
+    agent_id: number;
+    status: 'completed' | 'failed' | 'running';
+    error?: string;
+    server_id?: string;
+    server_name?: string;
+}
+
 export type ProbeDataHandler = (data: ProbeDataEvent) => void;
+export type SpeedtestUpdateHandler = (data: SpeedtestUpdateEvent) => void;
 export type ConnectionHandler = () => void;
 export type ErrorHandler = (error: Event | Error) => void;
 
@@ -31,6 +43,7 @@ class WebSocketService {
     private baseReconnectDelay = 1000;
 
     private probeDataHandlers: Map<string, Set<ProbeDataHandler>> = new Map();
+    private speedtestUpdateHandlers: Map<string, Set<SpeedtestUpdateHandler>> = new Map();
     private onConnectHandlers: Set<ConnectionHandler> = new Set();
     private onDisconnectHandlers: Set<ConnectionHandler> = new Set();
     private onErrorHandlers: Set<ErrorHandler> = new Set();
@@ -130,6 +143,11 @@ class WebSocketService {
                     this.notifyProbeDataHandlers(probeData);
                     break;
 
+                case 'speedtest_update':
+                    const speedtestData: SpeedtestUpdateEvent = msg.data;
+                    this.notifySpeedtestUpdateHandlers(speedtestData);
+                    break;
+
                 case 'subscribe_ok':
                     console.log('[WebSocket] Subscription confirmed:', msg.data);
                     break;
@@ -157,6 +175,19 @@ class WebSocketService {
         // Notify workspace-wide handlers (probeId = 0)
         const wsKey = `${data.workspace_id}:0`;
         this.probeDataHandlers.get(wsKey)?.forEach(h => h(data));
+    }
+
+    /**
+     * Notify handlers for speedtest updates
+     */
+    private notifySpeedtestUpdateHandlers(data: SpeedtestUpdateEvent): void {
+        // Notify workspace-wide handlers
+        const wsKey = `${data.workspace_id}:0`;
+        this.speedtestUpdateHandlers.get(wsKey)?.forEach(h => h(data));
+
+        // Notify agent-specific handlers
+        const agentKey = `${data.workspace_id}:${data.agent_id}`;
+        this.speedtestUpdateHandlers.get(agentKey)?.forEach(h => h(data));
     }
 
     /**
@@ -227,6 +258,30 @@ class WebSocketService {
             if (this.probeDataHandlers.get(key)?.size === 0) {
                 this.probeDataHandlers.delete(key);
                 this.activeSubscriptions.delete(key);
+            }
+        };
+    }
+
+    /**
+     * Subscribe to speedtest queue updates for a workspace/agent
+     * @param workspaceId - Workspace ID
+     * @param agentId - Agent ID (0 for all agents in workspace)
+     * @param handler - Callback function
+     * @returns Unsubscribe function
+     */
+    onSpeedtestUpdate(workspaceId: number, agentId: number, handler: SpeedtestUpdateHandler): () => void {
+        const key = `${workspaceId}:${agentId}`;
+
+        if (!this.speedtestUpdateHandlers.has(key)) {
+            this.speedtestUpdateHandlers.set(key, new Set());
+        }
+        this.speedtestUpdateHandlers.get(key)!.add(handler);
+
+        // Return unsubscribe function
+        return () => {
+            this.speedtestUpdateHandlers.get(key)?.delete(handler);
+            if (this.speedtestUpdateHandlers.get(key)?.size === 0) {
+                this.speedtestUpdateHandlers.delete(key);
             }
         };
     }

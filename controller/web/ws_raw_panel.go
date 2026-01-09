@@ -198,6 +198,57 @@ func (h *RawPanelHub) BroadcastRaw(data ProbeDataBroadcast) {
 	}
 }
 
+// SpeedtestUpdate represents a speedtest queue status change
+type SpeedtestUpdate struct {
+	QueueID     uint   `json:"queue_id"`
+	WorkspaceID uint   `json:"workspace_id"`
+	AgentID     uint   `json:"agent_id"`
+	Status      string `json:"status"` // "completed", "failed", "running"
+	Error       string `json:"error,omitempty"`
+	ServerID    string `json:"server_id,omitempty"`
+	ServerName  string `json:"server_name,omitempty"`
+}
+
+// BroadcastSpeedtestUpdate sends speedtest queue updates to all subscribed panel clients for the workspace
+func (h *RawPanelHub) BroadcastSpeedtestUpdate(update SpeedtestUpdate) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"event": "speedtest_update",
+		"data":  update,
+	})
+	if err != nil {
+		log.Errorf("[RawPanelWS] Marshal speedtest update error: %v", err)
+		return
+	}
+
+	recipients := make(map[string]struct{})
+
+	// Send to all connections subscribed to this workspace (probeID 0 = workspace-wide)
+	if wsMap, ok := h.subscriptions[update.WorkspaceID]; ok {
+		if connMap, ok := wsMap[0]; ok {
+			for connID := range connMap {
+				recipients[connID] = struct{}{}
+			}
+		}
+	}
+
+	for connID := range recipients {
+		if conn, ok := h.conns[connID]; ok {
+			select {
+			case conn.Send <- payload:
+			default:
+				log.Warnf("[RawPanelWS] Send buffer full for %s (speedtest update)", connID)
+			}
+		}
+	}
+
+	if len(recipients) > 0 {
+		log.Debugf("[RawPanelWS] Speedtest update broadcast to %d clients (queue=%d, status=%s)", len(recipients), update.QueueID, update.Status)
+	}
+}
+
 // Read pump for raw WebSocket
 func (c *RawPanelConn) readPump(hub *RawPanelHub) {
 	defer func() {
