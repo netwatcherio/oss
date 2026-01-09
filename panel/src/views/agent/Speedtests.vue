@@ -19,8 +19,9 @@ import '@vuepic/vue-datepicker/dist/main.css'
 import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService, type SpeedtestQueueItem } from "@/services/apiService";
 import { websocketService, type SpeedtestUpdateEvent } from "@/services/websocketService";
 
-// Cleanup function for WebSocket subscription
+// Cleanup functions for WebSocket subscriptions
 let unsubscribeSpeedtest: (() => void) | null = null;
+let unsubscribeWs: (() => void) | null = null;
 
 
 const router = useRouter();
@@ -351,7 +352,10 @@ onMounted(async () => {
       // Connect to WebSocket if not already connected
       websocketService.connect();
       
-      // Subscribe to speedtest updates for this agent
+      // Subscribe to workspace for receiving broadcasts (probeId=0 means workspace-wide)
+      unsubscribeWs = websocketService.subscribe(wsId, 0, () => {});  // Handler not used for speedtests, just need the subscription
+      
+      // Register handler for speedtest updates for this agent
       unsubscribeSpeedtest = websocketService.onSpeedtestUpdate(wsId, aId, async (update: SpeedtestUpdateEvent) => {
         console.log('[Speedtest] WebSocket update:', update);
         
@@ -386,11 +390,15 @@ onMounted(async () => {
   }
 })
 
-// Cleanup WebSocket subscription on unmount
+// Cleanup WebSocket subscriptions on unmount
 onUnmounted(() => {
   if (unsubscribeSpeedtest) {
     unsubscribeSpeedtest();
     unsubscribeSpeedtest = null;
+  }
+  if (unsubscribeWs) {
+    unsubscribeWs();
+    unsubscribeWs = null;
   }
 })
 
