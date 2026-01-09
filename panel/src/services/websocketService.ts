@@ -1,14 +1,13 @@
 /**
  * WebSocket Service for NetWatcher Panel
  * 
- * Connects to the controller's WebSocket server using the official neffos.js client
+ * Connects to the controller's raw WebSocket server (not neffos)
  * for real-time probe data updates.
  */
 
-import * as neffos from 'neffos.js';
 import { getSession } from "@/session";
 
-// Event types for the panel namespace
+// Event types for probe data
 export interface ProbeDataEvent {
     workspace_id: number;
     probe_id: number;
@@ -25,12 +24,11 @@ export type ConnectionHandler = () => void;
 export type ErrorHandler = (error: Event | Error) => void;
 
 class WebSocketService {
-    private conn: neffos.Conn | null = null;
-    private nsConn: neffos.NSConn | null = null;
+    private ws: WebSocket | null = null;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 10;
-    private baseReconnectDelay = 1000; // 1 second
+    private baseReconnectDelay = 1000;
 
     private probeDataHandlers: Map<string, Set<ProbeDataHandler>> = new Map();
     private onConnectHandlers: Set<ConnectionHandler> = new Set();
@@ -38,7 +36,7 @@ class WebSocketService {
     private onErrorHandlers: Set<ErrorHandler> = new Set();
 
     private activeSubscriptions: Set<string> = new Set();
-    private namespaceConnected = false;
+    private connected = false;
 
     /**
      * Get the WebSocket URL based on the controller endpoint
@@ -64,12 +62,12 @@ class WebSocketService {
             baseUrl = proto + baseUrl;
         }
 
-        // Token passed as query param (browsers can't send custom headers)
-        return `${baseUrl}/ws/panel?token=${encodeURIComponent(token)}`;
+        // Use raw WebSocket endpoint (simpler than neffos)
+        return `${baseUrl}/ws/panel/raw?token=${encodeURIComponent(token)}`;
     }
 
     /**
-     * Connect to the WebSocket server using neffos.js
+     * Connect to the raw WebSocket server
      */
     async connect(): Promise<void> {
         const session = getSession();
@@ -78,7 +76,7 @@ class WebSocketService {
             return;
         }
 
-        if (this.conn) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[WebSocket] Already connected');
             return;
         }
@@ -87,50 +85,64 @@ class WebSocketService {
         console.log('[WebSocket] Connecting to', url.replace(/token=[^&]+/, 'token=***'));
 
         try {
-            // Define namespace events
-            const panelNamespace: neffos.Events = {
-                _OnNamespaceConnected: (nsConn: neffos.NSConn, msg: neffos.Message) => {
-                    console.log('[WebSocket] Panel namespace connected');
-                    this.namespaceConnected = true;
-                    this.reconnectAttempts = 0;
-                    this.onConnectHandlers.forEach(h => h());
-                    this.restoreSubscriptions();
-                },
-                _OnNamespaceDisconnect: (nsConn: neffos.NSConn, msg: neffos.Message) => {
-                    console.log('[WebSocket] Panel namespace disconnected');
-                    this.namespaceConnected = false;
-                    this.onDisconnectHandlers.forEach(h => h());
-                },
-                subscribe_ok: (nsConn: neffos.NSConn, msg: neffos.Message) => {
-                    console.log('[WebSocket] Subscription confirmed');
-                },
-                probe_data: (nsConn: neffos.NSConn, msg: neffos.Message) => {
-                    try {
-                        const data: ProbeDataEvent = JSON.parse(new TextDecoder().decode(msg.Body));
-                        this.notifyProbeDataHandlers(data);
-                    } catch (e) {
-                        console.error('[WebSocket] Failed to parse probe_data:', e);
-                    }
-                }
+            this.ws = new WebSocket(url);
+
+            this.ws.onopen = () => {
+                console.log('[WebSocket] Connected');
+                this.connected = true;
+                this.reconnectAttempts = 0;
+                this.onConnectHandlers.forEach(h => h());
+                this.restoreSubscriptions();
             };
 
-            // Dial with neffos
-            this.conn = await neffos.dial(url, { panel: panelNamespace });
-            console.log('[WebSocket] Connected to server');
+            this.ws.onmessage = (event) => {
+                this.handleMessage(event.data);
+            };
 
-            // Set up connection close handler
-            this.conn.wasReconnected().then(() => {
-                console.log('[WebSocket] Reconnection handler triggered');
-            });
+            this.ws.onerror = (error) => {
+                console.error('[WebSocket] Error:', error);
+                this.onErrorHandlers.forEach(h => h(error));
+            };
 
-            // Connect to the panel namespace
-            this.nsConn = await this.conn.connect("panel");
-            console.log('[WebSocket] Joined panel namespace');
+            this.ws.onclose = (event) => {
+                console.log('[WebSocket] Disconnected', event.code, event.reason);
+                this.connected = false;
+                this.onDisconnectHandlers.forEach(h => h());
+                this.scheduleReconnect();
+            };
 
         } catch (error) {
             console.error('[WebSocket] Connection error:', error);
-            this.onErrorHandlers.forEach(h => h(error as Error));
             this.scheduleReconnect();
+        }
+    }
+
+    /**
+     * Handle incoming messages (simple JSON protocol)
+     */
+    private handleMessage(data: string): void {
+        try {
+            const msg = JSON.parse(data);
+
+            switch (msg.event) {
+                case 'probe_data':
+                    const probeData: ProbeDataEvent = msg.data;
+                    this.notifyProbeDataHandlers(probeData);
+                    break;
+
+                case 'subscribe_ok':
+                    console.log('[WebSocket] Subscription confirmed:', msg.data);
+                    break;
+
+                case 'pong':
+                    // Heartbeat response
+                    break;
+
+                default:
+                    console.log('[WebSocket] Unknown event:', msg.event);
+            }
+        } catch (e) {
+            console.error('[WebSocket] Failed to parse message:', e);
         }
     }
 
@@ -148,6 +160,17 @@ class WebSocketService {
     }
 
     /**
+     * Send a JSON message
+     */
+    private send(event: string, data: any): void {
+        if (this.ws?.readyState !== WebSocket.OPEN) {
+            console.warn('[WebSocket] Cannot send, not connected');
+            return;
+        }
+        this.ws.send(JSON.stringify({ event, data }));
+    }
+
+    /**
      * Schedule a reconnection attempt
      */
     private scheduleReconnect(): void {
@@ -161,8 +184,6 @@ class WebSocketService {
 
         this.reconnectTimer = setTimeout(() => {
             this.reconnectAttempts++;
-            this.conn = null;
-            this.nsConn = null;
             this.connect();
         }, delay);
     }
@@ -176,23 +197,9 @@ class WebSocketService {
             const wsId = parseInt(parts[0] || '0', 10);
             const probeId = parseInt(parts[1] || '0', 10);
             if (!isNaN(wsId) && !isNaN(probeId) && wsId > 0) {
-                this.sendSubscribe(wsId, probeId);
+                this.send('subscribe', { workspace_id: wsId, probe_id: probeId });
             }
         });
-    }
-
-    /**
-     * Send subscribe message
-     */
-    private sendSubscribe(workspaceId: number, probeId: number): void {
-        if (!this.nsConn || !this.namespaceConnected) {
-            console.warn('[WebSocket] Cannot send subscribe, not connected to namespace');
-            return;
-        }
-
-        const body = JSON.stringify({ workspace_id: workspaceId, probe_id: probeId });
-        this.nsConn.emit("subscribe", new TextEncoder().encode(body));
-        console.log(`[WebSocket] Subscribed to workspace ${workspaceId} probe ${probeId}`);
     }
 
     /**
@@ -210,8 +217,8 @@ class WebSocketService {
         this.activeSubscriptions.add(key);
 
         // Send subscription if connected
-        if (this.namespaceConnected) {
-            this.sendSubscribe(workspaceId, probeId);
+        if (this.connected) {
+            this.send('subscribe', { workspace_id: workspaceId, probe_id: probeId });
         }
 
         // Return unsubscribe function
@@ -220,12 +227,6 @@ class WebSocketService {
             if (this.probeDataHandlers.get(key)?.size === 0) {
                 this.probeDataHandlers.delete(key);
                 this.activeSubscriptions.delete(key);
-
-                // Send unsubscribe if connected
-                if (this.namespaceConnected && this.nsConn) {
-                    const body = JSON.stringify({ workspace_id: workspaceId, probe_id: probeId });
-                    this.nsConn.emit("unsubscribe", new TextEncoder().encode(body));
-                }
             }
         };
     }
@@ -263,13 +264,12 @@ class WebSocketService {
             this.reconnectTimer = null;
         }
 
-        if (this.conn) {
-            this.conn.close();
-            this.conn = null;
-            this.nsConn = null;
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
         }
 
-        this.namespaceConnected = false;
+        this.connected = false;
         this.reconnectAttempts = 0;
     }
 
@@ -277,7 +277,7 @@ class WebSocketService {
      * Check if connected
      */
     isConnected(): boolean {
-        return this.namespaceConnected;
+        return this.connected;
     }
 }
 

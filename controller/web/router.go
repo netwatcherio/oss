@@ -26,6 +26,9 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 		log.Error(err)
 	}
 
+	// Raw WebSocket for panel (simpler than neffos, better browser compatibility)
+	RegisterRawPanelWS(app, db)
+
 	// ----- Protected (JWT) -----
 	api := app.Party("/")
 	api.Use(JWTMiddleware(db))
