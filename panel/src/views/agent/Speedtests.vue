@@ -17,7 +17,7 @@ import Title from "@/components/Title.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
 import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService, type SpeedtestQueueItem } from "@/services/apiService";
-import websocketService, { type SpeedtestUpdateEvent } from "@/services/websocketService";
+import { websocketService, type SpeedtestUpdateEvent } from "@/services/websocketService";
 
 // Cleanup function for WebSocket subscription
 let unsubscribeSpeedtest: (() => void) | null = null;
