@@ -217,6 +217,26 @@ func (s *Store) ListWorkspaces(ctx context.Context, f ListWorkspacesFilter) ([]W
 	return out, nil
 }
 
+// ListWorkspacesByUserID returns all workspaces where the user is a member (any role)
+func (s *Store) ListWorkspacesByUserID(ctx context.Context, userID uint) ([]Workspace, error) {
+	if userID == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	var out []Workspace
+	// Join with members table to find all workspaces where user is a member
+	err := s.db.WithContext(ctx).
+		Model(&Workspace{}).
+		Joins("INNER JOIN workspace_members ON workspace_members.workspace_id = workspaces.id").
+		Where("workspace_members.user_id = ? AND workspace_members.deleted_at IS NULL", userID).
+		Order("workspaces.id DESC").
+		Find(&out).Error
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type UpdateWorkspaceInput struct {
 	Name        *string
 	Description *string

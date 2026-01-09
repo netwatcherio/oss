@@ -16,15 +16,10 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore) 
 	wsParty := api.Party("/workspaces")
 	store := workspace.NewStore(db)
 
-	// GET /workspaces
+	// GET /workspaces - returns all workspaces where user is a member
 	wsParty.Get("/", func(ctx iris.Context) {
 		uid := currentUserID(ctx)
-		out, err := store.ListWorkspaces(ctx.Request().Context(), workspace.ListWorkspacesFilter{
-			OwnerID: uid,
-			Query:   stringsTrim(ctx.URLParamDefault("q", "")),
-			Limit:   intParam(ctx, "limit", 50, 1, 200),
-			Offset:  intParam(ctx, "offset", 0, 0, 1_000_000),
-		})
+		out, err := store.ListWorkspacesByUserID(ctx.Request().Context(), uid)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})

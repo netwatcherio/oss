@@ -1,10 +1,29 @@
 <script lang="ts" setup>
+import { ref, onMounted, onUnmounted } from "vue";
 import core from "@/core";
 import {clearSession, type Session} from "@/session";
+import { themeService, type Theme } from "@/services/themeService";
 
 const persistent = core.persistent()
 const router = core.router()
 const session = core.session()
+
+const currentTheme = ref<Theme>(themeService.getTheme());
+let unsubscribe: (() => void) | null = null;
+
+onMounted(() => {
+  unsubscribe = themeService.onThemeChange((theme) => {
+    currentTheme.value = theme;
+  });
+});
+
+onUnmounted(() => {
+  if (unsubscribe) unsubscribe();
+});
+
+function toggleTheme() {
+  themeService.toggle();
+}
 
 function logout() {
   clearSession()
@@ -24,8 +43,8 @@ function logout() {
       <!-- Right Side Actions -->
       <div class="navbar-actions">
         <!-- Theme Toggle -->
-        <button class="nav-icon-btn" title="Toggle theme">
-          <i class="bi bi-moon"></i>
+        <button class="nav-icon-btn" title="Toggle theme" @click="toggleTheme">
+          <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
         </button>
 
         <!-- Notifications -->
@@ -327,58 +346,56 @@ function logout() {
   }
 }
 
-/* Dark Mode Support (optional) */
-@media (prefers-color-scheme: dark) {
-  .navbar {
-    background: #1f2937;
-    border-bottom-color: #374151;
-  }
-  
-  .navbar-brand {
-    color: #f9fafb;
-  }
-  
-  .navbar-brand:hover {
-    color: #60a5fa;
-  }
-  
-  .nav-icon-btn {
-    color: #9ca3af;
-  }
-  
-  .nav-icon-btn:hover {
-    background: #374151;
-    color: #f9fafb;
-  }
-  
-  .nav-divider {
-    background: #374151;
-  }
-  
-  .user-menu-btn:hover {
-    background: #374151;
-  }
-  
-  .user-name {
-    color: #f9fafb;
-  }
-  
-  .user-role {
-    color: #9ca3af;
-  }
-  
-  .dropdown-menu {
-    background: #1f2937;
-    border-color: #374151;
-  }
-  
-  .dropdown-item {
-    color: #d1d5db;
-  }
-  
-  .dropdown-item:hover {
-    background: #374151;
-    color: #f9fafb;
-  }
+/* Dark Mode Support - controlled via data-theme attribute */
+:global([data-theme="dark"]) .navbar {
+  background: #1f2937;
+  border-bottom-color: #374151;
+}
+
+:global([data-theme="dark"]) .navbar-brand {
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .navbar-brand:hover {
+  color: #60a5fa;
+}
+
+:global([data-theme="dark"]) .nav-icon-btn {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .nav-icon-btn:hover {
+  background: #374151;
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .nav-divider {
+  background: #374151;
+}
+
+:global([data-theme="dark"]) .user-menu-btn:hover {
+  background: #374151;
+}
+
+:global([data-theme="dark"]) .user-name {
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .user-role {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .dropdown-menu {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .dropdown-item {
+  color: #d1d5db;
+}
+
+:global([data-theme="dark"]) .dropdown-item:hover {
+  background: #374151;
+  color: #f9fafb;
 }
 </style>
