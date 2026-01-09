@@ -16,7 +16,7 @@ import core from "@/core";
 import Title from "@/components/Title.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css'
-import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService  } from "@/services/apiService";
+import { AgentService, WorkspaceService, ProbeService, ProbeDataService, SpeedtestService, type SpeedtestQueueItem } from "@/services/apiService";
 
 const router = useRouter();
 
@@ -32,7 +32,9 @@ const state = reactive({
   speedtestServerProbe: {} as Probe,
   selectedTest: null as SpeedTestResult | null,
   expandedTests: new Set<string>(),
-  pendingTest: null as { target: string, time: Date } | null
+  pendingTest: null as { target: string, time: Date } | null,
+  pendingItems: [] as SpeedtestQueueItem[],
+  cancellingIds: new Set<number>(),
 })
 
 // Computed properties
@@ -205,6 +207,36 @@ function formatTimeUntil(date: Date): string {
   return 'in less than a minute';
 }
 
+function formatTimeRemaining(expiresAt: string): string {
+  const expires = new Date(expiresAt);
+  const now = new Date();
+  const diff = expires.getTime() - now.getTime();
+  
+  if (diff <= 0) return 'Expired';
+  
+  const minutes = Math.floor(diff / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+  
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+async function cancelQueueItem(itemId: number) {
+  const workspaceId = router.currentRoute.value.params["wID"] as string;
+  const agentId = router.currentRoute.value.params["aID"] as string;
+  if (!workspaceId || !agentId) return;
+  
+  state.cancellingIds.add(itemId);
+  try {
+    await SpeedtestService.cancelQueueItem(workspaceId, agentId, itemId);
+    state.pendingItems = state.pendingItems.filter(item => item.id !== itemId);
+  } catch (error) {
+    console.error('Failed to cancel queue item:', error);
+  } finally {
+    state.cancellingIds.delete(itemId);
+  }
+}
+
 onMounted(async () => {
   const workspaceId = router.currentRoute.value.params["wID"] as string;
   const agentId = router.currentRoute.value.params["aID"] as string;
@@ -246,12 +278,13 @@ onMounted(async () => {
       }
     }
 
-    // Also load queue items
+    // Load pending queue items
     try {
-      const queueRes = await SpeedtestService.listQueue(workspaceId, agentId);
-      // Store queue items if needed
+      const queueRes = await SpeedtestService.listQueue(workspaceId, agentId, 'pending');
+      state.pendingItems = queueRes.data || [];
     } catch (e) {
       // Queue API might not have data yet, ignore
+      console.debug('Queue fetch error:', e);
     }
 
     state.ready = true;
@@ -285,8 +318,48 @@ onMounted(async () => {
       </div>
     </Title>
 
-    <!-- Pending Test Notification -->
-    <div v-if="state.pendingTest" class="pending-test-card">
+    <!-- Pending Queue Items -->
+    <div v-if="state.pendingItems.length > 0" class="pending-queue-section">
+      <div class="pending-queue-header">
+        <h6><i class="bi bi-hourglass-split"></i> Pending Speedtests</h6>
+        <span class="badge bg-warning">{{ state.pendingItems.length }} queued</span>
+      </div>
+      <div class="pending-queue-list">
+        <div 
+          v-for="item in state.pendingItems" 
+          :key="item.id" 
+          class="pending-queue-item"
+        >
+          <div class="pending-item-info">
+            <div class="pending-item-server">
+              <i class="bi bi-server"></i>
+              {{ item.server_name || 'Auto-select' }}
+            </div>
+            <div class="pending-item-meta">
+              <span class="pending-item-time">
+                <i class="bi bi-clock"></i>
+                Requested {{ formatDate(new Date(item.requested_at)) }}
+              </span>
+              <span class="pending-item-expires">
+                <i class="bi bi-hourglass"></i>
+                Expires in {{ formatTimeRemaining(item.expires_at) }}
+              </span>
+            </div>
+          </div>
+          <button 
+            class="btn btn-sm btn-outline-danger"
+            @click="cancelQueueItem(item.id)"
+            :disabled="state.cancellingIds.has(item.id)"
+          >
+            <i :class="state.cancellingIds.has(item.id) ? 'bi bi-arrow-repeat spin' : 'bi bi-x-lg'"></i>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Legacy Pending Test Notification (from probe metadata) -->
+    <div v-else-if="state.pendingTest" class="pending-test-card">
       <div class="pending-icon">
         <i class="bi bi-clock"></i>
       </div>
@@ -510,6 +583,98 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Pending Queue Section */
+.pending-queue-section {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+.pending-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-bottom: 1px solid #fbbf24;
+}
+
+.pending-queue-header h6 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pending-queue-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pending-queue-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.15s;
+}
+
+.pending-queue-item:last-child {
+  border-bottom: none;
+}
+
+.pending-queue-item:hover {
+  background: #fffbeb;
+}
+
+.pending-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-item-server {
+  font-weight: 600;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.pending-item-meta {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.pending-item-time,
+.pending-item-expires {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.pending-item-expires {
+  color: #d97706;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 /* Pending Test Card */
 .pending-test-card {
   background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);

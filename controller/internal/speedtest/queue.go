@@ -18,7 +18,11 @@ const (
 	StatusCompleted QueueStatus = "completed"
 	StatusFailed    QueueStatus = "failed"
 	StatusCancelled QueueStatus = "cancelled"
+	StatusExpired   QueueStatus = "expired"
 )
+
+// DefaultExpirationDuration is how long a queue item remains valid before expiring.
+const DefaultExpirationDuration = 15 * time.Minute
 
 var (
 	ErrQueueNotFound = errors.New("queue item not found")
@@ -42,6 +46,7 @@ type QueueItem struct {
 
 	RequestedBy  uint       `json:"requested_by"` // user ID
 	RequestedAt  time.Time  `gorm:"index" json:"requested_at"`
+	ExpiresAt    time.Time  `gorm:"index" json:"expires_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	ErrorMessage string     `gorm:"type:text" json:"error,omitempty"`
@@ -76,6 +81,7 @@ func CreateQueueItem(ctx context.Context, db *gorm.DB, in CreateQueueInput) (*Qu
 		Status:      StatusPending,
 		RequestedBy: in.RequestedBy,
 		RequestedAt: now,
+		ExpiresAt:   now.Add(DefaultExpirationDuration),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -96,14 +102,27 @@ func GetQueueItem(ctx context.Context, db *gorm.DB, id uint) (*QueueItem, error)
 	return &item, err
 }
 
-// ListPendingForAgent returns pending queue items for a specific agent.
+// ListPendingForAgent returns pending, non-expired queue items for a specific agent.
 func ListPendingForAgent(ctx context.Context, db *gorm.DB, agentID uint) ([]QueueItem, error) {
 	var items []QueueItem
 	err := db.WithContext(ctx).
-		Where("agent_id = ? AND status = ?", agentID, StatusPending).
+		Where("agent_id = ? AND status = ? AND expires_at > ?", agentID, StatusPending, time.Now()).
 		Order("requested_at ASC").
 		Find(&items).Error
 	return items, err
+}
+
+// ExpirePendingItems marks all pending items past their expiration as expired.
+// Returns the number of items expired.
+func ExpirePendingItems(ctx context.Context, db *gorm.DB) (int64, error) {
+	now := time.Now()
+	res := db.WithContext(ctx).Model(&QueueItem{}).
+		Where("status = ? AND expires_at <= ?", StatusPending, now).
+		Updates(map[string]any{
+			"status":     StatusExpired,
+			"updated_at": now,
+		})
+	return res.RowsAffected, res.Error
 }
 
 // ListForAgent returns all queue items for an agent (optionally filtered by status).

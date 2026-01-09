@@ -236,6 +236,27 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 					return errors.New("unauthorized: no agent in context")
 				}
 
+				// Expire old pending items first
+				if expired, err := speedtest.ExpirePendingItems(context.TODO(), db); err != nil {
+					log.Warnf("speedtest_queue_get: expire error: %v", err)
+				} else if expired > 0 {
+					log.Infof("speedtest_queue_get: expired %d items", expired)
+				}
+
+				// Check if agent is online (seen within last 2 minutes)
+				a, err := agent.GetAgentByID(context.TODO(), db, aid)
+				if err != nil {
+					log.Errorf("speedtest_queue_get: get agent: %v", err)
+					return err
+				}
+				onlineThreshold := 2 * time.Minute
+				if time.Since(a.LastSeenAt) > onlineThreshold {
+					// Agent is not considered online, return empty queue
+					log.Debugf("speedtest_queue_get: agent %d not online (last seen %v ago)", aid, time.Since(a.LastSeenAt))
+					nsConn.Emit("speedtest_queue", []byte("[]"))
+					return nil
+				}
+
 				items, err := speedtest.ListPendingForAgent(context.TODO(), db, aid)
 				if err != nil {
 					log.Errorf("speedtest_queue_get: %v", err)

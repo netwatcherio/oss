@@ -382,9 +382,10 @@ export interface SpeedtestQueueItem {
     agent_id: number;
     server_id: string;
     server_name: string;
-    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'expired';
     requested_by: number;
     requested_at: string;
+    expires_at: string;
     started_at?: string;
     completed_at?: string;
     error?: string;
