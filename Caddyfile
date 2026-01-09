@@ -11,6 +11,15 @@
 		header Connection *Upgrade*
 		header Upgrade websocket
 	}
+	
+	# Handle WebSocket connections with proper header forwarding
+	reverse_proxy @ws {$CONTROLLER_UPSTREAM} {
+		import common_cf_headers
+		header_up Connection {http.request.header.Connection}
+		header_up Upgrade {http.request.header.Upgrade}
+	}
+	
+	# Handle regular HTTP requests
 	reverse_proxy {$CONTROLLER_UPSTREAM} {
 		import common_cf_headers
 	}
