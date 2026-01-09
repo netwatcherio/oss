@@ -95,5 +95,7 @@ services:
     image: netwatcher-panel
     restart: unless-stopped
     networks: [ netwatcher ]
+    environment:
+      CONTROLLER_ENDPOINT: ${CONTROLLER_ENDPOINT}
     ports:
       - "3000:3000"
