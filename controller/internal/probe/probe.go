@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"net"
 	"netwatcher-controller/internal/agent"
 	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -245,6 +246,7 @@ func ListByAgent(ctx context.Context, db *gorm.DB, agentID uint) ([]Probe, error
 func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([]Probe, error) {
 	var out []Probe
 
+	// 1. Get probes owned by this agent
 	err := db.WithContext(ctx).
 		Preload("Targets").
 		Where("agent_id = ?", agentID).
@@ -257,6 +259,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	// cache public IP lookups per agent to avoid repeat DB hits
 	pubIPCache := make(map[uint]string)
 
+	// 2. Resolve IP targets for owned probes
 	for i := range out {
 		p := &out[i]
 
@@ -265,7 +268,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 
 			switch p.Type {
 			case TypeAgent:
-				// TODO: create multiple probes for agent type for all available target agents (left as-is)
+				// These are handled below via expansion
 			case TypeMTR, TypePing:
 				// fill target when it's empty and we have a target agent
 				if t.Target == "" && t.AgentID != nil {
@@ -288,7 +291,139 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 	}
 
+	// 3. Find reverse AGENT probes - probes from OTHER agents that target THIS agent
+	reverseProbes, err := findReverseAgentProbes(ctx, db, agentID)
+	if err != nil {
+		log.Warnf("ListForAgent: error finding reverse probes: %v", err)
+		// Don't fail the whole operation
+	}
+
+	// 4. Expand reverse AGENT probes into MTR, PING, TRAFFICSIM
+	for _, rp := range reverseProbes {
+		expanded, err := expandAgentProbe(ctx, db, ch, &rp, agentID, pubIPCache)
+		if err != nil {
+			log.Warnf("ListForAgent: error expanding probe %d: %v", rp.ID, err)
+			continue
+		}
+		out = append(out, expanded...)
+	}
+
 	return out, nil
+}
+
+// findReverseAgentProbes finds AGENT-type probes from other agents that target this agent.
+func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint) ([]Probe, error) {
+	var probes []Probe
+	err := db.WithContext(ctx).
+		Preload("Targets").
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id").
+		Where("probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ?",
+			TypeAgent, targetAgentID, targetAgentID).
+		Find(&probes).Error
+	return probes, err
+}
+
+// expandAgentProbe expands an AGENT-type probe into concrete MTR, PING, and optionally TRAFFICSIM probes.
+// The source agent's public IP is resolved and used as the target.
+func expandAgentProbe(ctx context.Context, db *gorm.DB, ch *sql.DB,
+	agentProbe *Probe, targetAgentID uint, pubIPCache map[uint]string) ([]Probe, error) {
+
+	// Get source agent's public IP
+	sourceAgentID := agentProbe.AgentID
+	sourceIP, ok := pubIPCache[sourceAgentID]
+	if !ok {
+		var err error
+		sourceIP, err = getPublicIP(ctx, db, ch, sourceAgentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get source agent %d public IP: %w", sourceAgentID, err)
+		}
+		pubIPCache[sourceAgentID] = sourceIP
+	}
+
+	if sourceIP == "" {
+		return nil, fmt.Errorf("source agent %d has no public IP", sourceAgentID)
+	}
+
+	var expanded []Probe
+
+	// Create MTR probe
+	expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, sourceIP, sourceAgentID))
+
+	// Create PING probe
+	expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, sourceIP, sourceAgentID))
+
+	// Create TRAFFICSIM probe only if source agent has a server
+	if hasTrafficSimServer(ctx, db, sourceAgentID) {
+		tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, sourceIP, sourceAgentID)
+		// Get the server port from the source's TrafficSim server config
+		port := getTrafficSimServerPort(ctx, db, sourceAgentID)
+		if port != "" {
+			tsProbe.Targets[0].Target = sourceIP + ":" + port
+		}
+		expanded = append(expanded, tsProbe)
+	}
+
+	return expanded, nil
+}
+
+// createExpandedProbe creates a concrete probe from an AGENT probe template.
+func createExpandedProbe(source *Probe, probeType Type, targetIP string, sourceAgentID uint) Probe {
+	return Probe{
+		ID:          source.ID, // Keep original ID for data correlation
+		CreatedAt:   source.CreatedAt,
+		UpdatedAt:   source.UpdatedAt,
+		WorkspaceID: source.WorkspaceID,
+		AgentID:     source.AgentID, // Original source agent owns this correlation
+		Type:        probeType,
+		Enabled:     source.Enabled,
+		IntervalSec: source.IntervalSec,
+		TimeoutSec:  source.TimeoutSec,
+		Count:       source.Count,
+		DurationSec: source.DurationSec,
+		Labels:      source.Labels,
+		Metadata:    source.Metadata,
+		Targets: []Target{
+			{
+				ProbeID:   source.ID,
+				Target:    targetIP,
+				AgentID:   &sourceAgentID, // Track the source agent for data attribution
+				CreatedAt: source.CreatedAt,
+				UpdatedAt: source.UpdatedAt,
+			},
+		},
+	}
+}
+
+// hasTrafficSimServer checks if an agent has a TrafficSim server probe configured.
+func hasTrafficSimServer(ctx context.Context, db *gorm.DB, agentID uint) bool {
+	var count int64
+	db.WithContext(ctx).Model(&Probe{}).
+		Where("agent_id = ? AND type = ? AND server = true", agentID, TypeTrafficSim).
+		Count(&count)
+	return count > 0
+}
+
+// getTrafficSimServerPort returns the port from an agent's TrafficSim server probe.
+func getTrafficSimServerPort(ctx context.Context, db *gorm.DB, agentID uint) string {
+	var probes []Probe
+	err := db.WithContext(ctx).
+		Preload("Targets").
+		Where("agent_id = ? AND type = ? AND server = true", agentID, TypeTrafficSim).
+		Limit(1).
+		Find(&probes).Error
+	if err != nil || len(probes) == 0 || len(probes[0].Targets) == 0 {
+		return ""
+	}
+
+	// Extract port from target (format: "0.0.0.0:port" or ":port")
+	target := probes[0].Targets[0].Target
+	if strings.Contains(target, ":") {
+		parts := strings.Split(target, ":")
+		if len(parts) >= 2 {
+			return parts[len(parts)-1]
+		}
+	}
+	return ""
 }
 
 func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (string, error) {

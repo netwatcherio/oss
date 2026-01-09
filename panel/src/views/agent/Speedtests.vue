@@ -62,6 +62,43 @@ const averageLatency = computed(() => {
 });
 
 function convertToSpeedTestResult(data: any): SpeedTestResult {
+  // Handle new direct format from queue system (payload is the data object)
+  // Format: { test_data: [...], timestamp: "..." }
+  if (data && data.test_data && Array.isArray(data.test_data)) {
+    return {
+      test_data: data.test_data.map((server: any) => ({
+        url: server.url || '',
+        lat: server.lat || '',
+        lon: server.lon || '',
+        name: server.name || '',
+        country: server.country || '',
+        sponsor: server.sponsor || '',
+        id: server.id || '',
+        host: server.host || '',
+        distance: Number(server.distance) || 0,
+        latency: Number(server.latency) || 0,
+        max_latency: Number(server.max_latency) || 0,
+        min_latency: Number(server.min_latency) || 0,
+        jitter: Number(server.jitter) || 0,
+        dl_speed: Number(server.dl_speed) || 0,
+        ul_speed: Number(server.ul_speed) || 0,
+        test_duration: server.test_duration ? {
+          ping: server.test_duration.ping,
+          download: server.test_duration.download,
+          upload: server.test_duration.upload,
+          total: server.test_duration.total,
+        } : undefined,
+        packet_loss: server.packet_loss ? {
+          sent: server.packet_loss.sent || 0,
+          dup: server.packet_loss.dup || 0,
+          max: server.packet_loss.max || 0,
+        } : undefined,
+      })) as SpeedTestServer[],
+      timestamp: new Date(data.timestamp),
+    };
+  }
+
+  // Handle legacy Key/Value format from old ClickHouse data
   const result: SpeedTestResult = {
     test_data: [],
     timestamp: new Date(data.createdAt)
