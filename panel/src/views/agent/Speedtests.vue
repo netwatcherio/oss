@@ -306,9 +306,11 @@ onMounted(async () => {
         
         // Load speedtest data using ProbeDataService
         const probeData = await ProbeDataService.byProbe(workspaceId, probe.id, { limit: 25 }) as ProbeData[];
-        for (const data of probeData) {
-          const convD = convertToSpeedTestResult(data.payload);
-          state.speedtestData.push(convD);
+        if (probeData && Array.isArray(probeData)) {
+          for (const data of probeData) {
+            const convD = convertToSpeedTestResult(data.payload);
+            state.speedtestData.push(convD);
+          }
         }
       } else if (probe.type === "SPEEDTEST_SERVERS") {
         state.speedtestServerProbe = probe;

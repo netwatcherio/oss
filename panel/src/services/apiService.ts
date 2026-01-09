@@ -200,7 +200,7 @@ export const ProbeDataService = {
         const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/find${qs.toString() ? `?${qs}` : ""}`
         );
-        return data.data;
+        return data?.data || [];
     },
 
     /**
@@ -222,7 +222,7 @@ export const ProbeDataService = {
         const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/probes/${probeId}/data${qs.toString() ? `?${qs}` : ""}`
         );
-        return data.data;
+        return data?.data || [];
     },
 
     /**
