@@ -16,6 +16,9 @@ import '@vuepic/vue-datepicker/dist/main.css';
 import {AgentService, ProbeDataService, ProbeService, WorkspaceService} from "@/services/apiService";
 import {findMatchingProbesByProbeId, findProbesByInitialTarget} from "@/utils/probeGrouping";
 
+// WebSocket for real-time updates
+import { useProbeSubscription, type ProbeDataEvent } from "@/composables/useWebSocket";
+
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
 
@@ -66,8 +69,10 @@ const state = reactive({
   checks: [] as Probe[],
   // New state for agent probe groupings
   agentPairData: [] as Array<{
-    sourceAgentId: string,
-    targetAgentId: string,
+    direction: 'forward' | 'reverse',
+    probeId: number,
+    sourceAgentId: number,
+    targetAgentId: number,
     sourceAgentName: string,
     targetAgentName: string,
     pingData: ProbeData[],
@@ -76,6 +81,8 @@ const state = reactive({
     rperfData: ProbeData[]
   }>,
   isAgentProbe: false,
+  reciprocalProbe: null as Probe | null,  // The reverse AGENT probe if it exists
+  selectedDirection: 0 as number,  // Index of selected direction tab
   rawGroups: {} as any,
 });
 
@@ -319,7 +326,10 @@ async function parseAgentPairData(groups: any) {
   for (const [sourceAgentId, targetAgents] of Object.entries(groups || {})) {
     for (const [targetAgentId, probeTypes] of Object.entries(targetAgents as any)) {
       const pair = {
-        sourceAgentId, targetAgentId,
+        direction: 'forward' as const,
+        probeId: 0,  // Will be populated from actual probe if needed
+        sourceAgentId: Number(sourceAgentId), 
+        targetAgentId: Number(targetAgentId),
         sourceAgentName: await getName(wid, sourceAgentId),
         targetAgentName: await getName(wid, targetAgentId),
         pingData: [] as ProbeData[], mtrData: [] as ProbeData[], trafficSimData: [] as ProbeData[], rperfData: [] as ProbeData[]
@@ -399,11 +409,34 @@ async function reloadData() {
     state.probes = findProbesByInitialTarget(state.probe, allProbes);
     console.log("probes:", state.probes);
     
+    // 4) Get first target early for multiple uses
+    const firstTarget = (state.probe?.targets?.[0] ?? {}) as any;
+    
     // 3a) Detect if this is an AGENT probe type for bidirectional display
     state.isAgentProbe = state.probe?.type === 'AGENT';
+    state.reciprocalProbe = null;
+    
+    // 3b) If AGENT probe, look for reciprocal probe (B→A when we have A→B)
+    if (state.isAgentProbe && firstTarget?.agent_id) {
+      const targetAgentId = firstTarget.agent_id as number;
+      try {
+        // Get probes from the target agent
+        const targetAgentProbes = (await ProbeService.list(workspaceID, String(targetAgentId))) as Probe[];
+        // Find AGENT probe that targets our agent
+        const reciprocal = targetAgentProbes.find(p => 
+          p.type === 'AGENT' && 
+          p.targets?.some(t => t.agent_id === Number(agentID))
+        );
+        if (reciprocal) {
+          state.reciprocalProbe = reciprocal;
+          console.log("Found reciprocal AGENT probe:", reciprocal.id);
+        }
+      } catch (e) {
+        console.log("No reciprocal probe found:", e);
+      }
+    }
 
-    // 4) Title from first target (agent ref vs literal)
-    const firstTarget = (state.probe?.targets?.[0] ?? {}) as any;
+    // 5) Title from first target (agent ref vs literal)
     if (firstTarget.agent_id != null) {
       try {
         const targ = (await AgentService.get(workspaceID, firstTarget.agent_id as number)) as Agent;
@@ -482,10 +515,59 @@ function onCreate(_: any) { router.push("/workspace"); }
 function onError(response: any) { alert(response); }
 function submit() {}
 
+// Navigate to the reciprocal probe (reverse direction)
+function switchToReciprocal() {
+  if (!state.reciprocalProbe) return;
+  const rp = state.reciprocalProbe;
+  const wsId = state.workspace.id;
+  const targetAgentId = rp.agent_id;
+  router.push(`/workspaces/${wsId}/agents/${targetAgentId}/probes/${rp.id}`);
+}
+
 onMounted(() => {
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
 });
+
+// WebSocket subscription for real-time updates
+const workspaceIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
+const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);
+
+// Handler for incoming live probe data
+const handleLiveProbeData = (data: ProbeDataEvent) => {
+  console.log('[Probe] Live data received:', data.type, data.probe_id);
+  
+  // Convert WebSocket event to ProbeData format
+  const probeData: ProbeData = {
+    id: 0, // Will be assigned by addProbeDataUnique
+    probe_id: data.probe_id,
+    probe_agent_id: data.agent_id, // Same as agent_id for live data
+    agent_id: data.agent_id,
+    type: data.type as ProbeType,
+    payload: data.payload,
+    created_at: data.created_at,
+    received_at: new Date().toISOString(),
+    target: data.target || '',
+    triggered: data.triggered || false,
+    triggered_reason: '',
+  };
+
+  // Add to common bucket
+  addProbeDataUnique(state.probeData, probeData);
+
+  // Add to type-specific buckets
+  if (data.type === 'PING') addProbeDataUnique(state.pingData, probeData);
+  if (data.type === 'MTR') addProbeDataUnique(state.mtrData, probeData);
+  if (data.type === 'TRAFFICSIM') addProbeDataUnique(state.trafficSimData, probeData);
+  if (data.type === 'RPERF' && !(state.probe as any).server) addProbeDataUnique(state.rperfData, probeData);
+};
+
+// Set up WebSocket subscription for this probe
+const { connected: wsConnected } = useProbeSubscription(
+  workspaceIdRef,
+  probeIdRef,
+  handleLiveProbeData
+);
 
 // Watch for timeRange changes
 watch(() => state.timeRange, () => { reloadData() }, { deep: true });
@@ -505,6 +587,32 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
         <VueDatePicker v-model="state.timeRange" :partial-range="false" range/>
       </div>
     </Title>
+    
+    <!-- Direction Selector for AGENT probes with reciprocal -->
+    <div v-if="state.ready && state.isAgentProbe && state.reciprocalProbe" class="mb-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="d-flex align-items-center gap-3">
+            <span class="text-muted small">Direction:</span>
+            <div class="btn-group" role="group" aria-label="probe direction">
+              <button 
+                type="button" 
+                :class="['btn btn-sm', state.selectedDirection === 0 ? 'btn-primary' : 'btn-outline-primary']"
+                @click="state.selectedDirection = 0">
+                {{ state.agent.name }} → {{ state.probeAgent.name || 'Target' }}
+              </button>
+              <button 
+                type="button" 
+                :class="['btn btn-sm', state.selectedDirection === 1 ? 'btn-primary' : 'btn-outline-primary']"
+                @click="switchToReciprocal">
+                {{ state.probeAgent.name || 'Target' }} → {{ state.agent.name }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <div v-if="state.ready" >
     <!-- Summary Card (from AgentProbe) 
     <div class="card mb-3" v-if="state.summary.totalDataPoints > 0">

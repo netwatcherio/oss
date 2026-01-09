@@ -2,7 +2,7 @@
 
 TrafficSim is NetWatcher's agent-to-agent traffic simulation probe. It provides continuous latency and packet loss monitoring between distributed agents using UDP.
 
-> **Status:** Currently disabled (`trafficsim.go.disabled`) due to MongoDB dependencies and incomplete testing. This document captures the architecture for future re-implementation.
+> **Status:** Enabled. The implementation uses `uint` agent IDs (migrated from MongoDB ObjectIDs) and integrates with the AGENT probe expansion system.
 
 ---
 
@@ -47,8 +47,8 @@ TrafficSim is NetWatcher's agent-to-agent traffic simulation probe. It provides 
 type TrafficSimMsg struct {
     Type      TrafficSimMsgType  `json:"type"`
     Data      TrafficSimData     `json:"data"`
-    Src       primitive.ObjectID `json:"src"`      // TODO: Change to uint
-    Dst       primitive.ObjectID `json:"dst"`      // TODO: Change to uint
+    Src       uint               `json:"src"`       // Source agent ID
+    Dst       uint               `json:"dst"`       // Destination agent ID
     Timestamp int64              `json:"timestamp"`
     Size      int                `json:"size"`
 }
@@ -94,14 +94,37 @@ const (
 
 ```go
 type CycleTracker struct {
-    StartSeq    int
-    EndSeq      int
-    PacketSeqs  []int              // All packets in cycle
-    StartTime   time.Time
-    PacketTimes map[int]PacketTime // Per-packet timing
-    mu          sync.RWMutex
+    StartSeq        int
+    EndSeq          int
+    PacketSeqs      []int
+    StartTime       time.Time
+    PacketTimes     map[int]PacketTime   // Per-packet timing
+    receivedSeqs    map[int]int          // Track receive count per seq (duplicate detection)
+    lastReceivedSeq int                  // Last received seq (out-of-order detection)
+    outOfOrder      int                  // Count of out-of-order packets
+    duplicates      int                  // Count of duplicate packets
+    mu              sync.RWMutex
 }
 ```
+
+### Reported Statistics
+
+Each cycle reports the following metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `lostPackets` | int | Number of packets that timed out |
+| `lossPercentage` | float64 | Packet loss as percentage |
+| `totalPackets` | int | Total packets sent in cycle |
+| `averageRTT` | float64 | Mean round-trip time (ms) |
+| `minRTT` | int64 | Minimum RTT observed (ms) |
+| `maxRTT` | int64 | Maximum RTT observed (ms) |
+| `stdDevRTT` | float64 | Standard deviation of RTT |
+| `outOfOrder` | int | Packets received out of sequence |
+| `outOfOrderPercent` | float64 | Out-of-order as % of received |
+| `duplicates` | int | Duplicate packets received |
+| `duplicatePercent` | float64 | Duplicates as % of received |
+| `timestamp` | time.Time | When stats were calculated |
 
 ---
 

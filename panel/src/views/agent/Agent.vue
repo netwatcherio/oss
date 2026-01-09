@@ -417,6 +417,7 @@ let state = reactive({
   ready: false,
   agent: {} as Agent,
   agents: [] as Agent[],
+  agentNames: {} as Record<number, string>,  // Cache of agent ID → name for target display
   networkInfo: {} as NetInfoPayload,
   systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
@@ -507,6 +508,20 @@ onMounted(async () => {
         grouped.groups.forEach(group => {
           state.groupStats[group.key] = initializeGroupStats(group);
         });
+
+        // Lookup agent names for agent-type groups
+        const agentGroups = grouped.groups.filter(g => g.kind === 'agent');
+        for (const g of agentGroups) {
+          const targetAgentId = Number(g.id);
+          if (targetAgentId && !state.agentNames[targetAgentId]) {
+            try {
+              const targetAgent = await AgentService.get(workspaceID, targetAgentId) as Agent;
+              state.agentNames[targetAgentId] = targetAgent.name || `Agent #${targetAgentId}`;
+            } catch {
+              state.agentNames[targetAgentId] = `Agent #${targetAgentId}`;
+            }
+          }
+        }
 
         // Fetch ping statistics if there are ping or agent probes
         const hasPingProbes = pL.some(p => p.type === 'PING' || p.type === 'AGENT');
@@ -715,7 +730,7 @@ onMounted(async () => {
               <div class="probe-content">
                 <h6 class="probe-title">
                   <span v-if="g.kind==='host'">{{ g.label }}</span>
-                  <span v-else-if="g.kind==='agent'">Agent {{ g.id }}</span>
+                  <span v-else-if="g.kind==='agent'">{{ state.agentNames[Number(g.id)] || `Agent #${g.id}` }}</span>
                   <span v-else>Local on Agent {{ g.id }}</span>
                 </h6>
 

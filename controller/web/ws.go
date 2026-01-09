@@ -9,6 +9,7 @@ import (
 	"netwatcher-controller/internal/agent"
 	probe "netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/speedtest"
+	"netwatcher-controller/internal/users"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 		getWebsocketEvents(app, db, ch),
 	)
 
-	// Authenticate connection via PSK
+	// Authenticate connection via PSK (agents) or JWT (panel clients)
 	websocketServer.OnConnect = func(c *websocket.Conn) error {
 		ctx := websocket.GetContext(c)
 
@@ -42,37 +43,59 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 		agIDStr := ctx.GetHeader("X-Agent-ID")
 		psk := ctx.GetHeader("X-Agent-PSK")
 
-		if wsIDStr == "" || agIDStr == "" || psk == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: missing X-Workspace-ID / X-Agent-ID / X-Agent-PSK")
+		// Try agent authentication first (PSK-based)
+		if wsIDStr != "" && agIDStr != "" && psk != "" {
+			wsID64, err := strconv.ParseUint(strings.TrimSpace(wsIDStr), 10, 64)
+			if err != nil {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return errors.New("unauthorized: invalid workspace id")
+			}
+			agID64, err := strconv.ParseUint(strings.TrimSpace(agIDStr), 10, 64)
+			if err != nil {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return errors.New("unauthorized: invalid agent id")
+			}
+
+			a, err := agent.AuthenticateWithPSK(ctx, db, uint(wsID64), uint(agID64), psk)
+			if err != nil {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return errors.New("unauthorized: invalid psk")
+			}
+
+			// Mark agent seen
+			_ = agent.UpdateAgentSeen(ctx, db, a.ID, time.Now())
+
+			// Stash IDs into the Iris context so namespace handlers can fetch them
+			ctx.Values().Set("agent_id", a.ID)
+			ctx.Values().Set("workspace_id", a.WorkspaceID)
+			ctx.Values().Set("client_type", "agent")
+
+			log.Infof("WS auth ok — agent %d (ws %d) connected as %s", a.ID, a.WorkspaceID, c.ID())
+			return nil
 		}
 
-		wsID64, err := strconv.ParseUint(strings.TrimSpace(wsIDStr), 10, 64)
-		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: invalid workspace id")
+		// Try panel authentication (JWT-based)
+		authHeader := ctx.GetHeader("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			u, sess, err := users.GetUserFromToken(context.Background(), db, token)
+			if err != nil {
+				ctx.StatusCode(http.StatusUnauthorized)
+				return errors.New("unauthorized: invalid jwt token")
+			}
+
+			// Store user info in context
+			ctx.Values().Set("user_id", u.ID)
+			ctx.Values().Set("session_id", sess.SessionID)
+			ctx.Values().Set("client_type", "panel")
+
+			log.Infof("WS auth ok — panel user %d (session %d) connected as %s", u.ID, sess.SessionID, c.ID())
+			return nil
 		}
-		agID64, err := strconv.ParseUint(strings.TrimSpace(agIDStr), 10, 64)
-		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: invalid agent id")
-		}
 
-		a, err := agent.AuthenticateWithPSK(ctx, db, uint(wsID64), uint(agID64), psk)
-		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return errors.New("unauthorized: invalid psk")
-		}
-
-		// Mark agent seen
-		_ = agent.UpdateAgentSeen(ctx, db, a.ID, time.Now())
-
-		// Stash IDs into the Iris context so namespace handlers can fetch them
-		ctx.Values().Set("agent_id", a.ID)
-		ctx.Values().Set("workspace_id", a.WorkspaceID)
-
-		log.Infof("WS auth ok — agent %d (ws %d) connected as %s", a.ID, a.WorkspaceID, c.ID())
-		return nil
+		// No valid auth provided
+		ctx.StatusCode(http.StatusUnauthorized)
+		return errors.New("unauthorized: missing authentication (X-Agent-PSK or Authorization header)")
 	}
 
 	app.Get("ws", websocket.Handler(websocketServer))
@@ -167,6 +190,7 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 				if (ok != nil) || (aid == 0) {
 					return errors.New("unauthorized: no agent in context")
 				}
+				wsid, _ := ctx.Values().GetUint("workspace_id")
 
 				// Unmarshal as ProbeData (top-level fields + payload)
 				log.Infof("[%s] posted message to namespace [%s]: %s", nsConn, msg.Namespace, msg.Body)
@@ -194,6 +218,18 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 					log.Errorf("probe_post dispatch: %v", err)
 					return err
 				}
+
+				// Broadcast to subscribed panel clients
+				GetPanelHub().Broadcast(ProbeDataBroadcast{
+					WorkspaceID: wsid,
+					ProbeID:     pp.ProbeID,
+					AgentID:     pp.AgentID,
+					Type:        string(pp.Type),
+					Payload:     pp.Payload,
+					CreatedAt:   pp.CreatedAt.Format(time.RFC3339),
+					Target:      pp.Target,
+					Triggered:   pp.Triggered,
+				})
 
 				// Optionally ACK
 				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))
@@ -330,6 +366,76 @@ func getWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocke
 				}
 
 				nsConn.Emit("speedtest_result_ok", []byte(`{"ok":true}`))
+				return nil
+			},
+		},
+
+		// ================== Panel Namespace ==================
+		// Panel clients connect with JWT auth and can subscribe to real-time probe data
+		"panel": websocket.Events{
+			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				uid, _ := ctx.Values().GetUint("user_id")
+				clientType := ctx.Values().GetString("client_type")
+
+				if clientType != "panel" {
+					return errors.New("unauthorized: panel namespace requires JWT auth")
+				}
+
+				// Register connection with the panel hub
+				GetPanelHub().RegisterConnection(nsConn.Conn.ID(), nsConn)
+
+				log.Infof("[panel] user %d connected to panel namespace", uid)
+				return nil
+			},
+
+			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				// Unregister connection from the panel hub (cleans up all subscriptions)
+				GetPanelHub().UnregisterConnection(nsConn.Conn.ID())
+				log.Infof("[panel] %s disconnected from panel namespace", nsConn.Conn.ID())
+				return nil
+			},
+
+			// subscribe: Panel client subscribes to probe updates
+			// Payload: { "workspace_id": uint, "probe_id": uint (optional, 0 = all) }
+			"subscribe": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				uid, ok := ctx.Values().GetUint("user_id")
+				if ok != nil || uid == 0 {
+					return errors.New("unauthorized: no user in context")
+				}
+
+				var sub struct {
+					WorkspaceID uint `json:"workspace_id"`
+					ProbeID     uint `json:"probe_id"`
+				}
+				if err := json.Unmarshal(msg.Body, &sub); err != nil {
+					log.Errorf("[panel] subscribe unmarshal error: %v", err)
+					return err
+				}
+
+				// TODO: Verify user has access to workspace (for now, trust JWT)
+				GetPanelHub().Subscribe(nsConn.Conn.ID(), sub.WorkspaceID, sub.ProbeID)
+
+				nsConn.Emit("subscribe_ok", []byte(`{"ok":true}`))
+				log.Infof("[panel] user %d subscribed to workspace %d probe %d", uid, sub.WorkspaceID, sub.ProbeID)
+				return nil
+			},
+
+			// unsubscribe: Panel client unsubscribes from probe updates
+			"unsubscribe": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				var sub struct {
+					WorkspaceID uint `json:"workspace_id"`
+					ProbeID     uint `json:"probe_id"`
+				}
+				if err := json.Unmarshal(msg.Body, &sub); err != nil {
+					log.Errorf("[panel] unsubscribe unmarshal error: %v", err)
+					return err
+				}
+
+				GetPanelHub().Unsubscribe(nsConn.Conn.ID(), sub.WorkspaceID, sub.ProbeID)
+
+				nsConn.Emit("unsubscribe_ok", []byte(`{"ok":true}`))
 				return nil
 			},
 		},

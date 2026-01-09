@@ -237,22 +237,69 @@ type NetInfoPayload struct {
 
 ---
 
-## Disabled Probes
+### AGENT (Agent-to-Agent Monitoring)
 
-### TRAFFICSIM (trafficsim.go.disabled)
+**Purpose:** Bidirectional monitoring between agents for mesh network health
+
+**How It Works:**
+
+When you create an AGENT probe targeting another agent, the controller automatically **expands** it into concrete probe types:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│          AGENT Probe (A → B)                                │
+│                                                             │
+│  Controller expands into:                                   │
+│  ├── PING probe   → targeting B's public IP                 │
+│  ├── MTR probe    → targeting B's public IP                 │
+│  └── TRAFFICSIM   → targeting B's IP:port (if B has server) │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Panel Display:**
+- AGENT probes show target agent name (not just ID)
+- If reciprocal probes exist (A→B and B→A), the panel shows direction tabs
+- Statistics aggregate data from expanded PING probes
+
+**Configuration:**
+- `targets[].agent_id` - Target agent ID (required)
+- Other fields (`interval_sec`, `count`) apply to expanded probes
+
+**Technical Details:**
+- Controller resolves target agent's public IP dynamically via `getPublicIP()`
+- Expansion happens in `ListForAgent()` in `probe.go`
+- Expanded probes keep the original AGENT probe ID for data correlation
+
+---
+
+### TRAFFICSIM
 
 **Purpose:** Continuous UDP traffic between agents for latency/loss monitoring
 
 **Features:**
 - Client/Server UDP communication
-- Flow statistics tracking
-- Automatic reconnection with backoff
-- Cycle-based reporting (every N packets)
-- Interface selection with scoring algorithm
+- Flow statistics tracking (RTT, jitter, packet loss)
+- Cycle-based reporting (60 packets per cycle)
+- Automatic MTR triggering when packet loss exceeds 5%
+- Graceful shutdown handling
 
-**Why Disabled:** Complex 2900+ line implementation, requires testing
+**Usage:**
+TrafficSim operates in two modes:
+1. **Server mode** (`server: true`) - Listens for incoming UDP traffic
+2. **Client mode** (`server: false`) - Connects to a TrafficSim server
+
+**Configuration:**
+| Field | Description |
+|-------|-------------|
+| `server` | `true` for server mode, `false` for client |
+| `targets[].target` | Server IP:port for client mode |
+| `targets[].agent_id` | Target agent for auto-resolution |
+
+**See Also:** [TrafficSim Architecture](./trafficsim-architecture.md)
 
 ---
+
+## Disabled Probes
 
 ### WEB (web.go.disabled)
 

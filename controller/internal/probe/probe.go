@@ -247,11 +247,12 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	var out []Probe
 
 	// 1. Get probes owned by this agent
+	var allProbes []Probe
 	err := db.WithContext(ctx).
 		Preload("Targets").
 		Where("agent_id = ?", agentID).
 		Order("id DESC").
-		Find(&out).Error
+		Find(&allProbes).Error
 	if err != nil {
 		return nil, err
 	}
@@ -259,53 +260,47 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	// cache public IP lookups per agent to avoid repeat DB hits
 	pubIPCache := make(map[uint]string)
 
-	// 2. Resolve IP targets for owned probes
-	for i := range out {
-		p := &out[i]
+	// 2. Process owned probes - expand AGENT probes, resolve IPs for others
+	for i := range allProbes {
+		p := &allProbes[i]
 
-		for j := range p.Targets {
-			t := &p.Targets[j]
+		switch p.Type {
+		case TypeAgent:
+			// Expand this agent's own AGENT probe into MTR, PING, TRAFFICSIM
+			// Target is the agent specified in the probe's targets
+			for _, t := range p.Targets {
+				if t.AgentID != nil {
+					targetAgentID := *t.AgentID
+					expanded, err := expandAgentProbeForOwner(ctx, db, ch, p, targetAgentID, pubIPCache)
+					if err != nil {
+						log.Warnf("ListForAgent: error expanding owned AGENT probe %d: %v", p.ID, err)
+						continue
+					}
+					out = append(out, expanded...)
+				}
+			}
+			// Don't add the raw AGENT probe to output
 
-			switch p.Type {
-			case TypeAgent:
-				// These are handled below via expansion
-			case TypeMTR, TypePing:
-				// fill target when it's empty and we have a target agent
-				if t.Target == "" && t.AgentID != nil {
+		default:
+			// Resolve IP targets for non-AGENT probes
+			for j := range p.Targets {
+				t := &p.Targets[j]
+				if (p.Type == TypeMTR || p.Type == TypePing) && t.Target == "" && t.AgentID != nil {
 					aid := *t.AgentID
-
 					ip, ok := pubIPCache[aid]
 					if !ok {
-						var err2 error
-						ip, err2 = getPublicIP(ctx, db, ch, aid)
-						if err2 != nil {
-							log.Error(err2)
+						ip, err = getPublicIP(ctx, db, ch, aid)
+						if err != nil {
+							log.Error(err)
 							continue
 						}
 						pubIPCache[aid] = ip
 					}
-
 					t.Target = ip
 				}
 			}
+			out = append(out, *p)
 		}
-	}
-
-	// 3. Find reverse AGENT probes - probes from OTHER agents that target THIS agent
-	reverseProbes, err := findReverseAgentProbes(ctx, db, agentID)
-	if err != nil {
-		log.Warnf("ListForAgent: error finding reverse probes: %v", err)
-		// Don't fail the whole operation
-	}
-
-	// 4. Expand reverse AGENT probes into MTR, PING, TRAFFICSIM
-	for _, rp := range reverseProbes {
-		expanded, err := expandAgentProbe(ctx, db, ch, &rp, agentID, pubIPCache)
-		if err != nil {
-			log.Warnf("ListForAgent: error expanding probe %d: %v", rp.ID, err)
-			continue
-		}
-		out = append(out, expanded...)
 	}
 
 	return out, nil
@@ -321,6 +316,51 @@ func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint
 			TypeAgent, targetAgentID, targetAgentID).
 		Find(&probes).Error
 	return probes, err
+}
+
+// expandAgentProbeForOwner expands an AGENT probe for the owning agent.
+// The target agent's public IP is resolved and used as the destination.
+func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
+	agentProbe *Probe, targetAgentID uint, pubIPCache map[uint]string) ([]Probe, error) {
+
+	// Get target agent's public IP
+	targetIP, ok := pubIPCache[targetAgentID]
+	if !ok {
+		var err error
+		targetIP, err = getPublicIP(ctx, db, ch, targetAgentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get target agent %d public IP: %w", targetAgentID, err)
+		}
+		pubIPCache[targetAgentID] = targetIP
+	}
+
+	if targetIP == "" {
+		return nil, fmt.Errorf("target agent %d has no public IP", targetAgentID)
+	}
+
+	var expanded []Probe
+
+	// Create MTR probe targeting the target agent
+	expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
+
+	// Create PING probe targeting the target agent
+	expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
+
+	// Create TRAFFICSIM probe only if target agent has a server
+	if hasTrafficSimServer(ctx, db, targetAgentID) {
+		tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
+		// Get the server port from the target's TrafficSim server config
+		port := getTrafficSimServerPort(ctx, db, targetAgentID)
+		if port != "" {
+			tsProbe.Targets[0].Target = targetIP + ":" + port
+		}
+		expanded = append(expanded, tsProbe)
+	}
+
+	log.Debugf("expandAgentProbeForOwner: probe %d expanded into %d probes targeting %s",
+		agentProbe.ID, len(expanded), targetIP)
+
+	return expanded, nil
 }
 
 // expandAgentProbe expands an AGENT-type probe into concrete MTR, PING, and optionally TRAFFICSIM probes.
