@@ -34,6 +34,7 @@ const onNodeSelect = (node: any) => {
 const closeMtrModal = () => {
   showMtrModal.value = false;
   selectedNode.value = null;
+  state.selectedMtrData = [];  // Clear so modal falls back to state.mtrData for non-AGENT
 };
 
 // Reactive state to hold parsed groups and UI data
@@ -83,6 +84,7 @@ const state = reactive({
   isAgentProbe: false,
   reciprocalProbe: null as Probe | null,  // The reverse AGENT probe if it exists
   selectedDirection: 0 as number,  // Index of selected direction tab
+  selectedMtrData: [] as ProbeData[],  // MTR data for modal display (used by AGENT probe View All)
   rawGroups: {} as any,
 });
 
@@ -804,32 +806,8 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                           :mtrResults="transformMtrDataMulti(pair.mtrData)"
                           @nodeSelect="onNodeSelect"
                         />
-                        <div :id="`mtrAccordion-${index}`" class="accordion mt-3">
-                          <div v-for="(mtr, mtrIndex) in pair.mtrData" :key="`${mtr.id}-${index}-${mtrIndex}`">
-                            <div class="accordion-item">
-                              <h2 :id="`heading-${index}-${mtr.id}`" class="accordion-header">
-                                <button 
-                                  :aria-controls="`collapse-${index}-${mtr.id}`" 
-                                  :aria-expanded="false"
-                                  :data-bs-target="`#collapse-${index}-${mtr.id}`"
-                                  class="accordion-button collapsed" 
-                                  data-bs-toggle="collapse" 
-                                  type="button">
-                                  {{ formatMtrTimestamp(mtr as ProbeData) }}
-                                  <span v-if="(mtr as ProbeData).triggered" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
-                                </button>
-                              </h2>
-                              <div 
-                                :id="`collapse-${index}-${mtr.id}`" 
-                                :aria-labelledby="`heading-${index}-${mtr.id}`"
-                                :data-bs-parent="`#mtrAccordion-${index}`"
-                                class="accordion-collapse collapse">
-                                <div class="accordion-body p-0">
-                                  <MtrTable :probe-data="mtr as ProbeData" />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                        <div class="mtr-help-text">
+                          <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
                         </div>
                         
                         <!-- Notable Traces section for AGENT probes -->
@@ -840,6 +818,9 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                               Notable Traces
                               <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(pair.mtrData).length }}</span>
                             </h6>
+                            <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true; state.selectedMtrData = pair.mtrData">
+                              <i class="bi bi-list-ul"></i> View All ({{ pair.mtrData.length }})
+                            </button>
                           </div>
                           
                           <div v-if="getNotableMtrResults(pair.mtrData).length === 0" class="text-muted text-center py-3">
@@ -847,12 +828,12 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                             No issues detected in the selected time range
                           </div>
                           
-                          <div v-else :id="`notableAccordion-${index}`" class="accordion">
+                          <div v-else :id="`agent-notableAccordion-${index}`" class="accordion">
                             <div v-for="(item, notableIdx) in getNotableMtrResults(pair.mtrData)" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
                               <div class="accordion-item">
-                                <h2 :id="`notable-heading-${index}-${item.data.id}`" class="accordion-header">
-                                  <button :aria-controls="`notable-collapse-${index}-${item.data.id}`" :aria-expanded="false"
-                                          :data-bs-target="`#notable-collapse-${index}-${item.data.id}`"
+                                <h2 :id="`agent-notable-heading-${index}-${notableIdx}`" class="accordion-header">
+                                  <button :aria-controls="`agent-notable-collapse-${index}-${notableIdx}`" :aria-expanded="false"
+                                          :data-bs-target="`#agent-notable-collapse-${index}-${notableIdx}`"
                                           class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
                                     {{ formatMtrTimestamp(item.data) }}
                                     <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
@@ -861,9 +842,9 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                                     <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
                                   </button>
                                 </h2>
-                                <div :id="`notable-collapse-${index}-${item.data.id}`" :aria-labelledby="`notable-heading-${index}-${item.data.id}`"
+                                <div :id="`agent-notable-collapse-${index}-${notableIdx}`" :aria-labelledby="`agent-notable-heading-${index}-${notableIdx}`"
                                      class="accordion-collapse collapse"
-                                     :data-bs-parent="`#notableAccordion-${index}`">
+                                     :data-bs-parent="`#agent-notableAccordion-${index}`">
                                   <div class="accordion-body p-0">
                                     <MtrTable :probe-data="item.data" />
                                   </div>
@@ -1051,7 +1032,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
   <MtrDetailModal 
     :visible="showMtrModal" 
     :node="selectedNode" 
-    :mtr-results="state.mtrData" 
+    :mtr-results="state.selectedMtrData.length > 0 ? state.selectedMtrData : state.mtrData" 
     @close="closeMtrModal" 
   />
 </div>
