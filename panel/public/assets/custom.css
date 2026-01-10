@@ -13076,4 +13076,204 @@ code {
   color: #9ca3af;
 }
 
+/* Stat cards with colored backgrounds - make them darker */
+[data-theme="dark"] .bg-primary-subtle,
+[data-theme="dark"] .bg-success-subtle,
+[data-theme="dark"] .bg-warning-subtle,
+[data-theme="dark"] .bg-danger-subtle,
+[data-theme="dark"] .bg-info-subtle,
+[data-theme="dark"] .bg-secondary-subtle {
+  background-color: #1e293b !important;
+  border: 1px solid #374151 !important;
+}
+
+[data-theme="dark"] .bg-light {
+  background-color: #1e293b !important;
+}
+
+/* Summary cards (Total Agents, Online, Offline) */
+[data-theme="dark"] .card.bg-primary-subtle,
+[data-theme="dark"] .card.bg-success-subtle,
+[data-theme="dark"] .card.bg-warning-subtle,
+[data-theme="dark"] .card.bg-danger-subtle {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Alternatively for inline style backgrounds using CSS variables */
+[data-theme="dark"] [style*="background-color: var(--bs-success-bg-subtle)"],
+[data-theme="dark"] [style*="background-color: var(--bs-danger-bg-subtle)"],
+[data-theme="dark"] [style*="background-color: var(--bs-primary-bg-subtle)"],
+[data-theme="dark"] [style*="background-color: var(--bs-warning-bg-subtle)"] {
+  background-color: #1e293b !important;
+}
+
+/* Agent cards and resource cards */
+[data-theme="dark"] .agent-card,
+[data-theme="dark"] .resource-card {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Title and header elements */
+[data-theme="dark"] .page-title,
+[data-theme="dark"] .page-header h1,
+[data-theme="dark"] .page-header h2 {
+  color: #f9fafb;
+}
+
+/* Progress bars */
+[data-theme="dark"] .progress {
+  background-color: #374151;
+}
+
+/* Btn outline variants in dark mode */
+[data-theme="dark"] .btn-outline-primary {
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .btn-outline-primary:hover {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+[data-theme="dark"] .btn-outline-success {
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+[data-theme="dark"] .btn-outline-danger {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+[data-theme="dark"] .btn-outline-warning {
+  border-color: #eab308;
+  color: #eab308;
+}
+
+/* Links within cards */
+[data-theme="dark"] .card a:not(.btn) {
+  color: #60a5fa;
+}
+
+/* Badges */
+[data-theme="dark"] .badge.bg-light {
+  background-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .badge.text-dark {
+  color: #e5e7eb !important;
+}
+
+/* Search inputs */
+[data-theme="dark"] .search-input,
+[data-theme="dark"] input[type="search"] {
+  background-color: #1e293b;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+/* Select dropdowns */
+[data-theme="dark"] select.form-select {
+  background-color: #1e293b;
+  border-color: #374151;
+  color: #e5e7eb;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+}
+
+/* Stat card icons */
+[data-theme="dark"] .stat-icon {
+  background-color: #334155 !important;
+}
+
+/* Info cards with light backgrounds */
+[data-theme="dark"] .info-card,
+[data-theme="dark"] .stat-card,
+[data-theme="dark"] .summary-card {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Text colors */
+[data-theme="dark"] .text-dark {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .text-body {
+  color: #e5e7eb !important;
+}
+
+/* Override inline styles for colored card backgrounds */
+[data-theme="dark"] .card[style*="background"] {
+  border-color: #374151 !important;
+}
+
+/* Agent card list styling */
+[data-theme="dark"] .agent-list .card {
+  background-color: #1e293b !important;
+}
+
+/* Code and pre elements */
+[data-theme="dark"] code {
+  background-color: #334155;
+  color: #fbbf24;
+}
+
+[data-theme="dark"] pre {
+  background-color: #1e293b;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+/* Tooltip */
+[data-theme="dark"] .tooltip-inner {
+  background-color: #334155;
+  color: #e5e7eb;
+}
+
+/* Offcanvas / sidebar */
+[data-theme="dark"] .offcanvas {
+  background-color: #1e293b;
+  border-color: #374151;
+}
+
+/* Chart backgrounds */
+[data-theme="dark"] .apexcharts-canvas {
+  background-color: transparent !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-title {
+  background-color: #334155 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .apexcharts-xaxistooltip,
+[data-theme="dark"] .apexcharts-yaxistooltip {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-legend-text {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-text {
+  fill: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-gridline {
+  stroke: #374151 !important;
+}
+
 /*# sourceMappingURL=custom.css.map */
