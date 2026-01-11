@@ -521,9 +521,14 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   position: relative;
   width: 100%;
   min-height: 700px;
-  background: #0f172a;
+  background: #f8f9fa;  /* Light mode default */
   border-radius: 8px;
   overflow: hidden;
+}
+
+/* Dark mode container */
+:global([data-theme="dark"]) .network-map-container {
+  background: #0f172a;
 }
 
 .controls {
@@ -531,14 +536,20 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   top: 10px;
   right: 10px;
   z-index: 100;
-  background: #1e293b;
+  background: white;  /* Light mode default */
   padding: 12px;
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
   gap: 10px;
   align-items: center;
-  border: 1px solid #374151;
+  border: 1px solid #e5e7eb;
+}
+
+:global([data-theme="dark"]) .controls {
+  background: #1e293b;
+  border-color: #374151;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .control-btn {
@@ -558,15 +569,26 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 
 .control-select {
   padding: 6px 12px;
-  border: 1px solid #374151;
+  border: 1px solid #e5e7eb;
   border-radius: 4px;
   font-size: 14px;
-  background: #1e293b;
-  color: #e2e8f0;
+  background: white;  /* Light mode default */
+  color: #374151;
   cursor: pointer;
 }
 
+:global([data-theme="dark"]) .control-select {
+  background: #1e293b;
+  border-color: #374151;
+  color: #e2e8f0;
+}
+
 .control-select option {
+  background: white;
+  color: #374151;
+}
+
+:global([data-theme="dark"]) .control-select option {
   background: #1e293b;
   color: #e2e8f0;
 }

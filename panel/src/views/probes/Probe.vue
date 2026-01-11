@@ -621,20 +621,35 @@ async function loadProbeData(): Promise<void> {
       const probeType = p.type as string;
       const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
       
-      const rows = await ProbeDataService.byProbe(
-          workspaceID,
-          p.id,
-          { 
-            from, 
-            to, 
-            // When aggregated, don't limit - bucket size controls data volume
-            // When not aggregated (raw data), limit to avoid huge transfers
-            limit: useAggregation ? undefined : 300,
-            asc: false,
-            aggregate: useAggregation ? aggregateSec : undefined,
-            type: useAggregation ? probeType : undefined
-          }
-      );
+      let rows;
+      try {
+        rows = await ProbeDataService.byProbe(
+            workspaceID,
+            p.id,
+            { 
+              from, 
+              to, 
+              // When aggregated, don't limit - bucket size controls data volume
+              // When not aggregated (raw data), limit to avoid huge transfers
+              limit: useAggregation ? undefined : 300,
+              asc: false,
+              aggregate: useAggregation ? aggregateSec : undefined,
+              type: useAggregation ? probeType : undefined
+            }
+        );
+      } catch (aggErr) {
+        // If aggregation fails (e.g., backend not updated), fallback to raw data
+        if (useAggregation) {
+          console.warn(`Aggregated fetch failed for probe ${p.id}, falling back to raw:`, aggErr);
+          rows = await ProbeDataService.byProbe(
+              workspaceID,
+              p.id,
+              { from, to, limit: 300, asc: false }
+          );
+        } else {
+          throw aggErr;
+        }
+      }
 
       for (const d of rows) {
         // common bucket
