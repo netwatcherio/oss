@@ -59,6 +59,51 @@
                     <i class="bi bi-shuffle"></i> Route Changed
                   </span>
                 </div>
+                
+                <!-- Route Diff Display -->
+                <div v-if="hasRouteChange((currentPage - 1) * pageSize + index)" class="route-diff-container">
+                  <div class="route-diff-header" @click="toggleDiff((currentPage - 1) * pageSize + index)">
+                    <i :class="expandedDiffs[(currentPage - 1) * pageSize + index] ? 'bi bi-chevron-down' : 'bi bi-chevron-right'"></i>
+                    Show Route Difference
+                  </div>
+                  <div v-if="expandedDiffs[(currentPage - 1) * pageSize + index]" class="route-diff-content">
+                    <div class="route-diff-columns">
+                      <div class="route-column previous">
+                        <div class="column-header">
+                          <i class="bi bi-arrow-left-circle"></i> Previous Route
+                        </div>
+                        <div class="hop-list">
+                          <div 
+                            v-for="(hop, hopIdx) in getPreviousHops((currentPage - 1) * pageSize + index)" 
+                            :key="hopIdx"
+                            class="hop-item"
+                            :class="getHopDiffClass((currentPage - 1) * pageSize + index, hopIdx, 'previous')"
+                          >
+                            <span class="hop-number">{{ hopIdx + 1 }}</span>
+                            <span class="hop-ip">{{ hop }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="route-column current">
+                        <div class="column-header">
+                          <i class="bi bi-arrow-right-circle"></i> Current Route
+                        </div>
+                        <div class="hop-list">
+                          <div 
+                            v-for="(hop, hopIdx) in getCurrentHops((currentPage - 1) * pageSize + index)" 
+                            :key="hopIdx"
+                            class="hop-item"
+                            :class="getHopDiffClass((currentPage - 1) * pageSize + index, hopIdx, 'current')"
+                          >
+                            <span class="hop-number">{{ hopIdx + 1 }}</span>
+                            <span class="hop-ip">{{ hop }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
                 <MtrTable :probe-data="result" :show-copy="true" />
               </div>
             </div>
@@ -207,8 +252,12 @@ const getRouteSignature = (result: ProbeData): string => {
 const hasRouteChange = (index: number): boolean => {
   if (index === filteredResults.value.length - 1) return false; // First (oldest) trace has no previous
   
-  const current = getRouteSignature(filteredResults.value[index]);
-  const previous = getRouteSignature(filteredResults.value[index + 1]);
+  const currentResult = filteredResults.value[index];
+  const previousResult = filteredResults.value[index + 1];
+  if (!currentResult || !previousResult) return false;
+  
+  const current = getRouteSignature(currentResult);
+  const previous = getRouteSignature(previousResult);
   
   return current !== previous;
 };
@@ -221,6 +270,61 @@ const routeChanges = computed(() => {
   }
   return changes;
 });
+
+// Track which diffs are expanded
+const expandedDiffs = ref<Record<number, boolean>>({});
+
+const toggleDiff = (index: number) => {
+  expandedDiffs.value[index] = !expandedDiffs.value[index];
+};
+
+// Get hop IPs as array
+const getHopsArray = (result: ProbeData): string[] => {
+  const payload = result.payload as MtrResult;
+  if (!payload?.report?.hops) return [];
+  return payload.report.hops.map(hop => hop.hosts?.[0]?.ip || '*');
+};
+
+// Get previous route hops
+const getPreviousHops = (index: number): string[] => {
+  const previousResult = filteredResults.value[index + 1];
+  return previousResult ? getHopsArray(previousResult) : [];
+};
+
+// Get current route hops
+const getCurrentHops = (index: number): string[] => {
+  const currentResult = filteredResults.value[index];
+  return currentResult ? getHopsArray(currentResult) : [];
+};
+
+// Get CSS class for hop diff highlighting
+const getHopDiffClass = (index: number, hopIdx: number, side: 'previous' | 'current'): string => {
+  const previousHops = getPreviousHops(index);
+  const currentHops = getCurrentHops(index);
+  
+  if (side === 'previous') {
+    const hop = previousHops[hopIdx];
+    if (!hop) return '';
+    // If this hop doesn't exist in current route at same position, mark as removed
+    if (currentHops[hopIdx] !== hop) {
+      if (!currentHops.includes(hop)) {
+        return 'hop-removed';
+      }
+      return 'hop-changed';
+    }
+  } else {
+    const hop = currentHops[hopIdx];
+    if (!hop) return '';
+    // If this hop doesn't exist in previous route at same position, mark as added
+    if (previousHops[hopIdx] !== hop) {
+      if (!previousHops.includes(hop)) {
+        return 'hop-added';
+      }
+      return 'hop-changed';
+    }
+  }
+  return '';
+};
 
 // Time range display - show actual date range
 const timeRange = computed(() => {
@@ -465,6 +569,124 @@ const formatTimestamp = (result: ProbeData): string => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* Route Diff Display */
+.route-diff-container {
+  margin: 0.75rem 1rem;
+  border: 1px solid #3d3e50;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.route-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: #252636;
+  color: #7aa2f7;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.route-diff-header:hover {
+  background: #2d2e40;
+}
+
+.route-diff-content {
+  padding: 1rem;
+  background: #1a1b26;
+}
+
+.route-diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.route-column {
+  background: #1e1f2e;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.route-column.previous .column-header {
+  background: rgba(247, 118, 142, 0.1);
+  color: #f7768e;
+}
+
+.route-column.current .column-header {
+  background: rgba(158, 206, 106, 0.1);
+  color: #9ece6a;
+}
+
+.hop-list {
+  padding: 0.5rem;
+}
+
+.hop-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.hop-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.hop-number {
+  min-width: 20px;
+  color: #565f89;
+  font-weight: 600;
+}
+
+.hop-ip {
+  color: #c0caf5;
+}
+
+/* Diff highlighting */
+.hop-added {
+  background: rgba(158, 206, 106, 0.15);
+  border-left: 3px solid #9ece6a;
+}
+
+.hop-added .hop-ip {
+  color: #9ece6a;
+}
+
+.hop-removed {
+  background: rgba(247, 118, 142, 0.15);
+  border-left: 3px solid #f7768e;
+}
+
+.hop-removed .hop-ip {
+  color: #f7768e;
+}
+
+.hop-changed {
+  background: rgba(224, 175, 104, 0.15);
+  border-left: 3px solid #e0af68;
+}
+
+.hop-changed .hop-ip {
+  color: #e0af68;
 }
 </style>
 
