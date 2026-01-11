@@ -206,11 +206,21 @@ export const ProbeDataService = {
     /**
      * Timeseries for a specific probe.
      * GET /workspaces/{id}/probe-data/probes/{probeID}/data
+     * 
+     * @param aggregate - Aggregation bucket size in seconds (e.g., 60 = 1 min buckets)
+     * @param type - "PING" or "TRAFFICSIM" - required when using aggregate
      */
     async byProbe(
         workspaceId: number | string,
         probeId: number | string,
-        params?: { from?: string | number | Date; to?: string | number | Date; limit?: number; asc?: boolean }
+        params?: {
+            from?: string | number | Date;
+            to?: string | number | Date;
+            limit?: number;
+            asc?: boolean;
+            aggregate?: number;  // Seconds for time-bucket aggregation
+            type?: string;       // "PING" or "TRAFFICSIM"
+        }
     ) {
         const qs = new URLSearchParams();
         if (params) {
@@ -218,6 +228,8 @@ export const ProbeDataService = {
             setIf(qs, "to", toRFC3339(params.to));
             setIf(qs, "limit", params.limit);
             if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
+            setIf(qs, "aggregate", params.aggregate);
+            setIf(qs, "type", params.type);
         }
         const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/probes/${probeId}/data${qs.toString() ? `?${qs}` : ""}`

@@ -1735,4 +1735,229 @@ onMounted(async () => {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ========================================
+   DARK MODE STYLES
+   ======================================== */
+
+/* Stat Items */
+:global([data-theme="dark"]) .stat-item {
+  background: #1e293b;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .stat-item:hover:not(.loading) {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+:global([data-theme="dark"]) .stat-value {
+  color: #f9fafb !important;
+}
+
+:global([data-theme="dark"]) .stat-label {
+  color: #9ca3af !important;
+}
+
+/* Stat icons - darker backgrounds */
+:global([data-theme="dark"]) .stat-icon.cpu {
+  background: #1e3a5f;
+  color: #60a5fa;
+}
+
+:global([data-theme="dark"]) .stat-icon.memory {
+  background: #064e3b;
+  color: #34d399;
+}
+
+:global([data-theme="dark"]) .stat-icon.network {
+  background: #78350f;
+  color: #fbbf24;
+}
+
+:global([data-theme="dark"]) .stat-icon.uptime {
+  background: #4c1d95;
+  color: #a78bfa;
+}
+
+/* Content Sections */
+:global([data-theme="dark"]) .content-section {
+  background: #1e293b;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .section-header {
+  border-bottom-color: #374151;
+}
+
+:global([data-theme="dark"]) .section-title {
+  color: #f9fafb !important;
+}
+
+:global([data-theme="dark"]) .section-title i {
+  color: #9ca3af !important;
+}
+
+/* Probe Cards */
+:global([data-theme="dark"]) .probe-card {
+  background: #1e293b;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .probe-card:hover:not(.skeleton) {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+:global([data-theme="dark"]) .probe-card.has-issues {
+  border-color: #991b1b;
+  background: #1f1515;
+}
+
+:global([data-theme="dark"]) .probe-icon {
+  background: #1e3a5f;
+  color: #60a5fa;
+}
+
+:global([data-theme="dark"]) .probe-title {
+  color: #f9fafb !important;
+}
+
+:global([data-theme="dark"]) .probe-type-badge {
+  background: #374151;
+  color: #d1d5db;
+}
+
+:global([data-theme="dark"]) .probe-type-badge.inactive {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+:global([data-theme="dark"]) .probe-stat {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .probe-arrow {
+  color: #6b7280;
+}
+
+/* Info Cards */
+:global([data-theme="dark"]) .info-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+:global([data-theme="dark"]) .card-header {
+  background: #0f172a !important;
+  border-bottom-color: #374151 !important;
+}
+
+:global([data-theme="dark"]) .card-title {
+  color: #f9fafb !important;
+}
+
+:global([data-theme="dark"]) .card-title i {
+  color: #9ca3af !important;
+}
+
+:global([data-theme="dark"]) .card-content {
+  background: #1e293b;
+}
+
+:global([data-theme="dark"]) .card-footer {
+  background: #0f172a;
+  border-top-color: #374151;
+}
+
+/* Info Rows */
+:global([data-theme="dark"]) .info-label {
+  color: #9ca3af !important;
+}
+
+:global([data-theme="dark"]) .info-value {
+  color: #e5e7eb !important;
+}
+
+/* Resource Meters */
+:global([data-theme="dark"]) .resource-header {
+  color: #e5e7eb;
+}
+
+:global([data-theme="dark"]) .resource-details {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .progress {
+  background: #374151;
+}
+
+/* MAC list and details */
+:global([data-theme="dark"]) .mac-item {
+  background: #0f172a;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .mac-address {
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .mac-vendor {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .memory-details {
+  background: #0f172a;
+}
+
+:global([data-theme="dark"]) .detail-row {
+  color: #e5e7eb;
+  border-bottom-color: #374151;
+}
+
+/* Skeleton loading */
+:global([data-theme="dark"]) .skeleton-text {
+  background: #374151;
+}
+
+:global([data-theme="dark"]) .skeleton-text::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+}
+
+:global([data-theme="dark"]) .skeleton-box {
+  background: #374151;
+}
+
+/* Empty state */
+:global([data-theme="dark"]) .empty-state {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .empty-state h5 {
+  color: #e5e7eb !important;
+}
+
+/* Status badges */
+:global([data-theme="dark"]) .status-badge.online {
+  background: #064e3b;
+  color: #22c55e;
+}
+
+:global([data-theme="dark"]) .status-badge.offline {
+  background: #7f1d1d;
+  color: #ef4444;
+}
+
+:global([data-theme="dark"]) .status-badge.loading {
+  background: #374151;
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .status-badge.live {
+  background: #064e3b;
+  color: #34d399;
+}
+
+/* Horizontal rules */
+:global([data-theme="dark"]) hr {
+  border-color: #374151;
+}
 </style>

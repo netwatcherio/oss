@@ -99,6 +99,9 @@ function logout() {
 <style scoped>
 /* Navbar Base */
 .navbar {
+  position: sticky;
+  top: 0;
+  z-index: 1030;
   background: #ffffff;
   border-bottom: 1px solid #e5e7eb;
   padding: 0.75rem 0;

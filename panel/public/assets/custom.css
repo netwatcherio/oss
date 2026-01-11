@@ -12819,9 +12819,26 @@ code {
   --bs-link-hover-color: #93c5fd;
 }
 
-[data-theme="dark"] body {
-  background-color: #0f172a;
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+[data-theme="dark"] #app {
+  background-color: #0f172a !important;
   color: #e5e7eb;
+  min-height: 100vh;
+}
+
+[data-theme="dark"] .container-fluid,
+[data-theme="dark"] .container,
+[data-theme="dark"] .container-sm,
+[data-theme="dark"] .container-md,
+[data-theme="dark"] .container-lg,
+[data-theme="dark"] .container-xl,
+[data-theme="dark"] .container-xxl,
+[data-theme="dark"] main,
+[data-theme="dark"] section,
+[data-theme="dark"] .row,
+[data-theme="dark"] .content {
+  background-color: #0f172a !important;
 }
 
 /* Cards */
@@ -13274,6 +13291,1907 @@ code {
 
 [data-theme="dark"] .apexcharts-gridline {
   stroke: #374151 !important;
+}
+
+/* ========================================
+   NAVBAR - Global Dark Mode
+   ======================================== */
+[data-theme="dark"] .navbar {
+  background: #1f2937 !important;
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .navbar-brand {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .navbar-brand:hover {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .nav-icon-btn {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .nav-icon-btn:hover {
+  background: #374151 !important;
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .nav-divider {
+  background: #374151 !important;
+}
+
+[data-theme="dark"] .user-menu-btn:hover {
+  background: #374151 !important;
+}
+
+[data-theme="dark"] .user-name {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .user-role {
+  color: #9ca3af !important;
+}
+
+/* ========================================
+   Chart containers and stat boxes
+   ======================================== */
+[data-theme="dark"] .chart-container,
+[data-theme="dark"] .chart-wrapper,
+[data-theme="dark"] .graph-container {
+  background-color: #1e293b !important;
+}
+
+/* Stat boxes (CURRENT, AVERAGE, RANGE, etc.) */
+[data-theme="dark"] .stat-box,
+[data-theme="dark"] .metric-box,
+[data-theme="dark"] .latency-stat,
+[data-theme="dark"] [class*="stat-"],
+[data-theme="dark"] [class*="metric-"] {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Probe cards and info cards */
+[data-theme="dark"] .probe-card,
+[data-theme="dark"] .monitoring-card,
+[data-theme="dark"] .info-box {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Generic white background override */
+[data-theme="dark"] .bg-white,
+[data-theme="dark"] [style*="background: white"],
+[data-theme="dark"] [style*="background:#fff"],
+[data-theme="dark"] [style*="background: #fff"],
+[data-theme="dark"] [style*="background-color: white"],
+[data-theme="dark"] [style*="background-color:#fff"],
+[data-theme="dark"] [style*="background-color: #fff"],
+[data-theme="dark"] [style*="background-color: rgb(255, 255, 255)"] {
+  background-color: #1e293b !important;
+}
+
+/* Cards within rows - target all cards aggressively */
+[data-theme="dark"] .row>div>.card,
+[data-theme="dark"] .col>.card,
+[data-theme="dark"] .col-12>.card,
+[data-theme="dark"] .col-md-3>.card,
+[data-theme="dark"] .col-md-4>.card,
+[data-theme="dark"] .col-md-6>.card {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Card body backgrounds */
+[data-theme="dark"] .card .card-body {
+  background-color: inherit;
+}
+
+/* Small info cards with icons */
+[data-theme="dark"] .d-flex.align-items-center.p-3,
+[data-theme="dark"] .rounded.p-3 {
+  background-color: #1e293b !important;
+}
+
+/* Any element with rounded corners and padding (common card pattern) */
+[data-theme="dark"] .rounded-3,
+[data-theme="dark"] .rounded-4 {
+  border-color: #374151 !important;
+}
+
+/* Switch/toggle styling */
+[data-theme="dark"] .form-check-input {
+  background-color: #374151;
+  border-color: #6b7280;
+}
+
+[data-theme="dark"] .form-check-input:checked {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+/* Label colors */
+[data-theme="dark"] .form-check-label {
+  color: #e5e7eb;
+}
+
+/* Scrollbar styling for dark mode */
+[data-theme="dark"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Force all direct children of body to use dark colors */
+[data-theme="dark"] #app {
+  background-color: #0f172a;
+}
+
+/* Container backgrounds */
+[data-theme="dark"] .container,
+[data-theme="dark"] .container-fluid {
+  background-color: transparent;
+}
+
+/* Main content area */
+[data-theme="dark"] main,
+[data-theme="dark"] .main-content,
+[data-theme="dark"] .content-wrapper {
+  background-color: #0f172a;
+}
+
+/* Table row hover */
+[data-theme="dark"] .table-hover tbody tr:hover td {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ========================================
+   TEXT COLOR OVERRIDES FOR DARK MODE
+   ======================================== */
+
+/* Base text colors - ensure all text is readable */
+[data-theme="dark"] body,
+[data-theme="dark"] p,
+[data-theme="dark"] span,
+[data-theme="dark"] div,
+[data-theme="dark"] label,
+[data-theme="dark"] li {
+  color: #e5e7eb;
+}
+
+/* Headings */
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] h5,
+[data-theme="dark"] h6,
+[data-theme="dark"] .h1,
+[data-theme="dark"] .h2,
+[data-theme="dark"] .h3,
+[data-theme="dark"] .h4,
+[data-theme="dark"] .h5,
+[data-theme="dark"] .h6 {
+  color: #f9fafb !important;
+}
+
+/* Card titles and headers */
+[data-theme="dark"] .card-title,
+[data-theme="dark"] .card-header,
+[data-theme="dark"] .card-header h1,
+[data-theme="dark"] .card-header h2,
+[data-theme="dark"] .card-header h3,
+[data-theme="dark"] .card-header h4,
+[data-theme="dark"] .card-header h5,
+[data-theme="dark"] .card-header h6 {
+  color: #f9fafb !important;
+}
+
+/* Text utilities */
+[data-theme="dark"] .text-dark,
+[data-theme="dark"] .text-body,
+[data-theme="dark"] .text-secondary {
+  color: #d1d5db !important;
+}
+
+[data-theme="dark"] .text-muted {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .text-black {
+  color: #f9fafb !important;
+}
+
+/* Labels and small text */
+[data-theme="dark"] small,
+[data-theme="dark"] .small,
+[data-theme="dark"] .form-text {
+  color: #9ca3af !important;
+}
+
+/* Links */
+[data-theme="dark"] a:not(.btn):not(.nav-link):not(.dropdown-item) {
+  color: #60a5fa;
+}
+
+[data-theme="dark"] a:not(.btn):not(.nav-link):not(.dropdown-item):hover {
+  color: #93c5fd;
+}
+
+/* Breadcrumbs */
+[data-theme="dark"] .breadcrumb-item,
+[data-theme="dark"] .breadcrumb-item a {
+  color: #9ca3af;
+}
+
+[data-theme="dark"] .breadcrumb-item.active {
+  color: #d1d5db;
+}
+
+/* Table text */
+[data-theme="dark"] .table td,
+[data-theme="dark"] .table th,
+[data-theme="dark"] table td,
+[data-theme="dark"] table th {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .table thead th {
+  color: #f9fafb !important;
+}
+
+/* Form labels */
+[data-theme="dark"] .form-label,
+[data-theme="dark"] .col-form-label {
+  color: #e5e7eb !important;
+}
+
+/* Icon colors in dark mode */
+[data-theme="dark"] .bi,
+[data-theme="dark"] i[class^="bi-"] {
+  color: inherit;
+}
+
+/* Strong/bold text */
+[data-theme="dark"] strong,
+[data-theme="dark"] b {
+  color: #f9fafb;
+}
+
+/* Selection highlight */
+[data-theme="dark"] ::selection {
+  background: #3b82f6;
+  color: #fff;
+}
+
+/* Placeholder text */
+[data-theme="dark"] ::placeholder {
+  color: #6b7280 !important;
+  opacity: 1;
+}
+
+/* Description list */
+[data-theme="dark"] dt {
+  color: #9ca3af;
+}
+
+[data-theme="dark"] dd {
+  color: #e5e7eb;
+}
+
+/* Any element with 'title' or 'label' in class name */
+[data-theme="dark"] [class*="title"],
+[data-theme="dark"] [class*="label"]:not(.btn):not(.badge) {
+  color: #e5e7eb;
+}
+
+/* Value displays */
+[data-theme="dark"] [class*="value"] {
+  color: #f9fafb;
+}
+
+/* Status text colors - keep these colorful for visibility */
+[data-theme="dark"] .text-success {
+  color: #22c55e !important;
+}
+
+[data-theme="dark"] .text-danger {
+  color: #ef4444 !important;
+}
+
+[data-theme="dark"] .text-warning {
+  color: #eab308 !important;
+}
+
+[data-theme="dark"] .text-info {
+  color: #06b6d4 !important;
+}
+
+[data-theme="dark"] .text-primary {
+  color: #3b82f6 !important;
+}
+
+/* ========================================
+   AGENT PAGE SPECIFIC DARK MODE STYLES
+   These override scoped component styles
+   ======================================== */
+
+/* Stat items on agent page */
+[data-theme="dark"] .stat-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .stat-item .stat-value {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .stat-item .stat-label {
+  color: #9ca3af !important;
+}
+
+/* Stat icons */
+[data-theme="dark"] .stat-icon.cpu {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .stat-icon.memory {
+  background: #064e3b !important;
+  color: #34d399 !important;
+}
+
+[data-theme="dark"] .stat-icon.network {
+  background: #78350f !important;
+  color: #fbbf24 !important;
+}
+
+[data-theme="dark"] .stat-icon.uptime {
+  background: #4c1d95 !important;
+  color: #a78bfa !important;
+}
+
+/* Content sections */
+[data-theme="dark"] .content-section,
+[data-theme="dark"] .probes-section {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .section-header {
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .section-title {
+  color: #f9fafb !important;
+}
+
+/* Probe cards */
+[data-theme="dark"] .probe-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .probe-card:hover {
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .probe-icon {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .probe-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .probe-type-badge {
+  background: #374151 !important;
+  color: #d1d5db !important;
+}
+
+[data-theme="dark"] .probe-stat {
+  color: #9ca3af !important;
+}
+
+/* Info cards - CRITICAL for agent page bottom sections */
+[data-theme="dark"] .info-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .info-card .card-header {
+  background: #0f172a !important;
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .info-card .card-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .info-card .card-content {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .info-card .card-footer {
+  background: #0f172a !important;
+  border-top-color: #374151 !important;
+}
+
+/* Info rows */
+[data-theme="dark"] .info-row .info-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .info-row .info-value,
+[data-theme="dark"] .info-row .info-value span {
+  color: #e5e7eb !important;
+}
+
+/* Resource meters */
+[data-theme="dark"] .resource-meter .resource-header {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .resource-meter .resource-header span {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .resource-details,
+[data-theme="dark"] .resource-details span {
+  color: #9ca3af !important;
+}
+
+/* Memory and MAC details */
+[data-theme="dark"] .memory-details,
+[data-theme="dark"] .mac-list {
+  background: #0f172a !important;
+}
+
+[data-theme="dark"] .detail-row,
+[data-theme="dark"] .mac-item {
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mac-address {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .mac-vendor {
+  color: #9ca3af !important;
+}
+
+/* Skeleton loading in dark mode */
+[data-theme="dark"] .skeleton-text {
+  background: #374151 !important;
+}
+
+/* Status badges */
+[data-theme="dark"] .status-badge.online {
+  background: #064e3b !important;
+  color: #22c55e !important;
+}
+
+[data-theme="dark"] .status-badge.offline {
+  background: #7f1d1d !important;
+  color: #ef4444 !important;
+}
+
+[data-theme="dark"] .status-badge.live {
+  background: #064e3b !important;
+  color: #34d399 !important;
+}
+
+/* HR elements */
+[data-theme="dark"] hr {
+  border-color: #374151 !important;
+}
+
+/* Latency graph container */
+[data-theme="dark"] .latency-graph-container {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .stats-row .stat-card {
+  background: linear-gradient(135deg, #334155 0%, #1e293b 100%) !important;
+  border-color: #475569 !important;
+}
+
+[data-theme="dark"] .stat-card .stat-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .stat-card .stat-value {
+  color: #f9fafb !important;
+}
+
+/* ========================================
+   WORKSPACE PAGE & AGENT CARD DARK MODE
+   ======================================== */
+
+/* Agent card wrapper and cards */
+[data-theme="dark"] .agent-card-wrapper .card,
+[data-theme="dark"] .agent-card-wrapper :deep(.card) {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .agent-card-wrapper .card:hover {
+  border-color: #3b82f6 !important;
+}
+
+/* Agent card content */
+[data-theme="dark"] .agent-card-content {
+  background: #1e293b !important;
+}
+
+/* Agent actions footer */
+[data-theme="dark"] .agent-actions {
+  background: #0f172a !important;
+  border-top-color: #374151 !important;
+}
+
+/* Mini stats */
+[data-theme="dark"] .mini-stat {
+  color: #9ca3af !important;
+}
+
+/* Last seen badge */
+[data-theme="dark"] .last-seen-badge {
+  background: #374151 !important;
+  color: #d1d5db !important;
+}
+
+/* Empty state */
+[data-theme="dark"] .empty-state {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .empty-state h5 {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .empty-state-icon {
+  color: #4b5563 !important;
+}
+
+/* Search box */
+[data-theme="dark"] .search-box input {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .search-box input:focus {
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .search-icon {
+  color: #9ca3af !important;
+}
+
+/* Sort dropdown */
+[data-theme="dark"] .sort-dropdown label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .sort-dropdown .form-select {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* AgentCard component styles (used in workspace view) */
+[data-theme="dark"] .card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .card .card-body {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .card .card-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .card .card-header {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .card .card-footer {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+/* ========================================
+   WORKSPACES LIST PAGE DARK MODE
+   ======================================== */
+
+/* Table header */
+[data-theme="dark"] .table thead th {
+  background-color: #0f172a !important;
+  border-bottom-color: #374151 !important;
+  color: #9ca3af !important;
+}
+
+/* Table rows */
+[data-theme="dark"] .table tbody tr {
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .table tbody tr:hover {
+  background-color: #374151 !important;
+}
+
+[data-theme="dark"] .workspace-row {
+  background: #1e293b !important;
+}
+
+/* Sortable header hover */
+[data-theme="dark"] .sortable:hover {
+  background-color: #374151 !important;
+}
+
+/* Workspace name link */
+[data-theme="dark"] .text-dark {
+  color: #f9fafb !important;
+}
+
+/* Input group */
+[data-theme="dark"] .input-group-text {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .input-group .form-control {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* Form control general */
+[data-theme="dark"] .form-control {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .form-control:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Form select */
+[data-theme="dark"] .form-select {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* Button outlines */
+[data-theme="dark"] .btn-outline-primary {
+  color: #60a5fa !important;
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .btn-outline-primary:hover {
+  background-color: #3b82f6 !important;
+  color: white !important;
+}
+
+[data-theme="dark"] .btn-outline-secondary {
+  color: #9ca3af !important;
+  border-color: #4b5563 !important;
+}
+
+[data-theme="dark"] .btn-outline-secondary:hover {
+  background-color: #4b5563 !important;
+  color: white !important;
+}
+
+[data-theme="dark"] .btn-outline-dark {
+  color: #e5e7eb !important;
+  border-color: #6b7280 !important;
+}
+
+[data-theme="dark"] .btn-outline-dark:hover {
+  background-color: #6b7280 !important;
+  color: white !important;
+}
+
+[data-theme="dark"] .btn-outline-danger {
+  color: #f87171 !important;
+  border-color: #ef4444 !important;
+}
+
+[data-theme="dark"] .btn-outline-success {
+  color: #34d399 !important;
+  border-color: #22c55e !important;
+}
+
+[data-theme="dark"] .btn-outline-warning {
+  color: #fbbf24 !important;
+  border-color: #f59e0b !important;
+}
+
+/* ========================================
+   APEXCHARTS TOOLTIPS DARK MODE
+   ======================================== */
+
+[data-theme="dark"] .apexcharts-tooltip {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-title {
+  background: #0f172a !important;
+  border-bottom-color: #374151 !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-text {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-text-y-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-text-y-value {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .apexcharts-xaxistooltip {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .apexcharts-xaxistooltip-text {
+  color: #e5e7eb !important;
+}
+
+/* Custom tooltip class from PingGraph */
+[data-theme="dark"] .custom-tooltip {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .tooltip-title {
+  color: #9ca3af !important;
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .tooltip-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .tooltip-value {
+  color: #f9fafb !important;
+}
+
+/* ========================================
+   MTR TRACEROUTE TABLES DARK MODE
+   ======================================== */
+
+/* Traceroute section header */
+[data-theme="dark"] .traceroute-header,
+[data-theme="dark"] .mtr-header {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+  color: #f9fafb !important;
+}
+
+/* MTR table */
+[data-theme="dark"] .mtr-table {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .mtr-table thead th {
+  background: #0f172a !important;
+  color: #9ca3af !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-table tbody tr {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-table tbody tr:hover {
+  background: #334155 !important;
+}
+
+[data-theme="dark"] .mtr-table tbody td {
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+/* Accordion for traceroutes */
+[data-theme="dark"] .accordion {
+  --bs-accordion-bg: #1e293b;
+  --bs-accordion-border-color: #374151;
+}
+
+[data-theme="dark"] .accordion-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .accordion-button {
+  background: #1e293b !important;
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .accordion-button:not(.collapsed) {
+  background: #0f172a !important;
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .accordion-button::after {
+  filter: invert(1);
+}
+
+[data-theme="dark"] .accordion-body {
+  background: #1e293b !important;
+  color: #e5e7eb !important;
+}
+
+/* Network map container */
+[data-theme="dark"] .network-map,
+[data-theme="dark"] .network-topology {
+  background: #0f172a !important;
+}
+
+/* Notable traces section */
+[data-theme="dark"] .notable-traces {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .notable-traces h6 {
+  color: #f9fafb !important;
+}
+
+/* MTR help text */
+[data-theme="dark"] .mtr-help-text {
+  color: #9ca3af !important;
+}
+
+/* ========================================
+   SPEEDTEST PAGE DARK MODE
+   ======================================== */
+
+/* Test items/list */
+[data-theme="dark"] .test-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .test-item.expanded {
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .test-header {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .test-header:hover {
+  background: #334155 !important;
+}
+
+/* Test info */
+[data-theme="dark"] .test-info {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .test-time {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .test-server {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .server-location {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .server-distance {
+  color: #6b7280 !important;
+}
+
+/* Test metrics */
+[data-theme="dark"] .test-metrics .metric {
+  background: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .test-toggle {
+  color: #9ca3af !important;
+}
+
+/* Test details section */
+[data-theme="dark"] .test-details {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .details-grid {
+  background: #0f172a !important;
+}
+
+[data-theme="dark"] .detail-section {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .detail-section h6 {
+  color: #f9fafb !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .detail-row {
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .detail-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .detail-value {
+  color: #e5e7eb !important;
+}
+
+/* Results header */
+[data-theme="dark"] .results-header {
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .results-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .results-count {
+  color: #9ca3af !important;
+}
+
+/* Content cards */
+[data-theme="dark"] .content-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Pending queue */
+[data-theme="dark"] .pending-queue-section {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .pending-queue-header {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .pending-queue-header h6 {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .pending-queue-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .pending-item-info {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .pending-item-meta {
+  color: #9ca3af !important;
+}
+
+/* Pending test card */
+[data-theme="dark"] .pending-test-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .pending-content h6,
+[data-theme="dark"] .pending-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .pending-description {
+  color: #9ca3af !important;
+}
+
+/* Loading state */
+[data-theme="dark"] .loading-state {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .loading-text {
+  color: #9ca3af !important;
+}
+
+/* Speed/latency class colors - keep colorful in dark mode */
+[data-theme="dark"] .speed-excellent,
+[data-theme="dark"] .metric.speed-excellent {
+  color: #22c55e !important;
+  background: rgba(34, 197, 94, 0.15) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
+}
+
+[data-theme="dark"] .speed-good,
+[data-theme="dark"] .metric.speed-good {
+  color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.15) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
+[data-theme="dark"] .speed-fair,
+[data-theme="dark"] .metric.speed-fair {
+  color: #eab308 !important;
+  background: rgba(234, 179, 8, 0.15) !important;
+  border-color: rgba(234, 179, 8, 0.3) !important;
+}
+
+[data-theme="dark"] .speed-poor,
+[data-theme="dark"] .metric.speed-poor {
+  color: #f97316 !important;
+  background: rgba(249, 115, 22, 0.15) !important;
+  border-color: rgba(249, 115, 22, 0.3) !important;
+}
+
+[data-theme="dark"] .speed-bad,
+[data-theme="dark"] .metric.speed-bad {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+/* Latency class colors */
+[data-theme="dark"] .latency-excellent,
+[data-theme="dark"] .metric.latency-excellent {
+  color: #22c55e !important;
+  background: rgba(34, 197, 94, 0.15) !important;
+}
+
+[data-theme="dark"] .latency-good,
+[data-theme="dark"] .metric.latency-good {
+  color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.15) !important;
+}
+
+[data-theme="dark"] .latency-fair,
+[data-theme="dark"] .metric.latency-fair {
+  color: #eab308 !important;
+  background: rgba(234, 179, 8, 0.15) !important;
+}
+
+[data-theme="dark"] .latency-poor,
+[data-theme="dark"] .metric.latency-poor {
+  color: #f97316 !important;
+  background: rgba(249, 115, 22, 0.15) !important;
+}
+
+[data-theme="dark"] .latency-bad,
+[data-theme="dark"] .metric.latency-bad {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+/* More aggressive test item targeting */
+[data-theme="dark"] .speedtest-results .test-item,
+[data-theme="dark"] .test-list .test-item,
+[data-theme="dark"] div.test-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .speedtest-results .test-header,
+[data-theme="dark"] .test-list .test-header,
+[data-theme="dark"] div.test-header {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .speedtest-results,
+[data-theme="dark"] .test-list {
+  background: transparent !important;
+}
+
+/* ========================================
+   MANAGE PROBES & NEW PROBE PAGES DARK MODE
+   ======================================== */
+
+/* Probe cards */
+[data-theme="dark"] .probe-card {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .probe-card:hover {
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .probe-card.active,
+[data-theme="dark"] .probe-card.selected {
+  border-color: #22c55e !important;
+  background: rgba(34, 197, 94, 0.1) !important;
+}
+
+[data-theme="dark"] .probe-header {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .probe-icon {
+  background: #0f172a !important;
+}
+
+[data-theme="dark"] .probe-info h6,
+[data-theme="dark"] .probe-type {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .probe-description,
+[data-theme="dark"] .probe-desc {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .probe-target {
+  background: #0f172a !important;
+  color: #60a5fa !important;
+}
+
+/* Probe sections */
+[data-theme="dark"] .probe-section {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .section-title {
+  color: #9ca3af !important;
+}
+
+/* Stat chips */
+[data-theme="dark"] .stat-chip {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* Filters section */
+[data-theme="dark"] .filters-section {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Probe type option cards (Select Probe Type page) */
+[data-theme="dark"] .probe-type-card,
+[data-theme="dark"] .type-card,
+[data-theme="dark"] .probe-option {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .probe-type-card:hover,
+[data-theme="dark"] .type-card:hover,
+[data-theme="dark"] .probe-option:hover {
+  border-color: #3b82f6 !important;
+  background: #334155 !important;
+}
+
+[data-theme="dark"] .probe-type-card.selected,
+[data-theme="dark"] .type-card.selected {
+  border-color: #22c55e !important;
+  background: rgba(34, 197, 94, 0.1) !important;
+}
+
+[data-theme="dark"] .probe-type-card h5,
+[data-theme="dark"] .type-card h5,
+[data-theme="dark"] .probe-option h5 {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .probe-type-card p,
+[data-theme="dark"] .type-card p,
+[data-theme="dark"] .probe-option p {
+  color: #9ca3af !important;
+}
+
+/* ========================================
+   MODALS DARK MODE
+   ======================================== */
+
+[data-theme="dark"] .modal-content {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .modal-header {
+  background: #0f172a !important;
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="dark"] .modal-title {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .modal-body {
+  background: #1e293b !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .modal-footer {
+  background: #0f172a !important;
+  border-top-color: #374151 !important;
+}
+
+[data-theme="dark"] .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Modal info sections */
+[data-theme="dark"] .modal-body h6 {
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .modal-body .detail-row {
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .modal-body .detail-label,
+[data-theme="dark"] .modal-body .config-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .modal-body .detail-value,
+[data-theme="dark"] .modal-body .config-value {
+  color: #e5e7eb !important;
+}
+
+/* Target badges in modal */
+[data-theme="dark"] .target-badge,
+[data-theme="dark"] .target-item {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+  color: #60a5fa !important;
+}
+
+/* ========================================
+   ADDITIONAL SPEEDTEST DARK MODE OVERRIDES
+   ======================================== */
+
+/* Results header row */
+[data-theme="dark"] .results-header {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+/* Catch-all for any remaining white backgrounds */
+[data-theme="dark"] [style*="background: white"],
+[data-theme="dark"] [style*="background-color: white"],
+[data-theme="dark"] [style*="background: #fff"],
+[data-theme="dark"] [style*="background-color: #fff"],
+[data-theme="dark"] [style*="background: #ffffff"],
+[data-theme="dark"] [style*="background-color: #ffffff"] {
+  background: #1e293b !important;
+}
+
+/* Scoped Vue component overrides */
+[data-theme="dark"] [data-v-speedtest] .test-item,
+[data-theme="dark"] .speedtest-page .test-item,
+[data-theme="dark"] .container-fluid .test-item {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] [data-v-speedtest] .test-header,
+[data-theme="dark"] .speedtest-page .test-header,
+[data-theme="dark"] .container-fluid .test-header {
+  background: #1e293b !important;
+}
+
+/* Force all divs inside test-list to be dark */
+[data-theme="dark"] .test-list>div {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+/* Content wrapper backgrounds */
+[data-theme="dark"] .content-wrapper {
+  background: transparent !important;
+}
+
+/* ========================================
+   COMPREHENSIVE DARK MODE FIXES
+   ======================================== */
+
+/* Ensure full page dark background */
+[data-theme="dark"] html,
+[data-theme="dark"] body {
+  background-color: #0f172a !important;
+  min-height: 100vh !important;
+}
+
+[data-theme="dark"] #app {
+  background-color: #0f172a !important;
+  min-height: 100vh !important;
+}
+
+[data-theme="dark"] main,
+[data-theme="dark"] .main-content {
+  background-color: #0f172a !important;
+}
+
+/* DNS Record Types section */
+[data-theme="dark"] .dns-record-types {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .dns-record-grid {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .dns-record-grid .form-check {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .form-check-label {
+  color: #e5e7eb !important;
+  background: transparent !important;
+}
+
+[data-theme="dark"] .record-type-name {
+  color: #f9fafb !important;
+}
+
+/* Configuration section styling */
+[data-theme="dark"] .configuration-section {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .configuration-section h6 {
+  color: #f9fafb !important;
+}
+
+/* Probe icon backgrounds - make transparent */
+[data-theme="dark"] .probe-icon,
+[data-theme="dark"] .probe-card .probe-icon,
+[data-theme="dark"] .probe-type-card .probe-icon,
+[data-theme="dark"] i.probe-icon {
+  background: transparent !important;
+  color: #60a5fa !important;
+}
+
+/* Icon containers in probe cards */
+[data-theme="dark"] .probe-card>div:first-child,
+[data-theme="dark"] .probe-type-card>div:first-child {
+  background: #0f172a !important;
+}
+
+/* Modal fixes */
+[data-theme="dark"] .modal-body .badge {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+}
+
+/* Button group dark mode */
+[data-theme="dark"] .btn-group .btn-outline-primary {
+  background: transparent !important;
+  color: #60a5fa !important;
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .btn-group .btn-outline-primary:hover,
+[data-theme="dark"] .btn-group .btn-check:checked+.btn-outline-primary {
+  background: #3b82f6 !important;
+  color: white !important;
+}
+
+/* Form labels */
+[data-theme="dark"] .form-label {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .form-label.fw-semibold {
+  color: #f9fafb !important;
+}
+
+/* Text utilities fix */
+[data-theme="dark"] .text-muted {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] small.text-muted {
+  color: #9ca3af !important;
+}
+
+/* Probe details text */
+[data-theme="dark"] .probe-card .probe-description,
+[data-theme="dark"] .probe-type-card .probe-description,
+[data-theme="dark"] .probe-type-card p {
+  color: #9ca3af !important;
+}
+
+/* System badge */
+[data-theme="dark"] .badge.bg-light {
+  background: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* Probe header icon containers */
+[data-theme="dark"] .probe-header>div:first-child {
+  background: transparent !important;
+}
+
+/* Fix for sections with light backgrounds */
+[data-theme="dark"] .bg-light {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .bg-white {
+  background: #1e293b !important;
+}
+
+/* Form check input (checkboxes) */
+[data-theme="dark"] .form-check-input:not(:checked) {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+}
+
+[data-theme="dark"] .form-check-input:checked {
+  background-color: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+}
+
+/* Section title */
+[data-theme="dark"] .section-title {
+  color: #9ca3af !important;
+  background: transparent !important;
+}
+
+/* Card header with colored background */
+[data-theme="dark"] .card-header.bg-primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+}
+
+/* Input group text icons */
+[data-theme="dark"] .input-group-text i {
+  color: #9ca3af !important;
+}
+
+/* Enable/Disable toggle container */
+[data-theme="dark"] .form-switch {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .form-switch .form-check-input {
+  background-color: #374151 !important;
+}
+
+[data-theme="dark"] .form-switch .form-check-input:checked {
+  background-color: #22c55e !important;
+}
+
+/* ========================================
+   NAVBAR DARK MODE FIXES
+   ======================================== */
+
+/* Main navbar container */
+[data-theme="dark"] nav.navbar,
+[data-theme="dark"] .navbar {
+  background-color: #1F2A37 !important;
+  border-bottom: 1px solid #374151 !important;
+}
+
+/* Navbar brand text */
+[data-theme="dark"] .navbar-brand,
+[data-theme="dark"] .navbar .brand-text {
+  color: #f9fafb !important;
+}
+
+/* Navbar icons */
+[data-theme="dark"] .navbar .btn-icon,
+[data-theme="dark"] .navbar button i {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .navbar .btn-icon:hover,
+[data-theme="dark"] .navbar button:hover i {
+  color: #f9fafb !important;
+}
+
+/* User menu / dropdown */
+[data-theme="dark"] .navbar .dropdown-menu {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .navbar .dropdown-item {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .navbar .dropdown-item:hover {
+  background-color: #374151 !important;
+  color: #f9fafb !important;
+}
+
+/* Fix any badge issues in navbar */
+[data-theme="dark"] .navbar .badge {
+  background-color: #ef4444 !important;
+}
+
+/* Title/Page header section below navbar */
+[data-theme="dark"] .page-header,
+[data-theme="dark"] .title-section {
+  background-color: #0f172a !important;
+}
+
+/* Fix breadcrumb area */
+[data-theme="dark"] .breadcrumb {
+  background-color: transparent !important;
+}
+
+[data-theme="dark"] .breadcrumb-item a {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .breadcrumb-item.active {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .breadcrumb-item+.breadcrumb-item::before {
+  color: #6b7280 !important;
+}
+
+/* ========================================
+   FOOTER DARK MODE FIXES
+   ======================================== */
+
+[data-theme="dark"] footer,
+[data-theme="dark"] .footer {
+  background-color: #1F2A37 !important;
+  border-top: 1px solid #374151 !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] footer a,
+[data-theme="dark"] .footer a {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] footer a:hover,
+[data-theme="dark"] .footer a:hover {
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .footer-text,
+[data-theme="dark"] footer p,
+[data-theme="dark"] footer span {
+  color: #9ca3af !important;
+}
+
+/* ========================================
+   Z-INDEX AND LAYERING FIXES
+   ======================================== */
+
+/* Ensure navbar is always on top */
+[data-theme="dark"] .navbar,
+[data-theme="dark"] nav.navbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 1030 !important;
+  background-color: #1F2A37 !important;
+  border-bottom: 1px solid #374151 !important;
+}
+
+/* Main content should be below navbar */
+[data-theme="dark"] main,
+[data-theme="dark"] .main-content,
+[data-theme="dark"] .container-fluid:not(.navbar .container-fluid) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Router view content */
+[data-theme="dark"] .flex-fill {
+  position: relative;
+  z-index: 1;
+}
+
+/* Title/breadcrumb section should be below navbar */
+[data-theme="dark"] .title-section,
+[data-theme="dark"] nav[aria-label="breadcrumb"] {
+  position: relative;
+  z-index: 1;
+}
+
+/* ========================================
+   PAGINATION & MTR DARK MODE STYLES
+   ======================================== */
+
+/* Pagination Controls - Dark Mode */
+[data-theme="dark"] .pagination .page-link {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .pagination .page-link:hover {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+  color: #f9fafb !important;
+}
+
+[data-theme="dark"] .pagination .page-item.active .page-link {
+  background-color: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .pagination .page-item.disabled .page-link {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #4b5563 !important;
+}
+
+/* MTR Table Container - Dark Mode */
+[data-theme="dark"] .mtr-table-container {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-header {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-title {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .mtr-data-table th {
+  background: #0f172a !important;
+  color: #9ca3af !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-data-table td {
+  color: #e2e8f0 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .mtr-data-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* MTR Modal - Light Mode Support */
+[data-theme="light"] .mtr-modal-overlay {
+  background: rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="light"] .mtr-modal {
+  background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%) !important;
+  border-color: #e5e7eb !important;
+  box-shadow: 0 25px 80px -12px rgba(0, 0, 0, 0.25) !important;
+}
+
+[data-theme="light"] .mtr-modal-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #ffffff 100%) !important;
+  border-color: #e5e7eb !important;
+}
+
+[data-theme="light"] .mtr-modal-title {
+  color: #1f2937 !important;
+}
+
+[data-theme="light"] .mtr-modal-title i {
+  color: #3b82f6 !important;
+}
+
+[data-theme="light"] .node-badge {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  color: #ffffff !important;
+}
+
+[data-theme="light"] .close-btn {
+  color: #6b7280 !important;
+}
+
+[data-theme="light"] .close-btn:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #ef4444 !important;
+}
+
+[data-theme="light"] .summary-bar {
+  background: linear-gradient(135deg, #f9fafb 0%, #ffffff 100%) !important;
+  border-color: #e5e7eb !important;
+}
+
+[data-theme="light"] .stat-value {
+  color: #1f2937 !important;
+}
+
+[data-theme="light"] .stat-label {
+  color: #6b7280 !important;
+}
+
+[data-theme="light"] .traceroute-item {
+  border-color: #e5e7eb !important;
+}
+
+[data-theme="light"] .traceroute-item:hover {
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="light"] .traceroute-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #ffffff 100%) !important;
+  border-color: #e5e7eb !important;
+}
+
+[data-theme="light"] .traceroute-time {
+  color: #3b82f6 !important;
+}
+
+/* Accordion Dark Mode */
+[data-theme="dark"] .accordion-item {
+  background-color: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .accordion-button {
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .accordion-button:not(.collapsed) {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .accordion-button::after {
+  filter: invert(1) !important;
+}
+
+[data-theme="dark"] .accordion-body {
+  background-color: #0f172a !important;
+}
+
+/* ========================================
+   TRAFFICSIM GRAPH DARK MODE STYLES
+   ======================================== */
+
+/* TrafficSim Container */
+[data-theme="dark"] .traffic-graph-container {
+  background-color: #0f172a !important;
+}
+
+/* TrafficSim Stat Cards */
+[data-theme="dark"] .stat-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .stat-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .stat-value {
+  color: #f1f5f9 !important;
+}
+
+/* Toggle Switch */
+[data-theme="dark"] .toggle-text {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .toggle-switch {
+  background-color: #374151 !important;
+}
+
+[data-theme="dark"] .toggle-input:checked+.toggle-switch {
+  background-color: #3b82f6 !important;
+}
+
+/* ApexCharts in dark mode */
+[data-theme="dark"] .apexcharts-text,
+[data-theme="dark"] .apexcharts-title-text {
+  fill: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-legend-text {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-title {
+  background: #0f172a !important;
+  border-color: #374151 !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-marker {
+  background-color: inherit !important;
+}
+
+[data-theme="dark"] .apexcharts-xaxis-label,
+[data-theme="dark"] .apexcharts-yaxis-label {
+  fill: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-gridline {
+  stroke: #374151 !important;
+}
+
+[data-theme="dark"] .apexcharts-xcrosshairs,
+[data-theme="dark"] .apexcharts-ycrosshairs {
+  stroke: #4b5563 !important;
+}
+
+[data-theme="dark"] .apexcharts-toolbar svg {
+  fill: #9ca3af !important;
+}
+
+[data-theme="dark"] .apexcharts-menu {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .apexcharts-menu-item {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .apexcharts-menu-item:hover {
+  background: #374151 !important;
+}
+
+/* Time Range Buttons */
+[data-theme="dark"] .time-btn {
+  background: #1e293b !important;
+  border-color: #374151 !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .time-btn:hover {
+  background: #374151 !important;
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .time-btn.active {
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #ffffff !important;
 }
 
 /*# sourceMappingURL=custom.css.map */

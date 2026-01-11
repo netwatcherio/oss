@@ -262,13 +262,13 @@ function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): T
 function getTrafficBucketSize(data: TrafficSimResult[], timeRange: string): number {
   if (data.length === 0) return 0;
   
-  // Define target points for each time range
+  // Define target points for each time range - lower counts for better performance
   const targetPoints = {
-    '1h': 360,    // ~10 second buckets
-    '6h': 360,    // ~1 minute buckets  
-    '24h': 288,   // ~5 minute buckets
-    '7d': 336,    // ~30 minute buckets
-    'all': 500    // Dynamic based on data span
+    '1h': 180,    // ~20 second buckets (reduced from 360)
+    '6h': 180,    // ~2 minute buckets  (reduced from 360)
+    '24h': 150,   // ~10 minute buckets (reduced from 288)
+    '7d': 150,    // ~1 hour buckets (reduced from 336)
+    'all': 200    // Dynamic based on data span (reduced from 500)
   };
   
   let dataSpanMs: number;
@@ -285,10 +285,10 @@ function getTrafficBucketSize(data: TrafficSimResult[], timeRange: string): numb
     dataSpanMs = ranges[timeRange];
   }
   
-  const target = targetPoints[timeRange as keyof typeof targetPoints] || 500;
+  const target = targetPoints[timeRange as keyof typeof targetPoints] || 200;
   const bucketSize = Math.floor(dataSpanMs / target);
   
-  // Don't aggregate if we have fewer points than target
+  // Always aggregate if data exceeds target for performance
   if (data.length <= target) return 0;
   
   return bucketSize;
@@ -563,6 +563,9 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   const p90Value = sortedAvgRtts[p90Index] || sortedAvgRtts[sortedAvgRtts.length - 1];
   const yMax = Math.min(Math.ceil(p90Value * 1.5 / 50) * 50, 500);
 
+  // Performance optimization: determine if we have a large dataset
+  const isLargeDataset = processedData.length > 300;
+
   return {
     series,
     chart: {
@@ -573,12 +576,16 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       fontFamily: 'Inter, system-ui, sans-serif',
       stacked: false,
       animations: {
-        enabled: true,
+        enabled: !isLargeDataset,  // Disable animations for large datasets
         easing: 'easeinout',
-        speed: 400,
+        speed: isLargeDataset ? 0 : 300,
         animateGradually: {
-          enabled: true,
-          delay: 100
+          enabled: !isLargeDataset,
+          delay: 50
+        },
+        dynamicAnimation: {
+          enabled: !isLargeDataset,
+          speed: 200
         }
       },
       zoom: {
@@ -601,13 +608,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         },
         autoSelected: 'zoom'
       },
+      // Disable drop shadows for better performance
       dropShadow: {
-        enabled: true,
-        top: 3,
-        left: 0,
-        blur: 4,
-        opacity: 0.1
-      }
+        enabled: false
+      },
+      redrawOnParentResize: true,
+      redrawOnWindowResize: true
     },
     colors: ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#a855f7'],
     stroke: {
@@ -625,11 +631,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     markers: {
-      size: [3, 4, 3, 0, 5],
+      size: isLargeDataset ? [0, 0, 0, 0, 0] : [2, 3, 2, 0, 4],
       strokeWidth: 1,
       strokeColors: '#fff',
       hover: {
-        sizeOffset: 4
+        size: 6,
+        sizeOffset: 2
       }
     },
     xaxis: {
@@ -706,9 +713,19 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     ],
     tooltip: {
+      enabled: true,
       shared: true,
       intersect: false,
       theme: 'light',
+      // Performance: use fixed tooltip position for large datasets
+      fixed: isLargeDataset ? {
+        enabled: true,
+        position: 'topRight',
+        offsetX: 0,
+        offsetY: 0
+      } : {
+        enabled: false
+      },
       x: {
         format: 'dd MMM HH:mm:ss'
       },

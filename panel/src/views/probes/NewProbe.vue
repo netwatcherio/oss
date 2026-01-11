@@ -212,7 +212,7 @@ const probeTypeConfig = computed(() => {
   return config[state.selected.value] || {};
 });
 
-// Initialize probe type options
+// Initialize probe type options - only show supported probe types
 function initializeOptions() {
   state.options = [
     {
@@ -252,22 +252,6 @@ function initializeOptions() {
       text: "DNS Monitor",
       icon: "bi-signpost",
       agentAvailable: false,
-      disabled: false,
-      recommended: false
-    },
-    {
-      value: "SPEEDTEST",
-      text: "Speed Test",
-      icon: "bi-speedometer2",
-      agentAvailable: true,
-      disabled: false,
-      recommended: false
-    },
-    {
-      value: "RPERF",
-      text: "RPERF (UDP Performance)",
-      icon: "bi-graph-up",
-      agentAvailable: true,
       disabled: false,
       recommended: false
     }

@@ -88,6 +88,33 @@ const state = reactive({
   rawGroups: {} as any,
 });
 
+// Pagination state for MTR results
+const mtrPage = ref(1);
+const mtrPageSize = 10;
+const agentMtrPages = reactive<Record<number, number>>({});  // Per-agent-pair pagination
+
+const getPaginatedMtrResults = (mtrData: ProbeData[], page: number) => {
+  const notable = getNotableMtrResults(mtrData);
+  const start = (page - 1) * mtrPageSize;
+  const end = page * mtrPageSize;
+  return {
+    items: notable.slice(start, end),  // Show only current page
+    total: notable.length,
+    currentPage: page,
+    totalPages: Math.ceil(notable.length / mtrPageSize),
+    hasNext: end < notable.length,
+    hasPrev: page > 1
+  };
+};
+
+const goToMtrPage = (page: number, pairIndex?: number) => {
+  if (pairIndex !== undefined) {
+    agentMtrPages[pairIndex] = page;
+  } else {
+    mtrPage.value = page;
+  }
+};
+
 const router = core.router();
 
 // ---------- Small utils ----------
@@ -486,10 +513,30 @@ async function reloadData() {
         try {
           const recipProbe = state.reciprocalProbe;
           const [fromTime, toTime] = state.timeRange;
+          
+          // Calculate aggregation (same logic as loadProbeData)
+          const rangeMs = new Date(toTime).getTime() - new Date(fromTime).getTime();
+          const rangeHours = rangeMs / (1000 * 60 * 60);
+          let recipAggregateSec = 0;
+          if (rangeHours >= 168) recipAggregateSec = 3600;
+          else if (rangeHours >= 24) recipAggregateSec = 600;
+          else if (rangeHours >= 6) recipAggregateSec = 120;
+          else if (rangeHours >= 1) recipAggregateSec = 30;
+          
+          const recipType = recipProbe.type as string;
+          const useRecipAgg = recipAggregateSec > 0 && (recipType === 'PING' || recipType === 'TRAFFICSIM');
+          
           const recipData = await ProbeDataService.byProbe(
             workspaceID, 
             recipProbe.id, 
-            { from: toRFC3339(fromTime), to: toRFC3339(toTime) }
+            { 
+              from: toRFC3339(fromTime), 
+              to: toRFC3339(toTime), 
+              // When aggregated, don't limit - bucket size controls volume
+              limit: useRecipAgg ? undefined : 300,
+              aggregate: useRecipAgg ? recipAggregateSec : undefined,
+              type: useRecipAgg ? recipType : undefined
+            }
           ) as ProbeData[];
           
           // Sort reciprocal data by type
@@ -546,15 +593,47 @@ function containsProbeType(type: ProbeType): boolean {
 
 async function loadProbeData(): Promise<void> {
   const [from, to] = state.timeRange;
+  
+  // Calculate aggregation bucket size based on time range
+  // Larger time ranges get larger buckets to reduce data points
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  const rangeMs = toDate.getTime() - fromDate.getTime();
+  const rangeHours = rangeMs / (1000 * 60 * 60);
+  
+  // Smart aggregation: aim for ~200 points max
+  let aggregateSec = 0;
+  if (rangeHours >= 168) {        // 7+ days: 60 min buckets
+    aggregateSec = 3600;
+  } else if (rangeHours >= 24) {  // 1-7 days: 10 min buckets
+    aggregateSec = 600;
+  } else if (rangeHours >= 6) {   // 6-24 hours: 2 min buckets  
+    aggregateSec = 120;
+  } else if (rangeHours >= 1) {   // 1-6 hours: 30 sec buckets
+    aggregateSec = 30;
+  }
+  // Less than 1 hour: no aggregation (raw data)
 
-  console.log("loading probe data")
+  console.log("loading probe data, aggregate:", aggregateSec, "seconds, range:", rangeHours.toFixed(1), "hours");
 
   const tasks = state.probes.map(async (p) => {
     try {
+      const probeType = p.type as string;
+      const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
+      
       const rows = await ProbeDataService.byProbe(
           workspaceID,
           p.id,
-          { from, to, limit: 5000, asc: false }
+          { 
+            from, 
+            to, 
+            // When aggregated, don't limit - bucket size controls data volume
+            // When not aggregated (raw data), limit to avoid huge transfers
+            limit: useAggregation ? undefined : 300,
+            asc: false,
+            aggregate: useAggregation ? aggregateSec : undefined,
+            type: useAggregation ? probeType : undefined
+          }
       );
 
       for (const d of rows) {
@@ -573,7 +652,7 @@ async function loadProbeData(): Promise<void> {
     }
   });
 
-  console.log("loaded probe data")
+  console.log("loaded probe data");
 
   // run them all in parallel, but don't throw if one fails
   await Promise.allSettled(tasks);
@@ -829,7 +908,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                           </div>
                           
                           <div v-else :id="`agent-notableAccordion-${index}`" class="accordion">
-                            <div v-for="(item, notableIdx) in getNotableMtrResults(pair.mtrData)" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
+                            <div v-for="(item, notableIdx) in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).items" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
                               <div class="accordion-item">
                                 <h2 :id="`agent-notable-heading-${index}-${notableIdx}`" class="accordion-header">
                                   <button :aria-controls="`agent-notable-collapse-${index}-${notableIdx}`" :aria-expanded="false"
@@ -851,6 +930,25 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                                 </div>
                               </div>
                             </div>
+                            <!-- Pagination Controls per pair -->
+                            <nav v-if="getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages > 1" class="mt-3">
+                              <ul class="pagination pagination-sm justify-content-center mb-0">
+                                <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasPrev }">
+                                  <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) - 1, index)">
+                                    <i class="bi bi-chevron-left"></i>
+                                  </button>
+                                </li>
+                                <li v-for="p in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages" :key="p" 
+                                    class="page-item" :class="{ active: p === (agentMtrPages[index] || 1) }">
+                                  <button class="page-link" @click="goToMtrPage(p, index)">{{ p }}</button>
+                                </li>
+                                <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasNext }">
+                                  <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) + 1, index)">
+                                    <i class="bi bi-chevron-right"></i>
+                                  </button>
+                                </li>
+                              </ul>
+                            </nav>
                           </div>
                         </div>
                       </div>
@@ -982,7 +1080,7 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                 </div>
                 
                 <div v-else id="mtrAccordion" class="accordion">
-                  <div v-for="(item, index) in getNotableMtrResults(state.mtrData)" :key="`${item.data.id}-${index}`">
+                  <div v-for="(item, index) in getPaginatedMtrResults(state.mtrData, mtrPage).items" :key="`${item.data.id}-${index}`">
                     <div class="accordion-item">
                       <h2 :id="'heading' + item.data.id" class="accordion-header">
                         <button :aria-controls="'collapse' + item.data.id" :aria-expanded="false"
@@ -1004,6 +1102,25 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
                       </div>
                     </div>
                   </div>
+                  <!-- Pagination Controls -->
+                  <nav v-if="getPaginatedMtrResults(state.mtrData, mtrPage).totalPages > 1" class="mt-3">
+                    <ul class="pagination pagination-sm justify-content-center mb-0">
+                      <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(state.mtrData, mtrPage).hasPrev }">
+                        <button class="page-link" @click="goToMtrPage(mtrPage - 1)">
+                          <i class="bi bi-chevron-left"></i>
+                        </button>
+                      </li>
+                      <li v-for="p in getPaginatedMtrResults(state.mtrData, mtrPage).totalPages" :key="p" 
+                          class="page-item" :class="{ active: p === mtrPage }">
+                        <button class="page-link" @click="goToMtrPage(p)">{{ p }}</button>
+                      </li>
+                      <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(state.mtrData, mtrPage).hasNext }">
+                        <button class="page-link" @click="goToMtrPage(mtrPage + 1)">
+                          <i class="bi bi-chevron-right"></i>
+                        </button>
+                      </li>
+                    </ul>
+                  </nav>
                 </div>
               </div>
             </div>

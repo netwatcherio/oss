@@ -422,3 +422,133 @@ func GetLatestSysInfoForAgent(
 	}
 	return GetLatest(ctx, db, params)
 }
+
+// GetProbeDataAggregated returns aggregated rows for a given probe using time-bucket averaging.
+// aggregateSec specifies the bucket size in seconds (e.g., 60 = 1 minute buckets).
+// This reduces data transfer by grouping raw points into aggregated summaries.
+func GetProbeDataAggregated(
+	ctx context.Context,
+	db *sql.DB,
+	probeID uint64,
+	probeType string, // "PING" or "TRAFFICSIM"
+	from, to time.Time,
+	aggregateSec int,
+	limit int,
+) ([]ProbeData, error) {
+	if aggregateSec <= 0 {
+		// Fall back to non-aggregated query
+		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
+	}
+
+	var clauses []string
+	clauses = append(clauses, fmt.Sprintf("probe_id = %d", probeID))
+	if probeType != "" {
+		clauses = append(clauses, fmt.Sprintf("type = %s", chQuoteString(probeType)))
+	}
+	if !from.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("created_at >= %s", chQuoteTime(from)))
+	}
+	if !to.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("created_at <= %s", chQuoteTime(to)))
+	}
+
+	where := strings.Join(clauses, " AND ")
+
+	// Build aggregation query based on probe type
+	var q string
+	switch probeType {
+	case "PING":
+		q = fmt.Sprintf(`
+SELECT 
+    toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
+    max(created_at) as created_at,
+    max(received_at) as received_at,
+    type,
+    probe_id,
+    any(agent_id) as agent_id,
+    any(probe_agent_id) as probe_agent_id,
+    max(triggered) as triggered,
+    '' as triggered_reason,
+    any(target) as target,
+    any(target_agent) as target_agent,
+    concat('{',
+        '"latency":', toString(round(avg(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
+        '"minLatency":', toString(round(min(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
+        '"maxLatency":', toString(round(max(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
+        '"avgLatency":', toString(round(avg(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
+        '"packetLoss":', toString(round(avg(JSONExtractFloat(payload_raw, 'packetLoss')), 2)), ',',
+        '"packetsSent":', toString(sum(JSONExtractUInt(payload_raw, 'packetsSent'))), ',',
+        '"packetsLost":', toString(sum(JSONExtractUInt(payload_raw, 'packetsLost'))), ',',
+        '"jitter":', toString(round(avg(JSONExtractFloat(payload_raw, 'jitter')), 2)),
+    '}') as payload_raw
+FROM probe_data
+WHERE %s
+GROUP BY bucket, type, probe_id
+ORDER BY bucket DESC
+`, aggregateSec, where)
+
+	case "TRAFFICSIM":
+		q = fmt.Sprintf(`
+SELECT 
+    toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
+    max(created_at) as created_at,
+    max(received_at) as received_at,
+    type,
+    probe_id,
+    any(agent_id) as agent_id,
+    any(probe_agent_id) as probe_agent_id,
+    max(triggered) as triggered,
+    '' as triggered_reason,
+    any(target) as target,
+    any(target_agent) as target_agent,
+    concat('{',
+        '"reportTime":"', formatDateTime(bucket, '%%Y-%%m-%%dT%%H:%%i:%%sZ'), '",',
+        '"averageRTT":', toString(round(avg(JSONExtractFloat(payload_raw, 'averageRTT')), 2)), ',',
+        '"minRTT":', toString(round(min(JSONExtractFloat(payload_raw, 'minRTT')), 2)), ',',
+        '"maxRTT":', toString(round(max(JSONExtractFloat(payload_raw, 'maxRTT')), 2)), ',',
+        '"totalPackets":', toString(sum(JSONExtractUInt(payload_raw, 'totalPackets'))), ',',
+        '"lostPackets":', toString(sum(JSONExtractUInt(payload_raw, 'lostPackets'))), ',',
+        '"outOfSequence":', toString(sum(JSONExtractUInt(payload_raw, 'outOfSequence'))), ',',
+        '"duplicates":', toString(sum(JSONExtractUInt(payload_raw, 'duplicates'))),
+    '}') as payload_raw
+FROM probe_data
+WHERE %s
+GROUP BY bucket, type, probe_id
+ORDER BY bucket DESC
+`, aggregateSec, where)
+
+	default:
+		// For other types, fall back to non-aggregated
+		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
+	}
+
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("aggregated query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProbeData
+	for rows.Next() {
+		var r ProbeData
+		var bucket time.Time // We select bucket but scan into created_at below
+		var trigBool bool
+		var typeStr string
+		var payloadStr string
+		if err := rows.Scan(
+			&bucket, &r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
+			&trigBool, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
+		); err != nil {
+			return nil, err
+		}
+		r.Type = Type(typeStr)
+		r.Triggered = trigBool
+		r.Payload = json.RawMessage(payloadStr)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

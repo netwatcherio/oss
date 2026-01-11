@@ -245,8 +245,10 @@ class NetworkVisualization {
       .attr('x', (this.width + this.margin.left + this.margin.right) / 2)
       .attr('y', 30)
       .attr('text-anchor', 'middle')
+      .attr('class', 'network-title')
       .style('font-size', '20px')
       .style('font-weight', 'bold')
+      .style('fill', '#c0caf5')
       .text('Network Topology');
   }
 
@@ -460,8 +462,10 @@ class NetworkVisualization {
     items.append('text')
       .attr('x', 24)
       .attr('y', 14)
+      .attr('class', 'legend-text')
       .text(d => d.label)
-      .style('font-size', '12px');
+      .style('font-size', '12px')
+      .style('fill', '#c0caf5');
   }
 
   public setLayout(mode: 'force' | 'hierarchical') {
@@ -517,7 +521,7 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   position: relative;
   width: 100%;
   min-height: 700px;
-  background: #f8f9fa;
+  background: #0f172a;
   border-radius: 8px;
   overflow: hidden;
 }
@@ -527,13 +531,14 @@ interface Link extends d3.SimulationLinkDatum<Node> {
   top: 10px;
   right: 10px;
   z-index: 100;
-  background: white;
+  background: #1e293b;
   padding: 12px;
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   display: flex;
   gap: 10px;
   align-items: center;
+  border: 1px solid #374151;
 }
 
 .control-btn {
@@ -553,11 +558,17 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 
 .control-select {
   padding: 6px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #374151;
   border-radius: 4px;
   font-size: 14px;
-  background: white;
+  background: #1e293b;
+  color: #e2e8f0;
   cursor: pointer;
+}
+
+.control-select option {
+  background: #1e293b;
+  color: #e2e8f0;
 }
 
 .network-map {
@@ -568,7 +579,9 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 
 /* Global styles for D3 elements */
 :global(.network-tooltip) {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  background: #1e293b !important;
+  border: 1px solid #374151;
 }
 
 :global(.node circle) {
@@ -577,5 +590,41 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 
 :global(.node:hover circle) {
   transform: scale(1.1);
+}
+
+/* Light mode overrides */
+:global([data-theme="light"]) .network-map-container {
+  background: #f8f9fa;
+}
+
+:global([data-theme="light"]) .controls {
+  background: white;
+  border-color: #e5e7eb;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+:global([data-theme="light"]) .control-select {
+  background: white;
+  border-color: #e5e7eb;
+  color: #374151;
+}
+
+:global([data-theme="light"]) .control-select option {
+  background: white;
+  color: #374151;
+}
+
+:global([data-theme="light"]) .network-tooltip {
+  background: white !important;
+  color: #374151 !important;
+  border-color: #e5e7eb !important;
+}
+
+:global([data-theme="light"]) .network-title {
+  fill: #1f2937 !important;
+}
+
+:global([data-theme="light"]) .legend-text {
+  fill: #374151 !important;
 }
 </style>

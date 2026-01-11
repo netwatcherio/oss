@@ -72,7 +72,8 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	// ------------------------------------------
 	// GET /workspaces/{id}/probe-data/probes/{probeID}/data
 	// Timeseries for one probe (ClickHouse)
-	// Query: from, to, limit, asc=true|false
+	// Query: from, to, limit, asc=true|false, aggregate=<seconds>, type=PING|TRAFFICSIM
+	// When aggregate > 0, returns time-bucket averaged data to reduce transfer
 	// ------------------------------------------
 	base.Get("/probes/{probeID:uint}/data", func(ctx iris.Context) {
 		probeID := uint64(uintParam(ctx, "probeID"))
@@ -81,8 +82,20 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		to, _ := readTime(ctx.URLParam("to"))
 		limit := intOrDefault(ctx.URLParam("limit"), 0)
 		asc := boolOr(ctx.URLParamDefault("asc", ""), false)
+		aggregateSec := intOrDefault(ctx.URLParam("aggregate"), 0)
+		probeType := ctx.URLParam("type") // "PING" or "TRAFFICSIM"
 
-		rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
+		var rows []probe.ProbeData
+		var err error
+
+		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM") {
+			// Use aggregated query for performance
+			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, probeType, from, to, aggregateSec, limit)
+		} else {
+			// Standard non-aggregated query
+			rows, err = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
+		}
+
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})

@@ -45,23 +45,46 @@
             <!-- Traceroute list -->
             <div class="traceroute-list">
               <div 
-                v-for="(result, index) in filteredResults" 
+                v-for="(result, index) in paginatedResults" 
                 :key="result.id || index" 
                 class="traceroute-item"
-                :class="{ 'route-changed': hasRouteChange(index) }"
+                :class="{ 'route-changed': hasRouteChange((currentPage - 1) * pageSize + index) }"
               >
                 <div class="traceroute-header">
                   <span class="traceroute-time">
                     <i class="bi bi-clock"></i>
                     {{ formatTimestamp(result) }}
                   </span>
-                  <span v-if="hasRouteChange(index)" class="route-change-badge">
+                  <span v-if="hasRouteChange((currentPage - 1) * pageSize + index)" class="route-change-badge">
                     <i class="bi bi-shuffle"></i> Route Changed
                   </span>
                 </div>
                 <MtrTable :probe-data="result" :show-copy="true" />
               </div>
             </div>
+            
+            <!-- Pagination Controls -->
+            <nav v-if="totalPages > 1" class="mt-3">
+              <ul class="pagination justify-content-center mb-0">
+                <li class="page-item" :class="{ disabled: currentPage === 1 }">
+                  <button class="page-link" @click="currentPage--">
+                    <i class="bi bi-chevron-left"></i>
+                  </button>
+                </li>
+                <li v-for="p in displayedPages" :key="p" 
+                    class="page-item" :class="{ active: p === currentPage }">
+                  <button class="page-link" @click="currentPage = p">{{ p }}</button>
+                </li>
+                <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+                  <button class="page-link" @click="currentPage++">
+                    <i class="bi bi-chevron-right"></i>
+                  </button>
+                </li>
+              </ul>
+              <div class="text-center mt-2 text-muted" style="font-size: 0.85rem;">
+                Showing {{ (currentPage - 1) * pageSize + 1 }}-{{ Math.min(currentPage * pageSize, filteredResults.length) }} of {{ filteredResults.length }}
+              </div>
+            </nav>
           </template>
         </div>
       </div>
@@ -70,7 +93,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, watch } from 'vue';
+import { computed, watch, ref } from 'vue';
 import type { ProbeData, MtrResult } from '@/types';
 import MtrTable from '@/components/MtrTable.vue';
 
@@ -92,6 +115,48 @@ const emit = defineEmits<{
 }>();
 
 const close = () => emit('close');
+
+// Pagination state
+const currentPage = ref(1);
+const pageSize = 10;
+
+const totalPages = computed(() => Math.ceil(filteredResults.value.length / pageSize));
+
+const paginatedResults = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  const end = start + pageSize;
+  return filteredResults.value.slice(start, end);
+});
+
+// Show limited page numbers (e.g., 1 2 3 ... 8 9 10)
+const displayedPages = computed(() => {
+  const total = totalPages.value;
+  const current = currentPage.value;
+  const pages: number[] = [];
+  
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) pages.push(i);
+  } else {
+    if (current <= 3) {
+      pages.push(1, 2, 3, 4, 5);
+    } else if (current >= total - 2) {
+      for (let i = total - 4; i <= total; i++) pages.push(i);
+    } else {
+      for (let i = current - 2; i <= current + 2; i++) pages.push(i);
+    }
+  }
+  
+  return pages;
+});
+
+// Reset page when modal opens or data changes
+watch(() => props.visible, (visible) => {
+  if (visible) currentPage.value = 1;
+});
+
+watch(() => props.mtrResults, () => {
+  currentPage.value = 1;
+});
 
 // Close on escape key
 watch(() => props.visible, (isVisible) => {

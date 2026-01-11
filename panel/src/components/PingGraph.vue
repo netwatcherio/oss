@@ -739,4 +739,88 @@ export default defineComponent({
     justify-content: center;
   }
 }
+
+/* ========================================
+   Dark Mode Styles
+   ======================================== */
+:global([data-theme="dark"]) .latency-graph-container {
+  background: #1e293b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+:global([data-theme="dark"]) .stat-card {
+  background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+  border-color: #475569;
+}
+
+:global([data-theme="dark"]) .stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+:global([data-theme="dark"]) .stat-label {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .stat-value {
+  color: #f9fafb;
+}
+
+/* Dark mode status cards */
+:global([data-theme="dark"]) .stat-card.status-good {
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+  border-color: #059669;
+}
+
+:global([data-theme="dark"]) .stat-card.status-fair {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border-color: #3b82f6;
+}
+
+:global([data-theme="dark"]) .stat-card.status-poor {
+  background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
+  border-color: #d97706;
+}
+
+:global([data-theme="dark"]) .stat-card.status-critical {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border-color: #dc2626;
+}
+
+:global([data-theme="dark"]) .time-btn {
+  background: #1e293b;
+  border-color: #475569;
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .time-btn:hover {
+  background: #334155;
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .toggle-switch {
+  background-color: #475569;
+}
+
+:global([data-theme="dark"]) .toggle-text {
+  color: #e5e7eb;
+}
+
+/* Dark mode tooltips */
+:global([data-theme="dark"]) .custom-tooltip {
+  background: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+:global([data-theme="dark"]) .tooltip-title {
+  color: #9ca3af;
+  border-bottom-color: #475569;
+}
+
+:global([data-theme="dark"]) .tooltip-label {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .tooltip-value {
+  color: #f9fafb;
+}
 </style>
