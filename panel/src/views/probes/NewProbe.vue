@@ -40,6 +40,7 @@ interface ProbeState {
   hostInput: string;
   portInput: string;
   dnsConfig: DnsConfig;
+  bidirectional: boolean; // Create matching probe on target agent
 }
 
 // Get probe description
@@ -94,7 +95,8 @@ const state = reactive<ProbeState>({
     selectedRecordTypes: ['A', 'AAAA'],
     dnsServer: "",
     dnssecValidation: false
-  }
+  },
+  bidirectional: true // Default to bidirectional for AGENT probes
 });
 
 const router = core.router();
@@ -405,6 +407,8 @@ async function submit() {
       if (state.targetAgent && state.targetAgentSelected && showTargetAgentOption.value) {
         newProbe.agent_targets = [state.targetAgentSelected.id];
         newProbe.targets = [];
+        // Pass bidirectional flag when using agent targets
+        (newProbe as any).bidirectional = state.bidirectional;
       } else {
         if (state.hostInput) {
           const target = state.hostInput.includes(':')
@@ -717,6 +721,23 @@ onMounted(async () => {
                 <small v-if="availableAgentsForSelection.length === 0" class="text-warning">
                   <i class="bi bi-info-circle me-1"></i>No other agents available in this workspace
                 </small>
+                
+                <!-- Bidirectional Probe Toggle -->
+                <div v-if="state.targetAgentSelected" class="form-check form-switch mt-3">
+                  <input
+                      id="bidirectional"
+                      v-model="state.bidirectional"
+                      class="form-check-input"
+                      type="checkbox"
+                  >
+                  <label class="form-check-label" for="bidirectional">
+                    <i class="bi bi-arrow-left-right me-2"></i>
+                    <strong>Bidirectional Monitoring</strong>
+                  </label>
+                  <div class="form-text">
+                    Create matching probe on target agent pointing back to this agent
+                  </div>
+                </div>
               </div>
               <!-- Custom Target Input for PING/MTR -->
               <div v-if="(state.selected.value === 'PING' || state.selected.value === 'MTR') && showCustomTargetInput" class="mb-4">

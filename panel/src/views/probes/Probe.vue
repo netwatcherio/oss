@@ -748,26 +748,33 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
     </Title>
     
     <!-- Direction Selector for AGENT probes with reciprocal -->
-    <div v-if="state.ready && state.isAgentProbe && state.reciprocalProbe" class="mb-3">
-      <div class="card">
-        <div class="card-body py-2">
-          <div class="d-flex align-items-center gap-3">
-            <span class="text-muted small">Direction:</span>
-            <div class="btn-group" role="group" aria-label="probe direction">
-              <button 
-                type="button" 
-                :class="['btn btn-sm', state.selectedDirection === 0 ? 'btn-primary' : 'btn-outline-primary']"
-                @click="state.selectedDirection = 0">
-                {{ state.agent.name }} → {{ state.probeAgent.name || 'Target' }}
-              </button>
-              <button 
-                type="button" 
-                :class="['btn btn-sm', state.selectedDirection === 1 ? 'btn-primary' : 'btn-outline-primary']"
-                @click="switchToReciprocal">
-                {{ state.probeAgent.name || 'Target' }} → {{ state.agent.name }}
-              </button>
-            </div>
-          </div>
+    <div v-if="state.ready && state.isAgentProbe && state.reciprocalProbe" class="direction-selector-wrapper mb-3">
+      <div class="direction-selector">
+        <div class="direction-label">
+          <i class="bi bi-arrow-left-right"></i>
+          <span>Direction</span>
+        </div>
+        <div class="direction-buttons" role="group" aria-label="probe direction">
+          <button 
+            type="button" 
+            class="direction-btn"
+            :class="{ active: state.selectedDirection === 0 }"
+            @click="state.selectedDirection = 0">
+            <i class="bi bi-arrow-right"></i>
+            <span class="agent-name">{{ state.agent.name }}</span>
+            <span class="direction-arrow">→</span>
+            <span class="agent-name">{{ state.probeAgent.name || 'Target' }}</span>
+          </button>
+          <button 
+            type="button" 
+            class="direction-btn"
+            :class="{ active: state.selectedDirection === 1 }"
+            @click="switchToReciprocal">
+            <i class="bi bi-arrow-left"></i>
+            <span class="agent-name">{{ state.probeAgent.name || 'Target' }}</span>
+            <span class="direction-arrow">→</span>
+            <span class="agent-name">{{ state.agent.name }}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -1217,5 +1224,101 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
 .badge.bg-orange {
   background-color: #f97316 !important;
   color: white;
+}
+
+/* Direction Selector */
+.direction-selector-wrapper {
+  padding: 0 0.5rem;
+}
+
+.direction-selector {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bs-body-bg, #fff);
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.direction-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--bs-secondary-color, #6c757d);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.direction-label i {
+  font-size: 1rem;
+}
+
+.direction-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.direction-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bs-tertiary-bg, #f8f9fa);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--bs-body-color, #212529);
+  transition: all 0.2s ease;
+}
+
+.direction-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.direction-btn.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+.direction-btn.active .direction-arrow {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.direction-btn .agent-name {
+  font-weight: 600;
+}
+
+.direction-btn .direction-arrow {
+  color: var(--bs-secondary-color, #6c757d);
+  font-weight: 400;
+}
+
+.direction-btn i {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+/* Dark mode support */
+[data-theme="dark"] .direction-selector {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .direction-btn {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .direction-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
 }
 </style>

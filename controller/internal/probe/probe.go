@@ -88,19 +88,20 @@ func (Target) TableName() string { return "probe_targets" }
 // -------------------- DTOs --------------------
 
 type CreateInput struct {
-	WorkspaceID  uint           `gorm:"index" json:"workspace_id"`
-	AgentID      uint           `gorm:"index" json:"agent_id"`
-	Type         Type           `gorm:"type:VARCHAR(64);index" json:"type"`
-	Enabled      bool           `gorm:"default:true;index" json:"enabled,omitempty"`
-	IntervalSec  int            `gorm:"default:60" json:"interval_sec,omitempty"`
-	TimeoutSec   int            `gorm:"default:10" json:"timeout_sec,omitempty"`
-	Count        int            `json:"count,omitempty"`
-	DurationSec  int            `json:"duration_sec,omitempty"`
-	Server       bool           `json:"server,omitempty"`
-	Targets      []string       `json:"targets,omitempty"`
-	AgentTargets []uint         `json:"agent_targets,omitempty"`
-	Labels       datatypes.JSON `gorm:"type:jsonb" json:"labels,omitempty"`
-	Metadata     datatypes.JSON `gorm:"type:jsonb" json:"metadata,omitempty"`
+	WorkspaceID   uint           `gorm:"index" json:"workspace_id"`
+	AgentID       uint           `gorm:"index" json:"agent_id"`
+	Type          Type           `gorm:"type:VARCHAR(64);index" json:"type"`
+	Enabled       bool           `gorm:"default:true;index" json:"enabled,omitempty"`
+	IntervalSec   int            `gorm:"default:60" json:"interval_sec,omitempty"`
+	TimeoutSec    int            `gorm:"default:10" json:"timeout_sec,omitempty"`
+	Count         int            `json:"count,omitempty"`
+	DurationSec   int            `json:"duration_sec,omitempty"`
+	Server        bool           `json:"server,omitempty"`
+	Targets       []string       `json:"targets,omitempty"`
+	AgentTargets  []uint         `json:"agent_targets,omitempty"`
+	Labels        datatypes.JSON `gorm:"type:jsonb" json:"labels,omitempty"`
+	Metadata      datatypes.JSON `gorm:"type:jsonb" json:"metadata,omitempty"`
+	Bidirectional bool           `json:"bidirectional,omitempty"` // Create matching probe on target agent(s)
 }
 
 type UpdateInput struct {
@@ -155,6 +156,8 @@ func validateLiteralTarget(s string) bool {
 // -------------------- Public API (No repo/service layers) --------------------
 
 // Create creates a probe and its targets in a single transaction.
+// When Bidirectional is true and AgentTargets are specified, it also creates
+// matching reverse probes on each target agent pointing back to the source.
 func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 	if in.WorkspaceID == 0 || in.AgentID == 0 || in.Type == "" {
 		return nil, fmt.Errorf("%w: workspaceId/agentId/type required", ErrBadInput)
@@ -210,7 +213,48 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		if len(rows) == 0 {
 			return ErrNoTargets
 		}
-		return tx.Create(&rows).Error
+		if err := tx.Create(&rows).Error; err != nil {
+			return err
+		}
+
+		// Create reverse probes if bidirectional and there are agent targets
+		if in.Bidirectional && len(in.AgentTargets) > 0 {
+			for _, targetAgentID := range in.AgentTargets {
+				// Create reverse probe owned by target agent, pointing to source
+				reverseProbe := &Probe{
+					WorkspaceID: in.WorkspaceID,
+					AgentID:     targetAgentID, // Owned by target
+					Type:        in.Type,
+					Enabled:     boolOr(&in.Enabled, true),
+					IntervalSec: ifZero(in.IntervalSec, 60),
+					TimeoutSec:  ifZero(in.TimeoutSec, 10),
+					Server:      in.Server,
+					Labels:      coalesceJSON(in.Labels),
+					Metadata:    coalesceJSON(in.Metadata),
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				}
+				if err := tx.Create(reverseProbe).Error; err != nil {
+					return fmt.Errorf("failed to create reverse probe: %w", err)
+				}
+				// Add target pointing back to source agent
+				sourceID := in.AgentID
+				reverseTarget := Target{
+					ProbeID:   reverseProbe.ID,
+					Target:    "",
+					AgentID:   &sourceID, // Points back to source
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				if err := tx.Create(&reverseTarget).Error; err != nil {
+					return fmt.Errorf("failed to create reverse target: %w", err)
+				}
+				log.Infof("Created bidirectional reverse probe %d on agent %d targeting agent %d",
+					reverseProbe.ID, targetAgentID, in.AgentID)
+			}
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, err
