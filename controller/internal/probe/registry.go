@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ---- Top-level meta you want at the main level ----
@@ -149,11 +151,11 @@ func Dispatch(ctx context.Context, pp ProbeData) error {
 	return Default.Dispatch(ctx, pp)
 }
 
-func InitWorkers(ch *sql.DB) {
+func InitWorkers(ch *sql.DB, pg *gorm.DB) {
 	initNetInfo(ch)
 	initSysInfo(ch)
 	initMtr(ch)
-	initPing(ch)
+	initPing(ch, pg)
 	initSpeedtest(ch)
-	initTrafficSim(ch)
+	initTrafficSim(ch, pg)
 }

@@ -88,6 +88,7 @@ import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import * as d3 from 'd3';
 import type { NetworkMapNode, NetworkMapEdge, NetworkMapData } from '@/types';
 import { useWebSocket } from '@/composables/useWebSocket';
+import request from '@/services/request';
 
 const props = defineProps<{
   workspaceId: number;
@@ -116,18 +117,11 @@ const { subscribe, connected } = useWebSocket();
 const fetchMapData = async () => {
   loading.value = true;
   try {
-    const response = await fetch(
-      `${import.meta.env.VITE_CONTROLLER_ENDPOINT || ''}/api/panel/workspaces/${props.workspaceId}/network-map?lookback=15`,
-      {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      }
+    const { data } = await request.get<NetworkMapData>(
+      `/workspaces/${props.workspaceId}/network-map?lookback=15`
     );
-    if (response.ok) {
-      mapData.value = await response.json();
-      createVisualization();
-    }
+    mapData.value = data;
+    createVisualization();
   } catch (err) {
     console.error('[WorkspaceNetworkMap] Fetch error:', err);
   } finally {

@@ -3,18 +3,20 @@ package probe
 import (
 	"context"
 	"database/sql"
-	log "github.com/sirupsen/logrus"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
-func initPing(db *sql.DB) {
+func initPing(db *sql.DB, pg *gorm.DB) {
 	Register(NewHandler[PingPayload](
 		TypePing,
 		func(p PingPayload) error {
 			return nil
 		},
 		func(ctx context.Context, data ProbeData, p PingPayload) error {
-			if err := SaveRecordCH(ctx, db, data, string(TypePing), p); err != nil {
+			if err := SaveRecordWithAlertEval(ctx, db, pg, data, string(TypePing), p); err != nil {
 				log.WithError(err).Error("save ping record (CH)")
 				return err
 			}

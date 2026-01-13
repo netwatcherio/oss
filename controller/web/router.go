@@ -40,6 +40,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelSpeedtest(api, db, ch) // /workspaces/{id}/agents/{agentID}/speedtest-*
 	panelGeoIP(api, geoStore)   // /geoip/*
 	panelWhois(api)             // /whois/*
+	panelAlerts(api, db)        // /alerts/* and /workspaces/{id}/alert-rules/*
 
 	// Admin panel routes (requires SITE_ADMIN role)
 	RegisterAdminRoutes(api, db)

@@ -95,7 +95,7 @@ func main() {
 	}
 	app.UseRouter(crs)
 
-	probe.InitWorkers(ch)
+	probe.InitWorkers(ch, db)
 
 	// Routes (public + protected)
 	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore)

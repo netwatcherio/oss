@@ -3,6 +3,7 @@ import { onMounted, reactive, computed } from "vue";
 import type { Workspace } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
+import AlertRulesConfig from "@/components/AlertRulesConfig.vue";
 import { WorkspaceService } from "@/services/apiService";
 
 const router = core.router();
@@ -170,6 +171,18 @@ async function submit() {
               </button>
             </div>
           </div>
+
+          <!-- Alert Rules -->
+          <div class="card mt-3">
+            <div class="card-header">
+              <h5 class="mb-0">
+                <i class="bi bi-bell me-2"></i>Alert Rules
+              </h5>
+            </div>
+            <div class="card-body">
+              <AlertRulesConfig :workspaceId="state.workspace.id" />
+            </div>
+          </div>
         </div>
 
         <!-- Info sidebar -->
@@ -185,9 +198,9 @@ async function submit() {
                     <td class="text-muted">ID</td>
                     <td><code>{{ state.workspace.id }}</code></td>
                   </tr>
-                  <tr v-if="state.workspace.created_at">
+                  <tr v-if="state.workspace.createdAt">
                     <td class="text-muted">Created</td>
-                    <td>{{ new Date(state.workspace.created_at).toLocaleDateString() }}</td>
+                    <td>{{ new Date(state.workspace.createdAt).toLocaleDateString() }}</td>
                   </tr>
                 </tbody>
               </table>

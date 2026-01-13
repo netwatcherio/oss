@@ -116,7 +116,7 @@ func getWorkspaceAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]a
 	err := pg.WithContext(ctx).
 		Table("agents").
 		Select("id, name, public_ip_override, location, updated_at").
-		Where("workspace_id = ? AND deleted_at IS NULL", workspaceID).
+		Where("workspace_id = ?", workspaceID).
 		Scan(&agents).Error
 	if err != nil {
 		return nil, err

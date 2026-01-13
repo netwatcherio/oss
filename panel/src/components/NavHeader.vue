@@ -3,22 +3,38 @@ import { ref, onMounted, onUnmounted } from "vue";
 import core from "@/core";
 import {clearSession, type Session} from "@/session";
 import { themeService, type Theme } from "@/services/themeService";
+import { AlertService } from "@/services/apiService";
 
 const persistent = core.persistent()
 const router = core.router()
 const session = core.session()
 
 const currentTheme = ref<Theme>(themeService.getTheme());
+const alertCount = ref(0);
 let unsubscribe: (() => void) | null = null;
+let alertPollInterval: ReturnType<typeof setInterval> | null = null;
+
+async function fetchAlertCount() {
+  try {
+    alertCount.value = await AlertService.getCount();
+  } catch (e) {
+    // Silent fail - user may not be authenticated yet
+  }
+}
 
 onMounted(() => {
   unsubscribe = themeService.onThemeChange((theme) => {
     currentTheme.value = theme;
   });
+  // Fetch initial alert count
+  fetchAlertCount();
+  // Poll every 30 seconds for updates
+  alertPollInterval = setInterval(fetchAlertCount, 30000);
 });
 
 onUnmounted(() => {
   if (unsubscribe) unsubscribe();
+  if (alertPollInterval) clearInterval(alertPollInterval);
 });
 
 function toggleTheme() {
@@ -47,11 +63,11 @@ function logout() {
           <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
         </button>
 
-        <!-- Notifications -->
-        <button class="nav-icon-btn" title="Notifications">
+        <!-- Alerts -->
+        <router-link to="/workspaces/alerts" class="nav-icon-btn" title="Alerts">
           <i class="bi bi-bell"></i>
-          <span class="notification-badge">3</span>
-        </button>
+          <span v-if="alertCount > 0" class="notification-badge">{{ alertCount > 99 ? '99+' : alertCount }}</span>
+        </router-link>
 
         <!-- Divider -->
         <div class="nav-divider"></div>

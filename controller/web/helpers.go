@@ -3,13 +3,34 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
 
+	"netwatcher-controller/internal/workspace"
+
 	"github.com/kataras/iris/v12"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
+
+// getUserWorkspaceIDs returns all workspace IDs that a user has access to
+func getUserWorkspaceIDs(ctx context.Context, db *gorm.DB, userID uint) ([]uint, error) {
+	var members []workspace.Member
+	err := db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Find(&members).Error
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]uint, len(members))
+	for i, m := range members {
+		ids[i] = m.WorkspaceID
+	}
+	return ids, nil
+}
 
 // -------------------- Context Helpers --------------------
 
@@ -23,6 +44,11 @@ func currentUserID(ctx iris.Context) uint {
 		}
 	}
 	return 0
+}
+
+// getUserID is an alias for currentUserID for backward compatibility.
+func getUserID(ctx iris.Context) uint {
+	return currentUserID(ctx)
 }
 
 // -------------------- Parameter Parsing --------------------

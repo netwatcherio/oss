@@ -34,6 +34,7 @@ import Profile from '@/views/profile/Profile.vue'
 import Probe from '@/views/probes/Probe.vue'
 import NewProbe from '@/views/probes/NewProbe.vue'
 import DeleteProbe from '@/views/probes/DeleteProbe.vue'
+import Alerts from '@/views/Alerts.vue'
 
 // admin views
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
@@ -106,6 +107,7 @@ const routes: RouteRecordRaw[] = [
 
             // ----- /workspaces (list + create) -----
             { path: 'workspaces', name: 'workspaces', component: Workspaces },
+            { path: 'workspaces/alerts', name: 'workspaceAlerts', component: Alerts },
             { path: 'workspaces/new', name: 'workspaceNew', component: NewWorkspace },
 
             // ----- /workspaces/:wID (shell with children) -----

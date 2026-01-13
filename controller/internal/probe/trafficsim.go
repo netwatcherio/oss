@@ -6,14 +6,15 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
-func initTrafficSim(db *sql.DB) {
+func initTrafficSim(db *sql.DB, pg *gorm.DB) {
 	Register(NewHandler[TrafficSimResult](
 		TypeTrafficSim,
 		nil,
 		func(ctx context.Context, data ProbeData, p TrafficSimResult) error {
-			if err := SaveRecordCH(ctx, db, data, string(TypeTrafficSim), p); err != nil {
+			if err := SaveRecordWithAlertEval(ctx, db, pg, data, string(TypeTrafficSim), p); err != nil {
 				log.WithError(err).Error("save trafficsim record (CH)")
 				return err
 			}

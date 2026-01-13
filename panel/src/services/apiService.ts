@@ -478,3 +478,133 @@ export const SpeedtestService = {
         return data;
     },
 };
+
+/** ===== Alerts ===== */
+export interface Alert {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    alert_rule_id: number;
+    workspace_id: number;
+    probe_id?: number;
+    agent_id?: number;
+    metric: string;
+    value: number;
+    threshold: number;
+    severity: 'warning' | 'critical';
+    status: 'active' | 'acknowledged' | 'resolved';
+    message?: string;
+    triggered_at: string;
+    resolved_at?: string;
+    acknowledged_at?: string;
+    acknowledged_by?: number;
+}
+
+export interface AlertRule {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    workspace_id: number;
+    probe_id?: number;
+    agent_id?: number;
+    name: string;
+    description?: string;
+    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline';
+    operator: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
+    threshold: number;
+    severity: 'warning' | 'critical';
+    enabled: boolean;
+    notify_panel: boolean;
+    notify_email: boolean;
+    notify_webhook: boolean;
+    webhook_url?: string;
+    webhook_secret?: string;
+}
+
+export interface AlertRuleInput {
+    name: string;
+    description?: string;
+    probe_id?: number;
+    agent_id?: number;
+    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline';
+    operator: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
+    threshold: number;
+    severity?: 'warning' | 'critical';
+    enabled?: boolean;
+    notify_panel?: boolean;
+    notify_email?: boolean;
+    notify_webhook?: boolean;
+    webhook_url?: string;
+    webhook_secret?: string;
+}
+
+export const AlertService = {
+    async list(params?: { status?: string; limit?: number }) {
+        const qs = new URLSearchParams();
+        if (params?.status) qs.set("status", params.status);
+        if (params?.limit) qs.set("limit", String(params.limit));
+        const { data } = await request.get<ListResponse<Alert>>(
+            `/alerts${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data.data || [];
+    },
+
+    async getCount() {
+        const { data } = await request.get<{ count: number }>("/alerts/count");
+        return data.count;
+    },
+
+    async get(id: number | string) {
+        const { data } = await request.get<Alert>(`/alerts/${id}`);
+        return data;
+    },
+
+    async acknowledge(id: number | string) {
+        const { data } = await request.patch<{ ok: boolean }>(`/alerts/${id}/acknowledge`);
+        return data;
+    },
+
+    async resolve(id: number | string) {
+        const { data } = await request.patch<{ ok: boolean }>(`/alerts/${id}/resolve`);
+        return data;
+    },
+};
+
+export const AlertRuleService = {
+    async list(workspaceId: number | string) {
+        const { data } = await request.get<ListResponse<AlertRule>>(
+            `/workspaces/${workspaceId}/alert-rules`
+        );
+        return data.data || [];
+    },
+
+    async get(workspaceId: number | string, ruleId: number | string) {
+        const { data } = await request.get<AlertRule>(
+            `/workspaces/${workspaceId}/alert-rules/${ruleId}`
+        );
+        return data;
+    },
+
+    async create(workspaceId: number | string, body: AlertRuleInput) {
+        const { data } = await request.post<AlertRule>(
+            `/workspaces/${workspaceId}/alert-rules`,
+            body
+        );
+        return data;
+    },
+
+    async update(workspaceId: number | string, ruleId: number | string, body: Partial<AlertRuleInput>) {
+        const { data } = await request.patch<AlertRule>(
+            `/workspaces/${workspaceId}/alert-rules/${ruleId}`,
+            body
+        );
+        return data;
+    },
+
+    async remove(workspaceId: number | string, ruleId: number | string) {
+        const { data } = await request.delete<{ ok: boolean }>(
+            `/workspaces/${workspaceId}/alert-rules/${ruleId}`
+        );
+        return data;
+    },
+};
