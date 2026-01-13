@@ -40,6 +40,7 @@ var (
 	ErrBadInput     = errors.New("invalid input")
 	ErrNoTargets    = errors.New("no targets provided")
 	ErrTargetFormat = errors.New("invalid target format")
+	ErrDuplicate    = errors.New("duplicate probe already exists")
 )
 
 // -------------------- Models --------------------
@@ -153,6 +154,71 @@ func validateLiteralTarget(s string) bool {
 	return true
 }
 
+// checkDuplicateProbe checks if a probe with the same agent, type, and targets already exists.
+// Returns ErrDuplicate if a matching probe is found.
+func checkDuplicateProbe(ctx context.Context, db *gorm.DB, in CreateInput) error {
+	// Find existing probes with the same agent and type
+	var existing []Probe
+	err := db.WithContext(ctx).
+		Preload("Targets").
+		Where("agent_id = ? AND type = ?", in.AgentID, in.Type).
+		Find(&existing).Error
+	if err != nil {
+		return err
+	}
+
+	// Build sets of incoming targets for comparison
+	incomingLiteralTargets := make(map[string]bool)
+	for _, t := range in.Targets {
+		incomingLiteralTargets[t] = true
+	}
+	incomingAgentTargets := make(map[uint]bool)
+	for _, aid := range in.AgentTargets {
+		incomingAgentTargets[aid] = true
+	}
+
+	// Check each existing probe for matching targets
+	for _, p := range existing {
+		// Build sets of existing targets
+		existingLiteralTargets := make(map[string]bool)
+		existingAgentTargets := make(map[uint]bool)
+		for _, t := range p.Targets {
+			if t.AgentID != nil {
+				existingAgentTargets[*t.AgentID] = true
+			} else if t.Target != "" {
+				existingLiteralTargets[t.Target] = true
+			}
+		}
+
+		// Check if there's any overlap in targets
+		hasLiteralOverlap := false
+		for t := range incomingLiteralTargets {
+			if existingLiteralTargets[t] {
+				hasLiteralOverlap = true
+				break
+			}
+		}
+
+		hasAgentOverlap := false
+		for aid := range incomingAgentTargets {
+			if existingAgentTargets[aid] {
+				hasAgentOverlap = true
+				break
+			}
+		}
+
+		// If any target overlaps, it's a duplicate
+		if hasLiteralOverlap || hasAgentOverlap {
+			log.Warnf("Duplicate probe detected: existing probe %d (agent=%d, type=%s) has overlapping targets",
+				p.ID, p.AgentID, p.Type)
+			return fmt.Errorf("%w: probe with same type and target already exists on agent %d (probe ID: %d)",
+				ErrDuplicate, in.AgentID, p.ID)
+		}
+	}
+
+	return nil
+}
+
 // -------------------- Public API (No repo/service layers) --------------------
 
 // Create creates a probe and its targets in a single transaction.
@@ -164,6 +230,11 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 	}
 	if len(in.Targets) == 0 && len(in.AgentTargets) == 0 {
 		return nil, ErrNoTargets
+	}
+
+	// Check for duplicate probe (same agent, type, and targets)
+	if err := checkDuplicateProbe(ctx, db, in); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
