@@ -117,7 +117,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 	}
 
 	// 2. Get MTR data from ClickHouse (filtered by workspace agents)
-	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
+	mtrData, err := getWorkspaceMTRData(ctx, ch, pg, agentIDs, from)
 	if err != nil {
 		// Non-fatal - MTR data is optional
 		mtrData = []mtrTrace{}
@@ -172,7 +172,7 @@ type mtrTrace struct {
 	Hops        []mtrHop
 }
 
-func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]mtrTrace, error) {
+func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, pg *gorm.DB, agentIDs []uint, from time.Time) ([]mtrTrace, error) {
 	// Query raw MTR payloads filtered by workspace agents
 	if len(agentIDs) == 0 {
 		return []mtrTrace{}, nil
@@ -190,6 +190,7 @@ SELECT
     agent_id,
     target,
     target_agent,
+    probe_id,
     payload_raw
 FROM probe_data
 WHERE type = 'MTR'
@@ -206,6 +207,9 @@ LIMIT 1000
 	}
 	defer rows.Close()
 
+	// Cache probe targets to avoid repeated DB lookups
+	probeTargetCache := make(map[uint]string)
+
 	// Keep only the latest trace per agent+target
 	seenPaths := make(map[string]bool)
 	var traces []mtrTrace
@@ -216,9 +220,10 @@ LIMIT 1000
 		var agentID uint64
 		var target string
 		var targetAgent uint64
+		var probeID uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &probeID, &payloadRaw); err != nil {
 			log.Printf("[NetworkMap] Row scan error: %v", err)
 			continue
 		}
@@ -230,17 +235,36 @@ LIMIT 1000
 			continue
 		}
 
-		// Extract target from payload if database column is empty
+		// Target resolution priority:
+		// 1. Database target column (if agent sent it)
+		// 2. Probe definition target (original hostname like google.com)
+		// 3. MTR payload resolved IP (fallback - may differ from original target)
+		if target == "" && probeID > 0 && pg != nil {
+			// Look up original target from probe definition
+			if cachedTarget, ok := probeTargetCache[uint(probeID)]; ok {
+				target = cachedTarget
+			} else {
+				var probeTargets []Target
+				if err := pg.WithContext(ctx).Where("probe_id = ?", probeID).Limit(1).Find(&probeTargets).Error; err == nil && len(probeTargets) > 0 {
+					if probeTargets[0].Target != "" {
+						target = probeTargets[0].Target
+					}
+				}
+				probeTargetCache[uint(probeID)] = target
+			}
+		}
+
+		// Fallback to MTR payload if still empty
 		if target == "" {
-			target = payload.Report.Info.Target.IP
+			target = payload.Report.Info.Target.Hostname
 			if target == "" {
-				target = payload.Report.Info.Target.Hostname
+				target = payload.Report.Info.Target.IP
 			}
 		}
 
 		// Skip if still no target
 		if target == "" {
-			log.Printf("[NetworkMap] Agent %d: no target found in DB or payload, skipping", agentID)
+			log.Printf("[NetworkMap] Agent %d: no target found in DB, probe, or payload, skipping", agentID)
 			continue
 		}
 

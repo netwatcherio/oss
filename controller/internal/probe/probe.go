@@ -597,6 +597,9 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		if err != nil {
 			return "", err
 		}
+		if netInfoPayload == nil || netInfoPayload.Payload == nil {
+			return "", fmt.Errorf("no netinfo payload found for agent %d", agentID)
+		}
 
 		var netInfo = struct {
 			LocalAddress     string    `json:"local_address" bson:"local_address"`
