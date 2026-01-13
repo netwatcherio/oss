@@ -90,6 +90,7 @@ import { onMounted, onUnmounted, ref, watch, computed, defineComponent } from 'v
 import ApexCharts from 'apexcharts'
 import type { PropType } from 'vue';
 import type { PingResult } from '@/types';
+import { themeService } from '@/services/themeService';
 
 const NS_TO_MS = 1e-6;
 
@@ -118,6 +119,8 @@ export default defineComponent({
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref<'all' | '1h' | '6h' | '24h' | '7d'>('all');
     const showAnnotations = ref(true);
+    const isDark = ref(themeService.getTheme() === 'dark');
+    let themeUnsubscribe: (() => void) | null = null;
 
     // Calculate the maximum allowed gap dynamically based on probe interval
     // Use 3x the interval to avoid breaking lines with sparse data
@@ -216,7 +219,21 @@ export default defineComponent({
       return data.filter(d => ts(d) > cutoff);
     };
 
-    function createChartOptions(data: PingResult[], showAll: boolean): ApexCharts.ApexOptions {
+    function createChartOptions(data: PingResult[], showAll: boolean, darkMode: boolean = false): ApexCharts.ApexOptions {
+      // Theme-aware color definitions
+      const colors = darkMode ? {
+        foreColor: '#e5e7eb',
+        labelColor: '#9ca3af',
+        gridColor: '#374151',
+        axisBorder: '#4b5563',
+        tooltipTheme: 'dark' as const
+      } : {
+        foreColor: '#374151',
+        labelColor: '#6b7280',
+        gridColor: '#e5e7eb',
+        axisBorder: '#e5e7eb',
+        tooltipTheme: 'light' as const
+      };
       const sortedData = [...data].sort((a, b) => ts(a) - ts(b));
 
       // Decimate if too many points
@@ -329,7 +346,7 @@ export default defineComponent({
           height: 380,
           type: 'line',
           background: 'transparent',
-          foreColor: '#374151',
+          foreColor: colors.foreColor,
           fontFamily: 'Inter, system-ui, sans-serif',
           animations: {
             enabled: true,
@@ -345,48 +362,42 @@ export default defineComponent({
             tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true },
             autoSelected: 'zoom'
           },
-          dropShadow: {
-            enabled: true,
-            top: 3,
-            left: 0,
-            blur: 4,
-            opacity: 0.1
-          }
+          dropShadow: { enabled: false }
         },
-        colors: ['#22c55e', '#3b82f6', '#f97316', '#eab308'],
-        stroke: { width: [2, 3, 2, 0], curve: 'smooth', dashArray: [0, 0, 0, 0] },
+        colors: ['#10b981', '#3b82f6', '#f97316', '#fbbf24'],
+        stroke: { width: [2, 3, 2, 2], curve: 'smooth', dashArray: [0, 0, 0, 0] },
         fill: {
           type: ['solid', 'solid', 'solid', 'gradient'],
-          gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.1, stops: [0, 90, 100] }
+          gradient: { shadeIntensity: 0.8, opacityFrom: 0.35, opacityTo: 0.05, stops: [0, 95, 100] }
         },
-        markers: { size: [3, 4, 3, 0], strokeWidth: 1, strokeColors: '#fff', hover: { sizeOffset: 4 } },
+        markers: { size: [0, 4, 0, 0], strokeWidth: 2, strokeColors: '#fff', hover: { sizeOffset: 3 } },
         xaxis: {
           type: 'datetime',
-          labels: { style: { colors: '#6b7280', fontSize: '12px' }, datetimeUTC: false },
-          axisBorder: { color: '#e5e7eb' },
-          axisTicks: { color: '#e5e7eb' }
+          labels: { style: { colors: colors.labelColor, fontSize: '12px' }, datetimeUTC: false },
+          axisBorder: { color: colors.axisBorder },
+          axisTicks: { color: colors.axisBorder }
         },
         yaxis: [
           {
-            title: { text: 'Round Trip Time (ms)', style: { color: '#374151', fontSize: '14px', fontWeight: 600 } },
+            title: { text: 'Round Trip Time (ms)', style: { color: colors.foreColor, fontSize: '14px', fontWeight: 600 } },
             min: 0,
             max: yMax,
             tickAmount: 8,
-            labels: { style: { colors: '#6b7280', fontSize: '12px' }, formatter: (v: number) => v.toFixed(0) }
+            labels: { style: { colors: colors.labelColor, fontSize: '12px' }, formatter: (v: number) => v.toFixed(0) }
           },
           {
             opposite: true,
-            title: { text: 'Packet Loss (%)', style: { color: '#374151', fontSize: '14px', fontWeight: 600} },
+            title: { text: 'Packet Loss (%)', style: { color: colors.foreColor, fontSize: '14px', fontWeight: 600} },
             min: 0,
             max: 100,
             tickAmount: 5,
-            labels: { style: { colors: '#6b7280', fontSize: '12px' }, formatter: (v: number) => `${v.toFixed(0)}%` }
+            labels: { style: { colors: colors.labelColor, fontSize: '12px' }, formatter: (v: number) => `${v.toFixed(0)}%` }
           }
         ],
         tooltip: {
           shared: true,
           intersect: false,
-          theme: 'light',
+          theme: colors.tooltipTheme,
           fixed: {
             enabled: true,
             position: 'topLeft',
@@ -432,7 +443,7 @@ export default defineComponent({
           itemMargin: { horizontal: 10 }
         },
         grid: {
-          borderColor: '#e5e7eb',
+          borderColor: colors.gridColor,
           strokeDashArray: 0,
           xaxis: { lines: { show: true } },
           yaxis: { lines: { show: true } },
@@ -446,7 +457,7 @@ export default defineComponent({
       if (!latencyGraph.value || !props.pingResults?.length) return;
 
       const filtered = filterDataByTimeRange(props.pingResults);
-      const options = createChartOptions(filtered, showAnnotations.value);
+      const options = createChartOptions(filtered, showAnnotations.value, isDark.value);
 
       if (chart.value) {
         chart.value.updateOptions(options as ApexCharts.ApexOptions, false, true);
@@ -465,10 +476,16 @@ export default defineComponent({
     onMounted(() => {
       drawGraph();
       window.addEventListener('resize', resizeListener);
+      // Subscribe to theme changes
+      themeUnsubscribe = themeService.onThemeChange((theme) => {
+        isDark.value = theme === 'dark';
+        drawGraph();
+      });
     });
 
     onUnmounted(() => {
       window.removeEventListener('resize', resizeListener);
+      if (themeUnsubscribe) themeUnsubscribe();
       if (chart.value) {
         chart.value.destroy();
         chart.value = null;

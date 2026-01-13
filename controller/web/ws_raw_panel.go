@@ -249,6 +249,54 @@ func (h *RawPanelHub) BroadcastSpeedtestUpdate(update SpeedtestUpdate) {
 	}
 }
 
+// NetworkMapUpdate represents a network map topology update
+type NetworkMapUpdate struct {
+	WorkspaceID uint        `json:"workspace_id"`
+	Nodes       interface{} `json:"nodes"`
+	Edges       interface{} `json:"edges"`
+	GeneratedAt string      `json:"generated_at"`
+}
+
+// BroadcastNetworkMapUpdate sends network map updates to all subscribed panel clients for the workspace
+func (h *RawPanelHub) BroadcastNetworkMapUpdate(update NetworkMapUpdate) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"event": "network_map_update",
+		"data":  update,
+	})
+	if err != nil {
+		log.Errorf("[RawPanelWS] Marshal network map update error: %v", err)
+		return
+	}
+
+	recipients := make(map[string]struct{})
+
+	// Send to all connections subscribed to this workspace (probeID 0 = workspace-wide)
+	if wsMap, ok := h.subscriptions[update.WorkspaceID]; ok {
+		if connMap, ok := wsMap[0]; ok {
+			for connID := range connMap {
+				recipients[connID] = struct{}{}
+			}
+		}
+	}
+
+	for connID := range recipients {
+		if conn, ok := h.conns[connID]; ok {
+			select {
+			case conn.Send <- payload:
+			default:
+				log.Warnf("[RawPanelWS] Send buffer full for %s (network map update)", connID)
+			}
+		}
+	}
+
+	if len(recipients) > 0 {
+		log.Debugf("[RawPanelWS] Network map update broadcast to %d clients (workspace=%d)", len(recipients), update.WorkspaceID)
+	}
+}
+
 // Read pump for raw WebSocket
 func (c *RawPanelConn) readPump(hub *RawPanelHub) {
 	defer func() {

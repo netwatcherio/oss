@@ -26,6 +26,24 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	base := api.Party("/workspaces/{id:uint}/probe-data")
 
 	// ------------------------------------------
+	// GET /workspaces/{id}/network-map
+	// Aggregated network topology map for the workspace
+	// Query: lookback=<minutes, default 15>
+	// ------------------------------------------
+	api.Get("/workspaces/{id:uint}/network-map", func(ctx iris.Context) {
+		wID := uintParam(ctx, "id")
+		lookback := intOrDefault(ctx.URLParam("lookback"), 15)
+
+		mapData, err := probe.GetWorkspaceNetworkMap(ctx.Request().Context(), ch, pg, wID, lookback)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+		_ = ctx.JSON(mapData)
+	})
+
+	// ------------------------------------------
 	// GET /workspaces/{id}/probe-data/find
 	// Flexible finder across ClickHouse with query params mirroring pd.FindParams
 	// ------------------------------------------
@@ -91,9 +109,19 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM") {
 			// Use aggregated query for performance
 			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, probeType, from, to, aggregateSec, limit)
+			// Log aggregation for debugging
+			if err == nil {
+				ctx.Application().Logger().Debugf("[ProbeData] Aggregated query: probeID=%d type=%s aggregate=%ds from=%v to=%v -> %d rows",
+					probeID, probeType, aggregateSec, from, to, len(rows))
+			}
 		} else {
 			// Standard non-aggregated query
 			rows, err = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
+			// Log raw query for debugging
+			if err == nil && aggregateSec > 0 {
+				ctx.Application().Logger().Debugf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
+					probeType, probeID, len(rows))
+			}
 		}
 
 		if err != nil {

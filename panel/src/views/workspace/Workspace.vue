@@ -5,6 +5,7 @@ import Title from "@/components/Title.vue";
 import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
 import AgentCard from "@/components/AgentCard.vue";
+import WorkspaceNetworkMap from "@/components/WorkspaceNetworkMap.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
 import {usePermissions} from "@/composables/usePermissions";
@@ -17,7 +18,8 @@ const state = reactive({
   loading: true,
   loadingNetInfo: false,
   searchQuery: '',
-  sortBy: 'status' as 'status' | 'name' | 'description' | 'updated'
+  sortBy: 'status' as 'status' | 'name' | 'description' | 'updated',
+  showNetworkMap: false
 })
 
 // Permissions based on user's role in this workspace
@@ -210,6 +212,32 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- View Toggle -->
+    <div class="view-toggle mb-3" v-if="!state.loading && state.agents.length > 0">
+      <button 
+        @click="state.showNetworkMap = false" 
+        class="btn" 
+        :class="state.showNetworkMap ? 'btn-outline-secondary' : 'btn-primary'"
+      >
+        <i class="bi bi-grid-3x3-gap"></i> Agents Grid
+      </button>
+      <button 
+        @click="state.showNetworkMap = true" 
+        class="btn" 
+        :class="state.showNetworkMap ? 'btn-primary' : 'btn-outline-secondary'"
+      >
+        <i class="bi bi-diagram-3"></i> Network Map
+      </button>
+    </div>
+
+    <!-- Network Map View -->
+    <div v-if="state.showNetworkMap && !state.loading && state.workspace.id" class="mb-4">
+      <WorkspaceNetworkMap 
+        :workspace-id="state.workspace.id"
+        @node-select="(node) => console.log('Selected node:', node)"
+      />
+    </div>
+
     <!-- Loading State -->
     <div v-if="state.loading" class="text-center py-5">
       <Loader />
@@ -241,7 +269,7 @@ onMounted(async () => {
     </div>
 
     <!-- Agents Grid -->
-    <div class="agents-grid" v-else>
+    <div class="agents-grid" v-else-if="!state.showNetworkMap">
       <div v-for="agent in state.agents" :key="agent.id" class="agent-card-wrapper">
         <AgentCard
           :title="agent.name"
@@ -313,6 +341,18 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* View Toggle */
+.view-toggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-toggle .btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 /* Stats Container */
 .stats-container {
   display: grid;

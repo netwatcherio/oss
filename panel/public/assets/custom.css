@@ -12838,7 +12838,7 @@ code {
 [data-theme="dark"] section,
 [data-theme="dark"] .row,
 [data-theme="dark"] .content {
-  background-color: #0f172a !important;
+  background-color: transparent;
 }
 
 /* Cards */

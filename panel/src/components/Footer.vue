@@ -19,7 +19,7 @@ const currentYear = new Date().getFullYear();
   text-align: center;
   background-color: transparent;
   border-top: 1px solid rgba(55, 65, 81, 0.5);
-  margin-top: auto;
+  margin-top: 3rem;
 }
 
 .footer-content {

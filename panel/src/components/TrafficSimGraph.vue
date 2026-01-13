@@ -69,6 +69,7 @@
 import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
 import ApexCharts from 'apexcharts'
 import type { TrafficSimResult } from '@/types';
+import { themeService } from '@/services/themeService';
 
 export default {
   name: 'TrafficGraph',
@@ -84,6 +85,8 @@ export default {
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref('all');
     const showAnnotations = ref(true);
+    const isDark = ref(themeService.getTheme() === 'dark');
+    let themeUnsubscribe: (() => void) | null = null;
     
     // Calculate the maximum allowed gap dynamically based on probe interval
     // Use 3x the interval to avoid breaking lines with sparse data
@@ -171,9 +174,9 @@ export default {
       const filteredData = filterDataByTimeRange(props.trafficResults);
       
       if (chart.value) {
-        chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value));
+        chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
       } else {
-        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value));
+        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
         chart.value.render();
       }
     };
@@ -189,10 +192,16 @@ export default {
     onMounted(() => {
       drawGraph();
       window.addEventListener('resize', resizeListener);
+      // Subscribe to theme changes
+      themeUnsubscribe = themeService.onThemeChange((theme) => {
+        isDark.value = theme === 'dark';
+        drawGraph();
+      });
     });
 
     onUnmounted(() => {
       window.removeEventListener('resize', resizeListener);
+      if (themeUnsubscribe) themeUnsubscribe();
       if (chart.value) {
         chart.value.destroy();
         chart.value = null;
@@ -294,7 +303,21 @@ function getTrafficBucketSize(data: TrafficSimResult[], timeRange: string): numb
   return bucketSize;
 }
 
-function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnnotations: boolean, maxAllowedGap: number = DEFAULT_MAX_GAP): ApexCharts.ApexOptions {
+function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnnotations: boolean, maxAllowedGap: number = DEFAULT_MAX_GAP, darkMode: boolean = false): ApexCharts.ApexOptions {
+  // Theme-aware color definitions
+  const colors = darkMode ? {
+    foreColor: '#e5e7eb',
+    labelColor: '#9ca3af',
+    gridColor: '#374151',
+    axisBorder: '#4b5563',
+    tooltipTheme: 'dark' as const
+  } : {
+    foreColor: '#374151',
+    labelColor: '#6b7280',
+    gridColor: '#e5e7eb',
+    axisBorder: '#e5e7eb',
+    tooltipTheme: 'light' as const
+  };
   const sortedData = data.sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
   
   // Determine aggregation bucket size based on time range
@@ -356,204 +379,107 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 
   // Only add other annotations if showAnnotations is true
   if (showAnnotations) {
-
-    // Calculate Y-axis with limited scale for better readability
-    const avgRttValues = processedData.map(d => d.averageRTT);
-    const sortedAvgRtts = [...avgRttValues].sort((a, b) => a - b);
-    const p90Index = Math.floor(sortedAvgRtts.length * 0.90);
-    const p90Value = sortedAvgRtts[p90Index] || sortedAvgRtts[sortedAvgRtts.length - 1];
+    const anomalyThreshold = 300; // ms
     
-    // Set Y-axis limit based on 90th percentile
-    const yMax = Math.min(Math.ceil(p90Value * 1.5 / 50) * 50, 500); // Cap at 500ms
-
-    // Add high RTT anomaly annotations (>300ms)
-    const anomalyThreshold = 300;
-    processedData.forEach((d, index) => {
+    // Group consecutive high-latency anomalies into regions (like PingGraph)
+    let latencyRegion: { start: number; end: number } | null = null;
+    
+    processedData.forEach((d, i) => {
       const avgRtt = d.averageRTT;
       const maxRtt = d.maxRTT;
+      const isAnomaly = avgRtt > anomalyThreshold || maxRtt > anomalyThreshold;
+      const timestamp = new Date(d.reportTime).getTime();
       
-      if (avgRtt > anomalyThreshold || maxRtt > anomalyThreshold) {
-        annotations.points.push({
-          x: new Date(d.reportTime).getTime(),
-          y: Math.min(avgRtt, yMax),
-          seriesIndex: 1, // Avg RTT series
-          marker: {
-            size: 8,
-            fillColor: '#ef4444',
-            strokeColor: '#fff',
-            strokeWidth: 2,
-            radius: 2
-          },
-          label: {
-            borderColor: '#ef4444',
-            style: {
-              color: '#fff',
-              background: '#ef4444',
-              fontSize: '12px',
-              fontWeight: 'bold'
-            },
-            text: `Anomaly: ${avgRtt.toFixed(0)}ms`,
-            offsetY: -10
-          }
-        });
-        
-        // Vertical line for anomaly
-        annotations.xaxis.push({
-          x: new Date(d.reportTime).getTime(),
-          strokeDashArray: 0,
-          borderColor: '#ef4444',
-          borderWidth: 2,
-          opacity: 0.3,
-          label: {
-            borderColor: '#ef4444',
-            style: {
-              color: '#fff',
-              background: '#ef4444'
-            },
-            text: 'High Latency',
-            position: 'top',
-            orientation: 'horizontal'
-          }
-        });
-      }
-    });
-
-    // Enhanced packet loss annotations
-    let lossRegions: Array<{start: number, end: number, severity: string, color: string}> = [];
-    let currentRegion: any = null;
-
-    processedData.forEach((d, index) => {
-      const packetLoss = (d.lostPackets / d.totalPackets) * 100;
-      let severity = '';
-      let color = '';
-
-      if (packetLoss >= 1 && packetLoss < 5) {
-        severity = 'Low';
-        color = '#fbbf24'; // Amber
-      } else if (packetLoss >= 5 && packetLoss < 10) {
-        severity = 'Moderate';
-        color = '#fb923c'; // Orange
-      } else if (packetLoss >= 10) {
-        severity = 'High';
-        color = '#ef4444'; // Red
-      }
-
-      if (severity) {
-        if (!currentRegion || currentRegion.severity !== severity) {
-          if (currentRegion) {
-            lossRegions.push(currentRegion);
-          }
-          currentRegion = {
-            start: new Date(d.reportTime).getTime(),
-            end: new Date(d.reportTime).getTime(),
-            severity,
-            color
-          };
+      if (isAnomaly) {
+        if (!latencyRegion) {
+          latencyRegion = { start: timestamp, end: timestamp };
         } else {
-          currentRegion.end = new Date(d.reportTime).getTime();
+          latencyRegion.end = timestamp;
         }
-      } else if (currentRegion) {
-        lossRegions.push(currentRegion);
-        currentRegion = null;
+      } else if (latencyRegion) {
+        // End of anomaly region - add subtle shaded annotation
+        annotations.xaxis!.push({
+          x: latencyRegion.start,
+          x2: latencyRegion.end,
+          fillColor: '#fecaca',
+          borderColor: '#ef4444',
+          opacity: 0.15,
+          strokeDashArray: 0
+        } as any);
+        latencyRegion = null;
       }
     });
-
-    if (currentRegion) {
-      lossRegions.push(currentRegion);
+    
+    // Handle final region if data ends with anomaly
+    if (latencyRegion) {
+      annotations.xaxis!.push({
+        x: latencyRegion.start,
+        x2: latencyRegion.end,
+        fillColor: '#fecaca',
+        borderColor: '#ef4444',
+        opacity: 0.15,
+        strokeDashArray: 0
+      } as any);
     }
-
-    // Add enhanced loss region annotations
-    lossRegions.forEach(region => {
-      annotations.xaxis.push({
-        x: region.start,
-        x2: region.end,
-        fillColor: region.color,
-        borderColor: region.color,
-        opacity: 0.2,
-        label: {
-          text: `${region.severity} Packet Loss`,
-          style: {
-            fontSize: '12px',
-            fontWeight: 'bold',
-            color: '#fff',
-            background: region.color,
-            padding: {
-              left: 10,
-              right: 10,
-              top: 4,
-              bottom: 4
-            }
-          },
-          position: 'top'
-        }
-      });
-    });
-
-    // Add individual packet loss point annotations
-    processedData.forEach((d, index) => {
+    
+    // Group consecutive packet loss periods into regions
+    let lossRegion: { start: number; end: number; severity: 'low' | 'moderate' | 'high' } | null = null;
+    
+    processedData.forEach((d, i) => {
       const packetLoss = (d.lostPackets / d.totalPackets) * 100;
+      const timestamp = new Date(d.reportTime).getTime();
       
-      if (packetLoss > 0) {
-        let color = '';
-        let severity = '';
-        
-        if (packetLoss >= 10) {
-          color = '#ef4444'; // Red
-          severity = 'High';
-        } else if (packetLoss >= 5) {
-          color = '#fb923c'; // Orange
-          severity = 'Moderate';
-        } else if (packetLoss >= 1) {
-          color = '#fbbf24'; // Amber
-          severity = 'Low';
-        }
-        
-        annotations.points.push({
-          x: new Date(d.reportTime).getTime(),
-          y: packetLoss,
-          seriesIndex: 3, // Packet Loss series
-          marker: {
-            size: 8,
-            fillColor: color,
-            strokeColor: '#fff',
-            strokeWidth: 2,
-            radius: 2
-          },
-          label: {
-            borderColor: color,
-            style: {
-              color: '#fff',
-              background: color,
-              fontSize: '12px',
-              fontWeight: 'bold'
-            },
-            text: `${packetLoss.toFixed(1)}% Loss`,
-            offsetY: -10
+      // Determine severity
+      let severity: 'low' | 'moderate' | 'high' | null = null;
+      if (packetLoss >= 10) severity = 'high';
+      else if (packetLoss >= 5) severity = 'moderate';
+      else if (packetLoss >= 1) severity = 'low';
+      
+      if (severity) {
+        if (!lossRegion) {
+          lossRegion = { start: timestamp, end: timestamp, severity };
+        } else {
+          lossRegion.end = timestamp;
+          // Upgrade severity if needed
+          if (severity === 'high' || (severity === 'moderate' && lossRegion.severity === 'low')) {
+            lossRegion.severity = severity;
           }
-        });
-        
-        // Vertical line for significant packet loss
-        if (packetLoss >= 5) {
-          annotations.xaxis.push({
-            x: new Date(d.reportTime).getTime(),
-            strokeDashArray: 0,
-            borderColor: color,
-            borderWidth: 2,
-            opacity: 0.3,
-            label: {
-              borderColor: color,
-              style: {
-                color: '#fff',
-                background: color
-              },
-              text: `${severity} Loss`,
-              position: 'bottom',
-              orientation: 'horizontal'
-            }
-          });
         }
+      } else if (lossRegion) {
+        // End of loss region - add subtle shaded annotation
+        const color = lossRegion.severity === 'high' ? '#fecaca' : 
+                      lossRegion.severity === 'moderate' ? '#fed7aa' : '#fef3c7';
+        const borderColor = lossRegion.severity === 'high' ? '#ef4444' : 
+                            lossRegion.severity === 'moderate' ? '#f97316' : '#eab308';
+        
+        annotations.xaxis!.push({
+          x: lossRegion.start,
+          x2: lossRegion.end,
+          fillColor: color,
+          borderColor: borderColor,
+          opacity: 0.15,
+          strokeDashArray: 0
+        } as any);
+        lossRegion = null;
       }
     });
+    
+    // Handle final region
+    if (lossRegion) {
+      const color = lossRegion.severity === 'high' ? '#fecaca' : 
+                    lossRegion.severity === 'moderate' ? '#fed7aa' : '#fef3c7';
+      const borderColor = lossRegion.severity === 'high' ? '#ef4444' : 
+                          lossRegion.severity === 'moderate' ? '#f97316' : '#eab308';
+      
+      annotations.xaxis!.push({
+        x: lossRegion.start,
+        x2: lossRegion.end,
+        fillColor: color,
+        borderColor: borderColor,
+        opacity: 0.15,
+        strokeDashArray: 0
+      } as any);
+    }
   }
 
   // Calculate Y-axis for consistent scaling
@@ -572,7 +498,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       height: 380,
       type: 'line',
       background: 'transparent',
-      foreColor: '#374151',
+      foreColor: colors.foreColor,
       fontFamily: 'Inter, system-ui, sans-serif',
       stacked: false,
       animations: {
@@ -615,44 +541,44 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       redrawOnParentResize: true,
       redrawOnWindowResize: true
     },
-    colors: ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#a855f7'],
+    colors: ['#10b981', '#3b82f6', '#f97316', '#fbbf24', '#a855f7'],
     stroke: {
-      width: [2, 3, 2, 0, 0],
+      width: [2, 3, 2, 2, 0],
       curve: 'smooth',
       dashArray: [0, 0, 0, 0, 0]
     },
     fill: {
       type: ['solid', 'solid', 'solid', 'gradient', 'solid'],
       gradient: {
-        shadeIntensity: 1,
-        opacityFrom: 0.4,
-        opacityTo: 0.1,
-        stops: [0, 90, 100]
+        shadeIntensity: 0.8,
+        opacityFrom: 0.35,
+        opacityTo: 0.05,
+        stops: [0, 95, 100]
       }
     },
     markers: {
-      size: isLargeDataset ? [0, 0, 0, 0, 0] : [2, 3, 2, 0, 4],
-      strokeWidth: 1,
+      size: isLargeDataset ? [0, 0, 0, 0, 0] : [0, 4, 0, 0, 5],
+      strokeWidth: 2,
       strokeColors: '#fff',
       hover: {
         size: 6,
-        sizeOffset: 2
+        sizeOffset: 3
       }
     },
     xaxis: {
       type: 'datetime',
       labels: {
         style: {
-          colors: '#6b7280',
+          colors: colors.labelColor,
           fontSize: '12px'
         },
         datetimeUTC: false
       },
       axisBorder: {
-        color: '#e5e7eb'
+        color: colors.axisBorder
       },
       axisTicks: {
-        color: '#e5e7eb'
+        color: colors.axisBorder
       }
     },
     yaxis: [
@@ -661,7 +587,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         title: {
           text: 'Round Trip Time (ms)',
           style: {
-            color: '#374151',
+            color: colors.foreColor,
             fontSize: '14px',
             fontWeight: 600
           }
@@ -671,7 +597,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         tickAmount: 8,
         labels: {
           style: {
-            colors: '#6b7280',
+            colors: colors.labelColor,
             fontSize: '12px'
           },
           formatter: (val) => val.toFixed(0)
@@ -683,7 +609,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         title: {
           text: 'Packet Loss (%)',
           style: {
-            color: '#374151',
+            color: colors.foreColor,
             fontSize: '14px',
             fontWeight: 600
           }
@@ -693,7 +619,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         tickAmount: 5,
         labels: {
           style: {
-            colors: '#6b7280',
+            colors: colors.labelColor,
             fontSize: '12px'
           },
           formatter: (val) => val.toFixed(0) + '%'
@@ -706,7 +632,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         min: 0,
         labels: {
           style: {
-            colors: '#6b7280',
+            colors: colors.labelColor,
             fontSize: '12px'
           }
         }
@@ -716,7 +642,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       enabled: true,
       shared: true,
       intersect: false,
-      theme: 'light',
+      theme: colors.tooltipTheme,
       // Performance: use fixed tooltip position for large datasets
       fixed: isLargeDataset ? {
         enabled: true,
@@ -795,7 +721,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     grid: {
-      borderColor: '#e5e7eb',
+      borderColor: colors.gridColor,
       strokeDashArray: 0,
       xaxis: {
         lines: {
@@ -1022,5 +948,63 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   .annotation-toggle {
     justify-content: center;
   }
+}
+
+/* ========================================
+   Dark Mode Styles
+   ======================================== */
+:global([data-theme="dark"]) .traffic-graph-container {
+  background: #1e293b;
+}
+
+:global([data-theme="dark"]) .stat-card {
+  background: #334155;
+  border-color: #475569;
+}
+
+:global([data-theme="dark"]) .stat-label {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .stat-value {
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .time-btn {
+  background: #1e293b;
+  border-color: #475569;
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .time-btn:hover {
+  background: #334155;
+  color: #f9fafb;
+}
+
+:global([data-theme="dark"]) .toggle-switch {
+  background-color: #475569;
+}
+
+:global([data-theme="dark"]) .toggle-text {
+  color: #e5e7eb;
+}
+
+/* Dark mode tooltips */
+:global([data-theme="dark"]) .custom-tooltip {
+  background: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+:global([data-theme="dark"]) .tooltip-title {
+  color: #9ca3af;
+  border-bottom-color: #475569;
+}
+
+:global([data-theme="dark"]) .tooltip-label {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .tooltip-value {
+  color: #f9fafb;
 }
 </style>

@@ -330,6 +330,37 @@ export interface TrafficSimResult {
     reportTime: string;  // ISO 8601 timestamp
 }
 
+// Network Map types for workspace topology visualization
+export interface NetworkMapNode {
+    id: string;
+    type: 'agent' | 'hop' | 'destination';
+    label: string;
+    agent_id?: number;
+    ip?: string;
+    hostname?: string;
+    hop_number?: number;
+    avg_latency: number;
+    packet_loss: number;
+    path_count: number;
+    is_online?: boolean;
+}
+
+export interface NetworkMapEdge {
+    id: string;
+    source: string;
+    target: string;
+    avg_latency: number;
+    packet_loss: number;
+    path_count: number;
+}
+
+export interface NetworkMapData {
+    nodes: NetworkMapNode[];
+    edges: NetworkMapEdge[];
+    generated_at: string;
+    workspace_id: number;
+}
+
 export interface ProbeDataRequest {
     limit: number;
     startTimestamp: Date;

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {nextTick, onMounted, reactive, ref, watch} from "vue";
+import {nextTick, onMounted, onUnmounted, reactive, ref, watch} from "vue";
 import core from "@/core";
 import type {Agent, MtrResult, PingResult, Probe, ProbeData, ProbeType, TrafficSimResult, Workspace,} from "@/types";
 import Title from "@/components/Title.vue";
@@ -11,6 +11,7 @@ import MtrTable from "@/components/MtrTable.vue";
 import MtrDetailModal from "@/components/MtrDetailModal.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
+import { themeService } from '@/services/themeService';
 
 // NEW: API services wired to your new endpoints
 import {AgentService, ProbeDataService, ProbeService, WorkspaceService} from "@/services/apiService";
@@ -21,6 +22,9 @@ import { useProbeSubscription, type ProbeDataEvent } from "@/composables/useWebS
 
 // Ref for active tab to trigger NetworkMap updates
 const activeTabIndex = ref(0);
+
+// Theme detection for date picker
+const isDark = ref(themeService.getTheme() === 'dark');
 
 // Modal state for MTR detail view
 const showMtrModal = ref(false);
@@ -514,14 +518,24 @@ async function reloadData() {
           const recipProbe = state.reciprocalProbe;
           const [fromTime, toTime] = state.timeRange;
           
-          // Calculate aggregation (same logic as loadProbeData)
+          // Calculate aggregation (same logic as loadProbeData - target 500 points)
           const rangeMs = new Date(toTime).getTime() - new Date(fromTime).getTime();
-          const rangeHours = rangeMs / (1000 * 60 * 60);
+          const rangeSec = rangeMs / 1000;
+          const targetPoints = 500;
           let recipAggregateSec = 0;
-          if (rangeHours >= 168) recipAggregateSec = 3600;
-          else if (rangeHours >= 24) recipAggregateSec = 600;
-          else if (rangeHours >= 6) recipAggregateSec = 120;
-          else if (rangeHours >= 1) recipAggregateSec = 30;
+          
+          if (rangeSec > 60) {
+            const idealBucket = Math.ceil(rangeSec / targetPoints);
+            if (idealBucket <= 10) recipAggregateSec = 10;
+            else if (idealBucket <= 30) recipAggregateSec = 30;
+            else if (idealBucket <= 60) recipAggregateSec = 60;
+            else if (idealBucket <= 120) recipAggregateSec = 120;
+            else if (idealBucket <= 300) recipAggregateSec = 300;
+            else if (idealBucket <= 600) recipAggregateSec = 600;
+            else if (idealBucket <= 1800) recipAggregateSec = 1800;
+            else if (idealBucket <= 3600) recipAggregateSec = 3600;
+            else recipAggregateSec = Math.ceil(idealBucket / 3600) * 3600;
+          }
           
           const recipType = recipProbe.type as string;
           const useRecipAgg = recipAggregateSec > 0 && (recipType === 'PING' || recipType === 'TRAFFICSIM');
@@ -595,26 +609,45 @@ async function loadProbeData(): Promise<void> {
   const [from, to] = state.timeRange;
   
   // Calculate aggregation bucket size based on time range
-  // Larger time ranges get larger buckets to reduce data points
+  // Goal: aim for ~500 data points regardless of time range
   const fromDate = new Date(from);
   const toDate = new Date(to);
   const rangeMs = toDate.getTime() - fromDate.getTime();
-  const rangeHours = rangeMs / (1000 * 60 * 60);
+  const rangeSec = rangeMs / 1000;
+  const rangeHours = rangeSec / 3600;
   
-  // Smart aggregation: aim for ~200 points max
+  // Calculate bucket size to get ~500 points
+  // bucketSec = rangeInSeconds / targetPoints
+  const targetPoints = 500;
   let aggregateSec = 0;
-  if (rangeHours >= 168) {        // 7+ days: 60 min buckets
-    aggregateSec = 3600;
-  } else if (rangeHours >= 24) {  // 1-7 days: 10 min buckets
-    aggregateSec = 600;
-  } else if (rangeHours >= 6) {   // 6-24 hours: 2 min buckets  
-    aggregateSec = 120;
-  } else if (rangeHours >= 1) {   // 1-6 hours: 30 sec buckets
-    aggregateSec = 30;
+  
+  if (rangeSec > 60) { // Only aggregate if range > 1 minute
+    // Calculate ideal bucket size
+    let idealBucket = Math.ceil(rangeSec / targetPoints);
+    
+    // Round to nice intervals for cleaner data
+    if (idealBucket <= 10) {
+      aggregateSec = 10;        // 10 second buckets
+    } else if (idealBucket <= 30) {
+      aggregateSec = 30;        // 30 second buckets
+    } else if (idealBucket <= 60) {
+      aggregateSec = 60;        // 1 minute buckets
+    } else if (idealBucket <= 120) {
+      aggregateSec = 120;       // 2 minute buckets
+    } else if (idealBucket <= 300) {
+      aggregateSec = 300;       // 5 minute buckets
+    } else if (idealBucket <= 600) {
+      aggregateSec = 600;       // 10 minute buckets
+    } else if (idealBucket <= 1800) {
+      aggregateSec = 1800;      // 30 minute buckets
+    } else if (idealBucket <= 3600) {
+      aggregateSec = 3600;      // 1 hour buckets
+    } else {
+      aggregateSec = Math.ceil(idealBucket / 3600) * 3600; // Round to nearest hour
+    }
   }
-  // Less than 1 hour: no aggregation (raw data)
 
-  console.log("loading probe data, aggregate:", aggregateSec, "seconds, range:", rangeHours.toFixed(1), "hours");
+  console.log(`[Probe] Loading data: range=${rangeHours.toFixed(1)}h, idealBucket=${Math.ceil(rangeSec/targetPoints)}s, aggregate=${aggregateSec}s`);
 
   const tasks = state.probes.map(async (p) => {
     try {
@@ -637,6 +670,7 @@ async function loadProbeData(): Promise<void> {
               type: useAggregation ? probeType : undefined
             }
         );
+        console.log(`[Probe ${p.id}] Fetched ${rows.length} ${useAggregation ? 'aggregated' : 'raw'} rows (type=${probeType}, bucket=${aggregateSec}s)`);
       } catch (aggErr) {
         // If aggregation fails (e.g., backend not updated), fallback to raw data
         if (useAggregation) {
@@ -683,9 +717,24 @@ function switchToReciprocal() {
   state.selectedDirection = state.selectedDirection === 0 ? 1 : 0;
 }
 
+// Theme subscription for date picker
+let themeUnsubscribe: (() => void) | null = null;
+
 onMounted(() => {
   // default to last 3 hours
   state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
+  
+  // Subscribe to theme changes for date picker
+  themeUnsubscribe = themeService.onThemeChange((theme) => {
+    isDark.value = theme === 'dark';
+  });
+});
+
+onUnmounted(() => {
+  if (themeUnsubscribe) {
+    themeUnsubscribe();
+    themeUnsubscribe = null;
+  }
 });
 
 // WebSocket subscription for real-time updates
@@ -742,8 +791,27 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
       ]"
         :title="state.title"
         subtitle="information about this target">
-      <div v-if="state.ready" class="d-flex gap-1">
-        <VueDatePicker v-model="state.timeRange" :partial-range="false" range/>
+      <div v-if="state.ready" class="d-flex gap-2 align-items-center date-picker-wrapper">
+        <VueDatePicker 
+          v-model="state.timeRange" 
+          :partial-range="false" 
+          range
+          :dark="isDark"
+          :enable-time-picker="true"
+          :preset-dates="[
+            { label: 'Last Hour', value: [new Date(Date.now() - 60*60*1000), new Date()] },
+            { label: 'Last 3 Hours', value: [new Date(Date.now() - 3*60*60*1000), new Date()] },
+            { label: 'Last 6 Hours', value: [new Date(Date.now() - 6*60*60*1000), new Date()] },
+            { label: 'Last 24 Hours', value: [new Date(Date.now() - 24*60*60*1000), new Date()] },
+            { label: 'Last 7 Days', value: [new Date(Date.now() - 7*24*60*60*1000), new Date()] }
+          ]"
+          :timezone="Intl.DateTimeFormat().resolvedOptions().timeZone"
+          format="MMM dd, yyyy HH:mm"
+          preview-format="MMM dd, yyyy HH:mm"
+          input-class-name="date-picker-input"
+          menu-class-name="date-picker-menu"
+          calendar-class-name="date-picker-calendar"
+        />
       </div>
     </Title>
     
@@ -807,193 +875,157 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
     <div class="row">
       <!-- Agent Probe Comparison View -->
       <div v-if="state.isAgentProbe && state.agentPairData.length > 0" class="col-12">
-        <div class="card mb-3">
-          <div class="card-body">
-            <h5 class="card-title">Agent-to-Agent Monitoring Comparison</h5>
-            <p class="card-text">Bidirectional monitoring data between agent pairs</p>
-            
-            <!-- Tabs for different agent pairs -->
-            <ul class="nav nav-tabs" role="tablist">
-              <li v-for="(pair, index) in state.agentPairData" :key="`tab-${index}`" class="nav-item" role="presentation">
-                <button 
-                  :class="['nav-link', index === state.selectedDirection ? 'active' : '']"
-                  :id="`pair-tab-${index}`"
-                  :data-bs-target="`#pair-content-${index}`"
-                  data-bs-toggle="tab"
-                  type="button"
-                  role="tab"
-                  @click="state.selectedDirection = index; onTabChange(index)">
-                  {{ pair.sourceAgentName }} → {{ pair.targetAgentName }}
-                </button>
-              </li>
-            </ul>
-            
-            <!-- Tab content for each agent pair -->
-            <div class="tab-content mt-3">
-              <div v-for="(pair, index) in state.agentPairData" 
-                   :key="`content-${index}`"
-                   :id="`pair-content-${index}`"
-                   :class="['tab-pane', 'fade', index === state.selectedDirection ? 'show active' : '']"
-                   role="tabpanel">
-                
-                <!-- Agent Pair Information -->
-                <div class="alert alert-info">
-                  <strong>Source Agent:</strong> {{ pair.sourceAgentName }} ({{ pair.sourceAgentId }})<br>
-                  <strong>Target Agent:</strong> {{ pair.targetAgentName }} ({{ pair.targetAgentId }})
+        <!-- Direction content - use v-if for proper D3/NetworkMap rendering -->
+        <template v-for="(pair, index) in state.agentPairData" :key="`content-${index}`">
+          <div v-if="index === state.selectedDirection">
+          
+            <div class="row">
+            <!-- Ping/Latency Data -->
+            <div class="col-lg-12 mb-3">
+              <div class="card h-100">
+                <div class="card-header">
+                  <h6 class="mb-0">
+                    <i class="bi bi-speedometer2 me-2"></i>
+                    Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                  </h6>
                 </div>
-                
-                <div class="row">
-                  <!-- Ping Data for this pair -->
-                  <div v-if="pair.pingData.length > 0" class="col-lg-12 mb-3">
-                    <div class="card h-100">
-                      <div class="card-header">
-                        <h6 class="mb-0">Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
-                      </div>
-                      <div class="card-body">
-                        <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
-                      </div>
+                <div class="card-body">
+                  <div v-if="state.loading && pair.pingData.length === 0" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    <span class="text-muted">Loading latency data...</span>
+                  </div>
+                  <div v-else-if="pair.pingData.length === 0" class="text-center py-4 text-muted">
+                    <i class="bi bi-graph-down fs-1 mb-2 d-block"></i>
+                    <p class="mb-0">No latency data available for this direction</p>
+                  </div>
+                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="row">
+            <!-- Traffic Sim Data -->
+            <div class="col-lg-12 mb-3">
+              <div class="card h-100">
+                <div class="card-header">
+                  <h6 class="mb-0">
+                    <i class="bi bi-broadcast me-2"></i>
+                    Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                  </h6>
+                </div>
+                <div class="card-body">
+                  <div v-if="state.loading && pair.trafficSimData.length === 0" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    <span class="text-muted">Loading traffic simulation data...</span>
+                  </div>
+                  <div v-else-if="pair.trafficSimData.length === 0" class="text-center py-4 text-muted">
+                    <i class="bi bi-broadcast fs-1 mb-2 d-block"></i>
+                    <p class="mb-0">No traffic simulation data available for this direction</p>
+                  </div>
+                  <TrafficSimGraph v-else :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
+                </div>
+              </div>
+            </div>
+            
+            <!-- MTR Data -->
+            <div class="col-12 mb-3">
+              <div class="card">
+                <div class="card-header">
+                  <h6 class="mb-0">
+                    <i class="bi bi-diagram-3 me-2"></i>
+                    Traceroutes ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                  </h6>
+                </div>
+                <div class="card-body">
+                  <div v-if="state.loading && pair.mtrData.length === 0" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    <span class="text-muted">Loading traceroute data...</span>
+                  </div>
+                  <div v-else-if="pair.mtrData.length === 0" class="text-center py-4 text-muted">
+                    <i class="bi bi-diagram-3 fs-1 mb-2 d-block"></i>
+                    <p class="mb-0">No traceroute data available for this direction</p>
+                  </div>
+                  <template v-else>
+                    <!-- Key to force re-render on tab change -->
+                    <NetworkMap 
+                      :key="`mtr-map-${index}-${activeTabIndex}`"
+                      :mtrResults="transformMtrDataMulti(pair.mtrData)"
+                      @nodeSelect="onNodeSelect"
+                    />
+                    <div class="mtr-help-text">
+                      <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
                     </div>
-                  </div>
-                  <div v-else-if="containsProbeType('PING')" class="col-lg-12 mb-3">
-                    <div class="card h-100">
-                      <div class="card-header">
-                        <h6 class="mb-0">Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
+                    
+                    <!-- Notable Traces section for AGENT probes -->
+                    <div class="notable-traces mt-3">
+                      <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">
+                          <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+                          Notable Traces
+                          <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(pair.mtrData).length }}</span>
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true; state.selectedMtrData = pair.mtrData">
+                          <i class="bi bi-list-ul"></i> View All ({{ pair.mtrData.length }})
+                        </button>
                       </div>
-                      <div class="card-body d-flex align-items-center justify-content-center text-muted">
-                        <div class="text-center">
-                          <i class="bi bi-info-circle fs-1 mb-2"></i>
-                          <p>No latency data available for this direction</p>
-                        </div>
+                      
+                      <div v-if="getNotableMtrResults(pair.mtrData).length === 0" class="text-muted text-center py-3">
+                        <i class="bi bi-check-circle text-success me-2"></i>
+                        No issues detected in the selected time range
                       </div>
-                    </div>
-                  </div>
-                  </div>
-                  <div class="row">
-                  <!-- Traffic Sim Data for this pair -->
-                  <div v-if="pair.trafficSimData.length > 0" class="col-lg-12 mb-3">
-                    <div class="card h-100">
-                      <div class="card-header">
-                        <h6 class="mb-0">Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
-                      </div>
-                      <div class="card-body">
-                        <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else-if="containsProbeType('TRAFFICSIM')" class="col-lg-12 mb-3">
-                    <div class="card h-100">
-                      <div class="card-header">
-                        <h6 class="mb-0">Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
-                      </div>
-                      <div class="card-body d-flex align-items-center justify-content-center text-muted">
-                        <div class="text-center">
-                          <i class="bi bi-info-circle fs-1 mb-2"></i>
-                          <p>No traffic simulation data available for this direction</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <!-- MTR Data for this pair -->
-                  <div v-if="pair.mtrData.length > 0" class="col-12">
-                    <div class="card">
-                      <div class="card-header">
-                        <h6 class="mb-0">Traceroutes ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
-                      </div>
-                      <div class="card-body">
-                        <!-- Key to force re-render on tab change -->
-                        <NetworkMap 
-                          :key="`mtr-map-${index}-${activeTabIndex}`"
-                          :mtrResults="transformMtrDataMulti(pair.mtrData)"
-                          @nodeSelect="onNodeSelect"
-                        />
-                        <div class="mtr-help-text">
-                          <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
-                        </div>
-                        
-                        <!-- Notable Traces section for AGENT probes -->
-                        <div class="notable-traces mt-3">
-                          <div class="d-flex justify-content-between align-items-center mb-2">
-                            <h6 class="mb-0">
-                              <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
-                              Notable Traces
-                              <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(pair.mtrData).length }}</span>
-                            </h6>
-                            <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true; state.selectedMtrData = pair.mtrData">
-                              <i class="bi bi-list-ul"></i> View All ({{ pair.mtrData.length }})
-                            </button>
-                          </div>
-                          
-                          <div v-if="getNotableMtrResults(pair.mtrData).length === 0" class="text-muted text-center py-3">
-                            <i class="bi bi-check-circle text-success me-2"></i>
-                            No issues detected in the selected time range
-                          </div>
-                          
-                          <div v-else :id="`agent-notableAccordion-${index}`" class="accordion">
-                            <div v-for="(item, notableIdx) in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).items" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
-                              <div class="accordion-item">
-                                <h2 :id="`agent-notable-heading-${index}-${notableIdx}`" class="accordion-header">
-                                  <button :aria-controls="`agent-notable-collapse-${index}-${notableIdx}`" :aria-expanded="false"
-                                          :data-bs-target="`#agent-notable-collapse-${index}-${notableIdx}`"
-                                          class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                                    {{ formatMtrTimestamp(item.data) }}
-                                    <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
-                                    <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
-                                    <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
-                                    <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
-                                  </button>
-                                </h2>
-                                <div :id="`agent-notable-collapse-${index}-${notableIdx}`" :aria-labelledby="`agent-notable-heading-${index}-${notableIdx}`"
-                                     class="accordion-collapse collapse"
-                                     :data-bs-parent="`#agent-notableAccordion-${index}`">
-                                  <div class="accordion-body p-0">
-                                    <MtrTable :probe-data="item.data" />
-                                  </div>
-                                </div>
+                      
+                      <div v-else :id="`agent-notableAccordion-${index}`" class="accordion">
+                        <div v-for="(item, notableIdx) in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).items" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
+                          <div class="accordion-item">
+                            <h2 :id="`agent-notable-heading-${index}-${notableIdx}`" class="accordion-header">
+                              <button :aria-controls="`agent-notable-collapse-${index}-${notableIdx}`" :aria-expanded="false"
+                                      :data-bs-target="`#agent-notable-collapse-${index}-${notableIdx}`"
+                                      class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
+                                {{ formatMtrTimestamp(item.data) }}
+                                <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
+                                <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
+                                <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
+                                <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
+                              </button>
+                            </h2>
+                            <div :id="`agent-notable-collapse-${index}-${notableIdx}`" :aria-labelledby="`agent-notable-heading-${index}-${notableIdx}`"
+                                 class="accordion-collapse collapse"
+                                 :data-bs-parent="`#agent-notableAccordion-${index}`">
+                              <div class="accordion-body p-0">
+                                <MtrTable :probe-data="item.data" />
                               </div>
                             </div>
-                            <!-- Pagination Controls per pair -->
-                            <nav v-if="getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages > 1" class="mt-3">
-                              <ul class="pagination pagination-sm justify-content-center mb-0">
-                                <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasPrev }">
-                                  <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) - 1, index)">
-                                    <i class="bi bi-chevron-left"></i>
-                                  </button>
-                                </li>
-                                <li v-for="p in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages" :key="p" 
-                                    class="page-item" :class="{ active: p === (agentMtrPages[index] || 1) }">
-                                  <button class="page-link" @click="goToMtrPage(p, index)">{{ p }}</button>
-                                </li>
-                                <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasNext }">
-                                  <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) + 1, index)">
-                                    <i class="bi bi-chevron-right"></i>
-                                  </button>
-                                </li>
-                              </ul>
-                            </nav>
                           </div>
                         </div>
+                        <!-- Pagination Controls per pair -->
+                        <nav v-if="getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages > 1" class="mt-3">
+                          <ul class="pagination pagination-sm justify-content-center mb-0">
+                            <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasPrev }">
+                              <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) - 1, index)">
+                                <i class="bi bi-chevron-left"></i>
+                              </button>
+                            </li>
+                            <li v-for="p in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages" :key="p" 
+                                class="page-item" :class="{ active: p === (agentMtrPages[index] || 1) }">
+                              <button class="page-link" @click="goToMtrPage(p, index)">{{ p }}</button>
+                            </li>
+                            <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasNext }">
+                              <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) + 1, index)">
+                                <i class="bi bi-chevron-right"></i>
+                              </button>
+                            </li>
+                          </ul>
+                        </nav>
                       </div>
                     </div>
-                  </div>
-                  <div v-else-if="containsProbeType('MTR')" class="col-12">
-                    <div class="card">
-                      <div class="card-header">
-                        <h6 class="mb-0">Traceroutes ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})</h6>
-                      </div>
-                      <div class="card-body d-flex align-items-center justify-content-center text-muted" style="min-height: 200px;">
-                        <div class="text-center">
-                          <i class="bi bi-info-circle fs-1 mb-2"></i>
-                          <p>No traceroute data available for this direction</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  </template>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        </template>
       </div>
       
       <!-- No data state for agent probes -->
@@ -1320,5 +1352,101 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
 [data-theme="dark"] .direction-btn:hover {
   background: rgba(59, 130, 246, 0.2);
   border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* Date Picker Styling */
+.date-picker-wrapper {
+  min-width: 280px;
+}
+
+:global(.date-picker-input) {
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  border: 1px solid #e5e7eb !important;
+  font-size: 14px !important;
+  min-width: 260px;
+  background: white !important;
+  color: #374151 !important;
+  transition: all 0.2s ease !important;
+}
+
+:global(.date-picker-input:hover) {
+  border-color: #3b82f6 !important;
+}
+
+:global(.date-picker-input:focus) {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+  outline: none !important;
+}
+
+/* Dark mode date picker input */
+:global([data-theme="dark"] .date-picker-input) {
+  background: #1e293b !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+:global([data-theme="dark"] .date-picker-input:hover) {
+  border-color: #3b82f6 !important;
+}
+
+/* Date picker menu styling */
+:global(.dp__menu) {
+  border-radius: 12px !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15) !important;
+  border: 1px solid #e5e7eb !important;
+}
+
+:global([data-theme="dark"] .dp__menu) {
+  border-color: #475569 !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Preset dates sidebar */
+:global(.dp__preset_ranges) {
+  border-right: 1px solid #e5e7eb !important;
+  padding: 8px !important;
+}
+
+:global([data-theme="dark"] .dp__preset_ranges) {
+  border-right-color: #475569 !important;
+}
+
+:global(.dp__preset_range) {
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  margin-bottom: 4px !important;
+  font-size: 13px !important;
+  transition: all 0.15s ease !important;
+}
+
+:global(.dp__preset_range:hover) {
+  background: rgba(59, 130, 246, 0.1) !important;
+  color: #3b82f6 !important;
+}
+
+:global([data-theme="dark"] .dp__preset_range:hover) {
+  background: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Calendar cells */
+:global(.dp__cell_inner) {
+  border-radius: 6px !important;
+  transition: all 0.15s ease !important;
+}
+
+:global(.dp__today) {
+  border-color: #3b82f6 !important;
+}
+
+:global(.dp__active_date),
+:global(.dp__range_start),
+:global(.dp__range_end) {
+  background: #3b82f6 !important;
+}
+
+:global(.dp__range_between) {
+  background: rgba(59, 130, 246, 0.15) !important;
 }
 </style>
