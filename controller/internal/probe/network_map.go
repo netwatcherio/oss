@@ -296,6 +296,8 @@ FROM probe_data
 WHERE type = 'PING'
   AND agent_id IN (%s)
   AND created_at >= %s
+  AND payload_raw != ''
+  AND isValidJSON(payload_raw)
 GROUP BY agent_id, target
 `, agentIDList, chQuoteTime(from))
 
@@ -356,6 +358,8 @@ FROM probe_data
 WHERE type = 'TRAFFICSIM'
   AND agent_id IN (%s)
   AND created_at >= %s
+  AND payload_raw != ''
+  AND isValidJSON(payload_raw)
 GROUP BY agent_id, target
 `, agentIDList, chQuoteTime(from))
 
