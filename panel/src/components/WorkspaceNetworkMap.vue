@@ -174,11 +174,7 @@ const fetchMapData = async () => {
     const response = await request.get<NetworkMapData>(
       `/workspaces/${props.workspaceId}/network-map?lookback=60`
     );
-    console.log('[WorkspaceNetworkMap] Raw response:', response);
-    console.log('[WorkspaceNetworkMap] Data:', response.data);
     mapData.value = response.data;
-    console.log('[WorkspaceNetworkMap] mapData.value nodes:', mapData.value?.nodes?.length);
-    console.log('[WorkspaceNetworkMap] containerRef:', containerRef.value);
     createVisualization();
   } catch (err) {
     console.error('[WorkspaceNetworkMap] Fetch error:', err);
@@ -258,8 +254,12 @@ const highlightDestination = (target: string) => {
   if (destNode) {
     selectedNode.value = destNode;
     emit('node-select', destNode);
+    
+    // Highlight the path in the visualization
+    if (visualization) {
+      visualization.highlightPath(target);
+    }
   }
-  // TODO: Implement path highlighting in visualization
 };
 
 onMounted(async () => {
@@ -288,6 +288,13 @@ watch(connected, (val) => {
   isLive.value = val;
 });
 
+// Clear highlight when node is deselected
+watch(selectedNode, (node) => {
+  if (!node && visualization) {
+    visualization.clearHighlight();
+  }
+});
+
 // D3 Visualization Class
 class WorkspaceNetworkVisualization {
   private container: HTMLElement;
@@ -300,7 +307,7 @@ class WorkspaceNetworkVisualization {
   private links: D3Link[] = [];
   private width: number;
   private height: number;
-  private nodeRadius = 24;
+  private nodeRadius = 18;
   private margin = { top: 40, right: 20, bottom: 60, left: 20 };
   private onNodeClick?: (node: NetworkMapNode) => void;
 
@@ -314,7 +321,12 @@ class WorkspaceNetworkVisualization {
     this.container = container;
     this.onNodeClick = onNodeClick;
     this.width = container.clientWidth - this.margin.left - this.margin.right;
-    this.height = 550 - this.margin.top - this.margin.bottom;
+    
+    // Dynamic height based on node count for better spreading
+    const minHeight = 500;
+    const heightPerNode = 35;
+    const calculatedHeight = Math.max(minHeight, data.nodes.length * heightPerNode);
+    this.height = Math.min(calculatedHeight, 1200) - this.margin.top - this.margin.bottom;
 
     this.processData(data);
     this.initializeSVG();
@@ -477,33 +489,59 @@ class WorkspaceNetworkVisualization {
   }
 
   private applyHierarchicalLayout() {
-    // Group nodes by type: agents left, hops middle, destinations right
+    // Group nodes by layer (0=agent, 1-N=hops, 100=destination)
     const agentNodes = this.nodes.filter(n => n.type === 'agent');
     const hopNodes = this.nodes.filter(n => n.type === 'hop');
     const destNodes = this.nodes.filter(n => n.type === 'destination');
 
-    // Position agents on left
+    // Find the max layer among hops (excluding 100 which is destination)
+    const maxHopLayer = Math.max(...hopNodes.map(n => n.layer || n.hop_number || 1), 1);
+    
+    // Calculate horizontal spacing
+    const leftMargin = 80;
+    const rightMargin = 80;
+    const usableWidth = this.width - leftMargin - rightMargin;
+    const layerWidth = usableWidth / (maxHopLayer + 2); // +2 for agents and destinations
+
+    // Position agents on left (layer 0)
     agentNodes.forEach((node, i) => {
-      node.fx = 50;
+      node.fx = leftMargin;
       node.fy = (this.height / (agentNodes.length + 1)) * (i + 1);
     });
 
-    // Position destinations on right
+    // Position destinations on far right (layer N+1)
     destNodes.forEach((node, i) => {
-      node.fx = this.width - 50;
+      node.fx = this.width - rightMargin;
       node.fy = (this.height / (destNodes.length + 1)) * (i + 1);
     });
 
-    // Hops spread by hop_number
-    const maxHop = Math.max(...hopNodes.map(n => n.hop_number || 1));
-    hopNodes.forEach((node) => {
-      const hopNum = node.hop_number || 1;
-      node.fx = 100 + ((this.width - 200) * (hopNum / (maxHop + 1)));
+    // Group hops by their layer and spread vertically
+    const hopsByLayer: Record<number, D3Node[]> = {};
+    hopNodes.forEach(node => {
+      const layer = node.layer || node.hop_number || 1;
+      if (!hopsByLayer[layer]) hopsByLayer[layer] = [];
+      hopsByLayer[layer].push(node);
     });
 
+    // Position hops by layer with vertical spreading
+    Object.entries(hopsByLayer).forEach(([layerStr, nodes]) => {
+      const layer = parseInt(layerStr);
+      const xPos = leftMargin + layerWidth * layer;
+      
+      // Spread nodes vertically at this layer
+      nodes.forEach((node, i) => {
+        node.fx = xPos;
+        // Add some randomness to prevent overlapping, but constrain within height
+        const baseY = (this.height / (nodes.length + 1)) * (i + 1);
+        node.y = baseY;
+      });
+    });
+
+    // Apply forces for positioning
     this.simulation
-      .force('x', d3.forceX<D3Node>(d => d.fx || this.width / 2).strength(0.8))
-      .force('y', d3.forceY<D3Node>(d => d.fy || this.height / 2).strength(0.3));
+      .force('x', d3.forceX<D3Node>(d => d.fx || this.width / 2).strength(0.9))
+      .force('y', d3.forceY<D3Node>(d => d.y || this.height / 2).strength(0.1))
+      .force('collision', d3.forceCollide(this.nodeRadius + 12));
   }
 
   private createDragBehavior() {
@@ -660,6 +698,42 @@ class WorkspaceNetworkVisualization {
   public destroy() {
     this.simulation.stop();
     d3.select(this.container).selectAll('*').remove();
+  }
+
+  public highlightPath(targetId: string) {
+    // Find all nodes and edges connected to the target destination
+    const connectedNodeIds = new Set<string>([targetId]);
+    const connectedEdgeIds = new Set<string>();
+
+    // Trace backwards from destination to find all paths
+    const findConnected = (nodeId: string) => {
+      this.links.forEach(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+        const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+        
+        if (targetLinkId === nodeId && !connectedNodeIds.has(sourceId)) {
+          connectedNodeIds.add(sourceId);
+          connectedEdgeIds.add(link.id);
+          findConnected(sourceId);
+        }
+      });
+    };
+    findConnected(targetId);
+
+    // Dim non-connected elements
+    this.g.selectAll('.nodes g')
+      .style('opacity', (d: any) => connectedNodeIds.has(d.id) ? 1 : 0.2);
+    
+    this.g.selectAll('.links line')
+      .style('opacity', (d: any) => connectedEdgeIds.has(d.id) ? 1 : 0.1)
+      .style('stroke-width', (d: any) => connectedEdgeIds.has(d.id) ? 4 : 2);
+  }
+
+  public clearHighlight() {
+    this.g.selectAll('.nodes g').style('opacity', 1);
+    this.g.selectAll('.links line')
+      .style('opacity', 0.7)
+      .style('stroke-width', (d: any) => Math.max(2, Math.sqrt(d.path_count || 1) * 1.5));
   }
 }
 

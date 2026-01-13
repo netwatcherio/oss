@@ -52,8 +52,6 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 			return
 		}
 
-		log.Printf("[network-map] Success: nodes=%d edges=%d", len(mapData.Nodes), len(mapData.Edges))
-
 		// Explicitly marshal to check for JSON errors
 		jsonBytes, err := json.Marshal(mapData)
 		if err != nil {

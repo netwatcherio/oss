@@ -112,34 +112,26 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		}, nil
 	}
 
-	fmt.Printf("[network-map] workspace=%d agentIDs=%v lookback=%dmin from=%v\n", workspaceID, agentIDs, lookbackMinutes, from)
-
 	// 2. Get MTR data from ClickHouse (filtered by workspace agents)
 	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
 	if err != nil {
-		// Log but don't fail - MTR data is optional
-		fmt.Printf("[network-map] MTR query error (non-fatal): %v\n", err)
+		// Non-fatal - MTR data is optional
 		mtrData = []mtrHopData{}
 	}
-	fmt.Printf("[network-map] MTR hops found: %d\n", len(mtrData))
 
 	// 3. Get PING metrics for overlay
 	pingMetrics, err := getWorkspacePingMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without ping overlay
-		fmt.Printf("[network-map] PING query error (non-fatal): %v\n", err)
 		pingMetrics = make(map[string]pingStats)
 	}
-	fmt.Printf("[network-map] PING metrics found: %d\n", len(pingMetrics))
 
 	// 4. Get TrafficSim metrics for overlay
 	trafficMetrics, err := getWorkspaceTrafficSimMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without traffic sim overlay
-		fmt.Printf("[network-map] TrafficSim query error (non-fatal): %v\n", err)
 		trafficMetrics = make(map[string]trafficStats)
 	}
-	fmt.Printf("[network-map] TrafficSim metrics found: %d\n", len(trafficMetrics))
 
 	// 5. Build the topology graph
 	mapData := buildNetworkMap(agents, mtrData, pingMetrics, trafficMetrics, workspaceID)
@@ -183,27 +175,6 @@ func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from 
 		agentIDStrs[i] = fmt.Sprintf("%d", id)
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
-
-	// DEBUG: Check what probe_agent_id values exist
-	debugQ := fmt.Sprintf(`
-SELECT DISTINCT probe_agent_id, agent_id, type, count() as cnt
-FROM probe_data 
-WHERE type = 'MTR' AND created_at >= %s
-GROUP BY probe_agent_id, agent_id, type
-LIMIT 20
-`, chQuoteTime(from))
-	debugRows, _ := ch.QueryContext(ctx, debugQ)
-	if debugRows != nil {
-		defer debugRows.Close()
-		fmt.Printf("[network-map DEBUG] MTR probe_agent_id values in DB:\n")
-		for debugRows.Next() {
-			var pAID, aID uint64
-			var typ string
-			var cnt uint64
-			debugRows.Scan(&pAID, &aID, &typ, &cnt)
-			fmt.Printf("  probe_agent_id=%d agent_id=%d type=%s count=%d\n", pAID, aID, typ, cnt)
-		}
-	}
 
 	q := fmt.Sprintf(`
 SELECT 
@@ -639,7 +610,52 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 	}
 
-	// Process PING metrics - update destination summaries
+	// Create edges from last hop to destination for each MTR path
+	// Group MTR data by agent + target to find last hop
+	type pathKey struct {
+		AgentID uint
+		Target  string
+	}
+	lastHops := make(map[pathKey]mtrHopData)
+	for _, hop := range mtrData {
+		key := pathKey{AgentID: hop.AgentID, Target: hop.Target}
+		if existing, ok := lastHops[key]; !ok || hop.HopNumber > existing.HopNumber {
+			lastHops[key] = hop
+		}
+	}
+
+	// Create edges from last hop to destination
+	for key, lastHop := range lastHops {
+		var lastHopID string
+		if lastHop.IP != "" {
+			lastHopID = lastHop.IP
+		} else {
+			lastHopID = fmt.Sprintf("unknown-hop-%d", lastHop.HopNumber)
+		}
+
+		// Only create edge if destination node exists and last hop != destination
+		if _, destExists := nodeMap[key.Target]; destExists && lastHopID != key.Target {
+			edgeID := fmt.Sprintf("%s->%s", lastHopID, key.Target)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:         edgeID,
+					Source:     lastHopID,
+					Target:     key.Target,
+					AvgLatency: lastHop.AvgLatency,
+					PacketLoss: lastHop.PacketLoss,
+					PathCount:  1,
+				}
+			}
+		}
+	}
+
+	// Track which destinations have MTR paths from each agent
+	mtrPaths := make(map[pathKey]bool)
+	for key := range lastHops {
+		mtrPaths[key] = true
+	}
+
+	// Process PING metrics - update destination summaries and create edges
 	for key, stats := range pingMetrics {
 		parts := strings.SplitN(key, ":", 2)
 		if len(parts) != 2 {
@@ -664,10 +680,40 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
 
-		// Update node metrics if exists
+		// Create destination node if not exists
+		if _, exists := nodeMap[target]; !exists {
+			nodeMap[target] = &NetworkMapNode{
+				ID:        target,
+				Type:      "destination",
+				Label:     target,
+				IP:        target,
+				PathCount: 1,
+				Layer:     100,
+				Status:    "healthy",
+			}
+		}
+
+		// Update node metrics
 		if node, exists := nodeMap[target]; exists {
 			node.AvgLatency = (node.AvgLatency + stats.AvgLatency) / 2
 			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
+		}
+
+		// Create direct agent-to-destination edge if no MTR path exists
+		pathK := pathKey{AgentID: agentID, Target: target}
+		if !mtrPaths[pathK] {
+			agentNodeID := fmt.Sprintf("agent:%d", agentID)
+			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:         edgeID,
+					Source:     agentNodeID,
+					Target:     target,
+					AvgLatency: stats.AvgLatency,
+					PacketLoss: stats.PacketLoss,
+					PathCount:  1,
+				}
+			}
 		}
 	}
 
@@ -696,10 +742,40 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
 
+		// Create destination node if not exists
+		if _, exists := nodeMap[target]; !exists {
+			nodeMap[target] = &NetworkMapNode{
+				ID:        target,
+				Type:      "destination",
+				Label:     target,
+				IP:        target,
+				PathCount: 1,
+				Layer:     100,
+				Status:    "healthy",
+			}
+		}
+
 		// Update node
 		if node, exists := nodeMap[target]; exists {
 			node.AvgLatency = (node.AvgLatency + stats.AvgRTT) / 2
 			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
+		}
+
+		// Create direct agent-to-destination edge if no MTR path exists
+		pathK := pathKey{AgentID: agentID, Target: target}
+		if !mtrPaths[pathK] {
+			agentNodeID := fmt.Sprintf("agent:%d", agentID)
+			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:         edgeID,
+					Source:     agentNodeID,
+					Target:     target,
+					AvgLatency: stats.AvgRTT,
+					PacketLoss: stats.PacketLoss,
+					PathCount:  1,
+				}
+			}
 		}
 	}
 
