@@ -153,14 +153,15 @@ func getWorkspaceAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]a
 }
 
 type mtrHopData struct {
-	AgentID    uint
-	Target     string
-	HopNumber  int
-	IP         string
-	Hostname   string
-	AvgLatency float64
-	PacketLoss float64
-	PathCount  int
+	AgentID     uint
+	Target      string
+	TargetAgent uint // 0 if not agent-to-agent probe
+	HopNumber   int
+	IP          string
+	Hostname    string
+	AvgLatency  float64
+	PacketLoss  float64
+	PathCount   int
 }
 
 func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]mtrHopData, error) {
@@ -180,6 +181,7 @@ func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from 
 SELECT 
     agent_id,
     target,
+    target_agent,
     payload_raw
 FROM probe_data
 WHERE type = 'MTR'
@@ -201,9 +203,10 @@ LIMIT 1000
 	for rows.Next() {
 		var agentID uint64
 		var target string
+		var targetAgent uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
 			continue
 		}
 
@@ -249,14 +252,15 @@ LIMIT 1000
 					pathCount = 0
 				}
 				results = append(results, mtrHopData{
-					AgentID:    uint(agentID),
-					Target:     target,
-					HopNumber:  hopNum,
-					IP:         ip,
-					Hostname:   hostname,
-					AvgLatency: avgLatency,
-					PacketLoss: packetLoss,
-					PathCount:  pathCount,
+					AgentID:     uint(agentID),
+					Target:      target,
+					TargetAgent: uint(targetAgent),
+					HopNumber:   hopNum,
+					IP:          ip,
+					Hostname:    hostname,
+					AvgLatency:  avgLatency,
+					PacketLoss:  packetLoss,
+					PathCount:   pathCount,
 				})
 			}
 		}
@@ -624,7 +628,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 	}
 
-	// Create edges from last hop to destination
+	// Create edges from last hop to destination (or target agent)
 	for key, lastHop := range lastHops {
 		var lastHopID string
 		if lastHop.IP != "" {
@@ -633,17 +637,31 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			lastHopID = fmt.Sprintf("unknown-hop-%d", lastHop.HopNumber)
 		}
 
-		// Only create edge if destination node exists and last hop != destination
-		if _, destExists := nodeMap[key.Target]; destExists && lastHopID != key.Target {
-			edgeID := fmt.Sprintf("%s->%s", lastHopID, key.Target)
-			if _, exists := edgeMap[edgeID]; !exists {
-				edgeMap[edgeID] = &NetworkMapEdge{
-					ID:         edgeID,
-					Source:     lastHopID,
-					Target:     key.Target,
-					AvgLatency: lastHop.AvgLatency,
-					PacketLoss: lastHop.PacketLoss,
-					PathCount:  1,
+		// Determine the target node - use target agent if set, otherwise use destination IP
+		var targetNodeID string
+		if lastHop.TargetAgent > 0 {
+			// Agent-to-agent probe - connect to target agent node
+			targetNodeID = fmt.Sprintf("agent:%d", lastHop.TargetAgent)
+		} else {
+			// External destination
+			targetNodeID = key.Target
+		}
+
+		// Only create edge if last hop != target
+		if lastHopID != targetNodeID && lastHopID != "" {
+			// Check if target node exists
+			_, targetExists := nodeMap[targetNodeID]
+			if targetExists {
+				edgeID := fmt.Sprintf("%s->%s", lastHopID, targetNodeID)
+				if _, exists := edgeMap[edgeID]; !exists {
+					edgeMap[edgeID] = &NetworkMapEdge{
+						ID:         edgeID,
+						Source:     lastHopID,
+						Target:     targetNodeID,
+						AvgLatency: lastHop.AvgLatency,
+						PacketLoss: lastHop.PacketLoss,
+						PathCount:  1,
+					}
 				}
 			}
 		}
