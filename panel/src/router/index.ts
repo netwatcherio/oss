@@ -35,6 +35,13 @@ import Probe from '@/views/probes/Probe.vue'
 import NewProbe from '@/views/probes/NewProbe.vue'
 import DeleteProbe from '@/views/probes/DeleteProbe.vue'
 
+// admin views
+import AdminDashboard from '@/views/admin/AdminDashboard.vue'
+import AdminUsers from '@/views/admin/AdminUsers.vue'
+import AdminWorkspaces from '@/views/admin/AdminWorkspaces.vue'
+import AdminWorkspaceDetail from '@/views/admin/AdminWorkspaceDetail.vue'
+import AdminAgents from '@/views/admin/AdminAgents.vue'
+
 // Permission utilities
 import { hasMinimumRole } from '@/composables/usePermissions'
 import { WorkspaceService } from '@/services/apiService'
@@ -80,6 +87,8 @@ declare module 'vue-router' {
     interface RouteMeta {
         /** Minimum role required to access this route */
         requiresRole?: 'VIEWER' | 'USER' | 'ADMIN' | 'OWNER' | 'READ_ONLY' | 'READ_WRITE'
+        /** Requires site-wide admin access */
+        requiresSiteAdmin?: boolean
     }
 }
 
@@ -243,6 +252,20 @@ const routes: RouteRecordRaw[] = [
             // Profile at /profile
             { path: 'profile', name: 'profile', component: Profile },
 
+            // Admin routes (requires SITE_ADMIN role)
+            {
+                path: 'admin',
+                component: BasicView,
+                meta: { requiresSiteAdmin: true },
+                children: [
+                    { path: '', name: 'adminDashboard', component: AdminDashboard },
+                    { path: 'users', name: 'adminUsers', component: AdminUsers },
+                    { path: 'workspaces', name: 'adminWorkspaces', component: AdminWorkspaces },
+                    { path: 'workspaces/:wID', name: 'adminWorkspaceDetail', component: AdminWorkspaceDetail },
+                    { path: 'agents', name: 'adminAgents', component: AdminAgents },
+                ],
+            },
+
             // 403 Forbidden
             { path: '403', name: 'forbidden', component: Forbidden },
 
@@ -284,6 +307,32 @@ async function getUserRoleForWorkspace(workspaceId: string): Promise<string | nu
 
 // Navigation guard for permission checking
 router.beforeEach(async (to, _from, next) => {
+    // Check for site admin requirement first
+    if (to.matched.some(r => r.meta.requiresSiteAdmin)) {
+        try {
+            const token = localStorage.getItem('token')
+            if (token) {
+                const payload = JSON.parse(atob(token.split('.')[1]))
+                // Fetch user to check role (could also decode from token if added)
+                const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+                if (response.ok) {
+                    const user = await response.json()
+                    if (user.role !== 'SITE_ADMIN') {
+                        return next({ name: 'forbidden' })
+                    }
+                } else {
+                    return next({ name: 'forbidden' })
+                }
+            } else {
+                return next({ name: 'login' })
+            }
+        } catch {
+            return next({ name: 'forbidden' })
+        }
+    }
+
     const requiredRole = to.meta.requiresRole
     if (!requiredRole) {
         return next()

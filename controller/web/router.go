@@ -41,6 +41,9 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelGeoIP(api, geoStore)   // /geoip/*
 	panelWhois(api)             // /whois/*
 
+	// Admin panel routes (requires SITE_ADMIN role)
+	RegisterAdminRoutes(api, db)
+
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })
 }

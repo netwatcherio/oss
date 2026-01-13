@@ -48,11 +48,11 @@ type NetworkMapData struct {
 
 // Agent model for querying (simplified)
 type agentInfo struct {
-	ID        uint
-	Name      string
-	PublicIP  string
-	Location  string
-	UpdatedAt time.Time
+	ID               uint
+	Name             string
+	PublicIPOverride string `gorm:"column:public_ip_override"`
+	Location         string
+	UpdatedAt        time.Time
 }
 
 // GetWorkspaceNetworkMap builds aggregated network topology from MTR/PING/TrafficSim data
@@ -69,21 +69,37 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		return nil, fmt.Errorf("get agents: %w", err)
 	}
 
-	// 2. Get MTR data from ClickHouse
-	mtrData, err := getWorkspaceMTRData(ctx, ch, workspaceID, from)
+	// Extract agent IDs for filtering ClickHouse queries
+	agentIDs := make([]uint, len(agents))
+	for i, a := range agents {
+		agentIDs[i] = a.ID
+	}
+
+	// If no agents, return empty map
+	if len(agentIDs) == 0 {
+		return &NetworkMapData{
+			Nodes:       []NetworkMapNode{},
+			Edges:       []NetworkMapEdge{},
+			GeneratedAt: time.Now().UTC(),
+			WorkspaceID: workspaceID,
+		}, nil
+	}
+
+	// 2. Get MTR data from ClickHouse (filtered by workspace agents)
+	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
 	if err != nil {
 		return nil, fmt.Errorf("get mtr data: %w", err)
 	}
 
 	// 3. Get PING metrics for overlay
-	pingMetrics, err := getWorkspacePingMetrics(ctx, ch, workspaceID, from)
+	pingMetrics, err := getWorkspacePingMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without ping overlay
 		pingMetrics = make(map[string]pingStats)
 	}
 
 	// 4. Get TrafficSim metrics for overlay
-	trafficMetrics, err := getWorkspaceTrafficSimMetrics(ctx, ch, workspaceID, from)
+	trafficMetrics, err := getWorkspaceTrafficSimMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without traffic sim overlay
 		trafficMetrics = make(map[string]trafficStats)
@@ -119,10 +135,18 @@ type mtrHopData struct {
 	PathCount  int
 }
 
-func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, workspaceID uint, from time.Time) ([]mtrHopData, error) {
-	// Query raw MTR payloads and parse them
-	// We need to filter by workspace through the agents, but ClickHouse doesn't have workspace_id directly
-	// So we query all MTR data for the time range and filter by probe_agent_id matching workspace agents
+func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]mtrHopData, error) {
+	// Query raw MTR payloads filtered by workspace agents
+	if len(agentIDs) == 0 {
+		return []mtrHopData{}, nil
+	}
+
+	// Build agent ID IN clause
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
 
 	q := fmt.Sprintf(`
 SELECT 
@@ -131,10 +155,11 @@ SELECT
     payload_raw
 FROM probe_data
 WHERE type = 'MTR'
+  AND agent_id IN (%s)
   AND created_at >= %s
 ORDER BY created_at DESC
 LIMIT 1000
-`, chQuoteTime(from))
+`, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
@@ -218,7 +243,18 @@ type pingStats struct {
 	Count      int
 }
 
-func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, workspaceID uint, from time.Time) (map[string]pingStats, error) {
+func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]pingStats, error) {
+	if len(agentIDs) == 0 {
+		return make(map[string]pingStats), nil
+	}
+
+	// Build agent ID IN clause
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
 	q := fmt.Sprintf(`
 SELECT 
     agent_id,
@@ -228,9 +264,10 @@ SELECT
     count() as cnt
 FROM probe_data
 WHERE type = 'PING'
+  AND agent_id IN (%s)
   AND created_at >= %s
 GROUP BY agent_id, target
-`, chQuoteTime(from))
+`, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
@@ -266,7 +303,18 @@ type trafficStats struct {
 	Count      int
 }
 
-func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, workspaceID uint, from time.Time) (map[string]trafficStats, error) {
+func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]trafficStats, error) {
+	if len(agentIDs) == 0 {
+		return make(map[string]trafficStats), nil
+	}
+
+	// Build agent ID IN clause
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
 	q := fmt.Sprintf(`
 SELECT 
     agent_id,
@@ -282,9 +330,10 @@ SELECT
     count() as cnt
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
+  AND agent_id IN (%s)
   AND created_at >= %s
 GROUP BY agent_id, target
-`, chQuoteTime(from))
+`, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
@@ -327,7 +376,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			Type:      "agent",
 			Label:     agent.Name,
 			AgentID:   &agent.ID,
-			IP:        agent.PublicIP,
+			IP:        agent.PublicIPOverride,
 			IsOnline:  isOnline,
 			PathCount: 0,
 		}

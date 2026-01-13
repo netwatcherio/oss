@@ -12,6 +12,7 @@ import (
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 
+	"netwatcher-controller/internal/admin"
 	"netwatcher-controller/internal/database"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
@@ -31,6 +32,12 @@ func main() {
 	err = database.CreateIndexes(db)
 	if err != nil {
 		log.WithError(err).Fatal("db index creation failed")
+	}
+
+	// ---- Admin Bootstrap ----
+	adminCfg := admin.LoadConfigFromEnv()
+	if err := admin.BootstrapDefaultAdmin(context.Background(), db, adminCfg); err != nil {
+		log.WithError(err).Fatal("admin bootstrap failed")
 	}
 
 	ch, err := probe.OpenClickHouseFromEnv()
