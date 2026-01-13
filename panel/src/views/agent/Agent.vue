@@ -580,7 +580,7 @@ onMounted(async () => {
         const pL = res as Probe[];
         state.probes = pL;
 
-        const grouped = groupProbesByTarget(pL, { excludeDefaults: true });
+        const grouped = groupProbesByTarget(pL, { excludeDefaults: true, excludeServers: true });
 
         state.targetGroups = grouped.groups;
         state.targetGroupsByKey = grouped.byKey;

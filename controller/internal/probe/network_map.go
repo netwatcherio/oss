@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -526,106 +527,113 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 	}
 
-	// Process MTR hops
+	// Process MTR hops - group by path (agent+target) and process sequentially
+	// First, group hops by agent+target path
+	type pathKey struct {
+		AgentID uint
+		Target  string
+	}
+	pathHops := make(map[pathKey][]mtrHopData)
 	for _, hop := range mtrData {
-		agentNodeID := fmt.Sprintf("agent:%d", hop.AgentID)
+		key := pathKey{AgentID: hop.AgentID, Target: hop.Target}
+		pathHops[key] = append(pathHops[key], hop)
+	}
 
-		// Create hop node
-		var hopNodeID string
-		if hop.IP != "" {
-			hopNodeID = hop.IP
-		} else {
-			hopNodeID = fmt.Sprintf("unknown-hop-%d", hop.HopNumber)
-		}
+	// Process each path's hops in order
+	for pathK, hops := range pathHops {
+		agentNodeID := fmt.Sprintf("agent:%d", pathK.AgentID)
 
-		// Determine status based on metrics
-		hopStatus := "healthy"
-		if hop.PacketLoss >= 50 {
-			hopStatus = "critical"
-		} else if hop.PacketLoss >= 10 || hop.AvgLatency > 100 {
-			hopStatus = "degraded"
-		} else if hop.IP == "" {
-			hopStatus = "unknown"
-		}
+		// Sort hops by hop number
+		sort.Slice(hops, func(i, j int) bool {
+			return hops[i].HopNumber < hops[j].HopNumber
+		})
 
-		pathID := fmt.Sprintf("%d:%s", hop.AgentID, hop.Target)
+		var prevNodeID string = agentNodeID
 
-		if _, exists := nodeMap[hopNodeID]; !exists {
-			label := fmt.Sprintf("%d", hop.HopNumber)
-			if hop.IP == "" {
-				label = "?"
+		for _, hop := range hops {
+			// Create hop node ID
+			var hopNodeID string
+			if hop.IP != "" {
+				hopNodeID = hop.IP
+			} else {
+				hopNodeID = fmt.Sprintf("unknown-hop-%d", hop.HopNumber)
 			}
-			nodeMap[hopNodeID] = &NetworkMapNode{
-				ID:           hopNodeID,
-				Type:         "hop",
-				Label:        label,
-				IP:           hop.IP,
-				Hostname:     hop.Hostname,
-				HopNumber:    hop.HopNumber,
-				AvgLatency:   hop.AvgLatency,
-				PacketLoss:   hop.PacketLoss,
-				PathCount:    hop.PathCount,
-				Layer:        hop.HopNumber,
-				Status:       hopStatus,
-				SharedAgents: []uint{hop.AgentID},
-				PathIDs:      []string{pathID},
+
+			pathID := fmt.Sprintf("%d:%s", hop.AgentID, hop.Target)
+
+			// Determine status based on metrics
+			hopStatus := "healthy"
+			if hop.PacketLoss >= 50 {
+				hopStatus = "critical"
+			} else if hop.PacketLoss >= 10 || hop.AvgLatency > 100 {
+				hopStatus = "degraded"
+			} else if hop.IP == "" {
+				hopStatus = "unknown"
 			}
-		} else {
-			// Aggregate with existing - this is a SHARED hop
-			node := nodeMap[hopNodeID]
-			if node.PathCount+hop.PathCount > 0 {
-				node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
-				node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
-			}
-			node.PathCount += hop.PathCount
-			// Add agent to shared agents if not already present
-			agentFound := false
-			for _, a := range node.SharedAgents {
-				if a == hop.AgentID {
-					agentFound = true
-					break
+
+			// Create or update hop node
+			if _, exists := nodeMap[hopNodeID]; !exists {
+				label := fmt.Sprintf("%d", hop.HopNumber)
+				if hop.IP == "" {
+					label = "?"
 				}
-			}
-			if !agentFound {
-				node.SharedAgents = append(node.SharedAgents, hop.AgentID)
-			}
-			// Add path ID
-			node.PathIDs = append(node.PathIDs, pathID)
-		}
-
-		// Create edge from agent to first hop, or between hops
-		var sourceID string
-		if hop.HopNumber == 1 {
-			sourceID = agentNodeID
-		} else {
-			// Find previous hop
-			for _, prevHop := range mtrData {
-				if prevHop.AgentID == hop.AgentID && prevHop.Target == hop.Target && prevHop.HopNumber == hop.HopNumber-1 {
-					if prevHop.IP != "" {
-						sourceID = prevHop.IP
-					} else {
-						sourceID = fmt.Sprintf("unknown-hop-%d", prevHop.HopNumber)
-					}
-					break
-				}
-			}
-		}
-
-		if sourceID != "" {
-			edgeID := fmt.Sprintf("%s->%s", sourceID, hopNodeID)
-			if _, exists := edgeMap[edgeID]; !exists {
-				edgeMap[edgeID] = &NetworkMapEdge{
-					ID:         edgeID,
-					Source:     sourceID,
-					Target:     hopNodeID,
-					AvgLatency: hop.AvgLatency,
-					PacketLoss: hop.PacketLoss,
-					PathCount:  1,
+				nodeMap[hopNodeID] = &NetworkMapNode{
+					ID:           hopNodeID,
+					Type:         "hop",
+					Label:        label,
+					IP:           hop.IP,
+					Hostname:     hop.Hostname,
+					HopNumber:    hop.HopNumber,
+					AvgLatency:   hop.AvgLatency,
+					PacketLoss:   hop.PacketLoss,
+					PathCount:    hop.PathCount,
+					Layer:        hop.HopNumber,
+					Status:       hopStatus,
+					SharedAgents: []uint{hop.AgentID},
+					PathIDs:      []string{pathID},
 				}
 			} else {
-				edge := edgeMap[edgeID]
-				edge.PathCount++
+				// Aggregate with existing - this is a SHARED hop
+				node := nodeMap[hopNodeID]
+				if node.PathCount+hop.PathCount > 0 {
+					node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
+					node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
+				}
+				node.PathCount += hop.PathCount
+				// Add agent to shared agents if not already present
+				agentFound := false
+				for _, a := range node.SharedAgents {
+					if a == hop.AgentID {
+						agentFound = true
+						break
+					}
+				}
+				if !agentFound {
+					node.SharedAgents = append(node.SharedAgents, hop.AgentID)
+				}
+				node.PathIDs = append(node.PathIDs, pathID)
 			}
+
+			// Create edge from previous node to current hop
+			if prevNodeID != "" {
+				edgeID := fmt.Sprintf("%s->%s", prevNodeID, hopNodeID)
+				if _, exists := edgeMap[edgeID]; !exists {
+					edgeMap[edgeID] = &NetworkMapEdge{
+						ID:         edgeID,
+						Source:     prevNodeID,
+						Target:     hopNodeID,
+						AvgLatency: hop.AvgLatency,
+						PacketLoss: hop.PacketLoss,
+						PathCount:  1,
+						PathID:     pathID,
+					}
+				} else {
+					edgeMap[edgeID].PathCount++
+				}
+			}
+
+			// Set current hop as prev for next iteration
+			prevNodeID = hopNodeID
 		}
 	}
 
@@ -657,16 +665,12 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	}
 
 	// Create edges from last hop to destination for each MTR path
-	// Group MTR data by agent + target to find last hop
-	type pathKey struct {
-		AgentID uint
-		Target  string
-	}
+	// Reuse pathHops from earlier - find last hop for each path
 	lastHops := make(map[pathKey]mtrHopData)
-	for _, hop := range mtrData {
-		key := pathKey{AgentID: hop.AgentID, Target: hop.Target}
-		if existing, ok := lastHops[key]; !ok || hop.HopNumber > existing.HopNumber {
-			lastHops[key] = hop
+	for key, hops := range pathHops {
+		if len(hops) > 0 {
+			// hops are already sorted, so last one is the last hop
+			lastHops[key] = hops[len(hops)-1]
 		}
 	}
 

@@ -78,6 +78,8 @@ type GroupOptions = {
     excludeTypes?: string[] | Set<string>;
     /** Treat type matching case-insensitively (default true) */
     caseInsensitive?: boolean;
+    /** If true, exclude probes where server === true (e.g., TrafficSim servers) */
+    excludeServers?: boolean;
 };
 
 const DEFAULT_EXCLUDE = new Set(["SPEEDTEST", "NETINFO", "SPEEDTEST_SERVERS", "SYSINFO"]);
@@ -134,6 +136,7 @@ export function groupProbesByTarget(
     };
 
     const caseInsensitive = opts?.caseInsensitive ?? true;
+    const excludeServers = opts?.excludeServers ?? false;
     const excludeSet = buildExclusionSet(opts);
 
     const groups = new Map<string, Acc>();
@@ -162,6 +165,7 @@ export function groupProbesByTarget(
     // 1) target-backed groups (host/agent)
     for (const p of probes) {
         if (shouldSkip(p.type, excludeSet, caseInsensitive)) continue;
+        if (excludeServers && p.server) continue;
 
         const pEnabled = !!p.enabled;
         const pid = p.id;
@@ -254,6 +258,7 @@ export function groupProbesByTarget(
     // 2) local groups (no targets)
     for (const p of probes) {
         if (shouldSkip(p.type, excludeSet, caseInsensitive)) continue;
+        if (excludeServers && p.server) continue;
         if ((p.targets ?? []).length > 0) continue;
 
         const pEnabled = !!p.enabled;
