@@ -240,35 +240,36 @@ defineExpose({ performLookup, searchQuery });
 
 <style scoped>
 .ip-lookup-panel {
-  background: linear-gradient(180deg, #1a1b26 0%, #16161e 100%);
+  background: white;
   border-radius: 12px;
-  border: 1px solid #2a2b3d;
+  border: 1px solid #e5e7eb;
   overflow: hidden;
 }
 
 .lookup-search {
   padding: 1.25rem;
-  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
-  border-bottom: 1px solid #2a2b3d;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .search-input-wrapper {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  background: #1a1b26;
-  border: 1px solid #3d3e50;
+  background: white;
+  border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
   transition: border-color 0.2s;
 }
 
 .search-input-wrapper:focus-within {
-  border-color: #7aa2f7;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .search-input-wrapper i {
-  color: #565f89;
+  color: #9ca3af;
   font-size: 1rem;
 }
 
@@ -276,17 +277,17 @@ defineExpose({ performLookup, searchQuery });
   flex: 1;
   background: transparent;
   border: none;
-  color: #c0caf5;
+  color: #1f2937;
   font-size: 0.95rem;
   outline: none;
 }
 
 .search-input-wrapper input::placeholder {
-  color: #565f89;
+  color: #9ca3af;
 }
 
 .lookup-btn {
-  background: linear-gradient(135deg, #7aa2f7 0%, #5d7bd5 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #fff;
   border: none;
   padding: 0.5rem 1rem;
@@ -299,7 +300,7 @@ defineExpose({ performLookup, searchQuery });
 
 .lookup-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(122, 162, 247, 0.3);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .lookup-btn:disabled {
@@ -322,10 +323,10 @@ defineExpose({ performLookup, searchQuery });
   gap: 0.5rem;
   margin-top: 0.75rem;
   padding: 0.75rem;
-  background: rgba(247, 118, 142, 0.1);
-  border: 1px solid rgba(247, 118, 142, 0.2);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
   border-radius: 6px;
-  color: #f7768e;
+  color: #dc2626;
   font-size: 0.9rem;
 }
 
@@ -339,7 +340,7 @@ defineExpose({ performLookup, searchQuery });
   align-items: center;
   margin-bottom: 1.25rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #2a2b3d;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .result-ip {
@@ -355,7 +356,7 @@ defineExpose({ performLookup, searchQuery });
 .ip-text {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #c0caf5;
+  color: #1f2937;
   font-family: 'Monaco', 'Menlo', monospace;
 }
 
@@ -364,8 +365,8 @@ defineExpose({ performLookup, searchQuery });
   align-items: center;
   gap: 0.35rem;
   padding: 0.25rem 0.6rem;
-  background: rgba(158, 206, 106, 0.15);
-  color: #9ece6a;
+  background: #f0fdf4;
+  color: #16a34a;
   border-radius: 4px;
   font-size: 0.75rem;
   font-weight: 500;
@@ -373,7 +374,7 @@ defineExpose({ performLookup, searchQuery });
 
 .cache-time {
   font-size: 0.8rem;
-  color: #565f89;
+  color: #6b7280;
 }
 
 .result-section {
@@ -385,13 +386,13 @@ defineExpose({ performLookup, searchQuery });
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
+  background: #f9fafb;
   border-radius: 8px 8px 0 0;
-  color: #7aa2f7;
+  color: #3b82f6;
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
-  border: 1px solid #3d3e50;
+  border: 1px solid #e5e7eb;
   border-bottom: none;
 }
 
@@ -405,8 +406,8 @@ defineExpose({ performLookup, searchQuery });
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.75rem;
   padding: 1rem;
-  background: #1a1b26;
-  border: 1px solid #3d3e50;
+  background: white;
+  border: 1px solid #e5e7eb;
   border-radius: 0 0 8px 8px;
 }
 
@@ -418,13 +419,13 @@ defineExpose({ performLookup, searchQuery });
 
 .info-item .label {
   font-size: 0.75rem;
-  color: #565f89;
+  color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .info-item .value {
-  color: #c0caf5;
+  color: #1f2937;
   font-size: 0.9rem;
 }
 
@@ -441,15 +442,15 @@ defineExpose({ performLookup, searchQuery });
 
 .asn-number {
   padding: 0.15rem 0.4rem;
-  background: rgba(122, 162, 247, 0.15);
-  color: #7aa2f7;
+  background: #dbeafe;
+  color: #2563eb;
   border-radius: 4px;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 0.8rem;
 }
 
 .asn-org {
-  color: #9aa5ce;
+  color: #4b5563;
 }
 
 .coords {
@@ -461,18 +462,18 @@ defineExpose({ performLookup, searchQuery });
 }
 
 .map-link {
-  color: #7aa2f7;
+  color: #3b82f6;
   font-size: 0.8rem;
 }
 
 .map-link:hover {
-  color: #9aa5ce;
+  color: #2563eb;
 }
 
 .whois-content {
   padding: 1rem;
-  background: #1a1b26;
-  border: 1px solid #3d3e50;
+  background: white;
+  border: 1px solid #e5e7eb;
   border-top: none;
   border-radius: 0 0 8px 8px;
 }
@@ -483,15 +484,15 @@ defineExpose({ performLookup, searchQuery });
   gap: 0.5rem;
   margin-top: 1rem;
   padding: 0.6rem 0;
-  border-top: 1px solid #2a2b3d;
-  color: #565f89;
+  border-top: 1px solid #e5e7eb;
+  color: #6b7280;
   font-size: 0.85rem;
   cursor: pointer;
   transition: color 0.2s;
 }
 
 .raw-toggle:hover {
-  color: #7aa2f7;
+  color: #3b82f6;
 }
 
 .raw-whois {
@@ -500,14 +501,14 @@ defineExpose({ performLookup, searchQuery });
 }
 
 .raw-whois pre {
-  background: #16161e;
-  border: 1px solid #2a2b3d;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 1rem;
   max-height: 300px;
   overflow: auto;
   font-size: 0.8rem;
-  color: #9aa5ce;
+  color: #4b5563;
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -520,17 +521,17 @@ defineExpose({ performLookup, searchQuery });
   align-items: center;
   gap: 0.35rem;
   padding: 0.35rem 0.65rem;
-  background: #252636;
-  border: 1px solid #3d3e50;
+  background: white;
+  border: 1px solid #d1d5db;
   border-radius: 4px;
-  color: #7aa2f7;
+  color: #3b82f6;
   font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .copy-btn:hover {
-  background: #3d3e50;
+  background: #f3f4f6;
 }
 
 .empty-state {
@@ -539,7 +540,7 @@ defineExpose({ performLookup, searchQuery });
   align-items: center;
   justify-content: center;
   padding: 3rem 2rem;
-  color: #565f89;
+  color: #6b7280;
 }
 
 .empty-state i {
@@ -555,7 +556,7 @@ defineExpose({ performLookup, searchQuery });
 
 /* Link styling */
 a {
-  color: #7aa2f7;
+  color: #3b82f6;
   text-decoration: none;
 }
 

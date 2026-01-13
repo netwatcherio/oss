@@ -2,137 +2,70 @@
 // API service for GeoIP and WHOIS lookups
 
 import type { GeoIPResult, WhoisResult, IPLookupResult } from '@/types';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
-
-/**
- * Get auth headers for API requests
- */
-function getHeaders(): HeadersInit {
-    const token = localStorage.getItem('token');
-    return {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-}
+import request from './request';
 
 /**
  * Perform a GeoIP lookup for a single IP
  */
 export async function lookupGeoIP(ip: string): Promise<GeoIPResult> {
-    const response = await fetch(`${API_BASE}/geoip/lookup?ip=${encodeURIComponent(ip)}`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `GeoIP lookup failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.get<GeoIPResult>(`/geoip/lookup?ip=${encodeURIComponent(ip)}`);
+    return data;
 }
 
 /**
  * Perform bulk GeoIP lookups for multiple IPs
  */
 export async function bulkLookupGeoIP(ips: string[]): Promise<{ data: GeoIPResult[]; total: number }> {
-    const response = await fetch(`${API_BASE}/geoip/lookup`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ ips }),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `Bulk GeoIP lookup failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.post<{ data: GeoIPResult[]; total: number }>('/geoip/lookup', { ips });
+    return data;
 }
 
 /**
  * Get GeoIP lookup history for an IP
  */
 export async function getGeoIPHistory(ip: string, limit = 10): Promise<{ data: GeoIPResult[]; total: number }> {
-    const response = await fetch(`${API_BASE}/geoip/history?ip=${encodeURIComponent(ip)}&limit=${limit}`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `GeoIP history failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.get<{ data: GeoIPResult[]; total: number }>(
+        `/geoip/history?ip=${encodeURIComponent(ip)}&limit=${limit}`
+    );
+    return data;
 }
 
 /**
  * Check GeoIP service status
  */
 export async function getGeoIPStatus(): Promise<{ configured: boolean; city: boolean; country: boolean; asn: boolean }> {
-    const response = await fetch(`${API_BASE}/geoip/status`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
+    try {
+        const { data } = await request.get<{ configured: boolean; city: boolean; country: boolean; asn: boolean }>('/geoip/status');
+        return data;
+    } catch {
         return { configured: false, city: false, country: false, asn: false };
     }
-
-    return response.json();
 }
 
 /**
  * Perform a WHOIS lookup
  */
 export async function lookupWhois(query: string): Promise<WhoisResult> {
-    const response = await fetch(`${API_BASE}/whois/lookup?query=${encodeURIComponent(query)}`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `WHOIS lookup failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.get<WhoisResult>(`/whois/lookup?query=${encodeURIComponent(query)}`);
+    return data;
 }
 
 /**
  * Get WHOIS lookup history
  */
 export async function getWhoisHistory(query: string, limit = 10): Promise<{ data: WhoisResult[]; total: number }> {
-    const response = await fetch(`${API_BASE}/whois/history?query=${encodeURIComponent(query)}&limit=${limit}`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `WHOIS history failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.get<{ data: WhoisResult[]; total: number }>(
+        `/whois/history?query=${encodeURIComponent(query)}&limit=${limit}`
+    );
+    return data;
 }
 
 /**
  * Perform a combined GeoIP + WHOIS lookup
  */
 export async function lookupCombined(ip: string): Promise<IPLookupResult> {
-    const response = await fetch(`${API_BASE}/lookup/combined?ip=${encodeURIComponent(ip)}`, {
-        method: 'GET',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `Combined lookup failed: ${response.status}`);
-    }
-
-    return response.json();
+    const { data } = await request.get<IPLookupResult>(`/lookup/combined?ip=${encodeURIComponent(ip)}`);
+    return data;
 }
 
 /**

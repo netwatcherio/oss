@@ -53,18 +53,18 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: #c0caf5;
+  color: #1f2937;
   font-size: 1.75rem;
   font-weight: 600;
   margin: 0 0 0.5rem 0;
 }
 
 .page-header h1 i {
-  color: #7aa2f7;
+  color: #3b82f6;
 }
 
 .subtitle {
-  color: #565f89;
+  color: #6b7280;
   font-size: 0.95rem;
   margin: 0;
 }
