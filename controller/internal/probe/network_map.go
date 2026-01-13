@@ -289,8 +289,8 @@ func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, f
 SELECT 
     agent_id,
     target,
-    avg(JSONExtractFloat(payload_raw, 'latency')) as avg_latency,
-    avg(JSONExtractFloat(payload_raw, 'packetLoss')) as avg_packet_loss,
+    avg(JSONExtractFloat(payload_raw, 'avg_rtt') / 1000000.0) as avg_latency,
+    avg(JSONExtractFloat(payload_raw, 'packet_loss')) as avg_packet_loss,
     count() as cnt
 FROM probe_data
 WHERE type = 'PING'
@@ -350,13 +350,7 @@ SELECT
     agent_id,
     target,
     avg(JSONExtractFloat(payload_raw, 'averageRTT')) as avg_rtt,
-    avg(
-        CASE 
-            WHEN JSONExtractUInt(payload_raw, 'totalPackets') > 0 
-            THEN JSONExtractUInt(payload_raw, 'lostPackets') * 100.0 / JSONExtractUInt(payload_raw, 'totalPackets')
-            ELSE 0 
-        END
-    ) as avg_packet_loss,
+    avg(JSONExtractFloat(payload_raw, 'lossPercentage')) as avg_packet_loss,
     count() as cnt
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
