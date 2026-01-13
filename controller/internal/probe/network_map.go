@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -200,6 +201,7 @@ LIMIT 1000
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
+		log.Printf("[NetworkMap] MTR query error: %v", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -207,14 +209,17 @@ LIMIT 1000
 	// Keep only the latest trace per agent+target
 	seenPaths := make(map[string]bool)
 	var traces []mtrTrace
+	rowCount := 0
 
 	for rows.Next() {
+		rowCount++
 		var agentID uint64
 		var target string
 		var targetAgent uint64
 		var payloadRaw string
 
 		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
+			log.Printf("[NetworkMap] Row scan error: %v", err)
 			continue
 		}
 
@@ -227,6 +232,7 @@ LIMIT 1000
 		// Parse MTR payload
 		var payload mtrPayload
 		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
+			log.Printf("[NetworkMap] JSON parse error for agent %d -> %s: %v", agentID, target, err)
 			continue
 		}
 
@@ -254,6 +260,7 @@ LIMIT 1000
 		})
 	}
 
+	log.Printf("[NetworkMap] MTR query returned %d rows, parsed %d traces", rowCount, len(traces))
 	return traces, rows.Err()
 }
 
