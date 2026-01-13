@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
@@ -120,7 +119,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal - MTR data is optional
-		mtrData = []mtrHopData{}
+		mtrData = []mtrTrace{}
 	}
 
 	// 3. Get PING metrics for overlay
@@ -156,22 +155,26 @@ func getWorkspaceAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]a
 	return agents, nil
 }
 
-type mtrHopData struct {
+// mtrHop represents a single hop in an MTR trace
+type mtrHop struct {
+	IP         string
+	Hostname   string
+	AvgLatency float64
+	PacketLoss float64
+}
+
+// mtrTrace represents a complete MTR trace from agent to target
+type mtrTrace struct {
 	AgentID     uint
 	Target      string
 	TargetAgent uint // 0 if not agent-to-agent probe
-	HopNumber   int
-	IP          string
-	Hostname    string
-	AvgLatency  float64
-	PacketLoss  float64
-	PathCount   int
+	Hops        []mtrHop
 }
 
-func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]mtrHopData, error) {
+func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]mtrTrace, error) {
 	// Query raw MTR payloads filtered by workspace agents
 	if len(agentIDs) == 0 {
-		return []mtrHopData{}, nil
+		return []mtrTrace{}, nil
 	}
 
 	// Build agent ID IN clause
@@ -201,8 +204,9 @@ LIMIT 1000
 	}
 	defer rows.Close()
 
-	var results []mtrHopData
-	seenPaths := make(map[string]bool) // agent:target -> bool
+	// Keep only the latest trace per agent+target
+	seenPaths := make(map[string]bool)
+	var traces []mtrTrace
 
 	for rows.Next() {
 		var agentID uint64
@@ -214,63 +218,43 @@ LIMIT 1000
 			continue
 		}
 
+		pathKey := fmt.Sprintf("%d:%s", agentID, target)
+		if seenPaths[pathKey] {
+			continue // Already have latest trace for this path
+		}
+		seenPaths[pathKey] = true
+
 		// Parse MTR payload
 		var payload mtrPayload
 		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 			continue
 		}
 
-		pathKey := fmt.Sprintf("%d:%s", agentID, target)
-		isNewPath := !seenPaths[pathKey]
-		seenPaths[pathKey] = true
-
-		// Extract hop data
-		for i, hop := range payload.Report.Hops {
-			hopNum := i + 1
+		// Build ordered hop list
+		var hops []mtrHop
+		for _, hop := range payload.Report.Hops {
 			var ip, hostname string
 			if len(hop.Hosts) > 0 {
 				ip = hop.Hosts[0].IP
 				hostname = hop.Hosts[0].Hostname
 			}
-
-			// Parse metrics
-			avgLatency := parseFloat(hop.Avg)
-			packetLoss := parseFloat(hop.LossPct)
-
-			// Find or create hop entry
-			found := false
-			for j := range results {
-				if results[j].IP == ip && results[j].HopNumber == hopNum && ip != "" {
-					// Aggregate metrics
-					results[j].AvgLatency = (results[j].AvgLatency*float64(results[j].PathCount) + avgLatency) / float64(results[j].PathCount+1)
-					results[j].PacketLoss = (results[j].PacketLoss*float64(results[j].PathCount) + packetLoss) / float64(results[j].PathCount+1)
-					results[j].PathCount++
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				pathCount := 1
-				if !isNewPath {
-					pathCount = 0
-				}
-				results = append(results, mtrHopData{
-					AgentID:     uint(agentID),
-					Target:      target,
-					TargetAgent: uint(targetAgent),
-					HopNumber:   hopNum,
-					IP:          ip,
-					Hostname:    hostname,
-					AvgLatency:  avgLatency,
-					PacketLoss:  packetLoss,
-					PathCount:   pathCount,
-				})
-			}
+			hops = append(hops, mtrHop{
+				IP:         ip,
+				Hostname:   hostname,
+				AvgLatency: parseFloat(hop.Avg),
+				PacketLoss: parseFloat(hop.LossPct),
+			})
 		}
+
+		traces = append(traces, mtrTrace{
+			AgentID:     uint(agentID),
+			Target:      target,
+			TargetAgent: uint(targetAgent),
+			Hops:        hops,
+		})
 	}
 
-	return results, rows.Err()
+	return traces, rows.Err()
 }
 
 type pingStats struct {
@@ -455,7 +439,7 @@ LIMIT 5000
 	return results, rows.Err()
 }
 
-func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[string]pingStats, trafficMetrics map[string]trafficStats, workspaceID uint) *NetworkMapData {
+func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[string]pingStats, trafficMetrics map[string]trafficStats, workspaceID uint) *NetworkMapData {
 	nodeMap := make(map[string]*NetworkMapNode)
 	edgeMap := make(map[string]*NetworkMapEdge)
 
@@ -491,18 +475,21 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 	}
 
-	// Track destinations from MTR data
-	// For agent-to-agent probes, resolve target agent IP
-	for _, hop := range mtrData {
-		if hop.Target == "" {
+	// Track destinations and process MTR traces
+	// Each trace is a complete path: agent → hop1 → hop2 → ... → destination
+	for _, trace := range mtrData {
+		if trace.Target == "" {
 			continue
 		}
 
+		agentNodeID := fmt.Sprintf("agent:%d", trace.AgentID)
+		pathID := fmt.Sprintf("%d:%s", trace.AgentID, trace.Target)
+
 		// Determine destination key - for agent-to-agent, use target agent's IP
-		destKey := hop.Target
-		destLabel := hop.Target
-		if hop.TargetAgent > 0 {
-			if targetAgent, ok := agentByID[hop.TargetAgent]; ok {
+		destKey := trace.Target
+		destLabel := trace.Target
+		if trace.TargetAgent > 0 {
+			if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
 				if targetAgent.PublicIPOverride != "" {
 					destKey = targetAgent.PublicIPOverride
 				}
@@ -510,6 +497,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			}
 		}
 
+		// Track destination for this path
 		if destMetrics[destKey] == nil {
 			destMetrics[destKey] = &DestinationSummary{
 				Target:   destKey,
@@ -518,48 +506,24 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
 		}
-		destAgents[destKey][hop.AgentID] = true
+		destAgents[destKey][trace.AgentID] = true
 		destProbes[destKey]["MTR"] = true
+		destMetrics[destKey].HopCount = len(trace.Hops)
 
-		// Track max hop count
-		if hop.HopNumber > destMetrics[destKey].HopCount {
-			destMetrics[destKey].HopCount = hop.HopNumber
-		}
-	}
+		// Process hops sequentially: agent → hop1 → hop2 → ... → lastHop
+		prevNodeID := agentNodeID
+		var lastHopID string
 
-	// Process MTR hops - group by path (agent+target) and process sequentially
-	// First, group hops by agent+target path
-	type pathKey struct {
-		AgentID uint
-		Target  string
-	}
-	pathHops := make(map[pathKey][]mtrHopData)
-	for _, hop := range mtrData {
-		key := pathKey{AgentID: hop.AgentID, Target: hop.Target}
-		pathHops[key] = append(pathHops[key], hop)
-	}
+		for i, hop := range trace.Hops {
+			hopNum := i + 1
 
-	// Process each path's hops in order
-	for pathK, hops := range pathHops {
-		agentNodeID := fmt.Sprintf("agent:%d", pathK.AgentID)
-
-		// Sort hops by hop number
-		sort.Slice(hops, func(i, j int) bool {
-			return hops[i].HopNumber < hops[j].HopNumber
-		})
-
-		var prevNodeID string = agentNodeID
-
-		for _, hop := range hops {
-			// Create hop node ID
+			// Generate hop node ID - keyed by IP
 			var hopNodeID string
 			if hop.IP != "" {
-				hopNodeID = hop.IP
+				hopNodeID = hop.IP // KEY BY IP for shared hop detection
 			} else {
-				hopNodeID = fmt.Sprintf("unknown-hop-%d", hop.HopNumber)
+				hopNodeID = fmt.Sprintf("unknown-hop-%d-%d", trace.AgentID, hopNum)
 			}
-
-			pathID := fmt.Sprintf("%d:%s", hop.AgentID, hop.Target)
 
 			// Determine status based on metrics
 			hopStatus := "healthy"
@@ -573,159 +537,121 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 
 			// Create or update hop node
 			if _, exists := nodeMap[hopNodeID]; !exists {
-				label := fmt.Sprintf("%d", hop.HopNumber)
-				if hop.IP == "" {
-					label = "?"
-				}
 				nodeMap[hopNodeID] = &NetworkMapNode{
 					ID:           hopNodeID,
 					Type:         "hop",
-					Label:        label,
+					Label:        fmt.Sprintf("%d", hopNum),
 					IP:           hop.IP,
 					Hostname:     hop.Hostname,
-					HopNumber:    hop.HopNumber,
+					HopNumber:    hopNum,
 					AvgLatency:   hop.AvgLatency,
 					PacketLoss:   hop.PacketLoss,
-					PathCount:    hop.PathCount,
-					Layer:        hop.HopNumber,
+					PathCount:    1,
+					Layer:        hopNum,
 					Status:       hopStatus,
-					SharedAgents: []uint{hop.AgentID},
+					SharedAgents: []uint{trace.AgentID},
 					PathIDs:      []string{pathID},
 				}
 			} else {
-				// Aggregate with existing - this is a SHARED hop
+				// Aggregate - this is a SHARED hop (same IP from different paths)
 				node := nodeMap[hopNodeID]
-				if node.PathCount+hop.PathCount > 0 {
-					node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
-					node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
-				}
-				node.PathCount += hop.PathCount
+				node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency) / float64(node.PathCount+1)
+				node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss) / float64(node.PathCount+1)
+				node.PathCount++
 				// Add agent to shared agents if not already present
 				agentFound := false
 				for _, a := range node.SharedAgents {
-					if a == hop.AgentID {
+					if a == trace.AgentID {
 						agentFound = true
 						break
 					}
 				}
 				if !agentFound {
-					node.SharedAgents = append(node.SharedAgents, hop.AgentID)
+					node.SharedAgents = append(node.SharedAgents, trace.AgentID)
 				}
 				node.PathIDs = append(node.PathIDs, pathID)
 			}
 
-			// Create edge from previous node to current hop
-			if prevNodeID != "" {
-				edgeID := fmt.Sprintf("%s->%s", prevNodeID, hopNodeID)
-				if _, exists := edgeMap[edgeID]; !exists {
-					edgeMap[edgeID] = &NetworkMapEdge{
-						ID:         edgeID,
-						Source:     prevNodeID,
-						Target:     hopNodeID,
-						AvgLatency: hop.AvgLatency,
-						PacketLoss: hop.PacketLoss,
-						PathCount:  1,
-						PathID:     pathID,
-					}
-				} else {
-					edgeMap[edgeID].PathCount++
+			// Create edge from previous node to this hop
+			edgeID := fmt.Sprintf("%s->%s", prevNodeID, hopNodeID)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:         edgeID,
+					Source:     prevNodeID,
+					Target:     hopNodeID,
+					AvgLatency: hop.AvgLatency,
+					PacketLoss: hop.PacketLoss,
+					PathCount:  1,
+					PathID:     pathID,
 				}
+			} else {
+				edgeMap[edgeID].PathCount++
 			}
 
-			// Set current hop as prev for next iteration
+			// Update for next iteration
 			prevNodeID = hopNodeID
+			lastHopID = hopNodeID
 		}
-	}
 
-	// Add destination nodes
-	for dest := range destMetrics {
-		if dest == "" {
-			continue
-		}
-		if _, exists := nodeMap[dest]; !exists {
-			// Find hostname from any MTR hop that ended here
-			hostname := dest
-			for _, hop := range mtrData {
-				if hop.IP == dest && hop.Hostname != "" {
-					hostname = hop.Hostname
-					break
-				}
-			}
-			nodeMap[dest] = &NetworkMapNode{
-				ID:        dest,
+		// Create destination node if not exists
+		if _, exists := nodeMap[destKey]; !exists {
+			nodeMap[destKey] = &NetworkMapNode{
+				ID:        destKey,
 				Type:      "destination",
-				Label:     hostname,
-				IP:        dest,
-				Hostname:  hostname,
+				Label:     destLabel,
+				IP:        destKey,
+				Hostname:  destLabel,
 				PathCount: 1,
 				Layer:     100, // Destinations on far right
 				Status:    "healthy",
 			}
 		}
-	}
 
-	// Create edges from last hop to destination for each MTR path
-	// Reuse pathHops from earlier - find last hop for each path
-	lastHops := make(map[pathKey]mtrHopData)
-	for key, hops := range pathHops {
-		if len(hops) > 0 {
-			// hops are already sorted, so last one is the last hop
-			lastHops[key] = hops[len(hops)-1]
-		}
-	}
-
-	// Create edges from last hop to destination (or target agent)
-	for key, lastHop := range lastHops {
-		var lastHopID string
-		if lastHop.IP != "" {
-			lastHopID = lastHop.IP
-		} else {
-			lastHopID = fmt.Sprintf("unknown-hop-%d", lastHop.HopNumber)
-		}
-
-		// Determine the target node ID - should match the destination node key
-		var targetNodeID string
-		if lastHop.TargetAgent > 0 {
-			// Agent-to-agent probe - use target agent's IP as destination key
-			if targetAgent, ok := agentByID[lastHop.TargetAgent]; ok {
-				if targetAgent.PublicIPOverride != "" {
-					targetNodeID = targetAgent.PublicIPOverride
-				} else {
-					targetNodeID = key.Target // fallback to original target
+		// Create edge from last hop to destination
+		if lastHopID != "" && lastHopID != destKey {
+			edgeID := fmt.Sprintf("%s->%s", lastHopID, destKey)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:        edgeID,
+					Source:    lastHopID,
+					Target:    destKey,
+					PathCount: 1,
+					PathID:    pathID,
 				}
 			} else {
-				targetNodeID = key.Target
+				edgeMap[edgeID].PathCount++
 			}
-		} else {
-			// External destination
-			targetNodeID = key.Target
-		}
-
-		// Only create edge if last hop != target
-		if lastHopID != targetNodeID && lastHopID != "" {
-			// Check if target node exists
-			_, targetExists := nodeMap[targetNodeID]
-			if targetExists {
-				edgeID := fmt.Sprintf("%s->%s", lastHopID, targetNodeID)
-				if _, exists := edgeMap[edgeID]; !exists {
-					edgeMap[edgeID] = &NetworkMapEdge{
-						ID:         edgeID,
-						Source:     lastHopID,
-						Target:     targetNodeID,
-						AvgLatency: lastHop.AvgLatency,
-						PacketLoss: lastHop.PacketLoss,
-						PathCount:  1,
-					}
+		} else if len(trace.Hops) == 0 {
+			// No hops - direct connection from agent to destination
+			edgeID := fmt.Sprintf("%s->%s", agentNodeID, destKey)
+			if _, exists := edgeMap[edgeID]; !exists {
+				edgeMap[edgeID] = &NetworkMapEdge{
+					ID:        edgeID,
+					Source:    agentNodeID,
+					Target:    destKey,
+					PathCount: 1,
+					PathID:    pathID,
 				}
 			}
 		}
 	}
 
-	// Track which destinations have MTR paths from each agent
-	mtrPaths := make(map[pathKey]bool)
-	for key := range lastHops {
-		mtrPaths[key] = true
+	// Track which destinations have MTR paths
+	mtrDestinations := make(map[string]map[uint]bool) // dest -> agent IDs with MTR paths
+	for _, trace := range mtrData {
+		destKey := trace.Target
+		if trace.TargetAgent > 0 {
+			if targetAgent, ok := agentByID[trace.TargetAgent]; ok && targetAgent.PublicIPOverride != "" {
+				destKey = targetAgent.PublicIPOverride
+			}
+		}
+		if mtrDestinations[destKey] == nil {
+			mtrDestinations[destKey] = make(map[uint]bool)
+		}
+		mtrDestinations[destKey][trace.AgentID] = true
 	}
+
+	// Use mtrDestinations to know which agent+dest pairs have MTR paths
 
 	// Process PING metrics - update destination summaries and create edges
 	for key, stats := range pingMetrics {
@@ -772,8 +698,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 
 		// Create direct agent-to-destination edge if no MTR path exists
-		pathK := pathKey{AgentID: agentID, Target: target}
-		if !mtrPaths[pathK] {
+		if mtrDestinations[target] == nil || !mtrDestinations[target][agentID] {
 			agentNodeID := fmt.Sprintf("agent:%d", agentID)
 			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
 			if _, exists := edgeMap[edgeID]; !exists {
@@ -834,8 +759,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 
 		// Create direct agent-to-destination edge if no MTR path exists
-		pathK := pathKey{AgentID: agentID, Target: target}
-		if !mtrPaths[pathK] {
+		if mtrDestinations[target] == nil || !mtrDestinations[target][agentID] {
 			agentNodeID := fmt.Sprintf("agent:%d", agentID)
 			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
 			if _, exists := edgeMap[edgeID]; !exists {
