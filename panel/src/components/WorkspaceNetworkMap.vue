@@ -307,8 +307,8 @@ class WorkspaceNetworkVisualization {
   private links: D3Link[] = [];
   private width: number;
   private height: number;
-  private nodeRadius = 18;
-  private margin = { top: 40, right: 20, bottom: 60, left: 20 };
+  private nodeRadius = 14;
+  private margin = { top: 30, right: 20, bottom: 50, left: 20 };
   private onNodeClick?: (node: NetworkMapNode) => void;
 
   constructor(
@@ -320,13 +320,8 @@ class WorkspaceNetworkVisualization {
   ) {
     this.container = container;
     this.onNodeClick = onNodeClick;
-    this.width = container.clientWidth - this.margin.left - this.margin.right;
-    
-    // Dynamic height based on node count for better spreading
-    const minHeight = 500;
-    const heightPerNode = 35;
-    const calculatedHeight = Math.max(minHeight, data.nodes.length * heightPerNode);
-    this.height = Math.min(calculatedHeight, 1200) - this.margin.top - this.margin.bottom;
+    this.width = Math.min(container.clientWidth, 1200) - this.margin.left - this.margin.right;
+    this.height = 550 - this.margin.top - this.margin.bottom;
 
     this.processData(data);
     this.initializeSVG();
@@ -400,18 +395,17 @@ class WorkspaceNetworkVisualization {
   }
 
   private createVisualization() {
-    // Create simulation
+    // Create simulation with tighter parameters
     this.simulation = d3.forceSimulation<D3Node>(this.nodes)
       .force('link', d3.forceLink<D3Node, D3Link>(this.links)
         .id(d => d.id)
-        .distance(80))
-      .force('charge', d3.forceManyBody().strength(-200))
-      .force('collision', d3.forceCollide(this.nodeRadius + 8));
+        .distance(50))
+      .force('charge', d3.forceManyBody().strength(-120))
+      .force('collision', d3.forceCollide(this.nodeRadius + 4))
+      .force('center', d3.forceCenter(this.width / 2, this.height / 2));
 
     if (this.layoutMode === 'hierarchical') {
       this.applyHierarchicalLayout();
-    } else {
-      this.simulation.force('center', d3.forceCenter(this.width / 2, this.height / 2));
     }
 
     // Links
@@ -489,59 +483,38 @@ class WorkspaceNetworkVisualization {
   }
 
   private applyHierarchicalLayout() {
-    // Group nodes by layer (0=agent, 1-N=hops, 100=destination)
+    // Set initial positions but let force simulation refine them
     const agentNodes = this.nodes.filter(n => n.type === 'agent');
     const hopNodes = this.nodes.filter(n => n.type === 'hop');
     const destNodes = this.nodes.filter(n => n.type === 'destination');
 
-    // Find the max layer among hops (excluding 100 which is destination)
-    const maxHopLayer = Math.max(...hopNodes.map(n => n.layer || n.hop_number || 1), 1);
-    
-    // Calculate horizontal spacing
-    const leftMargin = 80;
-    const rightMargin = 80;
-    const usableWidth = this.width - leftMargin - rightMargin;
-    const layerWidth = usableWidth / (maxHopLayer + 2); // +2 for agents and destinations
-
-    // Position agents on left (layer 0)
+    // Initial positions - agents on left, destinations on right, hops in middle
     agentNodes.forEach((node, i) => {
-      node.fx = leftMargin;
-      node.fy = (this.height / (agentNodes.length + 1)) * (i + 1);
+      node.x = 50;
+      node.y = (this.height / (agentNodes.length + 1)) * (i + 1);
     });
 
-    // Position destinations on far right (layer N+1)
     destNodes.forEach((node, i) => {
-      node.fx = this.width - rightMargin;
-      node.fy = (this.height / (destNodes.length + 1)) * (i + 1);
+      node.x = this.width - 50;
+      node.y = (this.height / (destNodes.length + 1)) * (i + 1);
     });
 
-    // Group hops by their layer and spread vertically
-    const hopsByLayer: Record<number, D3Node[]> = {};
-    hopNodes.forEach(node => {
-      const layer = node.layer || node.hop_number || 1;
-      if (!hopsByLayer[layer]) hopsByLayer[layer] = [];
-      hopsByLayer[layer].push(node);
+    // Spread hops based on hop number
+    const maxHop = Math.max(...hopNodes.map(n => n.hop_number || 1), 1);
+    hopNodes.forEach((node) => {
+      const hopNum = node.hop_number || 1;
+      node.x = 80 + ((this.width - 160) * (hopNum / (maxHop + 1)));
+      node.y = this.height / 2 + (Math.random() - 0.5) * this.height * 0.6;
     });
 
-    // Position hops by layer with vertical spreading
-    Object.entries(hopsByLayer).forEach(([layerStr, nodes]) => {
-      const layer = parseInt(layerStr);
-      const xPos = leftMargin + layerWidth * layer;
-      
-      // Spread nodes vertically at this layer
-      nodes.forEach((node, i) => {
-        node.fx = xPos;
-        // Add some randomness to prevent overlapping, but constrain within height
-        const baseY = (this.height / (nodes.length + 1)) * (i + 1);
-        node.y = baseY;
-      });
-    });
-
-    // Apply forces for positioning
+    // Use x-positioning force to maintain general left-to-right flow
     this.simulation
-      .force('x', d3.forceX<D3Node>(d => d.fx || this.width / 2).strength(0.9))
-      .force('y', d3.forceY<D3Node>(d => d.y || this.height / 2).strength(0.1))
-      .force('collision', d3.forceCollide(this.nodeRadius + 12));
+      .force('x', d3.forceX<D3Node>(d => {
+        if (d.type === 'agent') return 50;
+        if (d.type === 'destination') return this.width - 50;
+        return d.x || this.width / 2;
+      }).strength(0.3))
+      .force('y', d3.forceY<D3Node>(this.height / 2).strength(0.05));
   }
 
   private createDragBehavior() {

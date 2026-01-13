@@ -37,10 +37,11 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelProbes(api, db)                 // /workspaces/{id}/agents/{agentID}/probes/*
 	panelAgents(api, db, ch)
 	panelProbeData(api, db, ch)
-	panelSpeedtest(api, db, ch) // /workspaces/{id}/agents/{agentID}/speedtest-*
-	panelGeoIP(api, geoStore)   // /geoip/*
-	panelWhois(api)             // /whois/*
-	panelAlerts(api, db)        // /alerts/* and /workspaces/{id}/alert-rules/*
+	panelSpeedtest(api, db, ch)    // /workspaces/{id}/agents/{agentID}/speedtest-*
+	panelGeoIP(api, geoStore, ch)  // /geoip/*
+	panelWhois(api, ch)            // /whois/*
+	panelLookup(api, geoStore, ch) // /lookup/*
+	panelAlerts(api, db)           // /alerts/* and /workspaces/{id}/alert-rules/*
 
 	// Admin panel routes (requires SITE_ADMIN role)
 	RegisterAdminRoutes(api, db)

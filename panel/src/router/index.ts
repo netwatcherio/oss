@@ -254,6 +254,13 @@ const routes: RouteRecordRaw[] = [
             // Profile at /profile
             { path: 'profile', name: 'profile', component: Profile },
 
+            // IP Lookup at /lookup
+            {
+                path: 'lookup',
+                name: 'ipLookup',
+                component: () => import('@/views/IpLookup.vue'),
+            },
+
             // Admin routes (requires SITE_ADMIN role)
             {
                 path: 'admin',

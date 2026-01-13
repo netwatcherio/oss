@@ -478,3 +478,66 @@ function calculateMOS(
 export interface Preferences {
     dark: boolean;
 }
+
+// ==================== GeoIP & WHOIS Types ====================
+
+export interface GeoIPCity {
+    name?: string;
+    subdivision?: string;
+}
+
+export interface GeoIPCountry {
+    code?: string;
+    name?: string;
+}
+
+export interface GeoIPASN {
+    number?: number;
+    organization?: string;
+}
+
+export interface GeoIPCoordinates {
+    latitude: number;
+    longitude: number;
+    accuracy_radius?: number;
+}
+
+export interface GeoIPResult {
+    ip: string;
+    city?: GeoIPCity;
+    country?: GeoIPCountry;
+    asn?: GeoIPASN;
+    coordinates?: GeoIPCoordinates;
+    cached?: boolean;
+    cache_time?: string;
+}
+
+export interface WhoisParsed {
+    netname?: string;
+    netrange?: string;
+    organization?: string;
+    country?: string;
+    registrar?: string;
+    created?: string;
+    updated?: string;
+    abuse_email?: string;
+    [key: string]: string | undefined;
+}
+
+export interface WhoisResult {
+    query: string;
+    raw_output: string;
+    parsed: WhoisParsed;
+    lookup_time_ms: number;
+    error?: string;
+    cached?: boolean;
+    cache_time?: string;
+}
+
+export interface IPLookupResult {
+    ip: string;
+    geoip?: GeoIPResult;
+    whois?: WhoisResult;
+    cached: boolean;
+    cache_time?: string;
+}

@@ -47,6 +47,9 @@ func main() {
 	if err := probe.MigrateCH(context.Background(), ch); err != nil {
 		log.WithError(err).Fatal("clickhouse migrate failed")
 	}
+	if err := probe.MigrateCacheTablesCH(context.Background(), ch); err != nil {
+		log.WithError(err).Fatal("clickhouse cache tables migrate failed")
+	}
 
 	// ---- Email Worker ----
 	smtpConfig := email.LoadSMTPConfigFromEnv()
