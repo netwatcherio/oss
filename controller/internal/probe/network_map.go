@@ -229,12 +229,21 @@ LIMIT 1000
 		}
 		seenPaths[pathKey] = true
 
+		// Log payload sample for debugging
+		if len(payloadRaw) > 500 {
+			log.Printf("[NetworkMap] Agent %d -> %s payload (first 500 chars): %s", agentID, target, payloadRaw[:500])
+		} else {
+			log.Printf("[NetworkMap] Agent %d -> %s payload: %s", agentID, target, payloadRaw)
+		}
+
 		// Parse MTR payload
 		var payload mtrPayload
 		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 			log.Printf("[NetworkMap] JSON parse error for agent %d -> %s: %v", agentID, target, err)
 			continue
 		}
+
+		log.Printf("[NetworkMap] Agent %d -> %s parsed: %d hops in payload.Report.Hops", agentID, target, len(payload.Report.Hops))
 
 		// Build ordered hop list
 		var hops []mtrHop
@@ -522,6 +531,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		prevNodeID := agentNodeID
 		var lastHopID string
 
+		log.Printf("[NetworkMap] Processing trace agent %d -> %s with %d hops", trace.AgentID, trace.Target, len(trace.Hops))
 		for i, hop := range trace.Hops {
 			hopNum := i + 1
 
