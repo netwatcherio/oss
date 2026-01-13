@@ -7,11 +7,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// sanitizeFloat replaces NaN and Infinity with 0
+func sanitizeFloat(f float64) float64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
+	return f
+}
 
 // NetworkMapNode represents a node in the network topology map
 type NetworkMapNode struct {
@@ -600,14 +609,18 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 		}
 	}
 
-	// Convert maps to slices
+	// Convert maps to slices - sanitize floats to prevent NaN/Infinity in JSON
 	nodes := make([]NetworkMapNode, 0, len(nodeMap))
 	for _, node := range nodeMap {
+		node.AvgLatency = sanitizeFloat(node.AvgLatency)
+		node.PacketLoss = sanitizeFloat(node.PacketLoss)
 		nodes = append(nodes, *node)
 	}
 
 	edges := make([]NetworkMapEdge, 0, len(edgeMap))
 	for _, edge := range edgeMap {
+		edge.AvgLatency = sanitizeFloat(edge.AvgLatency)
+		edge.PacketLoss = sanitizeFloat(edge.PacketLoss)
 		edges = append(edges, *edge)
 	}
 
