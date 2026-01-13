@@ -252,6 +252,7 @@ LIMIT 1000
 			})
 		}
 
+		log.Printf("[NetworkMap] Trace: agent %d -> %s has %d hops", agentID, target, len(hops))
 		traces = append(traces, mtrTrace{
 			AgentID:     uint(agentID),
 			Target:      target,
