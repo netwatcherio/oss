@@ -46,6 +46,7 @@ import AdminAgents from '@/views/admin/AdminAgents.vue'
 // Permission utilities
 import { hasMinimumRole } from '@/composables/usePermissions'
 import { WorkspaceService } from '@/services/apiService'
+import { getSession } from '@/session'
 
 // Helper: normalize module export to array
 const asArray = (r: unknown) => (Array.isArray(r) ? r : r ? [r] : [])
@@ -319,8 +320,8 @@ router.beforeEach(async (to, _from, next) => {
     // Check for site admin requirement first
     if (to.matched.some(r => r.meta.requiresSiteAdmin)) {
         try {
-            const session = JSON.parse(localStorage.getItem('session') || '{}')
-            const token = session?.token || localStorage.getItem('token')
+            const session = getSession()
+            const token = session?.token
             if (token) {
                 // Use same base URL as rest of app
                 const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || ''
