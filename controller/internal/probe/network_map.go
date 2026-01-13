@@ -58,7 +58,7 @@ type agentInfo struct {
 // GetWorkspaceNetworkMap builds aggregated network topology from MTR/PING/TrafficSim data
 func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspaceID uint, lookbackMinutes int) (*NetworkMapData, error) {
 	if lookbackMinutes <= 0 {
-		lookbackMinutes = 15
+		lookbackMinutes = 60 // Default to 1 hour of data
 	}
 
 	from := time.Now().UTC().Add(-time.Duration(lookbackMinutes) * time.Minute)
@@ -85,6 +85,8 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		}, nil
 	}
 
+	fmt.Printf("[network-map] workspace=%d agentIDs=%v lookback=%dmin from=%v\n", workspaceID, agentIDs, lookbackMinutes, from)
+
 	// 2. Get MTR data from ClickHouse (filtered by workspace agents)
 	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
 	if err != nil {
@@ -92,6 +94,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		fmt.Printf("[network-map] MTR query error (non-fatal): %v\n", err)
 		mtrData = []mtrHopData{}
 	}
+	fmt.Printf("[network-map] MTR hops found: %d\n", len(mtrData))
 
 	// 3. Get PING metrics for overlay
 	pingMetrics, err := getWorkspacePingMetrics(ctx, ch, agentIDs, from)
@@ -100,6 +103,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		fmt.Printf("[network-map] PING query error (non-fatal): %v\n", err)
 		pingMetrics = make(map[string]pingStats)
 	}
+	fmt.Printf("[network-map] PING metrics found: %d\n", len(pingMetrics))
 
 	// 4. Get TrafficSim metrics for overlay
 	trafficMetrics, err := getWorkspaceTrafficSimMetrics(ctx, ch, agentIDs, from)
@@ -108,6 +112,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		fmt.Printf("[network-map] TrafficSim query error (non-fatal): %v\n", err)
 		trafficMetrics = make(map[string]trafficStats)
 	}
+	fmt.Printf("[network-map] TrafficSim metrics found: %d\n", len(trafficMetrics))
 
 	// 5. Build the topology graph
 	mapData := buildNetworkMap(agents, mtrData, pingMetrics, trafficMetrics, workspaceID)

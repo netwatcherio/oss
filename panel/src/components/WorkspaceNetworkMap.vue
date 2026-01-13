@@ -118,7 +118,7 @@ const fetchMapData = async () => {
   loading.value = true;
   try {
     const { data } = await request.get<NetworkMapData>(
-      `/workspaces/${props.workspaceId}/network-map?lookback=15`
+      `/workspaces/${props.workspaceId}/network-map?lookback=60`
     );
     mapData.value = data;
     createVisualization();
