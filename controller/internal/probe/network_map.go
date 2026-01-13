@@ -25,7 +25,7 @@ func sanitizeFloat(f float64) float64 {
 // NetworkMapNode represents a node in the network topology map
 type NetworkMapNode struct {
 	ID         string  `json:"id"`
-	Type       string  `json:"type"` // "agent", "hop", "destination"
+	Type       string  `json:"type"` // "agent", "hop", "destination", "collapsed"
 	Label      string  `json:"label"`
 	AgentID    *uint   `json:"agent_id,omitempty"`
 	IP         string  `json:"ip,omitempty"`
@@ -35,6 +35,10 @@ type NetworkMapNode struct {
 	PacketLoss float64 `json:"packet_loss"`
 	PathCount  int     `json:"path_count"`
 	IsOnline   bool    `json:"is_online,omitempty"`
+	// New fields for improved visualization
+	Layer         int    `json:"layer,omitempty"`          // 0=agent, 1=gateway, 2-N=hops, N+1=destination
+	CollapsedHops int    `json:"collapsed_hops,omitempty"` // Number of unknown hops this node represents
+	Status        string `json:"status,omitempty"`         // "healthy", "degraded", "critical", "unknown"
 }
 
 // NetworkMapEdge represents an edge (link) between nodes
@@ -47,12 +51,26 @@ type NetworkMapEdge struct {
 	PathCount  int     `json:"path_count"`
 }
 
+// DestinationSummary provides quick overview of a destination's health
+type DestinationSummary struct {
+	Target      string   `json:"target"`
+	Hostname    string   `json:"hostname,omitempty"`
+	HopCount    int      `json:"hop_count"`
+	AvgLatency  float64  `json:"avg_latency"` // Combined from PING + TrafficSim + MTR
+	PacketLoss  float64  `json:"packet_loss"`
+	Status      string   `json:"status"`      // "healthy", "degraded", "critical"
+	AgentCount  int      `json:"agent_count"` // Number of agents testing this
+	ProbeTypes  []string `json:"probe_types"` // ["MTR", "PING", "TRAFFICSIM"]
+	LastUpdated string   `json:"last_updated,omitempty"`
+}
+
 // NetworkMapData contains the complete topology data for a workspace
 type NetworkMapData struct {
-	Nodes       []NetworkMapNode `json:"nodes"`
-	Edges       []NetworkMapEdge `json:"edges"`
-	GeneratedAt time.Time        `json:"generated_at"`
-	WorkspaceID uint             `json:"workspace_id"`
+	Nodes        []NetworkMapNode     `json:"nodes"`
+	Edges        []NetworkMapEdge     `json:"edges"`
+	Destinations []DestinationSummary `json:"destinations"` // Quick overview panel
+	GeneratedAt  time.Time            `json:"generated_at"`
+	WorkspaceID  uint                 `json:"workspace_id"`
 }
 
 // Agent model for querying (simplified)
@@ -462,10 +480,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	nodeMap := make(map[string]*NetworkMapNode)
 	edgeMap := make(map[string]*NetworkMapEdge)
 
-	// Add agent nodes
+	// Track destination metrics for summary
+	destMetrics := make(map[string]*DestinationSummary)
+	destAgents := make(map[string]map[uint]bool)
+	destProbes := make(map[string]map[string]bool)
+
+	// Add agent nodes (Layer 0)
 	for _, agent := range agents {
 		nodeID := fmt.Sprintf("agent:%d", agent.ID)
 		isOnline := time.Since(agent.UpdatedAt) < time.Minute
+		status := "healthy"
+		if !isOnline {
+			status = "unknown"
+		}
 		nodeMap[nodeID] = &NetworkMapNode{
 			ID:        nodeID,
 			Type:      "agent",
@@ -474,18 +501,34 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			IP:        agent.PublicIPOverride,
 			IsOnline:  isOnline,
 			PathCount: 0,
+			Layer:     0,
+			Status:    status,
 		}
 	}
 
-	// Track destinations
-	destinations := make(map[string]bool)
+	// Track destinations from MTR data
+	for _, hop := range mtrData {
+		if hop.Target != "" {
+			if destMetrics[hop.Target] == nil {
+				destMetrics[hop.Target] = &DestinationSummary{
+					Target: hop.Target,
+				}
+				destAgents[hop.Target] = make(map[uint]bool)
+				destProbes[hop.Target] = make(map[string]bool)
+			}
+			destAgents[hop.Target][hop.AgentID] = true
+			destProbes[hop.Target]["MTR"] = true
+
+			// Track max hop count
+			if hop.HopNumber > destMetrics[hop.Target].HopCount {
+				destMetrics[hop.Target].HopCount = hop.HopNumber
+			}
+		}
+	}
 
 	// Process MTR hops
 	for _, hop := range mtrData {
 		agentNodeID := fmt.Sprintf("agent:%d", hop.AgentID)
-
-		// Track destination
-		destinations[hop.Target] = true
 
 		// Create hop node
 		var hopNodeID string
@@ -493,6 +536,16 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			hopNodeID = hop.IP
 		} else {
 			hopNodeID = fmt.Sprintf("unknown-hop-%d", hop.HopNumber)
+		}
+
+		// Determine status based on metrics
+		hopStatus := "healthy"
+		if hop.PacketLoss >= 50 {
+			hopStatus = "critical"
+		} else if hop.PacketLoss >= 10 || hop.AvgLatency > 100 {
+			hopStatus = "degraded"
+		} else if hop.IP == "" {
+			hopStatus = "unknown"
 		}
 
 		if _, exists := nodeMap[hopNodeID]; !exists {
@@ -510,12 +563,16 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 				AvgLatency: hop.AvgLatency,
 				PacketLoss: hop.PacketLoss,
 				PathCount:  hop.PathCount,
+				Layer:      hop.HopNumber, // Use hop number as layer
+				Status:     hopStatus,
 			}
 		} else {
 			// Aggregate with existing
 			node := nodeMap[hopNodeID]
-			node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
-			node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
+			if node.PathCount+hop.PathCount > 0 {
+				node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
+				node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
+			}
 			node.PathCount += hop.PathCount
 		}
 
@@ -556,60 +613,129 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	}
 
 	// Add destination nodes
-	for dest := range destinations {
+	for dest := range destMetrics {
+		if dest == "" {
+			continue
+		}
 		if _, exists := nodeMap[dest]; !exists {
+			// Find hostname from any MTR hop that ended here
+			hostname := dest
+			for _, hop := range mtrData {
+				if hop.IP == dest && hop.Hostname != "" {
+					hostname = hop.Hostname
+					break
+				}
+			}
 			nodeMap[dest] = &NetworkMapNode{
 				ID:        dest,
 				Type:      "destination",
-				Label:     dest,
+				Label:     hostname,
 				IP:        dest,
+				Hostname:  hostname,
 				PathCount: 1,
+				Layer:     100, // Destinations on far right
+				Status:    "healthy",
 			}
 		}
 	}
 
-	// Overlay PING metrics onto edges
+	// Process PING metrics - update destination summaries
 	for key, stats := range pingMetrics {
 		parts := strings.SplitN(key, ":", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		agentNodeID := "agent:" + parts[0]
+		agentID := parseUint(parts[0])
 		target := parts[1]
 
-		// Find edge from agent to destination
-		edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
-		if edge, exists := edgeMap[edgeID]; exists {
-			// Average with existing metrics
-			edge.AvgLatency = (edge.AvgLatency + stats.AvgLatency) / 2
-			edge.PacketLoss = (edge.PacketLoss + stats.PacketLoss) / 2
+		if destMetrics[target] == nil {
+			destMetrics[target] = &DestinationSummary{Target: target}
+			destAgents[target] = make(map[uint]bool)
+			destProbes[target] = make(map[string]bool)
+		}
+		destAgents[target][agentID] = true
+		destProbes[target]["PING"] = true
+
+		// Average latency
+		if destMetrics[target].AvgLatency == 0 {
+			destMetrics[target].AvgLatency = stats.AvgLatency
+		} else {
+			destMetrics[target].AvgLatency = (destMetrics[target].AvgLatency + stats.AvgLatency) / 2
+		}
+		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
+
+		// Update node metrics if exists
+		if node, exists := nodeMap[target]; exists {
+			node.AvgLatency = (node.AvgLatency + stats.AvgLatency) / 2
+			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
 		}
 	}
 
-	// Overlay TrafficSim metrics
+	// Process TrafficSim metrics
 	for key, stats := range trafficMetrics {
 		parts := strings.SplitN(key, ":", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		agentNodeID := "agent:" + parts[0]
+		agentID := parseUint(parts[0])
 		target := parts[1]
 
-		// Update destination node if exists
+		if destMetrics[target] == nil {
+			destMetrics[target] = &DestinationSummary{Target: target}
+			destAgents[target] = make(map[uint]bool)
+			destProbes[target] = make(map[string]bool)
+		}
+		destAgents[target][agentID] = true
+		destProbes[target]["TRAFFICSIM"] = true
+
+		// Update metrics
+		if destMetrics[target].AvgLatency == 0 {
+			destMetrics[target].AvgLatency = stats.AvgRTT
+		} else {
+			destMetrics[target].AvgLatency = (destMetrics[target].AvgLatency + stats.AvgRTT) / 2
+		}
+		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
+
+		// Update node
 		if node, exists := nodeMap[target]; exists {
 			node.AvgLatency = (node.AvgLatency + stats.AvgRTT) / 2
 			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
 		}
-
-		// Update edge metrics
-		edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
-		if edge, exists := edgeMap[edgeID]; exists {
-			edge.AvgLatency = (edge.AvgLatency + stats.AvgRTT) / 2
-			edge.PacketLoss = (edge.PacketLoss + stats.PacketLoss) / 2
-		}
 	}
 
-	// Convert maps to slices - sanitize floats to prevent NaN/Infinity in JSON
+	// Build destination summaries
+	destinations := make([]DestinationSummary, 0, len(destMetrics))
+	for target, summary := range destMetrics {
+		if target == "" {
+			continue
+		}
+		summary.AgentCount = len(destAgents[target])
+		summary.ProbeTypes = make([]string, 0, len(destProbes[target]))
+		for pt := range destProbes[target] {
+			summary.ProbeTypes = append(summary.ProbeTypes, pt)
+		}
+
+		// Determine status
+		if summary.PacketLoss >= 50 {
+			summary.Status = "critical"
+		} else if summary.PacketLoss >= 10 || summary.AvgLatency > 100 {
+			summary.Status = "degraded"
+		} else {
+			summary.Status = "healthy"
+		}
+
+		// Find hostname from node
+		if node, exists := nodeMap[target]; exists {
+			summary.Hostname = node.Hostname
+			node.Status = summary.Status // Sync status
+		}
+
+		summary.AvgLatency = sanitizeFloat(summary.AvgLatency)
+		summary.PacketLoss = sanitizeFloat(summary.PacketLoss)
+		destinations = append(destinations, *summary)
+	}
+
+	// Convert maps to slices - sanitize floats
 	nodes := make([]NetworkMapNode, 0, len(nodeMap))
 	for _, node := range nodeMap {
 		node.AvgLatency = sanitizeFloat(node.AvgLatency)
@@ -625,11 +751,18 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	}
 
 	return &NetworkMapData{
-		Nodes:       nodes,
-		Edges:       edges,
-		GeneratedAt: time.Now().UTC(),
-		WorkspaceID: workspaceID,
+		Nodes:        nodes,
+		Edges:        edges,
+		Destinations: destinations,
+		GeneratedAt:  time.Now().UTC(),
+		WorkspaceID:  workspaceID,
 	}
+}
+
+func parseUint(s string) uint {
+	var u uint
+	fmt.Sscanf(s, "%d", &u)
+	return u
 }
 
 func parseFloat(s string) float64 {

@@ -40,7 +40,61 @@
       <p>Ensure agents have active MTR or PING probes configured.</p>
     </div>
     
-    <div v-else ref="containerRef" class="network-map"></div>
+    <div v-else class="map-content">
+      <div ref="containerRef" class="network-map"></div>
+      
+      <!-- Destination Summary Panel -->
+      <div v-if="mapData?.destinations?.length" class="destinations-panel">
+        <h5 class="panel-title">
+          <i class="bi bi-geo-alt"></i>
+          Destination Overview
+        </h5>
+        <div class="destinations-table-wrapper">
+          <table class="destinations-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Target</th>
+                <th>Hops</th>
+                <th>Latency</th>
+                <th>Loss</th>
+                <th>Agents</th>
+                <th>Probes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="dest in mapData.destinations" :key="dest.target" 
+                  @click="highlightDestination(dest.target)"
+                  class="dest-row">
+                <td>
+                  <span class="status-indicator" :class="'status-' + dest.status">
+                    <i :class="getStatusIcon(dest.status)"></i>
+                  </span>
+                </td>
+                <td class="target-cell">
+                  <div class="target-name">{{ dest.hostname || dest.target }}</div>
+                  <div v-if="dest.hostname && dest.hostname !== dest.target" class="target-ip">{{ dest.target }}</div>
+                </td>
+                <td class="text-center">{{ dest.hop_count || '-' }}</td>
+                <td :class="getLatencyClass(dest.avg_latency)">
+                  {{ dest.avg_latency?.toFixed(1) || '0' }} ms
+                </td>
+                <td :class="getPacketLossClass(dest.packet_loss)">
+                  {{ dest.packet_loss?.toFixed(1) || '0' }}%
+                </td>
+                <td class="text-center">{{ dest.agent_count }}</td>
+                <td>
+                  <span v-for="pt in dest.probe_types" :key="pt" 
+                        class="probe-badge" :class="'probe-' + pt.toLowerCase()">
+                    {{ pt }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     
     <div v-if="selectedNode" class="node-detail-panel">
       <button class="close-btn" @click="selectedNode = null">
@@ -117,10 +171,14 @@ const { subscribe, connected } = useWebSocket();
 const fetchMapData = async () => {
   loading.value = true;
   try {
-    const { data } = await request.get<NetworkMapData>(
+    const response = await request.get<NetworkMapData>(
       `/workspaces/${props.workspaceId}/network-map?lookback=60`
     );
-    mapData.value = data;
+    console.log('[WorkspaceNetworkMap] Raw response:', response);
+    console.log('[WorkspaceNetworkMap] Data:', response.data);
+    mapData.value = response.data;
+    console.log('[WorkspaceNetworkMap] mapData.value nodes:', mapData.value?.nodes?.length);
+    console.log('[WorkspaceNetworkMap] containerRef:', containerRef.value);
     createVisualization();
   } catch (err) {
     console.error('[WorkspaceNetworkMap] Fetch error:', err);
@@ -183,6 +241,25 @@ const getPacketLossClass = (loss: number) => {
   if (loss < 1) return 'text-success';
   if (loss < 5) return 'text-warning';
   return 'text-danger';
+};
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'healthy': return 'bi bi-check-circle-fill text-success';
+    case 'degraded': return 'bi bi-exclamation-triangle-fill text-warning';
+    case 'critical': return 'bi bi-x-circle-fill text-danger';
+    default: return 'bi bi-question-circle text-muted';
+  }
+};
+
+const highlightDestination = (target: string) => {
+  // Find the destination node and select it
+  const destNode = mapData.value?.nodes.find(n => n.id === target || n.ip === target);
+  if (destNode) {
+    selectedNode.value = destNode;
+    emit('node-select', destNode);
+  }
+  // TODO: Implement path highlighting in visualization
 };
 
 onMounted(async () => {
@@ -589,7 +666,7 @@ class WorkspaceNetworkVisualization {
 // D3-specific interfaces
 interface D3Node extends d3.SimulationNodeDatum {
   id: string;
-  type: 'agent' | 'hop' | 'destination';
+  type: 'agent' | 'hop' | 'destination' | 'collapsed';
   label: string;
   agent_id?: number;
   ip?: string;
@@ -599,6 +676,9 @@ interface D3Node extends d3.SimulationNodeDatum {
   packet_loss: number;
   path_count: number;
   is_online?: boolean;
+  layer?: number;
+  collapsed_hops?: number;
+  status?: 'healthy' | 'degraded' | 'critical' | 'unknown';
   fx?: number | null;
   fy?: number | null;
 }
@@ -857,4 +937,108 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .text-success { color: #22c55e !important; }
 .text-warning { color: #eab308 !important; }
 .text-danger { color: #ef4444 !important; }
+.text-muted { color: #64748b !important; }
+
+/* Map Content Container */
+.map-content {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Destinations Panel */
+.destinations-panel {
+  border-top: 1px solid var(--map-border);
+  padding: 16px 20px;
+  background: var(--map-header-bg);
+}
+
+.destinations-panel .panel-title {
+  margin: 0 0 12px 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--map-title-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.destinations-table-wrapper {
+  overflow-x: auto;
+}
+
+.destinations-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.destinations-table th,
+.destinations-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--map-border);
+}
+
+.destinations-table th {
+  color: var(--map-text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.destinations-table tbody tr {
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.destinations-table tbody tr:hover {
+  background: var(--map-control-hover-bg);
+}
+
+.dest-row .target-cell {
+  max-width: 250px;
+}
+
+.dest-row .target-name {
+  font-weight: 500;
+  color: var(--map-title-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dest-row .target-ip {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--map-text-muted);
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.status-indicator.status-healthy i { color: #22c55e; }
+.status-indicator.status-degraded i { color: #eab308; }
+.status-indicator.status-critical i { color: #ef4444; }
+
+.probe-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  margin-right: 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.probe-mtr { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+.probe-ping { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+.probe-trafficsim { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+
+.text-center { text-align: center; }
 </style>
