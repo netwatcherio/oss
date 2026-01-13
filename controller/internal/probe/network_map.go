@@ -25,7 +25,7 @@ func sanitizeFloat(f float64) float64 {
 // NetworkMapNode represents a node in the network topology map
 type NetworkMapNode struct {
 	ID         string  `json:"id"`
-	Type       string  `json:"type"` // "agent", "hop", "destination", "collapsed"
+	Type       string  `json:"type"` // "agent", "hop", "destination"
 	Label      string  `json:"label"`
 	AgentID    *uint   `json:"agent_id,omitempty"`
 	IP         string  `json:"ip,omitempty"`
@@ -35,10 +35,12 @@ type NetworkMapNode struct {
 	PacketLoss float64 `json:"packet_loss"`
 	PathCount  int     `json:"path_count"`
 	IsOnline   bool    `json:"is_online,omitempty"`
-	// New fields for improved visualization
-	Layer         int    `json:"layer,omitempty"`          // 0=agent, 1=gateway, 2-N=hops, N+1=destination
-	CollapsedHops int    `json:"collapsed_hops,omitempty"` // Number of unknown hops this node represents
-	Status        string `json:"status,omitempty"`         // "healthy", "degraded", "critical", "unknown"
+	// Visualization fields
+	Layer  int    `json:"layer,omitempty"`  // 0=agent, 1-N=hops, 100=destination
+	Status string `json:"status,omitempty"` // "healthy", "degraded", "critical"
+	// Shared hop tracking
+	SharedAgents []uint   `json:"shared_agents,omitempty"` // Agent IDs that traverse this hop
+	PathIDs      []string `json:"path_ids,omitempty"`      // Traceroute paths through this hop
 }
 
 // NetworkMapEdge represents an edge (link) between nodes
@@ -49,6 +51,7 @@ type NetworkMapEdge struct {
 	AvgLatency float64 `json:"avg_latency"`
 	PacketLoss float64 `json:"packet_loss"`
 	PathCount  int     `json:"path_count"`
+	PathID     string  `json:"path_id,omitempty"` // Unique path identifier (agent:target)
 }
 
 // DestinationSummary provides quick overview of a destination's health
@@ -523,32 +526,49 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			hopStatus = "unknown"
 		}
 
+		pathID := fmt.Sprintf("%d:%s", hop.AgentID, hop.Target)
+
 		if _, exists := nodeMap[hopNodeID]; !exists {
 			label := fmt.Sprintf("%d", hop.HopNumber)
 			if hop.IP == "" {
 				label = "?"
 			}
 			nodeMap[hopNodeID] = &NetworkMapNode{
-				ID:         hopNodeID,
-				Type:       "hop",
-				Label:      label,
-				IP:         hop.IP,
-				Hostname:   hop.Hostname,
-				HopNumber:  hop.HopNumber,
-				AvgLatency: hop.AvgLatency,
-				PacketLoss: hop.PacketLoss,
-				PathCount:  hop.PathCount,
-				Layer:      hop.HopNumber, // Use hop number as layer
-				Status:     hopStatus,
+				ID:           hopNodeID,
+				Type:         "hop",
+				Label:        label,
+				IP:           hop.IP,
+				Hostname:     hop.Hostname,
+				HopNumber:    hop.HopNumber,
+				AvgLatency:   hop.AvgLatency,
+				PacketLoss:   hop.PacketLoss,
+				PathCount:    hop.PathCount,
+				Layer:        hop.HopNumber,
+				Status:       hopStatus,
+				SharedAgents: []uint{hop.AgentID},
+				PathIDs:      []string{pathID},
 			}
 		} else {
-			// Aggregate with existing
+			// Aggregate with existing - this is a SHARED hop
 			node := nodeMap[hopNodeID]
 			if node.PathCount+hop.PathCount > 0 {
 				node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
 				node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss*float64(hop.PathCount)) / float64(node.PathCount+hop.PathCount)
 			}
 			node.PathCount += hop.PathCount
+			// Add agent to shared agents if not already present
+			agentFound := false
+			for _, a := range node.SharedAgents {
+				if a == hop.AgentID {
+					agentFound = true
+					break
+				}
+			}
+			if !agentFound {
+				node.SharedAgents = append(node.SharedAgents, hop.AgentID)
+			}
+			// Add path ID
+			node.PathIDs = append(node.PathIDs, pathID)
 		}
 
 		// Create edge from agent to first hop, or between hops

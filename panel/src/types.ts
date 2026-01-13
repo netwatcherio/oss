@@ -333,7 +333,7 @@ export interface TrafficSimResult {
 // Network Map types for workspace topology visualization
 export interface NetworkMapNode {
     id: string;
-    type: 'agent' | 'hop' | 'destination' | 'collapsed';
+    type: 'agent' | 'hop' | 'destination';
     label: string;
     agent_id?: number;
     ip?: string;
@@ -343,10 +343,12 @@ export interface NetworkMapNode {
     packet_loss: number;
     path_count: number;
     is_online?: boolean;
-    // New fields for improved visualization
+    // Visualization fields
     layer?: number;
-    collapsed_hops?: number;
     status?: 'healthy' | 'degraded' | 'critical' | 'unknown';
+    // Shared hop tracking
+    shared_agents?: number[];
+    path_ids?: string[];
 }
 
 export interface NetworkMapEdge {
@@ -356,6 +358,7 @@ export interface NetworkMapEdge {
     avg_latency: number;
     packet_loss: number;
     path_count: number;
+    path_id?: string;
 }
 
 export interface DestinationSummary {

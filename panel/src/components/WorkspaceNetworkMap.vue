@@ -408,16 +408,16 @@ class WorkspaceNetworkVisualization {
       this.applyHierarchicalLayout();
     }
 
-    // Links
+    // Links - teal color like reference
     const linkSelection = this.g.append('g')
       .attr('class', 'links')
       .selectAll('line')
       .data(this.links)
       .enter()
       .append('line')
-      .attr('stroke', d => this.getEdgeColor(d))
-      .attr('stroke-opacity', 0.7)
-      .attr('stroke-width', d => Math.max(2, Math.sqrt(d.path_count || 1) * 1.5));
+      .attr('stroke', '#14b8a6')
+      .attr('stroke-opacity', 0.8)
+      .attr('stroke-width', 2);
 
     // Nodes
     const nodeSelection = this.g.append('g')
@@ -429,32 +429,74 @@ class WorkspaceNetworkVisualization {
       .attr('class', 'node')
       .call(this.createDragBehavior());
 
-    // Node circles
-    nodeSelection.append('circle')
-      .attr('r', d => d.type === 'agent' ? this.nodeRadius + 4 : this.nodeRadius)
-      .attr('fill', d => this.getNodeColor(d))
-      .attr('stroke', d => d.type === 'agent' ? '#1e40af' : '#475569')
-      .attr('stroke-width', d => d.type === 'agent' ? 3 : 2)
-      .style('cursor', 'pointer');
+    // Render different shapes based on node type
+    nodeSelection.each((d, i, nodes) => {
+      const nodeEl = nodes[i];
+      if (!nodeEl) return;
+      const node = d3.select(nodeEl);
+      
+      if (d.type === 'agent') {
+        // Agent: Small circle with thick border
+        node.append('circle')
+          .attr('r', 10)
+          .attr('fill', '#22c55e')
+          .attr('stroke', '#15803d')
+          .attr('stroke-width', 2)
+          .style('cursor', 'pointer');
+      } else if (d.type === 'destination') {
+        // Destination: Small circle, colored by status
+        const color = d.status === 'critical' ? '#ef4444' : 
+                      d.status === 'degraded' ? '#f59e0b' : '#22c55e';
+        node.append('circle')
+          .attr('r', 8)
+          .attr('fill', color)
+          .attr('stroke', d.status === 'critical' ? '#dc2626' : '#475569')
+          .attr('stroke-width', 2)
+          .style('cursor', 'pointer');
+        // Add label to the right
+        node.append('text')
+          .attr('x', 14)
+          .attr('dy', 4)
+          .attr('text-anchor', 'start')
+          .attr('fill', '#64748b')
+          .style('font-size', '11px')
+          .style('pointer-events', 'none')
+          .text((d.hostname || d.label || d.ip || '').slice(0, 25));
+        // IP below label
+        if (d.ip && d.hostname && d.hostname !== d.ip) {
+          node.append('text')
+            .attr('x', 14)
+            .attr('dy', 16)
+            .attr('text-anchor', 'start')
+            .attr('fill', '#94a3b8')
+            .style('font-size', '9px')
+            .style('pointer-events', 'none')
+            .text(d.ip);
+        }
+      } else {
+        // Hop: Small circle, colored by status/health
+        const color = d.status === 'critical' ? '#ef4444' : 
+                      d.status === 'degraded' ? '#f59e0b' : 
+                      d.status === 'unknown' ? '#94a3b8' : '#22c55e';
+        const isShared = (d.shared_agents?.length || 0) > 1;
+        node.append('circle')
+          .attr('r', isShared ? 7 : 5)
+          .attr('fill', color)
+          .attr('stroke', isShared ? '#3b82f6' : color)
+          .attr('stroke-width', isShared ? 2 : 1)
+          .style('cursor', 'pointer');
+      }
+    });
 
-    // Node icons/labels
-    nodeSelection.append('text')
-      .attr('dy', 5)
+    // Agent labels - below the node
+    nodeSelection.filter(d => d.type === 'agent').append('text')
+      .attr('dy', 24)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'white')
-      .style('font-weight', 'bold')
-      .style('font-size', d => d.type === 'agent' ? '10px' : '12px')
-      .style('pointer-events', 'none')
-      .text(d => this.getNodeLabel(d));
-
-    // Hover labels below
-    nodeSelection.append('text')
-      .attr('dy', this.nodeRadius + 16)
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#94a3b8')
+      .attr('fill', '#475569')
       .style('font-size', '10px')
+      .style('font-weight', '500')
       .style('pointer-events', 'none')
-      .text(d => d.type === 'agent' ? d.label : (d.hostname || d.ip || '').slice(0, 15));
+      .text(d => d.label || 'Agent');
 
     // Interactions
     nodeSelection
@@ -483,38 +525,49 @@ class WorkspaceNetworkVisualization {
   }
 
   private applyHierarchicalLayout() {
-    // Set initial positions but let force simulation refine them
     const agentNodes = this.nodes.filter(n => n.type === 'agent');
     const hopNodes = this.nodes.filter(n => n.type === 'hop');
     const destNodes = this.nodes.filter(n => n.type === 'destination');
 
-    // Initial positions - agents on left, destinations on right, hops in middle
+    // Fix agent positions on left
     agentNodes.forEach((node, i) => {
-      node.x = 50;
-      node.y = (this.height / (agentNodes.length + 1)) * (i + 1);
+      node.fx = 30;
+      node.fy = (this.height / (agentNodes.length + 1)) * (i + 1);
     });
 
+    // Fix destination positions on right (leave room for labels)
     destNodes.forEach((node, i) => {
-      node.x = this.width - 50;
-      node.y = (this.height / (destNodes.length + 1)) * (i + 1);
+      node.fx = this.width - 150;
+      node.fy = (this.height / (destNodes.length + 1)) * (i + 1);
     });
 
-    // Spread hops based on hop number
+    // Position hops by hop number, spread vertically
     const maxHop = Math.max(...hopNodes.map(n => n.hop_number || 1), 1);
-    hopNodes.forEach((node) => {
-      const hopNum = node.hop_number || 1;
-      node.x = 80 + ((this.width - 160) * (hopNum / (maxHop + 1)));
-      node.y = this.height / 2 + (Math.random() - 0.5) * this.height * 0.6;
+    const hopWidth = (this.width - 220) / (maxHop + 1);
+    
+    // Group hops by hop number
+    const hopsByNum: Record<number, D3Node[]> = {};
+    hopNodes.forEach(node => {
+      const num = node.hop_number || 1;
+      if (!hopsByNum[num]) hopsByNum[num] = [];
+      hopsByNum[num].push(node);
     });
 
-    // Use x-positioning force to maintain general left-to-right flow
+    // Position each hop group
+    Object.entries(hopsByNum).forEach(([numStr, nodes]) => {
+      const num = parseInt(numStr);
+      const xPos = 60 + hopWidth * num;
+      nodes.forEach((node, i) => {
+        node.x = xPos;
+        node.y = (this.height / (nodes.length + 1)) * (i + 1);
+      });
+    });
+
+    // Tighter simulation forces for clean layout
     this.simulation
-      .force('x', d3.forceX<D3Node>(d => {
-        if (d.type === 'agent') return 50;
-        if (d.type === 'destination') return this.width - 50;
-        return d.x || this.width / 2;
-      }).strength(0.3))
-      .force('y', d3.forceY<D3Node>(this.height / 2).strength(0.05));
+      .force('link', d3.forceLink<D3Node, D3Link>(this.links).id(d => d.id).distance(30).strength(0.8))
+      .force('charge', d3.forceManyBody().strength(-50))
+      .force('collision', d3.forceCollide(12));
   }
 
   private createDragBehavior() {
@@ -713,7 +766,7 @@ class WorkspaceNetworkVisualization {
 // D3-specific interfaces
 interface D3Node extends d3.SimulationNodeDatum {
   id: string;
-  type: 'agent' | 'hop' | 'destination' | 'collapsed';
+  type: 'agent' | 'hop' | 'destination';
   label: string;
   agent_id?: number;
   ip?: string;
@@ -724,8 +777,9 @@ interface D3Node extends d3.SimulationNodeDatum {
   path_count: number;
   is_online?: boolean;
   layer?: number;
-  collapsed_hops?: number;
   status?: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  shared_agents?: number[];
+  path_ids?: string[];
   fx?: number | null;
   fy?: number | null;
 }
@@ -737,6 +791,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   avg_latency: number;
   packet_loss: number;
   path_count: number;
+  path_id?: string;
 }
 
 </script>
