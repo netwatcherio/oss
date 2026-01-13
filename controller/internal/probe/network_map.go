@@ -88,13 +88,16 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 	// 2. Get MTR data from ClickHouse (filtered by workspace agents)
 	mtrData, err := getWorkspaceMTRData(ctx, ch, agentIDs, from)
 	if err != nil {
-		return nil, fmt.Errorf("get mtr data: %w", err)
+		// Log but don't fail - MTR data is optional
+		fmt.Printf("[network-map] MTR query error (non-fatal): %v\n", err)
+		mtrData = []mtrHopData{}
 	}
 
 	// 3. Get PING metrics for overlay
 	pingMetrics, err := getWorkspacePingMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without ping overlay
+		fmt.Printf("[network-map] PING query error (non-fatal): %v\n", err)
 		pingMetrics = make(map[string]pingStats)
 	}
 
@@ -102,6 +105,7 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 	trafficMetrics, err := getWorkspaceTrafficSimMetrics(ctx, ch, agentIDs, from)
 	if err != nil {
 		// Non-fatal, continue without traffic sim overlay
+		fmt.Printf("[network-map] TrafficSim query error (non-fatal): %v\n", err)
 		trafficMetrics = make(map[string]trafficStats)
 	}
 
@@ -150,12 +154,12 @@ func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from 
 
 	q := fmt.Sprintf(`
 SELECT 
-    agent_id,
+    probe_agent_id,
     target,
     payload_raw
 FROM probe_data
 WHERE type = 'MTR'
-  AND agent_id IN (%s)
+  AND probe_agent_id IN (%s)
   AND created_at >= %s
 ORDER BY created_at DESC
 LIMIT 1000
@@ -257,16 +261,16 @@ func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, f
 
 	q := fmt.Sprintf(`
 SELECT 
-    agent_id,
+    probe_agent_id,
     target,
     avg(JSONExtractFloat(payload_raw, 'latency')) as avg_latency,
     avg(JSONExtractFloat(payload_raw, 'packetLoss')) as avg_packet_loss,
     count() as cnt
 FROM probe_data
 WHERE type = 'PING'
-  AND agent_id IN (%s)
+  AND probe_agent_id IN (%s)
   AND created_at >= %s
-GROUP BY agent_id, target
+GROUP BY probe_agent_id, target
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -317,7 +321,7 @@ func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []u
 
 	q := fmt.Sprintf(`
 SELECT 
-    agent_id,
+    probe_agent_id,
     target,
     avg(JSONExtractFloat(payload_raw, 'averageRTT')) as avg_rtt,
     avg(
@@ -330,9 +334,9 @@ SELECT
     count() as cnt
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
-  AND agent_id IN (%s)
+  AND probe_agent_id IN (%s)
   AND created_at >= %s
-GROUP BY agent_id, target
+GROUP BY probe_agent_id, target
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)

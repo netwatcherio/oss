@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 		mapData, err := probe.GetWorkspaceNetworkMap(ctx.Request().Context(), ch, pg, wID, lookback)
 		if err != nil {
+			log.Printf("[network-map] workspace=%d error: %v", wID, err)
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return

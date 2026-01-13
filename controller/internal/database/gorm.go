@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/speedtest"
 	"netwatcher-controller/internal/users"
@@ -174,6 +175,9 @@ func CreateIndexes(db *gorm.DB) error {
 
 		&speedtest.QueueItem{},    // TableName(): "speedtest_queue"
 		&speedtest.CachedServer{}, // TableName(): "agent_speedtest_servers"
+
+		&alert.AlertRule{}, // TableName(): "alert_rules"
+		&alert.Alert{},     // TableName(): "alerts"
 	); err != nil {
 		return fmt.Errorf("automigrate: %w", err)
 	}
@@ -220,6 +224,17 @@ func CreateIndexes(db *gorm.DB) error {
 		// agent_speedtest_servers
 		`CREATE UNIQUE INDEX IF NOT EXISTS ux_speedtest_servers_agent_server ON agent_speedtest_servers (agent_id, server_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_servers_agent ON agent_speedtest_servers (agent_id);`,
+
+		// alert_rules
+		`CREATE INDEX IF NOT EXISTS idx_alert_rules_ws ON alert_rules (workspace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_rules_ws_enabled ON alert_rules (workspace_id, enabled);`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_rules_probe ON alert_rules (probe_id);`,
+
+		// alerts
+		`CREATE INDEX IF NOT EXISTS idx_alerts_ws ON alerts (workspace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts (status);`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_ws_status ON alerts (workspace_id, status);`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_rule ON alerts (alert_rule_id);`,
 	}
 
 	for _, sql := range stmts {
