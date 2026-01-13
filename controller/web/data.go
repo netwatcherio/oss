@@ -4,6 +4,7 @@ package web
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -53,7 +54,17 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 		log.Printf("[network-map] Success: nodes=%d edges=%d", len(mapData.Nodes), len(mapData.Edges))
 
-		_ = ctx.JSON(mapData)
+		// Explicitly marshal to check for JSON errors
+		jsonBytes, err := json.Marshal(mapData)
+		if err != nil {
+			log.Printf("[network-map] JSON marshal error: %v", err)
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "json serialization failed"})
+			return
+		}
+
+		ctx.ContentType("application/json")
+		_, _ = ctx.Write(jsonBytes)
 	})
 
 	// ------------------------------------------
