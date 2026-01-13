@@ -157,14 +157,35 @@ func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, agentIDs []uint, from 
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
 
+	// DEBUG: Check what probe_agent_id values exist
+	debugQ := fmt.Sprintf(`
+SELECT DISTINCT probe_agent_id, agent_id, type, count() as cnt
+FROM probe_data 
+WHERE type = 'MTR' AND created_at >= %s
+GROUP BY probe_agent_id, agent_id, type
+LIMIT 20
+`, chQuoteTime(from))
+	debugRows, _ := ch.QueryContext(ctx, debugQ)
+	if debugRows != nil {
+		defer debugRows.Close()
+		fmt.Printf("[network-map DEBUG] MTR probe_agent_id values in DB:\n")
+		for debugRows.Next() {
+			var pAID, aID uint64
+			var typ string
+			var cnt uint64
+			debugRows.Scan(&pAID, &aID, &typ, &cnt)
+			fmt.Printf("  probe_agent_id=%d agent_id=%d type=%s count=%d\n", pAID, aID, typ, cnt)
+		}
+	}
+
 	q := fmt.Sprintf(`
 SELECT 
-    probe_agent_id,
+    agent_id,
     target,
     payload_raw
 FROM probe_data
 WHERE type = 'MTR'
-  AND probe_agent_id IN (%s)
+  AND agent_id IN (%s)
   AND created_at >= %s
 ORDER BY created_at DESC
 LIMIT 1000
@@ -266,16 +287,16 @@ func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, f
 
 	q := fmt.Sprintf(`
 SELECT 
-    probe_agent_id,
+    agent_id,
     target,
     avg(JSONExtractFloat(payload_raw, 'latency')) as avg_latency,
     avg(JSONExtractFloat(payload_raw, 'packetLoss')) as avg_packet_loss,
     count() as cnt
 FROM probe_data
 WHERE type = 'PING'
-  AND probe_agent_id IN (%s)
+  AND agent_id IN (%s)
   AND created_at >= %s
-GROUP BY probe_agent_id, target
+GROUP BY agent_id, target
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -326,7 +347,7 @@ func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []u
 
 	q := fmt.Sprintf(`
 SELECT 
-    probe_agent_id,
+    agent_id,
     target,
     avg(JSONExtractFloat(payload_raw, 'averageRTT')) as avg_rtt,
     avg(
@@ -339,9 +360,9 @@ SELECT
     count() as cnt
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
-  AND probe_agent_id IN (%s)
+  AND agent_id IN (%s)
   AND created_at >= %s
-GROUP BY probe_agent_id, target
+GROUP BY agent_id, target
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
