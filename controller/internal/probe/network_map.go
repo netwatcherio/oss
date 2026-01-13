@@ -223,25 +223,32 @@ LIMIT 1000
 			continue
 		}
 
+		// Parse MTR payload first so we can extract target if empty
+		var payload mtrPayload
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
+			log.Printf("[NetworkMap] JSON parse error for agent %d: %v", agentID, err)
+			continue
+		}
+
+		// Extract target from payload if database column is empty
+		if target == "" {
+			target = payload.Report.Info.Target.IP
+			if target == "" {
+				target = payload.Report.Info.Target.Hostname
+			}
+		}
+
+		// Skip if still no target
+		if target == "" {
+			log.Printf("[NetworkMap] Agent %d: no target found in DB or payload, skipping", agentID)
+			continue
+		}
+
 		pathKey := fmt.Sprintf("%d:%s", agentID, target)
 		if seenPaths[pathKey] {
 			continue // Already have latest trace for this path
 		}
 		seenPaths[pathKey] = true
-
-		// Log payload sample for debugging
-		if len(payloadRaw) > 500 {
-			log.Printf("[NetworkMap] Agent %d -> %s payload (first 500 chars): %s", agentID, target, payloadRaw[:500])
-		} else {
-			log.Printf("[NetworkMap] Agent %d -> %s payload: %s", agentID, target, payloadRaw)
-		}
-
-		// Parse MTR payload
-		var payload mtrPayload
-		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
-			log.Printf("[NetworkMap] JSON parse error for agent %d -> %s: %v", agentID, target, err)
-			continue
-		}
 
 		log.Printf("[NetworkMap] Agent %d -> %s parsed: %d hops in payload.Report.Hops", agentID, target, len(payload.Report.Hops))
 
