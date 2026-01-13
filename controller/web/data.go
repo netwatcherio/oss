@@ -32,6 +32,14 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	// Query: lookback=<minutes, default 15>
 	// ------------------------------------------
 	api.Get("/workspaces/{id:uint}/network-map", func(ctx iris.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[network-map] PANIC: %v", r)
+				ctx.StatusCode(http.StatusInternalServerError)
+				_ = ctx.JSON(iris.Map{"error": "internal error"})
+			}
+		}()
+
 		wID := uintParam(ctx, "id")
 		lookback := intOrDefault(ctx.URLParam("lookback"), 15)
 
@@ -42,6 +50,9 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
+
+		log.Printf("[network-map] Success: nodes=%d edges=%d", len(mapData.Nodes), len(mapData.Edges))
+
 		_ = ctx.JSON(mapData)
 	})
 
