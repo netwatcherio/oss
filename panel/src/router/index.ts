@@ -312,11 +312,12 @@ router.beforeEach(async (to, _from, next) => {
     // Check for site admin requirement first
     if (to.matched.some(r => r.meta.requiresSiteAdmin)) {
         try {
-            const token = localStorage.getItem('token')
+            const session = JSON.parse(localStorage.getItem('session') || '{}')
+            const token = session?.token || localStorage.getItem('token')
             if (token) {
-                const payload = JSON.parse(atob(token.split('.')[1]))
-                // Fetch user to check role (could also decode from token if added)
-                const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/auth/me`, {
+                // Use same base URL as rest of app
+                const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || ''
+                const response = await fetch(`${baseUrl}/auth/me`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
                 if (response.ok) {
@@ -325,13 +326,15 @@ router.beforeEach(async (to, _from, next) => {
                         return next({ name: 'forbidden' })
                     }
                 } else {
-                    return next({ name: 'forbidden' })
+                    console.warn('[Admin Route] Auth check failed:', response.status)
+                    return next({ name: 'login' })
                 }
             } else {
                 return next({ name: 'login' })
             }
-        } catch {
-            return next({ name: 'forbidden' })
+        } catch (err) {
+            console.error('[Admin Route] Error checking admin access:', err)
+            return next({ name: 'login' })
         }
     }
 

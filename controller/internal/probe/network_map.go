@@ -285,20 +285,18 @@ func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, f
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
 
+	// Fetch raw payloads and aggregate in Go
 	q := fmt.Sprintf(`
 SELECT 
     agent_id,
     target,
-    avg(JSONExtractFloat(payload_raw, 'avg_rtt') / 1000000.0) as avg_latency,
-    avg(JSONExtractFloat(payload_raw, 'packet_loss')) as avg_packet_loss,
-    count() as cnt
+    payload_raw
 FROM probe_data
 WHERE type = 'PING'
   AND agent_id IN (%s)
   AND created_at >= %s
-  AND payload_raw != ''
-  AND isValidJSON(payload_raw)
-GROUP BY agent_id, target
+ORDER BY created_at DESC
+LIMIT 5000
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -307,22 +305,53 @@ GROUP BY agent_id, target
 	}
 	defer rows.Close()
 
-	results := make(map[string]pingStats)
+	// Aggregate in Go
+	type pingAccum struct {
+		totalLatency float64
+		totalLoss    float64
+		count        int
+	}
+	accum := make(map[string]*pingAccum)
+
 	for rows.Next() {
 		var agentID uint64
 		var target string
-		var avgLatency, avgPacketLoss float64
-		var count int
+		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &avgLatency, &avgPacketLoss, &count); err != nil {
+		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil {
+			continue
+		}
+
+		if payloadRaw == "" {
+			continue
+		}
+
+		// Parse ping payload
+		var payload struct {
+			AvgRTT     int64   `json:"avg_rtt"`     // nanoseconds
+			PacketLoss float64 `json:"packet_loss"` // percentage
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 			continue
 		}
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
-		results[key] = pingStats{
-			AvgLatency: avgLatency,
-			PacketLoss: avgPacketLoss,
-			Count:      count,
+		if accum[key] == nil {
+			accum[key] = &pingAccum{}
+		}
+		accum[key].totalLatency += float64(payload.AvgRTT) / 1000000.0 // ns to ms
+		accum[key].totalLoss += payload.PacketLoss
+		accum[key].count++
+	}
+
+	results := make(map[string]pingStats)
+	for key, a := range accum {
+		if a.count > 0 {
+			results[key] = pingStats{
+				AvgLatency: a.totalLatency / float64(a.count),
+				PacketLoss: a.totalLoss / float64(a.count),
+				Count:      a.count,
+			}
 		}
 	}
 
@@ -347,20 +376,18 @@ func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []u
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
 
+	// Fetch raw payloads and aggregate in Go
 	q := fmt.Sprintf(`
 SELECT 
     agent_id,
     target,
-    avg(JSONExtractFloat(payload_raw, 'averageRTT')) as avg_rtt,
-    avg(JSONExtractFloat(payload_raw, 'lossPercentage')) as avg_packet_loss,
-    count() as cnt
+    payload_raw
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
   AND agent_id IN (%s)
   AND created_at >= %s
-  AND payload_raw != ''
-  AND isValidJSON(payload_raw)
-GROUP BY agent_id, target
+ORDER BY created_at DESC
+LIMIT 5000
 `, agentIDList, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -369,22 +396,53 @@ GROUP BY agent_id, target
 	}
 	defer rows.Close()
 
-	results := make(map[string]trafficStats)
+	// Aggregate in Go
+	type trafficAccum struct {
+		totalRTT  float64
+		totalLoss float64
+		count     int
+	}
+	accum := make(map[string]*trafficAccum)
+
 	for rows.Next() {
 		var agentID uint64
 		var target string
-		var avgRTT, avgPacketLoss float64
-		var count int
+		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &avgRTT, &avgPacketLoss, &count); err != nil {
+		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil {
+			continue
+		}
+
+		if payloadRaw == "" {
+			continue
+		}
+
+		// Parse trafficsim payload
+		var payload struct {
+			AverageRTT     float64 `json:"averageRTT"`     // milliseconds
+			LossPercentage float64 `json:"lossPercentage"` // percentage
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 			continue
 		}
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
-		results[key] = trafficStats{
-			AvgRTT:     avgRTT,
-			PacketLoss: avgPacketLoss,
-			Count:      count,
+		if accum[key] == nil {
+			accum[key] = &trafficAccum{}
+		}
+		accum[key].totalRTT += payload.AverageRTT
+		accum[key].totalLoss += payload.LossPercentage
+		accum[key].count++
+	}
+
+	results := make(map[string]trafficStats)
+	for key, a := range accum {
+		if a.count > 0 {
+			results[key] = trafficStats{
+				AvgRTT:     a.totalRTT / float64(a.count),
+				PacketLoss: a.totalLoss / float64(a.count),
+				Count:      a.count,
+			}
 		}
 	}
 
