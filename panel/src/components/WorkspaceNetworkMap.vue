@@ -295,6 +295,18 @@ watch(selectedNode, (node) => {
   }
 });
 
+// Refresh data when workspaceId changes (tab switch scenario)
+watch(() => props.workspaceId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    fetchMapData();
+  }
+}, { immediate: false });
+
+// Expose refresh method for parent components
+defineExpose({
+  refresh: fetchMapData
+});
+
 // D3 Visualization Class
 class WorkspaceNetworkVisualization {
   private container: HTMLElement;
