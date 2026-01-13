@@ -53,6 +53,30 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 		_ = ctx.JSON(iris.Map{"token": token, "data": u})
 	})
 
+	// GET /auth/me - returns current authenticated user
+	auth.Get("/me", JWTMiddleware(db), func(ctx iris.Context) {
+		userVal := ctx.Values().Get("user")
+		if userVal == nil {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		user, ok := userVal.(*users.User)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{
+			"id":    user.ID,
+			"email": user.Email,
+			"name":  user.Name,
+			"role":  user.Role,
+		})
+	})
+
 	// POST /auth/login
 	auth.Post("/login", func(ctx iris.Context) {
 		var body struct {
