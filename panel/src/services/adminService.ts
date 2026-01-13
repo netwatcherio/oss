@@ -1,7 +1,7 @@
 // Admin API Service
 // Provides access to site admin endpoints
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import request from './request';
 
 interface AdminStats {
     total_users: number;
@@ -65,124 +65,97 @@ interface ListResponse<T> {
     offset?: number;
 }
 
-function getAuthHeaders(): HeadersInit {
-    const token = localStorage.getItem('token');
-    return {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-    };
-}
-
-async function fetchJSON<T>(url: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(url, {
-        ...options,
-        headers: {
-            ...getAuthHeaders(),
-            ...options.headers
-        }
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return response.json();
-}
-
 // Stats
 export async function getStats(): Promise<AdminStats> {
-    return fetchJSON<AdminStats>(`${API_BASE}/admin/stats`);
+    const res = await request.get<AdminStats>('/admin/stats');
+    return res.data;
 }
 
 export async function getWorkspaceStats(): Promise<ListResponse<WorkspaceStats>> {
-    return fetchJSON<ListResponse<WorkspaceStats>>(`${API_BASE}/admin/workspace-stats`);
+    const res = await request.get<ListResponse<WorkspaceStats>>('/admin/workspace-stats');
+    return res.data;
 }
 
 // Users
 export async function listUsers(limit = 50, offset = 0, query = ''): Promise<ListResponse<AdminUser>> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (query) params.set('q', query);
-    return fetchJSON<ListResponse<AdminUser>>(`${API_BASE}/admin/users?${params}`);
+    const res = await request.get<ListResponse<AdminUser>>(`/admin/users?${params}`);
+    return res.data;
 }
 
 export async function getUser(id: number): Promise<AdminUser> {
-    return fetchJSON<AdminUser>(`${API_BASE}/admin/users/${id}`);
+    const res = await request.get<AdminUser>(`/admin/users/${id}`);
+    return res.data;
 }
 
 export async function updateUser(id: number, data: { email?: string; name?: string; verified?: boolean }): Promise<AdminUser> {
-    return fetchJSON<AdminUser>(`${API_BASE}/admin/users/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-    });
+    const res = await request.patch<AdminUser>(`/admin/users/${id}`, data);
+    return res.data;
 }
 
 export async function deleteUser(id: number): Promise<void> {
-    await fetchJSON<{ ok: boolean }>(`${API_BASE}/admin/users/${id}`, { method: 'DELETE' });
+    await request.delete(`/admin/users/${id}`);
 }
 
 export async function setUserRole(id: number, role: 'USER' | 'SITE_ADMIN'): Promise<AdminUser> {
-    return fetchJSON<AdminUser>(`${API_BASE}/admin/users/${id}/role`, {
-        method: 'PUT',
-        body: JSON.stringify({ role })
-    });
+    const res = await request.patch<AdminUser>(`/admin/users/${id}/role`, { role });
+    return res.data;
 }
 
 // Workspaces
 export async function listWorkspaces(limit = 50, offset = 0, query = ''): Promise<ListResponse<AdminWorkspace>> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (query) params.set('q', query);
-    return fetchJSON<ListResponse<AdminWorkspace>>(`${API_BASE}/admin/workspaces?${params}`);
+    const res = await request.get<ListResponse<AdminWorkspace>>(`/admin/workspaces?${params}`);
+    return res.data;
 }
 
 export async function getWorkspace(id: number): Promise<{ workspace: AdminWorkspace; members: unknown[]; agents: unknown[] }> {
-    return fetchJSON(`${API_BASE}/admin/workspaces/${id}`);
+    const res = await request.get<{ workspace: AdminWorkspace; members: unknown[]; agents: unknown[] }>(`/admin/workspaces/${id}`);
+    return res.data;
 }
 
 export async function updateWorkspace(id: number, data: { name?: string; description?: string }): Promise<AdminWorkspace> {
-    return fetchJSON<AdminWorkspace>(`${API_BASE}/admin/workspaces/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-    });
+    const res = await request.patch<AdminWorkspace>(`/admin/workspaces/${id}`, data);
+    return res.data;
 }
 
 export async function deleteWorkspace(id: number): Promise<void> {
-    await fetchJSON<{ ok: boolean }>(`${API_BASE}/admin/workspaces/${id}`, { method: 'DELETE' });
+    await request.delete(`/admin/workspaces/${id}`);
 }
 
 // Workspace Members
 export async function listMembers(workspaceId: number): Promise<ListResponse<unknown>> {
-    return fetchJSON(`${API_BASE}/admin/workspaces/${workspaceId}/members`);
+    const res = await request.get<ListResponse<unknown>>(`/admin/workspaces/${workspaceId}/members`);
+    return res.data;
 }
 
 export async function addMember(workspaceId: number, data: { user_id?: number; email?: string; role: string }): Promise<unknown> {
-    return fetchJSON(`${API_BASE}/admin/workspaces/${workspaceId}/members`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-    });
+    const res = await request.post(`/admin/workspaces/${workspaceId}/members`, data);
+    return res.data;
 }
 
 export async function updateMember(workspaceId: number, memberId: number, role: string): Promise<unknown> {
-    return fetchJSON(`${API_BASE}/admin/workspaces/${workspaceId}/members/${memberId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ role })
-    });
+    const res = await request.patch(`/admin/workspaces/${workspaceId}/members/${memberId}`, { role });
+    return res.data;
 }
 
 export async function removeMember(workspaceId: number, memberId: number): Promise<void> {
-    await fetchJSON<{ ok: boolean }>(`${API_BASE}/admin/workspaces/${workspaceId}/members/${memberId}`, {
-        method: 'DELETE'
-    });
+    await request.delete(`/admin/workspaces/${workspaceId}/members/${memberId}`);
 }
 
 // Agents
 export async function listAgents(limit = 50, offset = 0): Promise<ListResponse<AdminAgent>> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return fetchJSON<ListResponse<AdminAgent>>(`${API_BASE}/admin/agents?${params}`);
+    const res = await request.get<ListResponse<AdminAgent>>(`/admin/agents?${params}`);
+    return res.data;
 }
 
 export async function getAgentStats(): Promise<ListResponse<WorkspaceStats>> {
-    return fetchJSON<ListResponse<WorkspaceStats>>(`${API_BASE}/admin/agents/stats`);
+    const res = await request.get<ListResponse<WorkspaceStats>>('/admin/agents/stats');
+    return res.data;
 }
 
 export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse };
+

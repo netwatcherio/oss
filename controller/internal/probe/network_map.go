@@ -463,6 +463,12 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	destAgents := make(map[string]map[uint]bool)
 	destProbes := make(map[string]map[string]bool)
 
+	// Create agent lookup for resolving target agent IPs
+	agentByID := make(map[uint]agentInfo)
+	for _, agent := range agents {
+		agentByID[agent.ID] = agent
+	}
+
 	// Add agent nodes (Layer 0)
 	for _, agent := range agents {
 		nodeID := fmt.Sprintf("agent:%d", agent.ID)
@@ -485,22 +491,38 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 	}
 
 	// Track destinations from MTR data
+	// For agent-to-agent probes, resolve target agent IP
 	for _, hop := range mtrData {
-		if hop.Target != "" {
-			if destMetrics[hop.Target] == nil {
-				destMetrics[hop.Target] = &DestinationSummary{
-					Target: hop.Target,
-				}
-				destAgents[hop.Target] = make(map[uint]bool)
-				destProbes[hop.Target] = make(map[string]bool)
-			}
-			destAgents[hop.Target][hop.AgentID] = true
-			destProbes[hop.Target]["MTR"] = true
+		if hop.Target == "" {
+			continue
+		}
 
-			// Track max hop count
-			if hop.HopNumber > destMetrics[hop.Target].HopCount {
-				destMetrics[hop.Target].HopCount = hop.HopNumber
+		// Determine destination key - for agent-to-agent, use target agent's IP
+		destKey := hop.Target
+		destLabel := hop.Target
+		if hop.TargetAgent > 0 {
+			if targetAgent, ok := agentByID[hop.TargetAgent]; ok {
+				if targetAgent.PublicIPOverride != "" {
+					destKey = targetAgent.PublicIPOverride
+				}
+				destLabel = targetAgent.Name
 			}
+		}
+
+		if destMetrics[destKey] == nil {
+			destMetrics[destKey] = &DestinationSummary{
+				Target:   destKey,
+				Hostname: destLabel,
+			}
+			destAgents[destKey] = make(map[uint]bool)
+			destProbes[destKey] = make(map[string]bool)
+		}
+		destAgents[destKey][hop.AgentID] = true
+		destProbes[destKey]["MTR"] = true
+
+		// Track max hop count
+		if hop.HopNumber > destMetrics[destKey].HopCount {
+			destMetrics[destKey].HopCount = hop.HopNumber
 		}
 	}
 
@@ -657,11 +679,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrHopData, pingMetrics map[s
 			lastHopID = fmt.Sprintf("unknown-hop-%d", lastHop.HopNumber)
 		}
 
-		// Determine the target node - use target agent if set, otherwise use destination IP
+		// Determine the target node ID - should match the destination node key
 		var targetNodeID string
 		if lastHop.TargetAgent > 0 {
-			// Agent-to-agent probe - connect to target agent node
-			targetNodeID = fmt.Sprintf("agent:%d", lastHop.TargetAgent)
+			// Agent-to-agent probe - use target agent's IP as destination key
+			if targetAgent, ok := agentByID[lastHop.TargetAgent]; ok {
+				if targetAgent.PublicIPOverride != "" {
+					targetNodeID = targetAgent.PublicIPOverride
+				} else {
+					targetNodeID = key.Target // fallback to original target
+				}
+			} else {
+				targetNodeID = key.Target
+			}
 		} else {
 			// External destination
 			targetNodeID = key.Target
