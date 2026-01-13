@@ -78,7 +78,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data/geoip:/data/geoip:ro
+      - ./geoip:/data/geoip:ro
     depends_on:
       postgres:
         condition: service_healthy

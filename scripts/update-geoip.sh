@@ -12,7 +12,7 @@ set -e
 
 # Configuration
 GEOIP_DIR="${GEOIP_DIR:-/opt/oss/geoip}"
-GITHUB_BASE="https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download"
+GITHUB_BASE="https://github.com/P3TERX/GeoLite.mmdb/raw/download"
 
 # Database files to download
 declare -A DATABASES=(
