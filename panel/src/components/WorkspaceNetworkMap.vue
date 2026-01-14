@@ -855,15 +855,34 @@ class WorkspaceNetworkVisualization {
     const clickedNode = this.nodes.find(n => n.id === targetId);
     const relevantPathIds = new Set<string>(clickedNode?.path_ids || []);
     
-    // For destinations and agents, include paths where the node IS the destination
-    // Check if this is a destination node
-    const isDestination = clickedNode?.type === 'destination' || clickedNode?.type === 'agent';
-    if (isDestination) {
-      // Add path IDs that end at this destination (path_id format is "agentId:target")
+    // Special handling for AGENT nodes
+    // path_id format is "sourceAgentId:target" (e.g., "1:google.com", "3:agent:1")
+    if (clickedNode?.type === 'agent' && clickedNode.agent_id) {
+      const agentId = clickedNode.agent_id;
       this.links.forEach(link => {
         if (link.path_id) {
-          const pathTarget = link.path_id.split(':')[1];
-          if (pathTarget === targetId || (clickedNode?.type === 'agent' && targetId === `agent:${clickedNode.agent_id}`)) {
+          const [sourceAgentStr, ...targetParts] = link.path_id.split(':');
+          const sourceAgentId = parseInt(sourceAgentStr, 10);
+          const pathTarget = targetParts.join(':'); // rejoin in case target has ':' like "agent:3"
+          
+          // Include paths ORIGINATING from this agent
+          if (sourceAgentId === agentId) {
+            relevantPathIds.add(link.path_id);
+          }
+          // Include paths TARGETING this agent (agent-to-agent)
+          if (pathTarget === targetId || pathTarget === `agent:${agentId}`) {
+            relevantPathIds.add(link.path_id);
+          }
+        }
+      });
+    }
+    // For destination nodes
+    else if (clickedNode?.type === 'destination') {
+      this.links.forEach(link => {
+        if (link.path_id) {
+          const [, ...targetParts] = link.path_id.split(':');
+          const pathTarget = targetParts.join(':');
+          if (pathTarget === targetId || pathTarget === clickedNode.label) {
             relevantPathIds.add(link.path_id);
           }
         }
@@ -899,6 +918,14 @@ class WorkspaceNetworkVisualization {
     // Collect nodes and edges that belong to the relevant paths
     const connectedNodeIds = new Set<string>([targetId]);
     const connectedEdgeIds = new Set<string>();
+    
+    // Also add source agents from the relevant path_ids
+    relevantPathIds.forEach(pathId => {
+      const sourceAgentId = parseInt(pathId.split(':')[0], 10);
+      if (!isNaN(sourceAgentId)) {
+        connectedNodeIds.add(`agent:${sourceAgentId}`);
+      }
+    });
     
     this.links.forEach(link => {
       // Only include edges whose path_id is in our relevant set
