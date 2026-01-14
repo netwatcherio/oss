@@ -23,6 +23,26 @@ func sanitizeFloat(f float64) float64 {
 	return f
 }
 
+// stripPort removes the port suffix from a target if present
+// e.g., "108.165.150.19:5000" -> "108.165.150.19"
+func stripPort(target string) string {
+	// Handle IPv6 with port: [::1]:8080
+	if strings.HasPrefix(target, "[") {
+		if idx := strings.LastIndex(target, "]:"); idx != -1 {
+			return target[:idx+1]
+		}
+		return target
+	}
+	// Handle IPv4/hostname with port
+	if idx := strings.LastIndex(target, ":"); idx != -1 {
+		// Ensure it's not just an IPv6 address without brackets
+		if strings.Count(target, ":") == 1 {
+			return target[:idx]
+		}
+	}
+	return target
+}
+
 // NetworkMapNode represents a node in the network topology map
 type NetworkMapNode struct {
 	ID         string  `json:"id"`
@@ -741,7 +761,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			continue
 		}
 		agentID := parseUint(parts[0])
-		target := parts[1]
+		target := stripPort(parts[1]) // Normalize target (remove port) for matching
 
 		if destMetrics[target] == nil {
 			destMetrics[target] = &DestinationSummary{Target: target}
@@ -802,7 +822,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			continue
 		}
 		agentID := parseUint(parts[0])
-		target := parts[1]
+		target := stripPort(parts[1]) // Normalize target (remove port) for matching
 
 		if destMetrics[target] == nil {
 			destMetrics[target] = &DestinationSummary{Target: target}
