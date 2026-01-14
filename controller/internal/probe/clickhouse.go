@@ -465,15 +465,20 @@ func GetProbeDataAggregated(
 }
 
 // pingAggInputPayload represents the JSON structure for PING probe data (used for aggregation input)
-// This matches the camelCase format actually stored in the database
+// This matches the snake_case format sent by the agent (PingResult struct in agent/probes/ping.go)
+// RTT values are time.Duration which serializes as nanoseconds (int64)
 type pingAggInputPayload struct {
-	Latency     float64 `json:"latency"`
-	MinLatency  float64 `json:"minLatency"`
-	MaxLatency  float64 `json:"maxLatency"`
-	AvgLatency  float64 `json:"avgLatency"`
-	PacketLoss  float64 `json:"packetLoss"`
-	PacketsSent uint64  `json:"packetsSent"`
-	PacketsRecv uint64  `json:"packetsRecv"`
+	StartTimestamp        string  `json:"start_timestamp"`
+	StopTimestamp         string  `json:"stop_timestamp"`
+	PacketsRecv           int     `json:"packets_recv"`
+	PacketsSent           int     `json:"packets_sent"`
+	PacketsRecvDuplicates int     `json:"packets_recv_duplicates"`
+	PacketLoss            float64 `json:"packet_loss"`
+	Addr                  string  `json:"addr"`
+	MinRtt                int64   `json:"min_rtt"` // nanoseconds
+	MaxRtt                int64   `json:"max_rtt"` // nanoseconds
+	AvgRtt                int64   `json:"avg_rtt"` // nanoseconds
+	StdDevRtt             int64   `json:"std_dev_rtt"`
 }
 
 // AggregatedPingPayload represents aggregated PING data
@@ -520,7 +525,7 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 		if d.Payload == nil || len(d.Payload) == 0 {
 			continue
 		}
-		// Use pingAggInputPayload which matches the camelCase JSON format stored in DB
+		// Use pingAggInputPayload which matches the snake_case JSON format from the agent
 		var p pingAggInputPayload
 		if err := json.Unmarshal(d.Payload, &p); err != nil {
 			continue // Skip malformed payloads
@@ -533,13 +538,17 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 			buckets[key] = b
 		}
 
-		// Use the camelCase fields from pingAggInputPayload
-		b.latencies = append(b.latencies, p.Latency)
-		b.minLatencies = append(b.minLatencies, p.MinLatency)
-		b.maxLatencies = append(b.maxLatencies, p.MaxLatency)
+		// Convert nanoseconds to milliseconds for latency values
+		avgLatencyMs := float64(p.AvgRtt) / 1e6
+		minLatencyMs := float64(p.MinRtt) / 1e6
+		maxLatencyMs := float64(p.MaxRtt) / 1e6
+
+		b.latencies = append(b.latencies, avgLatencyMs)
+		b.minLatencies = append(b.minLatencies, minLatencyMs)
+		b.maxLatencies = append(b.maxLatencies, maxLatencyMs)
 		b.packetLoss = append(b.packetLoss, p.PacketLoss)
-		b.packetsSent += p.PacketsSent
-		b.packetsRecv += p.PacketsRecv
+		b.packetsSent += uint64(p.PacketsSent)
+		b.packetsRecv += uint64(p.PacketsRecv)
 
 		// Keep the most recent data for metadata
 		if d.CreatedAt.After(b.lastData.CreatedAt) {

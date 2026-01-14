@@ -42,14 +42,36 @@ const isFormValid = computed(() => validation.value.name.valid);
 const agentGitHubUrl = 'https://github.com/netwatcherio/agent';
 const agentReleasesUrl = 'https://github.com/netwatcherio/agent/releases';
 
+// Get controller host from environment or window
+function getControllerInfo() {
+  const anyWindow = window as any;
+  let endpoint = anyWindow?.CONTROLLER_ENDPOINT 
+    || import.meta.env?.CONTROLLER_ENDPOINT 
+    || `${window.location.protocol}//${window.location.host}`;
+  
+  // Parse the URL to extract host and SSL
+  try {
+    const url = new URL(endpoint);
+    return {
+      host: url.host,
+      ssl: url.protocol === 'https:'
+    };
+  } catch {
+    // Fallback if URL parsing fails
+    return {
+      host: window.location.host,
+      ssl: window.location.protocol === 'https:'
+    };
+  }
+}
+
 // Linux/macOS install script command
 const linuxInstallCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const host = window.location.host;  // e.g., api.netwatcher.io
-  const useSSL = window.location.protocol === 'https:';
+  const { host, ssl } = getControllerInfo();
   return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
   --host ${host} \\
-  --ssl ${useSSL} \\
+  --ssl ${ssl} \\
   --workspace ${state.workspace.id} \\
   --id ${state.createdAgent.id} \\
   --pin ${state.agentPin}`;
@@ -58,22 +80,20 @@ const linuxInstallCommand = computed(() => {
 // Windows PowerShell install command  
 const windowsInstallCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const host = window.location.host;
-  const useSSL = window.location.protocol === 'https:';
+  const { host, ssl } = getControllerInfo();
   return `# Download the installer
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/main/install.ps1" -OutFile "install.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
 # Run the installer
-.\\install.ps1 -Host "${host}" -SSL $${useSSL ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.createdAgent.id} -Pin "${state.agentPin}"`;
+.\\install.ps1 -Host "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.createdAgent.id} -Pin "${state.agentPin}"`;
 });
 
 // Docker command (alternative)
 const dockerInstallCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const host = window.location.host;
-  const useSSL = window.location.protocol === 'https:';
+  const { host, ssl } = getControllerInfo();
   return `docker run -d --name netwatcher-agent \\
   -e CONTROLLER_HOST="${host}" \\
-  -e CONTROLLER_SSL="${useSSL}" \\
+  -e CONTROLLER_SSL="${ssl}" \\
   -e WORKSPACE_ID="${state.workspace.id}" \\
   -e AGENT_ID="${state.createdAgent.id}" \\
   -e AGENT_PIN="${state.agentPin}" \\
