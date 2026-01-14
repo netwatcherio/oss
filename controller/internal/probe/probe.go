@@ -323,7 +323,8 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 				if err := tx.Create(&reverseTarget).Error; err != nil {
 					return fmt.Errorf("failed to create reverse target: %w", err)
 				}
-				log.Infof("Created bidirectional reverse probe %d on agent %d targeting agent %d",
+				log.Infof("[BIDIR] Created bidirectional pair: Primary probe %d (agent %d -> agent %d), Reverse probe %d (agent %d -> agent %d)",
+					p.ID, in.AgentID, targetAgentID,
 					reverseProbe.ID, targetAgentID, in.AgentID)
 			}
 		}
@@ -436,6 +437,16 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 	}
 
+	// Debug: log what probes are being sent to this agent
+	log.Infof("[BIDIR-DEBUG] ListForAgent: agent %d receiving %d probes", agentID, len(out))
+	for _, p := range out {
+		targetStr := ""
+		if len(p.Targets) > 0 {
+			targetStr = p.Targets[0].Target
+		}
+		log.Infof("[BIDIR-DEBUG]   -> Probe ID=%d Type=%s Target=%s", p.ID, p.Type, targetStr)
+	}
+
 	return out, nil
 }
 
@@ -522,8 +533,12 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		expanded = append(expanded, tsProbe)
 	}
 
-	log.Debugf("expandAgentProbeForOwner: probe %d expanded into %d probes targeting %s",
-		agentProbe.ID, len(expanded), targetIP)
+	log.Infof("[BIDIR-DEBUG] expandAgentProbeForOwner: AGENT probe %d (owned by agent %d) expanded into %d probes (MTR/PING/TS) targeting agent %d @ %s",
+		agentProbe.ID, agentProbe.AgentID, len(expanded), targetAgentID, targetIP)
+	for _, ep := range expanded {
+		log.Infof("[BIDIR-DEBUG]   -> Expanded probe: ID=%d Type=%s AgentID=%d Target=%s",
+			ep.ID, ep.Type, ep.AgentID, ep.Targets[0].Target)
+	}
 
 	return expanded, nil
 }

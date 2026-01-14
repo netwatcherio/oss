@@ -432,14 +432,19 @@ func GetLatestSysInfoForAgent(
 	return GetLatest(ctx, db, params)
 }
 
+// MaxRawRowsForAggregation limits how many raw rows we fetch before aggregating in Go.
+// This prevents memory exhaustion on very large time ranges.
+const MaxRawRowsForAggregation = 50000
+
 // GetProbeDataAggregated returns aggregated rows for a given probe using time-bucket averaging.
 // aggregateSec specifies the bucket size in seconds (e.g., 60 = 1 minute buckets).
 // This fetches raw data and aggregates in Go for robustness with JSON parsing.
+// For very large time ranges, it limits raw data to MaxRawRowsForAggregation rows.
 func GetProbeDataAggregated(
 	ctx context.Context,
 	db *sql.DB,
 	probeID uint64,
-	probeType string, // "PING" or "TRAFFICSIM"
+	probeType string, // "PING", "TRAFFICSIM", or "MTR"
 	from, to time.Time,
 	aggregateSec int,
 	limit int,
@@ -449,8 +454,9 @@ func GetProbeDataAggregated(
 		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
 	}
 
-	// Fetch raw data from ClickHouse
-	rawData, err := GetProbeDataByProbe(ctx, db, probeID, from, to, false, 0)
+	// Fetch raw data from ClickHouse with a sensible limit
+	// This prevents memory exhaustion on very large time ranges
+	rawData, err := GetProbeDataByProbe(ctx, db, probeID, from, to, false, MaxRawRowsForAggregation)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch raw probe data: %w", err)
 	}
@@ -467,6 +473,9 @@ func GetProbeDataAggregated(
 		return aggregatePingData(rawData, bucketDuration, limit), nil
 	case "TRAFFICSIM":
 		return aggregateTrafficSimData(rawData, bucketDuration, limit), nil
+	case "MTR":
+		// For MTR, sample one trace per bucket (most recent)
+		return bucketProbeData(rawData, bucketDuration, limit), nil
 	default:
 		// For other types, just bucket by time without payload aggregation
 		return bucketProbeData(rawData, bucketDuration, limit), nil

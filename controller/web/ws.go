@@ -189,6 +189,16 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					log.Errorf("probe_get: %v", err)
 				}
 
+				// Debug: log what probes are being sent to this agent
+				log.Infof("[BIDIR-DEBUG] probe_get: sending %d probes to agent %d", len(ownedP), a.ID)
+				for _, p := range ownedP {
+					targetStr := ""
+					if len(p.Targets) > 0 {
+						targetStr = p.Targets[0].Target
+					}
+					log.Infof("[BIDIR-DEBUG]   -> ID=%d Type=%s AgentID=%d Target=%s", p.ID, p.Type, p.AgentID, targetStr)
+				}
+
 				payload, err := json.Marshal(ownedP)
 				if err != nil {
 					return err
@@ -219,6 +229,10 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					pp.CreatedAt = time.Now()
 				}
 				pp.ReceivedAt = time.Now()
+
+				// Debug: log received probe data
+				log.Infof("[BIDIR-DEBUG] probe_post: agent %d sent data for probe_id=%d type=%s target=%s",
+					aid, pp.ProbeID, pp.Type, pp.Target)
 
 				// Resolve TargetAgent from probe configuration if not already set
 				// This handles bidirectional probe direction detection

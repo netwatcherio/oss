@@ -553,6 +553,7 @@ async function reloadData() {
           
           if (rangeSec > 60) {
             const idealBucket = Math.ceil(rangeSec / targetPoints);
+            // Extended bucket sizes for large time ranges (matching loadProbeData)
             if (idealBucket <= 10) recipAggregateSec = 10;
             else if (idealBucket <= 30) recipAggregateSec = 30;
             else if (idealBucket <= 60) recipAggregateSec = 60;
@@ -561,10 +562,14 @@ async function reloadData() {
             else if (idealBucket <= 600) recipAggregateSec = 600;
             else if (idealBucket <= 1800) recipAggregateSec = 1800;
             else if (idealBucket <= 3600) recipAggregateSec = 3600;
-            else recipAggregateSec = Math.ceil(idealBucket / 3600) * 3600;
+            else if (idealBucket <= 7200) recipAggregateSec = 7200;   // 2 hour buckets
+            else if (idealBucket <= 14400) recipAggregateSec = 14400; // 4 hour buckets
+            else if (idealBucket <= 21600) recipAggregateSec = 21600; // 6 hour buckets
+            else recipAggregateSec = Math.ceil(idealBucket / 21600) * 21600;
           }
           
           const recipType = recipProbe.type as string;
+          // Only aggregate PING and TRAFFICSIM - MTR needs all hop data
           const useRecipAgg = recipAggregateSec > 0 && (recipType === 'PING' || recipType === 'TRAFFICSIM');
           
           const recipData = await ProbeDataService.byProbe(
@@ -574,6 +579,7 @@ async function reloadData() {
               from: toRFC3339(fromTime), 
               to: toRFC3339(toTime), 
               // When aggregated, don't limit - bucket size controls volume
+              // For non-aggregated (including MTR), limit for pagination
               limit: useRecipAgg ? undefined : 300,
               aggregate: useRecipAgg ? recipAggregateSec : undefined,
               type: useRecipAgg ? recipType : undefined
@@ -642,6 +648,7 @@ async function loadProbeData(): Promise<void> {
   const rangeMs = toDate.getTime() - fromDate.getTime();
   const rangeSec = rangeMs / 1000;
   const rangeHours = rangeSec / 3600;
+  const rangeDays = rangeHours / 24;
   
   // Calculate bucket size to get ~500 points
   // bucketSec = rangeInSeconds / targetPoints
@@ -653,6 +660,7 @@ async function loadProbeData(): Promise<void> {
     let idealBucket = Math.ceil(rangeSec / targetPoints);
     
     // Round to nice intervals for cleaner data
+    // Extended to support very large time ranges (weeks/months)
     if (idealBucket <= 10) {
       aggregateSec = 10;        // 10 second buckets
     } else if (idealBucket <= 30) {
@@ -669,19 +677,27 @@ async function loadProbeData(): Promise<void> {
       aggregateSec = 1800;      // 30 minute buckets
     } else if (idealBucket <= 3600) {
       aggregateSec = 3600;      // 1 hour buckets
+    } else if (idealBucket <= 7200) {
+      aggregateSec = 7200;      // 2 hour buckets (~7 days range)
+    } else if (idealBucket <= 14400) {
+      aggregateSec = 14400;     // 4 hour buckets (~14 days range)
+    } else if (idealBucket <= 21600) {
+      aggregateSec = 21600;     // 6 hour buckets (~21 days range)
     } else {
-      aggregateSec = Math.ceil(idealBucket / 3600) * 3600; // Round to nearest hour
+      // For 30+ day ranges, use larger buckets (round to 6 hours)
+      aggregateSec = Math.ceil(idealBucket / 21600) * 21600;
     }
   }
 
   // Store aggregation bucket size in state for graph components
   state.aggregationBucketSec = aggregateSec;
 
-  console.log(`[Probe] Loading data: range=${rangeHours.toFixed(1)}h, idealBucket=${Math.ceil(rangeSec/targetPoints)}s, aggregate=${aggregateSec}s`);
+  console.log(`[Probe] Loading data: range=${rangeDays.toFixed(1)}d (${rangeHours.toFixed(1)}h), idealBucket=${Math.ceil(rangeSec/targetPoints)}s, aggregate=${aggregateSec}s`);
 
   const tasks = state.probes.map(async (p) => {
     try {
       const probeType = p.type as string;
+      // Enable aggregation for PING and TRAFFICSIM only (MTR needs all hop data, just paginate it)
       const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
       
       let rows;
