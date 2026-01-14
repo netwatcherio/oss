@@ -157,7 +157,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
+import { ref, onMounted, watch, onUnmounted, computed, nextTick } from 'vue';
 import * as d3 from 'd3';
 import type { NetworkMapNode, NetworkMapEdge, NetworkMapData } from '@/types';
 import { useWebSocket } from '@/composables/useWebSocket';
@@ -194,6 +194,8 @@ const fetchMapData = async () => {
       `/workspaces/${props.workspaceId}/network-map?lookback=60`
     );
     mapData.value = response.data;
+    // Wait for Vue to update the DOM before creating visualization
+    await nextTick();
     createVisualization();
   } catch (err) {
     console.error('[WorkspaceNetworkMap] Fetch error:', err);

@@ -220,6 +220,22 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 				pp.ReceivedAt = time.Now()
 
+				// Resolve TargetAgent from probe configuration if not already set
+				// This handles bidirectional probe direction detection
+				if pp.TargetAgent == 0 && pp.ProbeID != 0 {
+					p, err := probe.GetByID(context.TODO(), db, pp.ProbeID)
+					if err == nil && p != nil && len(p.Targets) > 0 {
+						// Determine direction based on reporting agent
+						if aid == p.AgentID && p.Targets[0].AgentID != nil {
+							// Forward direction: probe owner reporting, target is Target.AgentID
+							pp.TargetAgent = *p.Targets[0].AgentID
+						} else if p.Targets[0].AgentID != nil && aid == *p.Targets[0].AgentID {
+							// Reverse direction: target agent reporting, target is probe owner
+							pp.TargetAgent = p.AgentID
+						}
+					}
+				}
+
 				err := agent.UpdateAgentSeen(context.TODO(), db, pp.AgentID, time.Now())
 				if err != nil {
 					return err

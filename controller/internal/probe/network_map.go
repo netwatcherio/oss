@@ -259,18 +259,61 @@ LIMIT 1000
 		// 1. Database target column (if agent sent it)
 		// 2. Probe definition target (original hostname like google.com)
 		// 3. MTR payload resolved IP (fallback - may differ from original target)
-		if target == "" && probeID > 0 && pg != nil {
-			// Look up original target from probe definition
-			if cachedTarget, ok := probeTargetCache[uint(probeID)]; ok {
-				target = cachedTarget
+		if probeID > 0 && pg != nil {
+			type probeInfo struct {
+				target        string
+				targetAgentID uint // Agent ID in Target (for forward direction)
+				ownerAgentID  uint // Owner of the probe
+			}
+
+			// Look up probe info (with caching for the simple target string)
+			cacheKey := uint(probeID)
+			var info probeInfo
+			var needsLookup bool
+
+			if cachedStr, ok := probeTargetCache[cacheKey]; ok {
+				info.target = cachedStr
+				// For cached entries, we only have target string, need to requery for agent info
+				// This is fine since we need full probe info anyway
+				needsLookup = true
 			} else {
+				needsLookup = true
+			}
+
+			if needsLookup {
+				// First get the probe to get owner AgentID
+				var probe Probe
+				if err := pg.WithContext(ctx).Where("id = ?", probeID).First(&probe).Error; err == nil {
+					info.ownerAgentID = probe.AgentID
+				}
+
+				// Then get the target to get target string and target AgentID
 				var probeTargets []Target
 				if err := pg.WithContext(ctx).Where("probe_id = ?", probeID).Limit(1).Find(&probeTargets).Error; err == nil && len(probeTargets) > 0 {
-					if probeTargets[0].Target != "" {
-						target = probeTargets[0].Target
+					info.target = probeTargets[0].Target
+					if probeTargets[0].AgentID != nil {
+						info.targetAgentID = *probeTargets[0].AgentID
 					}
 				}
-				probeTargetCache[uint(probeID)] = target
+				probeTargetCache[cacheKey] = info.target
+			}
+
+			// Use probe target if DB target is empty
+			if target == "" && info.target != "" {
+				target = info.target
+			}
+
+			// Determine target_agent based on direction
+			// If reporting agent is the probe owner -> target is Target.AgentID
+			// If reporting agent is the target agent -> target is the probe owner (reverse direction)
+			if targetAgent == 0 {
+				if uint(agentID) == info.ownerAgentID && info.targetAgentID > 0 {
+					// Forward direction: owner -> target
+					targetAgent = uint64(info.targetAgentID)
+				} else if uint(agentID) == info.targetAgentID && info.ownerAgentID > 0 {
+					// Reverse direction: target -> owner
+					targetAgent = uint64(info.ownerAgentID)
+				}
 			}
 		}
 
