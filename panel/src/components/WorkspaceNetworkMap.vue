@@ -133,6 +133,25 @@
         <span class="label">Paths:</span>
         <span class="value">{{ selectedNode.path_count }}</span>
       </div>
+      <div class="detail-section" v-if="selectedNode.path_ids && selectedNode.path_ids.length > 0">
+        <span class="section-title">Routes through this node:</span>
+        <div class="routes-list">
+          <div v-for="pathId in selectedNode.path_ids.slice(0, 10)" :key="pathId" class="route-item">
+            <span class="route-path">{{ formatPathId(pathId) }}</span>
+          </div>
+          <div v-if="selectedNode.path_ids.length > 10" class="route-item text-muted">
+            ... and {{ selectedNode.path_ids.length - 10 }} more
+          </div>
+        </div>
+      </div>
+      <div class="detail-section" v-if="selectedNode.shared_agents && selectedNode.shared_agents.length > 1">
+        <span class="section-title">Shared by agents:</span>
+        <div class="shared-agents">
+          <span v-for="agentId in selectedNode.shared_agents" :key="agentId" class="agent-badge">
+            {{ getAgentName(agentId) }}
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -301,6 +320,27 @@ watch(() => props.workspaceId, (newId, oldId) => {
     fetchMapData();
   }
 }, { immediate: false });
+
+// Helper functions for route display
+const formatPathId = (pathId: string): string => {
+  // Format: "agentId:target" -> "Agent X → target"
+  const parts = pathId.split(':');
+  if (parts.length >= 2) {
+    const agentId = parseInt(parts[0]);
+    const target = parts.slice(1).join(':'); // Handle IPv6
+    const agentName = getAgentName(agentId);
+    return `${agentName} → ${target}`;
+  }
+  return pathId;
+};
+
+const getAgentName = (agentId: number): string => {
+  // Try to find agent name in map data
+  const agentNode = mapData.value?.nodes.find(
+    n => n.type === 'agent' && n.id === `agent:${agentId}`
+  );
+  return agentNode?.label || `Agent ${agentId}`;
+};
 
 // Expose refresh method for parent components
 defineExpose({
@@ -778,20 +818,40 @@ class WorkspaceNetworkVisualization {
     const connectedNodeIds = new Set<string>([targetId]);
     const connectedEdgeIds = new Set<string>();
 
-    // Trace backwards from destination to find all paths
-    const findConnected = (nodeId: string) => {
-      this.links.forEach(link => {
-        const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
-        const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
-        
-        if (targetLinkId === nodeId && !connectedNodeIds.has(sourceId)) {
+    // Build reverse adjacency map for efficient backwards traversal
+    const incomingEdges = new Map<string, string[]>();
+    this.links.forEach(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+      const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+      if (!incomingEdges.has(targetLinkId)) {
+        incomingEdges.set(targetLinkId, []);
+      }
+      incomingEdges.get(targetLinkId)!.push(sourceId);
+    });
+
+    // BFS backwards from destination to find all connected nodes
+    const queue = [targetId];
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!;
+      const sources = incomingEdges.get(nodeId) || [];
+      sources.forEach(sourceId => {
+        if (!connectedNodeIds.has(sourceId)) {
           connectedNodeIds.add(sourceId);
-          connectedEdgeIds.add(link.id);
-          findConnected(sourceId);
+          queue.push(sourceId);
         }
       });
-    };
-    findConnected(targetId);
+    }
+
+    // Collect ALL edges between connected nodes (including shared hop edges)
+    this.links.forEach(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+      const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+      
+      // If both source and target are in connected set, include this edge
+      if (connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetLinkId)) {
+        connectedEdgeIds.add(link.id);
+      }
+    });
 
     // Dim non-connected elements
     this.g.selectAll('.nodes g')

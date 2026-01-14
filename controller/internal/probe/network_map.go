@@ -548,6 +548,104 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 	}
 
+	// Aggregate bidirectional metrics for each agent (probes targeting this agent)
+	// Build a map of agent IP -> agent ID for reverse lookup
+	agentIPToID := make(map[string]uint)
+	for _, agent := range agents {
+		if agent.PublicIPOverride != "" {
+			agentIPToID[agent.PublicIPOverride] = agent.ID
+		}
+	}
+
+	// Aggregate PING metrics targeting each agent
+	for key, stats := range pingMetrics {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		target := stripPort(parts[1])
+		if targetAgentID, ok := agentIPToID[target]; ok {
+			nodeID := fmt.Sprintf("agent:%d", targetAgentID)
+			if node, exists := nodeMap[nodeID]; exists {
+				// Average in the new metrics
+				if node.PathCount == 0 {
+					node.AvgLatency = stats.AvgLatency
+					node.PacketLoss = stats.PacketLoss
+				} else {
+					node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + stats.AvgLatency) / float64(node.PathCount+1)
+					node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + stats.PacketLoss) / float64(node.PathCount+1)
+				}
+				node.PathCount++
+
+				// Update status based on metrics
+				if node.PacketLoss >= 50 {
+					node.Status = "critical"
+				} else if node.PacketLoss >= 10 || node.AvgLatency > 100 {
+					node.Status = "degraded"
+				} else if node.IsOnline {
+					node.Status = "healthy"
+				}
+			}
+		}
+	}
+
+	// Aggregate TrafficSim metrics targeting each agent
+	for key, stats := range trafficMetrics {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		target := stripPort(parts[1])
+		if targetAgentID, ok := agentIPToID[target]; ok {
+			nodeID := fmt.Sprintf("agent:%d", targetAgentID)
+			if node, exists := nodeMap[nodeID]; exists {
+				if node.PathCount == 0 {
+					node.AvgLatency = stats.AvgRTT
+					node.PacketLoss = stats.PacketLoss
+				} else {
+					node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + stats.AvgRTT) / float64(node.PathCount+1)
+					node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + stats.PacketLoss) / float64(node.PathCount+1)
+				}
+				node.PathCount++
+
+				if node.PacketLoss >= 50 {
+					node.Status = "critical"
+				} else if node.PacketLoss >= 10 || node.AvgLatency > 100 {
+					node.Status = "degraded"
+				} else if node.IsOnline {
+					node.Status = "healthy"
+				}
+			}
+		}
+	}
+
+	// Aggregate MTR final hop metrics targeting each agent
+	for _, trace := range mtrData {
+		if trace.TargetAgent > 0 && len(trace.Hops) > 0 {
+			// Use the last hop's metrics for the target agent
+			lastHop := trace.Hops[len(trace.Hops)-1]
+			nodeID := fmt.Sprintf("agent:%d", trace.TargetAgent)
+			if node, exists := nodeMap[nodeID]; exists {
+				if node.PathCount == 0 {
+					node.AvgLatency = lastHop.AvgLatency
+					node.PacketLoss = lastHop.PacketLoss
+				} else {
+					node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + lastHop.AvgLatency) / float64(node.PathCount+1)
+					node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + lastHop.PacketLoss) / float64(node.PathCount+1)
+				}
+				node.PathCount++
+
+				if node.PacketLoss >= 50 {
+					node.Status = "critical"
+				} else if node.PacketLoss >= 10 || node.AvgLatency > 100 {
+					node.Status = "degraded"
+				} else if node.IsOnline {
+					node.Status = "healthy"
+				}
+			}
+		}
+	}
+
 	// Track destinations and process MTR traces
 	// Each trace is a complete path: agent → hop1 → hop2 → ... → destination
 	for _, trace := range mtrData {
@@ -558,15 +656,16 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		agentNodeID := fmt.Sprintf("agent:%d", trace.AgentID)
 		pathID := fmt.Sprintf("%d:%s", trace.AgentID, trace.Target)
 
-		// Determine destination key - for agent-to-agent, use target agent's IP
+		// Determine destination key - for agent-to-agent, use target agent's NODE ID
 		destKey := trace.Target
 		destLabel := trace.Target
+		isAgentTarget := false
 		if trace.TargetAgent > 0 {
 			if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
-				if targetAgent.PublicIPOverride != "" {
-					destKey = targetAgent.PublicIPOverride
-				}
+				// Use agent node ID as destKey so edges connect to agent nodes
+				destKey = fmt.Sprintf("agent:%d", trace.TargetAgent)
 				destLabel = targetAgent.Name
+				isAgentTarget = true
 			}
 		}
 
@@ -699,17 +798,26 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			lastHopID = hopNodeID
 		}
 
-		// Create destination node if not exists
-		if _, exists := nodeMap[destKey]; !exists {
-			nodeMap[destKey] = &NetworkMapNode{
-				ID:        destKey,
-				Type:      "destination",
-				Label:     destLabel,
-				IP:        destKey,
-				Hostname:  destLabel,
-				PathCount: 1,
-				Layer:     100, // Destinations on far right
-				Status:    "healthy",
+		// Create destination node or upgrade existing hop to destination
+		// Skip for agent targets - they already have agent nodes
+		if !isAgentTarget {
+			if existing, exists := nodeMap[destKey]; !exists {
+				nodeMap[destKey] = &NetworkMapNode{
+					ID:        destKey,
+					Type:      "destination",
+					Label:     destLabel,
+					IP:        destKey,
+					Hostname:  destLabel,
+					PathCount: 1,
+					Layer:     100, // Destinations on far right
+					Status:    "healthy",
+				}
+			} else if existing.Type == "hop" {
+				// Upgrade hop to destination - it's the final target
+				existing.Type = "destination"
+				existing.Label = destLabel
+				existing.Hostname = destLabel
+				existing.Layer = 100
 			}
 		}
 
