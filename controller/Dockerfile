@@ -21,11 +21,14 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (whois needed for WHOIS lookups)
+# Install runtime dependencies
+# - whois: for WHOIS lookups
+# - netbase: provides /etc/services needed for service name resolution
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     whois \
+    netbase \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
