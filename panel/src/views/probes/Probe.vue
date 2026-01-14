@@ -780,6 +780,39 @@ onUnmounted(() => {
   }
 });
 
+// Debounced watch on timeRange to reload data when date picker changes
+let timeRangeDebounceTimer: number | null = null;
+watch(
+  () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
+  (newVal, oldVal) => {
+    // Skip if values are the same or initial mount
+    if (!newVal[0] || !newVal[1]) return;
+    if (oldVal && newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) return;
+    
+    console.log('[Probe] Time range changed, debouncing reload...');
+    
+    // Clear any pending reload
+    if (timeRangeDebounceTimer) {
+      clearTimeout(timeRangeDebounceTimer);
+    }
+    
+    // Debounce reload by 500ms to avoid rapid-fire requests
+    timeRangeDebounceTimer = window.setTimeout(() => {
+      console.log('[Probe] Debounced reload triggered');
+      // Clear existing data before reload
+      state.pingData = [];
+      state.mtrData = [];
+      state.trafficSimData = [];
+      state.rperfData = [];
+      state.probeData = [];
+      state.agentPairData = [];
+      loadProbeData();
+      timeRangeDebounceTimer = null;
+    }, 500);
+  },
+  { deep: false }
+);
+
 // WebSocket subscription for real-time updates
 const workspaceIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
 const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);

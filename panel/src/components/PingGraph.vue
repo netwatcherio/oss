@@ -270,7 +270,7 @@ export default defineComponent({
         return result;
       };
 
-      // Build series
+      // Build series - explicitly assign yAxisIndex to ensure correct axis alignment
       const series: ApexCharts.ApexOptions['series'] = [
         {
           name: 'Min RTT',
@@ -294,7 +294,10 @@ export default defineComponent({
         } as any
       ];
 
-      // yAxisIndex for packet loss
+      // Explicitly assign yAxisIndex - RTT series use axis 0, Packet Loss uses axis 1
+      (series![0] as any).yAxisIndex = 0;
+      (series![1] as any).yAxisIndex = 0;
+      (series![2] as any).yAxisIndex = 0;
       (series![3] as any).yAxisIndex = 1;
 
       // Annotations (only for anomalies, gaps are handled by null values in series data)

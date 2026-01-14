@@ -967,21 +967,21 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			destLabel = target
 		}
 
-		if destMetrics[target] == nil {
-			destMetrics[target] = &DestinationSummary{Target: target, Hostname: destLabel}
-			destAgents[target] = make(map[uint]bool)
-			destProbes[target] = make(map[string]bool)
+		if destMetrics[destKey] == nil {
+			destMetrics[destKey] = &DestinationSummary{Target: destKey, Hostname: destLabel}
+			destAgents[destKey] = make(map[uint]bool)
+			destProbes[destKey] = make(map[string]bool)
 		}
-		destAgents[target][agentID] = true
-		destProbes[target]["PING"] = true
+		destAgents[destKey][agentID] = true
+		destProbes[destKey]["PING"] = true
 
 		// Average latency
-		if destMetrics[target].AvgLatency == 0 {
-			destMetrics[target].AvgLatency = stats.AvgLatency
+		if destMetrics[destKey].AvgLatency == 0 {
+			destMetrics[destKey].AvgLatency = stats.AvgLatency
 		} else {
-			destMetrics[target].AvgLatency = (destMetrics[target].AvgLatency + stats.AvgLatency) / 2
+			destMetrics[destKey].AvgLatency = (destMetrics[destKey].AvgLatency + stats.AvgLatency) / 2
 		}
-		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
+		destMetrics[destKey].PacketLoss = (destMetrics[destKey].PacketLoss + stats.PacketLoss) / 2
 
 		// Create destination node only if not targeting an agent
 		if !isAgentTarget {
@@ -1061,21 +1061,21 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			destLabel = rawTarget
 		}
 
-		if destMetrics[rawTarget] == nil {
-			destMetrics[rawTarget] = &DestinationSummary{Target: rawTarget, Hostname: destLabel}
-			destAgents[rawTarget] = make(map[uint]bool)
-			destProbes[rawTarget] = make(map[string]bool)
+		if destMetrics[destKey] == nil {
+			destMetrics[destKey] = &DestinationSummary{Target: destKey, Hostname: destLabel}
+			destAgents[destKey] = make(map[uint]bool)
+			destProbes[destKey] = make(map[string]bool)
 		}
-		destAgents[rawTarget][agentID] = true
-		destProbes[rawTarget]["TRAFFICSIM"] = true
+		destAgents[destKey][agentID] = true
+		destProbes[destKey]["TRAFFICSIM"] = true
 
 		// Update metrics
-		if destMetrics[rawTarget].AvgLatency == 0 {
-			destMetrics[rawTarget].AvgLatency = stats.AvgRTT
+		if destMetrics[destKey].AvgLatency == 0 {
+			destMetrics[destKey].AvgLatency = stats.AvgRTT
 		} else {
-			destMetrics[rawTarget].AvgLatency = (destMetrics[rawTarget].AvgLatency + stats.AvgRTT) / 2
+			destMetrics[destKey].AvgLatency = (destMetrics[destKey].AvgLatency + stats.AvgRTT) / 2
 		}
-		destMetrics[rawTarget].PacketLoss = (destMetrics[rawTarget].PacketLoss + stats.PacketLoss) / 2
+		destMetrics[destKey].PacketLoss = (destMetrics[destKey].PacketLoss + stats.PacketLoss) / 2
 
 		// Only create destination node if NOT targeting an agent (agent nodes already exist)
 		if destType == "destination" {
