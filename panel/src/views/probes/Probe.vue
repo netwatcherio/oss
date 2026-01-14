@@ -218,12 +218,38 @@ function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
 // --------- Adapters for graphs (expecting your components’ input shapes) ---------
 
 // PING: flatten rows -> PingResult[]
+// Handles both raw (snake_case, nanoseconds) and aggregated (camelCase, milliseconds) formats
 function transformPingDataMulti(rows: ProbeData[]): PingResult[] {
-  return rows
-      .map((r) => {
-        // Normalize likely fields: ts/created_at, avg/latency, loss, min/max
-        return r.payload as PingResult
-      })
+  return rows.map((r) => {
+    const p = r.payload as any;
+    if (!p) return null;
+    
+    // Check if this is aggregated data (camelCase fields, values in ms)
+    // or raw data (snake_case fields, values in nanoseconds)
+    const isAggregated = 'avgLatency' in p || 'minLatency' in p || 'latency' in p;
+    
+    if (isAggregated) {
+      // Aggregated format: camelCase fields, values already in milliseconds
+      // Convert to PingResult format expected by PingGraph (snake_case, nanoseconds)
+      const MS_TO_NS = 1e6;
+      return {
+        start_timestamp: new Date(r.created_at),
+        stop_timestamp: new Date(r.created_at),
+        packets_recv: p.packetsRecv || 0,
+        packets_sent: p.packetsSent || 0,
+        packets_recv_duplicates: 0,
+        packet_loss: p.packetLoss || 0,
+        addr: '',
+        min_rtt: (p.minLatency || 0) * MS_TO_NS,  // Convert ms back to ns
+        max_rtt: (p.maxLatency || 0) * MS_TO_NS,
+        avg_rtt: (p.avgLatency || p.latency || 0) * MS_TO_NS,
+        std_dev_rtt: 0
+      } as PingResult;
+    } else {
+      // Raw format: snake_case fields, values in nanoseconds - use as-is
+      return p as PingResult;
+    }
+  }).filter(Boolean) as PingResult[];
 }
 
 // MTR: a single MTR payload -> MtrResult (for title/accordion)
