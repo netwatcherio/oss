@@ -370,6 +370,7 @@ export interface DestinationSummary {
     status: 'healthy' | 'degraded' | 'critical';
     agent_count: number;
     probe_types: string[];
+    endpoint_ips?: string[]; // Actual final hop IPs for DNS targets
     last_updated?: string;
 }
 

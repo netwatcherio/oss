@@ -82,9 +82,10 @@ type DestinationSummary struct {
 	HopCount    int      `json:"hop_count"`
 	AvgLatency  float64  `json:"avg_latency"` // Combined from PING + TrafficSim + MTR
 	PacketLoss  float64  `json:"packet_loss"`
-	Status      string   `json:"status"`      // "healthy", "degraded", "critical"
-	AgentCount  int      `json:"agent_count"` // Number of agents testing this
-	ProbeTypes  []string `json:"probe_types"` // ["MTR", "PING", "TRAFFICSIM"]
+	Status      string   `json:"status"`       // "healthy", "degraded", "critical"
+	AgentCount  int      `json:"agent_count"`  // Number of agents testing this
+	ProbeTypes  []string `json:"probe_types"`  // ["MTR", "PING", "TRAFFICSIM"]
+	EndpointIPs []string `json:"endpoint_ips"` // Actual final hop IPs that respond for this target
 	LastUpdated string   `json:"last_updated,omitempty"`
 }
 
@@ -563,6 +564,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 	destMetrics := make(map[string]*DestinationSummary)
 	destAgents := make(map[string]map[uint]bool)
 	destProbes := make(map[string]map[string]bool)
+	destEndpoints := make(map[string]map[string]bool) // Track unique endpoint IPs per target
 
 	// Create agent lookup for resolving target agent IPs
 	agentByID := make(map[uint]agentInfo)
@@ -735,10 +737,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
+			destEndpoints[destKey] = make(map[string]bool)
 		}
 		destAgents[destKey][trace.AgentID] = true
 		destProbes[destKey]["MTR"] = true
 		destMetrics[destKey].HopCount = len(trace.Hops)
+
+		// Track the final responding hop IP as an endpoint (for DNS targets that resolve to multiple IPs)
+		if len(trace.Hops) > 0 {
+			lastHop := trace.Hops[len(trace.Hops)-1]
+			if lastHop.IP != "" {
+				destEndpoints[destKey][lastHop.IP] = true
+			}
+		}
 
 		// Process hops sequentially: agent → hop1 → hop2 → ... → lastHop
 		prevNodeID := agentNodeID
@@ -1107,6 +1118,14 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		summary.ProbeTypes = make([]string, 0, len(destProbes[target]))
 		for pt := range destProbes[target] {
 			summary.ProbeTypes = append(summary.ProbeTypes, pt)
+		}
+
+		// Add endpoint IPs (actual final hop IPs for DNS targets)
+		if endpoints := destEndpoints[target]; len(endpoints) > 0 {
+			summary.EndpointIPs = make([]string, 0, len(endpoints))
+			for ip := range endpoints {
+				summary.EndpointIPs = append(summary.EndpointIPs, ip)
+			}
 		}
 
 		// Determine status

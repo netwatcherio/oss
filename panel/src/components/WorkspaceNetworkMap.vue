@@ -55,6 +55,7 @@
               <tr>
                 <th>Status</th>
                 <th>Target</th>
+                <th>Endpoints</th>
                 <th>Hops</th>
                 <th>Latency</th>
                 <th>Loss</th>
@@ -74,6 +75,17 @@
                 <td class="target-cell">
                   <div class="target-name">{{ dest.hostname || dest.target }}</div>
                   <div v-if="dest.hostname && dest.hostname !== dest.target" class="target-ip">{{ dest.target }}</div>
+                </td>
+                <td class="endpoints-cell">
+                  <template v-if="dest.endpoint_ips?.length">
+                    <span v-for="ip in dest.endpoint_ips.slice(0, 3)" :key="ip" class="endpoint-ip">
+                      {{ ip }}
+                    </span>
+                    <span v-if="dest.endpoint_ips.length > 3" class="text-muted">
+                      +{{ dest.endpoint_ips.length - 3 }} more
+                    </span>
+                  </template>
+                  <span v-else class="text-muted">-</span>
                 </td>
                 <td class="text-center">{{ dest.hop_count || '-' }}</td>
                 <td :class="getLatencyClass(dest.avg_latency)">
@@ -244,6 +256,10 @@ const createVisualization = () => {
     (node) => {
       selectedNode.value = node;
       emit('node-select', node);
+      // Highlight paths through this node
+      if (visualization) {
+        visualization.highlightPath(node.id);
+      }
     }
   );
 };
@@ -816,25 +832,37 @@ class WorkspaceNetworkVisualization {
   }
 
   public highlightPath(targetId: string) {
-    // Find all nodes and edges connected to the target destination
+    // Find all nodes and edges connected to the target in BOTH directions
     const connectedNodeIds = new Set<string>([targetId]);
     const connectedEdgeIds = new Set<string>();
 
-    // Build reverse adjacency map for efficient backwards traversal
-    const incomingEdges = new Map<string, string[]>();
+    // Build adjacency maps for bidirectional traversal
+    const incomingEdges = new Map<string, string[]>(); // target -> sources
+    const outgoingEdges = new Map<string, string[]>(); // source -> targets
+    
     this.links.forEach(link => {
       const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
       const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+      
+      // Incoming edges (for backwards traversal)
       if (!incomingEdges.has(targetLinkId)) {
         incomingEdges.set(targetLinkId, []);
       }
       incomingEdges.get(targetLinkId)!.push(sourceId);
+      
+      // Outgoing edges (for forwards traversal)
+      if (!outgoingEdges.has(sourceId)) {
+        outgoingEdges.set(sourceId, []);
+      }
+      outgoingEdges.get(sourceId)!.push(targetLinkId);
     });
 
-    // BFS backwards from destination to find all connected nodes
+    // BFS in BOTH directions from the clicked node
     const queue = [targetId];
     while (queue.length > 0) {
       const nodeId = queue.shift()!;
+      
+      // Traverse backwards (incoming edges)
       const sources = incomingEdges.get(nodeId) || [];
       sources.forEach(sourceId => {
         if (!connectedNodeIds.has(sourceId)) {
@@ -842,9 +870,18 @@ class WorkspaceNetworkVisualization {
           queue.push(sourceId);
         }
       });
+      
+      // Traverse forwards (outgoing edges)
+      const targets = outgoingEdges.get(nodeId) || [];
+      targets.forEach(tgtId => {
+        if (!connectedNodeIds.has(tgtId)) {
+          connectedNodeIds.add(tgtId);
+          queue.push(tgtId);
+        }
+      });
     }
 
-    // Collect ALL edges between connected nodes (including shared hop edges)
+    // Collect ALL edges between connected nodes
     this.links.forEach(link => {
       const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
       const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
