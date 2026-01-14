@@ -23,22 +23,26 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="state.loaded" class="container-fluid px-0 mx-0 h-100">
-    <div class="d-flex h-100">
-      <!--<div style="height: 100vh;">
-        <NavSidebar></NavSidebar>
-      </div>-->
-      <div class="flex-fill d-flex flex-column" style="height: 100vh;">
-        <NavHeader></NavHeader>
-
-        <RouterView></RouterView>
-        <div class="flex-fill"></div>
-        <Footer></Footer>
-      </div>
-    </div>
+  <div v-if="state.loaded" class="root-container">
+    <NavHeader></NavHeader>
+    <main class="main-content">
+      <RouterView></RouterView>
+    </main>
+    <Footer></Footer>
   </div>
 </template>
 
-<style>
+<style scoped>
+.root-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bs-body-bg);
+}
 
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 </style>
