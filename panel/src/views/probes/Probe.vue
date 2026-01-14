@@ -63,7 +63,7 @@ const state = reactive({
     probeTypes: [] as string[],
     dataCountByType: {} as Record<string,number>
   },
-  timeRange: [] as [Date, Date],
+  timeRange: [new Date(Date.now() - 3*60*60*1000), new Date()] as [Date, Date],
   title: "",
   ready: false,
   loading: true,
@@ -720,14 +720,27 @@ function switchToReciprocal() {
 // Theme subscription for date picker
 let themeUnsubscribe: (() => void) | null = null;
 
+// Handler for explicit time range updates from date picker
+const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
+  if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
+    console.warn('[Probe] Invalid time range update:', newRange);
+    return;
+  }
+  console.log('[Probe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
+  // Force a new array reference to ensure reactivity
+  state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+};
+
 onMounted(() => {
-  // default to last 3 hours
-  state.timeRange = [new Date(Date.now() - 3*60*60*1000), new Date()];
+  console.log('[Probe] Mounted with initial timeRange:', state.timeRange[0]?.toISOString(), 'to', state.timeRange[1]?.toISOString());
   
   // Subscribe to theme changes for date picker
   themeUnsubscribe = themeService.onThemeChange((theme) => {
     isDark.value = theme === 'dark';
   });
+  
+  // Load initial data (timeRange is already set in reactive state)
+  reloadData();
 });
 
 onUnmounted(() => {
@@ -777,8 +790,28 @@ const { connected: wsConnected } = useProbeSubscription(
   handleLiveProbeData
 );
 
-// Watch for timeRange changes
-watch(() => state.timeRange, () => { reloadData() }, { deep: true });
+// Watch for timeRange changes - skip if called during initial mount
+let initialLoad = true;
+watch(
+  () => state.timeRange,
+  (newRange, oldRange) => {
+    // Skip the initial watch trigger since onMounted already calls reloadData
+    if (initialLoad) {
+      initialLoad = false;
+      return;
+    }
+    // Validate time range
+    if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
+      console.warn('[Probe] Watch: Invalid time range, skipping reload');
+      return;
+    }
+    console.log('[Probe] Watch: Time range changed, reloading data...');
+    console.log('[Probe] Old range:', oldRange?.[0]?.toISOString?.(), 'to', oldRange?.[1]?.toISOString?.());
+    console.log('[Probe] New range:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
+    reloadData();
+  },
+  { deep: true }
+);
 </script>
 
 <template>
@@ -793,7 +826,8 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
         subtitle="information about this target">
       <div v-if="state.ready" class="d-flex gap-2 align-items-center date-picker-wrapper">
         <VueDatePicker 
-          v-model="state.timeRange" 
+          v-model="state.timeRange"
+          @update:model-value="onTimeRangeUpdate"
           :partial-range="false" 
           range
           :dark="isDark"
@@ -803,7 +837,8 @@ watch(() => state.timeRange, () => { reloadData() }, { deep: true });
             { label: 'Last 3 Hours', value: [new Date(Date.now() - 3*60*60*1000), new Date()] },
             { label: 'Last 6 Hours', value: [new Date(Date.now() - 6*60*60*1000), new Date()] },
             { label: 'Last 24 Hours', value: [new Date(Date.now() - 24*60*60*1000), new Date()] },
-            { label: 'Last 7 Days', value: [new Date(Date.now() - 7*24*60*60*1000), new Date()] }
+            { label: 'Last 7 Days', value: [new Date(Date.now() - 7*24*60*60*1000), new Date()] },
+            { label: 'Last 30 Days', value: [new Date(Date.now() - 30*24*60*60*1000), new Date()] }
           ]"
           :timezone="Intl.DateTimeFormat().resolvedOptions().timeZone"
           format="MMM dd, yyyy HH:mm"
