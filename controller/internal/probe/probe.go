@@ -64,9 +64,6 @@ type Probe struct {
 	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`
 	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
 
-	// For bidirectional TrafficSim: the probe ID to use when reporting reverse direction stats
-	ReverseProbeID *uint `json:"reverse_probe_id,omitempty"`
-
 	Targets []Target `json:"targets"` // eager-loaded as needed
 }
 
@@ -420,19 +417,6 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 				}
 			}
 
-			// For TrafficSim server probes, find the reverse AGENT probe ID for bidirectional reporting
-			if p.Type == TypeTrafficSim && p.Server {
-				reverseProbeID := findReverseProbeForServer(ctx, db, agentID)
-				if reverseProbeID != 0 {
-					p.ReverseProbeID = &reverseProbeID
-					log.Infof("Set ReverseProbeID=%d for TrafficSim server probe %d on agent %d",
-						reverseProbeID, p.ID, agentID)
-				} else {
-					log.Debugf("No reverse AGENT probe found for TrafficSim server %d on agent %d - bidirectional disabled",
-						p.ID, agentID)
-				}
-			}
-
 			out = append(out, *p)
 		}
 	}
@@ -460,36 +444,6 @@ func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint
 			TypeAgent, targetAgentID, targetAgentID).
 		Find(&probes).Error
 	return probes, err
-}
-
-// findReverseProbeForServer finds THIS agent's AGENT probe that can be used for reverse TrafficSim reporting.
-// When a bidirectional AGENT probe pair exists (A→B and B→A), the TrafficSim server on agent A
-// can report reverse direction stats (A→B) using this agent's own AGENT probe ID.
-// Returns the probe ID to use for reverse direction stats, or 0 if not found.
-func findReverseProbeForServer(ctx context.Context, db *gorm.DB, serverAgentID uint) uint {
-	// Look for THIS agent's AGENT probes that target other agents
-	// When a client connects, we'll report reverse stats using our own probe ID for that direction
-	var probes []Probe
-	err := db.WithContext(ctx).
-		Preload("Targets").
-		Where("agent_id = ? AND type = ?", serverAgentID, TypeAgent).
-		Find(&probes).Error
-	if err != nil {
-		log.Warnf("findReverseProbeForServer: error querying for agent %d: %v", serverAgentID, err)
-		return 0
-	}
-
-	if len(probes) == 0 {
-		log.Debugf("findReverseProbeForServer: no AGENT probes for server agent %d", serverAgentID)
-		return 0
-	}
-
-	// Return the first AGENT probe owned by this server's agent
-	// This probe represents the server→client direction
-	probe := probes[0]
-	log.Infof("findReverseProbeForServer: found AGENT probe %d (owned by server agent %d) for bidirectional reporting",
-		probe.ID, serverAgentID)
-	return probe.ID
 }
 
 // expandAgentProbeForOwner expands an AGENT probe for the owning agent.
