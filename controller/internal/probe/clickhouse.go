@@ -54,11 +54,15 @@ func getenv(k, def string) string {
 	return def
 }
 
-// MigrateCH creates the table (idempotent).
-func MigrateCH(ctx context.Context, ch *sql.DB) error {
+// MigrateCH creates the table with configurable retention (idempotent).
+func MigrateCH(ctx context.Context, ch *sql.DB, retentionDays int) error {
+	if retentionDays <= 0 {
+		retentionDays = 90 // default
+	}
+
 	// If your cluster supports JSON (24.8+), keep payload_json JSON.
 	// Otherwise, change it to String or Object('json') with experimental flag.
-	const ddl = `
+	ddl := fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS probe_data (
 		id               UInt64           DEFAULT 0,
 		created_at       DateTime('UTC')  DEFAULT now('UTC'),
@@ -76,11 +80,16 @@ func MigrateCH(ctx context.Context, ch *sql.DB) error {
 	ENGINE = MergeTree
 	PARTITION BY toYYYYMM(created_at)
 	ORDER BY (type, probe_id, created_at)
-	TTL created_at + INTERVAL 90 DAY DELETE
+	TTL created_at + INTERVAL %d DAY DELETE
 	SETTINGS index_granularity = 8192;
-`
+`, retentionDays)
 	_, err := ch.ExecContext(ctx, ddl)
 	return err
+}
+
+// MigrateCHWithDefaults creates the table with default 90-day retention
+func MigrateCHWithDefaults(ctx context.Context, ch *sql.DB) error {
+	return MigrateCH(ctx, ch, 90)
 }
 
 // SaveRecordCH inserts one probe event row.

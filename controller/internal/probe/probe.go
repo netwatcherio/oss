@@ -424,8 +424,11 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 				reverseProbeID := findReverseProbeForServer(ctx, db, agentID)
 				if reverseProbeID != 0 {
 					p.ReverseProbeID = &reverseProbeID
-					log.Debugf("Set ReverseProbeID=%d for TrafficSim server probe %d on agent %d",
+					log.Infof("Set ReverseProbeID=%d for TrafficSim server probe %d on agent %d",
 						reverseProbeID, p.ID, agentID)
+				} else {
+					log.Debugf("No reverse AGENT probe found for TrafficSim server %d on agent %d - bidirectional disabled",
+						p.ID, agentID)
 				}
 			}
 
@@ -448,28 +451,36 @@ func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint
 	return probes, err
 }
 
-// findReverseProbeForServer finds the AGENT probe owned by this server's agent that targets
-// another agent (for bidirectional TrafficSim reporting). Returns the probe ID to use for
-// reverse direction stats (B→A).
+// findReverseProbeForServer finds an AGENT probe from another agent that targets this server's agent.
+// This enables bidirectional TrafficSim reporting: when Agent A has an AGENT probe targeting Agent B,
+// Agent B's TrafficSim server can report B→A stats using Agent A's probe ID.
+// Returns the probe ID to use for reverse direction stats (B→A), or 0 if not found.
 func findReverseProbeForServer(ctx context.Context, db *gorm.DB, serverAgentID uint) uint {
-	// Look for AGENT probes owned by this server's agent (the server agent owns reverse probes)
-	var probe Probe
+	// Look for AGENT probes from OTHER agents that target THIS server's agent
+	// This means: "Who is monitoring me?" - those agents should receive our reverse stats
+	var probes []Probe
 	err := db.WithContext(ctx).
 		Preload("Targets").
-		Where("agent_id = ? AND type = ?", serverAgentID, TypeAgent).
-		First(&probe).Error
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id").
+		Where("probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ?",
+			TypeAgent, serverAgentID, serverAgentID).
+		Find(&probes).Error
 	if err != nil {
+		log.Warnf("findReverseProbeForServer: error querying for agent %d: %v", serverAgentID, err)
 		return 0
 	}
 
-	// Verify it has a target (the A agent it will report B→A stats for)
-	if len(probe.Targets) > 0 && probe.Targets[0].AgentID != nil {
-		log.Debugf("findReverseProbeForServer: found AGENT probe %d on server agent %d targeting agent %d",
-			probe.ID, serverAgentID, *probe.Targets[0].AgentID)
-		return probe.ID
+	if len(probes) == 0 {
+		log.Debugf("findReverseProbeForServer: no AGENT probes targeting server agent %d", serverAgentID)
+		return 0
 	}
 
-	return 0
+	// Return the first matching probe - this is the probe whose owner is monitoring us
+	// The server will report B→A stats using this probe ID
+	probe := probes[0]
+	log.Infof("findReverseProbeForServer: found AGENT probe %d (owned by agent %d) targeting server agent %d",
+		probe.ID, probe.AgentID, serverAgentID)
+	return probe.ID
 }
 
 // expandAgentProbeForOwner expands an AGENT probe for the owning agent.

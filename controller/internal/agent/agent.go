@@ -30,9 +30,10 @@ var (
 // -------------------- Agent (updated to your new struct) --------------------
 
 type Agent struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	CreatedAt time.Time `gorm:"index" json:"created_at"`
-	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
+	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
+	CreatedAt time.Time      `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// Ownership / scoping
 	WorkspaceID uint `gorm:"index:idx_ws_pin,priority:1" json:"workspace_id"`

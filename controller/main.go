@@ -17,6 +17,7 @@ import (
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/scheduler"
 	"netwatcher-controller/web"
 )
 
@@ -44,7 +45,13 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("clickhouse open failed")
 	}
-	if err := probe.MigrateCH(context.Background(), ch); err != nil {
+
+	// ---- Data Retention Config ----
+	retentionConfig := scheduler.LoadRetentionConfig()
+	log.Infof("Data retention: %d days, soft-delete grace: %d days",
+		retentionConfig.DataRetentionDays, retentionConfig.SoftDeleteGraceDays)
+
+	if err := probe.MigrateCH(context.Background(), ch, retentionConfig.DataRetentionDays); err != nil {
 		log.WithError(err).Fatal("clickhouse migrate failed")
 	}
 	if err := probe.MigrateCacheTablesCH(context.Background(), ch); err != nil {
@@ -71,6 +78,14 @@ func main() {
 	} else {
 		log.Info("GeoIP not configured, lookups disabled")
 	}
+
+	// ---- Cleanup Scheduler ----
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	cleanupScheduler := scheduler.NewCleanupScheduler(db, ch, retentionConfig)
+	go cleanupScheduler.Start(cleanupCtx)
+
+	// Update ClickHouse TTL on startup (in case config changed)
+	go scheduler.EnsureClickHouseTTL(context.Background(), ch, retentionConfig.DataRetentionDays)
 
 	// ---- Iris ----
 	app := iris.New()
@@ -112,6 +127,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Info("Shutting down...")
+		cleanupCancel()
 		emailWorker.Stop()
 		if geoStore != nil {
 			geoStore.Close()
