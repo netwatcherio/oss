@@ -21,8 +21,8 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+# Install runtime dependencies (whois needed for WHOIS lookups)
+RUN apk add --no-cache ca-certificates tzdata whois
 
 # Copy binary from builder
 COPY --from=builder /app/main .
