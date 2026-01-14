@@ -15194,4 +15194,27 @@ code {
   color: #ffffff !important;
 }
 
+/* Fix for background not extending to full viewport height */
+html,
+body {
+  min-height: 100vh;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
 /*# sourceMappingURL=custom.css.map */

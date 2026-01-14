@@ -150,22 +150,23 @@
         <span class="label">Paths:</span>
         <span class="value">{{ selectedNode.path_count }}</span>
       </div>
-      <div class="detail-section" v-if="selectedNode.path_ids && selectedNode.path_ids.length > 0">
-        <span class="section-title">Routes through this node:</span>
+      <div class="detail-section" v-if="aggregatedRoutes.length > 0">
+        <span class="section-title"><i class="bi bi-arrow-right-circle"></i> Routes through this node</span>
         <div class="routes-list">
-          <div v-for="pathId in selectedNode.path_ids.slice(0, 10)" :key="pathId" class="route-item">
-            <span class="route-path">{{ formatPathId(pathId) }}</span>
+          <div v-for="{ route, count } in aggregatedRoutes" :key="route" class="route-item">
+            <span class="route-path">{{ route }}</span>
+            <span v-if="count > 1" class="route-count">×{{ count }}</span>
           </div>
-          <div v-if="selectedNode.path_ids.length > 10" class="route-item text-muted">
-            ... and {{ selectedNode.path_ids.length - 10 }} more
+          <div v-if="selectedNode.path_ids && selectedNode.path_ids.length > aggregatedRoutes.length" class="route-item text-muted">
+            <i class="bi bi-three-dots"></i> {{ selectedNode.path_ids.length - aggregatedRoutes.length }} more routes
           </div>
         </div>
       </div>
       <div class="detail-section" v-if="selectedNode.shared_agents && selectedNode.shared_agents.length > 1">
-        <span class="section-title">Shared by agents:</span>
+        <span class="section-title"><i class="bi bi-share"></i> Shared by {{ selectedNode.shared_agents.length }} agents</span>
         <div class="shared-agents">
-          <span v-for="agentId in selectedNode.shared_agents" :key="agentId" class="agent-badge">
-            {{ getAgentName(agentId) }}
+          <span v-for="(agentId, index) in selectedNode.shared_agents" :key="agentId" class="agent-badge">
+            {{ getAgentName(agentId) }}<span v-if="index < selectedNode.shared_agents.length - 1">, </span>
           </span>
         </div>
       </div>
@@ -391,6 +392,24 @@ const getDestinationLabel = (target: string): string => {
   }
   return target;
 };
+
+// Aggregate and deduplicate routes for display
+const aggregatedRoutes = computed(() => {
+  if (!selectedNode.value?.path_ids) return [];
+  
+  // Count occurrences of each formatted path
+  const routeCounts = new Map<string, number>();
+  for (const pathId of selectedNode.value.path_ids) {
+    const formatted = formatPathId(pathId);
+    routeCounts.set(formatted, (routeCounts.get(formatted) || 0) + 1);
+  }
+  
+  // Convert to array and sort by count (descending)
+  return Array.from(routeCounts.entries())
+    .map(([route, count]) => ({ route, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8); // Show top 8 unique routes
+});
 
 // Check if destination target is an agent
 const isAgentTarget = (target: string): boolean => {
@@ -1298,6 +1317,77 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .text-warning { color: #eab308 !important; }
 .text-danger { color: #ef4444 !important; }
 .text-muted { color: #64748b !important; }
+
+/* Detail sections */
+.detail-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--map-border);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--map-text-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.section-title i {
+  font-size: 11px;
+}
+
+/* Routes list */
+.routes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.route-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.route-path {
+  color: var(--map-value-color);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.route-count {
+  flex-shrink: 0;
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+/* Shared agents */
+.shared-agents {
+  font-size: 12px;
+  color: var(--map-value-color);
+  line-height: 1.6;
+}
+
+.agent-badge {
+  display: inline;
+}
 
 /* Map Content Container */
 .map-content {
