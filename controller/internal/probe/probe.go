@@ -64,6 +64,9 @@ type Probe struct {
 	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`
 	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
 
+	// For bidirectional TrafficSim: the probe ID to use when reporting reverse direction stats
+	ReverseProbeID *uint `json:"reverse_probe_id,omitempty"`
+
 	Targets []Target `json:"targets"` // eager-loaded as needed
 }
 
@@ -415,6 +418,17 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 					t.Target = ip
 				}
 			}
+
+			// For TrafficSim server probes, find the reverse AGENT probe ID for bidirectional reporting
+			if p.Type == TypeTrafficSim && p.Server {
+				reverseProbeID := findReverseProbeForServer(ctx, db, agentID)
+				if reverseProbeID != 0 {
+					p.ReverseProbeID = &reverseProbeID
+					log.Debugf("Set ReverseProbeID=%d for TrafficSim server probe %d on agent %d",
+						reverseProbeID, p.ID, agentID)
+				}
+			}
+
 			out = append(out, *p)
 		}
 	}
@@ -432,6 +446,30 @@ func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint
 			TypeAgent, targetAgentID, targetAgentID).
 		Find(&probes).Error
 	return probes, err
+}
+
+// findReverseProbeForServer finds the AGENT probe owned by this server's agent that targets
+// another agent (for bidirectional TrafficSim reporting). Returns the probe ID to use for
+// reverse direction stats (B→A).
+func findReverseProbeForServer(ctx context.Context, db *gorm.DB, serverAgentID uint) uint {
+	// Look for AGENT probes owned by this server's agent (the server agent owns reverse probes)
+	var probe Probe
+	err := db.WithContext(ctx).
+		Preload("Targets").
+		Where("agent_id = ? AND type = ?", serverAgentID, TypeAgent).
+		First(&probe).Error
+	if err != nil {
+		return 0
+	}
+
+	// Verify it has a target (the A agent it will report B→A stats for)
+	if len(probe.Targets) > 0 && probe.Targets[0].AgentID != nil {
+		log.Debugf("findReverseProbeForServer: found AGENT probe %d on server agent %d targeting agent %d",
+			probe.ID, serverAgentID, *probe.Targets[0].AgentID)
+		return probe.ID
+	}
+
+	return 0
 }
 
 // expandAgentProbeForOwner expands an AGENT probe for the owning agent.
