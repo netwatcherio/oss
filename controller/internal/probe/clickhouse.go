@@ -465,12 +465,15 @@ func GetProbeDataAggregated(
 }
 
 // pingAggInputPayload represents the JSON structure for PING probe data (used for aggregation input)
+// This matches the camelCase format actually stored in the database
 type pingAggInputPayload struct {
 	Latency     float64 `json:"latency"`
+	MinLatency  float64 `json:"minLatency"`
+	MaxLatency  float64 `json:"maxLatency"`
+	AvgLatency  float64 `json:"avgLatency"`
 	PacketLoss  float64 `json:"packetLoss"`
 	PacketsSent uint64  `json:"packetsSent"`
-	PacketsLost uint64  `json:"packetsLost"`
-	Jitter      float64 `json:"jitter"`
+	PacketsRecv uint64  `json:"packetsRecv"`
 }
 
 // AggregatedPingPayload represents aggregated PING data
@@ -517,7 +520,8 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 		if d.Payload == nil || len(d.Payload) == 0 {
 			continue
 		}
-		var p PingPayload
+		// Use pingAggInputPayload which matches the camelCase JSON format stored in DB
+		var p pingAggInputPayload
 		if err := json.Unmarshal(d.Payload, &p); err != nil {
 			continue // Skip malformed payloads
 		}
@@ -529,16 +533,13 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 			buckets[key] = b
 		}
 
-		// Use the existing PingPayload fields - AvgRtt, MinRtt, MaxRtt are time.Duration (nanoseconds)
-		avg := float64(p.AvgRtt) / float64(time.Millisecond)
-		minRtt := float64(p.MinRtt) / float64(time.Millisecond)
-		maxRtt := float64(p.MaxRtt) / float64(time.Millisecond)
-		b.latencies = append(b.latencies, avg)
-		b.minLatencies = append(b.minLatencies, minRtt)
-		b.maxLatencies = append(b.maxLatencies, maxRtt)
+		// Use the camelCase fields from pingAggInputPayload
+		b.latencies = append(b.latencies, p.Latency)
+		b.minLatencies = append(b.minLatencies, p.MinLatency)
+		b.maxLatencies = append(b.maxLatencies, p.MaxLatency)
 		b.packetLoss = append(b.packetLoss, p.PacketLoss)
-		b.packetsSent += uint64(p.PacketsSent)
-		b.packetsRecv += uint64(p.PacketsRecv)
+		b.packetsSent += p.PacketsSent
+		b.packetsRecv += p.PacketsRecv
 
 		// Keep the most recent data for metadata
 		if d.CreatedAt.After(b.lastData.CreatedAt) {
