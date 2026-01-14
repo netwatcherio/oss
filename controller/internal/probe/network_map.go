@@ -746,7 +746,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		destMetrics[destKey].HopCount = len(trace.Hops)
 
 		// Track the final responding hop IP as an endpoint (for DNS targets that resolve to multiple IPs)
-		if len(trace.Hops) > 0 {
+		// IMPORTANT: Don't track endpoints for agent-to-agent paths - the destination IS the agent
+		if !isAgentTarget && len(trace.Hops) > 0 {
 			lastHop := trace.Hops[len(trace.Hops)-1]
 			if lastHop.IP != "" {
 				destEndpoints[destKey][lastHop.IP] = true
