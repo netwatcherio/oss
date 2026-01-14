@@ -403,6 +403,7 @@ export default defineComponent({
         },
         yaxis: [
           {
+            seriesName: 'Min RTT',
             title: { text: 'Round Trip Time (ms)', style: { color: colors.foreColor, fontSize: '14px', fontWeight: 600 } },
             min: 0,
             max: yMax,
@@ -410,6 +411,21 @@ export default defineComponent({
             labels: { style: { colors: colors.labelColor, fontSize: '12px' }, formatter: (v: number) => v.toFixed(0) }
           },
           {
+            seriesName: 'Avg RTT',
+            show: false,  // Hide duplicate axis
+            min: 0,
+            max: yMax,
+            labels: { show: false }
+          },
+          {
+            seriesName: 'Max RTT',
+            show: false,  // Hide duplicate axis
+            min: 0,
+            max: yMax,
+            labels: { show: false }
+          },
+          {
+            seriesName: 'Packet Loss',
             opposite: true,
             title: { text: 'Packet Loss (%)', style: { color: colors.foreColor, fontSize: '14px', fontWeight: 600} },
             min: 0,

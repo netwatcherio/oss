@@ -941,6 +941,18 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		mtrDestinations[destKey][trace.AgentID] = true
 	}
 
+	// Build reverse mapping: endpoint IP -> destination key
+	// This allows PING probes that target a resolved IP to be merged with their hostname destination
+	endpointIPToDestKey := make(map[string]string)
+	for destKey, endpoints := range destEndpoints {
+		for ip := range endpoints {
+			// Only map if the endpoint IP is not already a direct destination
+			if _, existsAsDirectDest := destMetrics[ip]; !existsAsDirectDest {
+				endpointIPToDestKey[ip] = destKey
+			}
+		}
+	}
+
 	// Use mtrDestinations to know which agent+dest pairs have MTR paths
 
 	// Process PING metrics - update destination summaries and create edges
@@ -963,8 +975,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 		}
 		if !isAgentTarget {
-			destKey = target
-			destLabel = target
+			// Check if this IP is an endpoint of an existing hostname destination
+			if existingDestKey, ok := endpointIPToDestKey[target]; ok {
+				// Use the hostname destination key to merge PING data with MTR
+				destKey = existingDestKey
+				if existing := destMetrics[destKey]; existing != nil {
+					destLabel = existing.Hostname
+				} else {
+					destLabel = existingDestKey
+				}
+			} else {
+				destKey = target
+				destLabel = target
+			}
 		}
 
 		if destMetrics[destKey] == nil {
@@ -1056,9 +1079,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 				destLabel = rawTarget
 			}
 		} else {
-			// Regular destination
-			destKey = rawTarget
-			destLabel = rawTarget
+			// Regular destination - check if this IP maps to a hostname destination first
+			if existingDestKey, ok := endpointIPToDestKey[rawTarget]; ok {
+				// Use the hostname destination key to merge TrafficSim data with MTR
+				destKey = existingDestKey
+				if existing := destMetrics[destKey]; existing != nil {
+					destLabel = existing.Hostname
+				} else {
+					destLabel = existingDestKey
+				}
+			} else {
+				destKey = rawTarget
+				destLabel = rawTarget
+			}
 		}
 
 		if destMetrics[destKey] == nil {
