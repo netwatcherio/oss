@@ -660,12 +660,27 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		destKey := trace.Target
 		destLabel := trace.Target
 		isAgentTarget := false
-		if trace.TargetAgent > 0 {
-			if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
-				// Use agent node ID as destKey so edges connect to agent nodes
-				destKey = fmt.Sprintf("agent:%d", trace.TargetAgent)
+		targetAgentID := trace.TargetAgent
+
+		// First check explicit target_agent field
+		if targetAgentID > 0 {
+			if targetAgent, ok := agentByID[targetAgentID]; ok {
+				destKey = fmt.Sprintf("agent:%d", targetAgentID)
 				destLabel = targetAgent.Name
 				isAgentTarget = true
+			}
+		}
+
+		// Fallback: check if target IP matches any agent's PublicIPOverride
+		if !isAgentTarget {
+			normalizedTarget := stripPort(trace.Target)
+			if matchedAgentID, ok := agentIPToID[normalizedTarget]; ok {
+				// This target is an agent - use agent node
+				if targetAgent, ok := agentByID[matchedAgentID]; ok {
+					destKey = fmt.Sprintf("agent:%d", matchedAgentID)
+					destLabel = targetAgent.Name
+					isAgentTarget = true
+				}
 			}
 		}
 
@@ -876,8 +891,23 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		agentID := parseUint(parts[0])
 		target := stripPort(parts[1]) // Normalize target (remove port) for matching
 
+		// Check if target is an agent
+		var destKey, destLabel string
+		isAgentTarget := false
+		if matchedAgentID, ok := agentIPToID[target]; ok {
+			if targetAgent, ok := agentByID[matchedAgentID]; ok {
+				destKey = fmt.Sprintf("agent:%d", matchedAgentID)
+				destLabel = targetAgent.Name
+				isAgentTarget = true
+			}
+		}
+		if !isAgentTarget {
+			destKey = target
+			destLabel = target
+		}
+
 		if destMetrics[target] == nil {
-			destMetrics[target] = &DestinationSummary{Target: target}
+			destMetrics[target] = &DestinationSummary{Target: target, Hostname: destLabel}
 			destAgents[target] = make(map[uint]bool)
 			destProbes[target] = make(map[string]bool)
 		}
@@ -892,34 +922,36 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
 
-		// Create destination node if not exists
-		if _, exists := nodeMap[target]; !exists {
-			nodeMap[target] = &NetworkMapNode{
-				ID:        target,
-				Type:      "destination",
-				Label:     target,
-				IP:        target,
-				PathCount: 1,
-				Layer:     100,
-				Status:    "healthy",
+		// Create destination node only if not targeting an agent
+		if !isAgentTarget {
+			if _, exists := nodeMap[destKey]; !exists {
+				nodeMap[destKey] = &NetworkMapNode{
+					ID:        destKey,
+					Type:      "destination",
+					Label:     destLabel,
+					IP:        target,
+					PathCount: 1,
+					Layer:     100,
+					Status:    "healthy",
+				}
 			}
-		}
 
-		// Update node metrics
-		if node, exists := nodeMap[target]; exists {
-			node.AvgLatency = (node.AvgLatency + stats.AvgLatency) / 2
-			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
+			// Update node metrics
+			if node, exists := nodeMap[destKey]; exists {
+				node.AvgLatency = (node.AvgLatency + stats.AvgLatency) / 2
+				node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
+			}
 		}
 
 		// Create direct agent-to-destination edge if no MTR path exists
 		if mtrDestinations[target] == nil || !mtrDestinations[target][agentID] {
 			agentNodeID := fmt.Sprintf("agent:%d", agentID)
-			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
+			edgeID := fmt.Sprintf("%s->%s", agentNodeID, destKey)
 			if _, exists := edgeMap[edgeID]; !exists {
 				edgeMap[edgeID] = &NetworkMapEdge{
 					ID:         edgeID,
 					Source:     agentNodeID,
-					Target:     target,
+					Target:     destKey,
 					AvgLatency: stats.AvgLatency,
 					PacketLoss: stats.PacketLoss,
 					PathCount:  1,
@@ -946,10 +978,19 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			destKey = fmt.Sprintf("agent:%d", stats.TargetAgent)
 			destType = "agent"
 			if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
-				destLabel = fmt.Sprintf("%s (%s)", targetAgent.Name, rawTarget)
+				destLabel = targetAgent.Name
 				if targetAgent.PublicIPOverride != "" {
 					rawTarget = targetAgent.PublicIPOverride
 				}
+			} else {
+				destLabel = rawTarget
+			}
+		} else if matchedAgentID, ok := agentIPToID[rawTarget]; ok {
+			// Fallback: target IP matches an agent
+			destKey = fmt.Sprintf("agent:%d", matchedAgentID)
+			destType = "agent"
+			if targetAgent, ok := agentByID[matchedAgentID]; ok {
+				destLabel = targetAgent.Name
 			} else {
 				destLabel = rawTarget
 			}
