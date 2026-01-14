@@ -149,6 +149,24 @@
           </div>
         </div>
       </div>
+
+      <!-- Diagnostic Errors -->
+      <div v-if="result.errors && (result.errors.geoip || result.errors.whois)" class="result-section errors-section">
+        <div class="section-header error-header">
+          <i class="bi bi-exclamation-triangle"></i>
+          <span>Lookup Issues</span>
+        </div>
+        <div class="errors-content">
+          <div v-if="result.errors.geoip" class="error-item">
+            <span class="error-label">GeoIP:</span>
+            <span class="error-text">{{ result.errors.geoip }}</span>
+          </div>
+          <div v-if="result.errors.whois" class="error-item">
+            <span class="error-label">WHOIS:</span>
+            <span class="error-text">{{ result.errors.whois }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty State -->
@@ -585,5 +603,42 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+/* Error diagnostics */
+.errors-section {
+  margin-top: 1rem;
+}
+
+.error-header {
+  background: #fef3c7 !important;
+  color: #d97706 !important;
+}
+
+.errors-content {
+  padding: 1rem;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.error-item {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.error-item:last-child {
+  margin-bottom: 0;
+}
+
+.error-label {
+  font-weight: 600;
+  color: #b45309;
+}
+
+.error-text {
+  color: #78350f;
 }
 </style>

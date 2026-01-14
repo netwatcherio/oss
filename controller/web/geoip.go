@@ -289,11 +289,16 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 			result.Hostname = query
 		}
 
+		// Track errors for diagnostics
+		var geoErr, whoisErr string
+
 		// GeoIP lookup using resolved IP
 		if geoStore != nil {
 			if ch != nil {
 				geoResult, err := geoip.LookupWithCache(ctx.Request().Context(), ch, geoStore, resolvedIP)
-				if err == nil {
+				if err != nil {
+					geoErr = err.Error()
+				} else if geoResult != nil {
 					result.GeoIP = geoResult
 					if geoResult.Cached {
 						result.Cached = true
@@ -302,17 +307,23 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 				}
 			} else {
 				directResult, err := geoStore.LookupAll(resolvedIP)
-				if err == nil {
+				if err != nil {
+					geoErr = err.Error()
+				} else if directResult != nil {
 					result.GeoIP = &geoip.CachedResult{LookupResult: directResult, Cached: false}
 				}
 			}
+		} else {
+			geoErr = "GeoIP databases not configured"
 		}
 
 		// WHOIS lookup - use original query for domains, resolved IP for IPs
 		whoisQuery := query
 		if ch != nil {
 			whoisResult, err := whois.LookupWithCache(ctx.Request().Context(), ch, whoisQuery, 15*time.Second)
-			if err == nil {
+			if err != nil {
+				whoisErr = err.Error()
+			} else if whoisResult != nil {
 				result.Whois = whoisResult
 				if whoisResult.Cached && result.CacheTime == nil {
 					result.Cached = true
@@ -320,13 +331,35 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 				}
 			}
 		} else {
+			// No cache, try direct lookup
 			sanitized, err := whois.ValidateQuery(whoisQuery)
-			if err == nil {
+			if err != nil {
+				whoisErr = "invalid query: " + err.Error()
+			} else {
 				whoisResult, err := whois.LookupWithTimeout(sanitized, 15*time.Second)
-				if err == nil {
+				if err != nil {
+					whoisErr = err.Error()
+				} else if whoisResult != nil {
 					result.Whois = &whois.CachedResult{Result: whoisResult, Cached: false}
 				}
 			}
+		}
+
+		// Include errors in response for diagnostics
+		if geoErr != "" || whoisErr != "" {
+			_ = ctx.JSON(iris.Map{
+				"ip":         result.IP,
+				"hostname":   result.Hostname,
+				"geoip":      result.GeoIP,
+				"whois":      result.Whois,
+				"cached":     result.Cached,
+				"cache_time": result.CacheTime,
+				"errors": iris.Map{
+					"geoip": geoErr,
+					"whois": whoisErr,
+				},
+			})
+			return
 		}
 
 		_ = ctx.JSON(result)

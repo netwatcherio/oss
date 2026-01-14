@@ -545,4 +545,8 @@ export interface IPLookupResult {
     whois?: WhoisResult;
     cached: boolean;
     cache_time?: string;
+    errors?: {
+        geoip?: string;
+        whois?: string;
+    };
 }
