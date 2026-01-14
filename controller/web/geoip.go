@@ -3,7 +3,9 @@ package web
 
 import (
 	"database/sql"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"netwatcher-controller/internal/geoip"
@@ -15,6 +17,7 @@ import (
 // CombinedLookupResult contains both GeoIP and WHOIS data for an IP.
 type CombinedLookupResult struct {
 	IP        string              `json:"ip"`
+	Hostname  string              `json:"hostname,omitempty"` // Original hostname if resolved
 	GeoIP     *geoip.CachedResult `json:"geoip,omitempty"`
 	Whois     *whois.CachedResult `json:"whois,omitempty"`
 	Cached    bool                `json:"cached"`
@@ -239,23 +242,57 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 
 	// GET /lookup/combined?ip={ip}
 	// Combined GeoIP + WHOIS lookup in one request
+	// Accepts both IP addresses and hostnames
 	lookup.Get("/combined", func(ctx iris.Context) {
-		ip := ctx.URLParam("ip")
-		if ip == "" {
+		query := ctx.URLParam("ip")
+		if query == "" {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": "ip parameter is required"})
 			return
 		}
 
+		// Determine if input is an IP or hostname
+		query = strings.TrimSpace(query)
+		resolvedIP := query
+		isHostname := false
+
+		// Check if it's a valid IP address
+		if net.ParseIP(query) == nil {
+			// Not an IP, try to resolve as hostname
+			ips, err := net.LookupIP(query)
+			if err != nil || len(ips) == 0 {
+				ctx.StatusCode(http.StatusBadRequest)
+				_ = ctx.JSON(iris.Map{"error": "could not resolve hostname: " + query})
+				return
+			}
+			// Use the first resolved IP (prefer IPv4)
+			for _, ip := range ips {
+				if ipv4 := ip.To4(); ipv4 != nil {
+					resolvedIP = ipv4.String()
+					break
+				}
+			}
+			if resolvedIP == query {
+				// No IPv4 found, use first IPv6
+				resolvedIP = ips[0].String()
+			}
+			isHostname = true
+		}
+
 		result := CombinedLookupResult{
-			IP:     ip,
+			IP:     resolvedIP,
 			Cached: false,
 		}
 
-		// GeoIP lookup
+		// Add hostname to result if we resolved one
+		if isHostname {
+			result.Hostname = query
+		}
+
+		// GeoIP lookup using resolved IP
 		if geoStore != nil {
 			if ch != nil {
-				geoResult, err := geoip.LookupWithCache(ctx.Request().Context(), ch, geoStore, ip)
+				geoResult, err := geoip.LookupWithCache(ctx.Request().Context(), ch, geoStore, resolvedIP)
 				if err == nil {
 					result.GeoIP = geoResult
 					if geoResult.Cached {
@@ -264,16 +301,17 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 					}
 				}
 			} else {
-				directResult, err := geoStore.LookupAll(ip)
+				directResult, err := geoStore.LookupAll(resolvedIP)
 				if err == nil {
 					result.GeoIP = &geoip.CachedResult{LookupResult: directResult, Cached: false}
 				}
 			}
 		}
 
-		// WHOIS lookup
+		// WHOIS lookup - use original query for domains, resolved IP for IPs
+		whoisQuery := query
 		if ch != nil {
-			whoisResult, err := whois.LookupWithCache(ctx.Request().Context(), ch, ip, 15*time.Second)
+			whoisResult, err := whois.LookupWithCache(ctx.Request().Context(), ch, whoisQuery, 15*time.Second)
 			if err == nil {
 				result.Whois = whoisResult
 				if whoisResult.Cached && result.CacheTime == nil {
@@ -282,7 +320,7 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 				}
 			}
 		} else {
-			sanitized, err := whois.ValidateQuery(ip)
+			sanitized, err := whois.ValidateQuery(whoisQuery)
 			if err == nil {
 				whoisResult, err := whois.LookupWithTimeout(sanitized, 15*time.Second)
 				if err == nil {

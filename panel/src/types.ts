@@ -540,6 +540,7 @@ export interface WhoisResult {
 
 export interface IPLookupResult {
     ip: string;
+    hostname?: string; // Original hostname if resolved
     geoip?: GeoIPResult;
     whois?: WhoisResult;
     cached: boolean;

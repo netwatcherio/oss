@@ -32,7 +32,12 @@
       <div class="result-header">
         <div class="result-ip">
           <span v-if="geoip?.country?.code" class="country-flag">{{ countryFlag }}</span>
-          <span class="ip-text">{{ result.ip }}</span>
+          <div class="ip-info">
+            <span v-if="result.hostname" class="hostname-text">{{ result.hostname }}</span>
+            <span class="ip-text" :class="{ 'resolved': result.hostname }">
+              {{ result.hostname ? `→ ${result.ip}` : result.ip }}
+            </span>
+          </div>
           <span v-if="result.cached" class="cached-badge">
             <i class="bi bi-database"></i> Cached
           </span>
@@ -353,11 +358,29 @@ defineExpose({ performLookup, searchQuery });
   font-size: 1.5rem;
 }
 
+.ip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.hostname-text {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
 .ip-text {
   font-size: 1.25rem;
   font-weight: 600;
   color: #1f2937;
   font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.ip-text.resolved {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #6b7280;
 }
 
 .cached-badge {
