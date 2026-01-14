@@ -112,6 +112,10 @@ export default defineComponent({
     intervalSec: {
       type: Number,
       default: 60 // Default to 60 seconds if not provided
+    },
+    aggregationBucketSec: {
+      type: Number,
+      default: 0 // 0 means no aggregation, use intervalSec
     }
   },
   setup(props) {
@@ -122,11 +126,20 @@ export default defineComponent({
     const isDark = ref(themeService.getTheme() === 'dark');
     let themeUnsubscribe: (() => void) | null = null;
 
-    // Calculate the maximum allowed gap dynamically based on probe interval
-    // Use 3x the interval to avoid breaking lines with sparse data
+    // Calculate the maximum allowed gap dynamically
+    // When aggregated, use the bucket size; otherwise use probe interval
+    // Use 3x the interval to allow for some variance without breaking lines
     const maxAllowedGap = computed(() => {
-      const intervalMs = (props.intervalSec || 60) * 1000;
-      return Math.max(intervalMs * 3, 180000); // At least 3 minutes minimum
+      // If aggregation bucket is specified and > 0, use it as the basis
+      // Otherwise fall back to probe interval
+      const baseIntervalSec = props.aggregationBucketSec > 0 
+        ? props.aggregationBucketSec 
+        : (props.intervalSec || 60);
+      
+      const intervalMs = baseIntervalSec * 1000;
+      // For aggregated data, allow 3x the bucket size for gaps
+      // Minimum gap is 3 minutes for safety
+      return Math.max(intervalMs * 3, 180000);
     });
 
     const timeRanges = [

@@ -90,6 +90,7 @@ const state = reactive({
   selectedDirection: 0 as number,  // Index of selected direction tab
   selectedMtrData: [] as ProbeData[],  // MTR data for modal display (used by AGENT probe View All)
   rawGroups: {} as any,
+  aggregationBucketSec: 0,  // Current aggregation bucket size (0 = no aggregation)
 });
 
 // Pagination state for MTR results
@@ -673,6 +674,9 @@ async function loadProbeData(): Promise<void> {
     }
   }
 
+  // Store aggregation bucket size in state for graph components
+  state.aggregationBucketSec = aggregateSec;
+
   console.log(`[Probe] Loading data: range=${rangeHours.toFixed(1)}h, idealBucket=${Math.ceil(rangeSec/targetPoints)}s, aggregate=${aggregateSec}s`);
 
   const tasks = state.probes.map(async (p) => {
@@ -959,7 +963,7 @@ watch(
                     <i class="bi bi-graph-down fs-1 mb-2 d-block"></i>
                     <p class="mb-0">No latency data available for this direction</p>
                   </div>
-                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
+                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" />
                 </div>
               </div>
             </div>
@@ -1121,7 +1125,7 @@ watch(
               <p class="text-muted">No ping data found for the selected time range</p>
             </div>
             <div v-else>
-              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" />
+              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" />
             </div>
           </div>
         </div>

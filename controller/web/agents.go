@@ -214,4 +214,50 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 		}
 		_ = ctx.JSON(iris.Map{"pin": pin})
 	})
+
+	// POST /workspaces/{id}/agents/{agentID}/regenerate - requires CanManage (ADMIN+)
+	// Invalidates existing PSK (disconnecting any connected agent), marks agent as uninitialized,
+	// and issues a new PIN for reinstallation on a different machine.
+	aid.Post("/regenerate", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+		var body struct {
+			PinLength  int `json:"pinLength"`
+			TTLSeconds int `json:"ttlSeconds"`
+		}
+		_ = ctx.ReadJSON(&body)
+
+		// 1) Clear the PSK hash - this invalidates any existing sessions
+		// The connected agent will fail auth on the next heartbeat/reconnect attempt
+		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, map[string]any{
+			"psk_hash":    "",    // Clear PSK - invalidates existing sessions
+			"initialized": false, // Mark as not initialized - requires bootstrap
+		}); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// 2) Issue a new PIN for reinstallation
+		var ttl *time.Duration
+		if body.TTLSeconds > 0 {
+			d := time.Duration(body.TTLSeconds) * time.Second
+			ttl = &d
+		}
+		pinPepper := os.Getenv("PIN_PEPPER")
+		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), pinPepper, ttl)
+		if err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// 3) Get updated agent info
+		a, _ := agent.GetAgentByID(ctx.Request().Context(), db, aID)
+
+		_ = ctx.JSON(iris.Map{
+			"pin":   pin,
+			"agent": a,
+		})
+	})
 }

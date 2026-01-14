@@ -63,6 +63,11 @@ function logout() {
           <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
         </button>
 
+        <!-- IP Lookup -->
+        <router-link to="/lookup" class="nav-icon-btn" title="IP/WHOIS Lookup">
+          <i class="bi bi-search"></i>
+        </router-link>
+
         <!-- Alerts -->
         <router-link to="/workspaces/alerts" class="nav-icon-btn" title="Alerts">
           <i class="bi bi-bell"></i>

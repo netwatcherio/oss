@@ -147,6 +147,14 @@ export const AgentService = {
         const { data } = await request.post(`/workspaces/${workspaceId}/agents/${agentId}/issue-pin`, body ?? {});
         return data as { pin: string; expiresAt?: string;[k: string]: any };
     },
+    /**
+     * Regenerate agent credentials: invalidates existing PSK (disconnecting any connected agent),
+     * marks agent as uninitialized, and issues a new PIN for reinstallation.
+     */
+    async regenerate(workspaceId: number | string, agentId: number | string, body?: { pinLength?: number; ttlSeconds?: number }) {
+        const { data } = await request.post(`/workspaces/${workspaceId}/agents/${agentId}/regenerate`, body ?? {});
+        return data as { pin: string; agent: Agent };
+    },
 };
 
 /** ===== Utils (local) ===== */

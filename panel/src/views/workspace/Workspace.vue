@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {computed, onMounted, reactive} from "vue";
+import {computed, onMounted, onUnmounted, reactive, ref} from "vue";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Loader from "@/components/Loader.vue";
@@ -9,6 +9,12 @@ import WorkspaceNetworkMap from "@/components/WorkspaceNetworkMap.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
 import {usePermissions} from "@/composables/usePermissions";
+
+// Reactive now timestamp for live status updates (updates every 30 seconds)
+const now = ref(new Date());
+let nowInterval: ReturnType<typeof setInterval> | null = null;
+let agentPollInterval: ReturnType<typeof setInterval> | null = null;
+
 // --- STATE: add stores for net-info by agent ---
 const state = reactive({
   workspace: {} as Workspace & { my_role?: Role },
@@ -89,16 +95,16 @@ const offlineAgentsCount = computed(() =>
 );
 
 function getOnlineStatus(agent: Agent) {
-  const currentTime = new Date();
+  const currentTime = now.value;
   const agentTime = new Date(agent.updated_at)
   const timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000;
   return timeDifference <= 1;
 }
 
 function getLastSeenText(agent: Agent) {
-  const now = new Date();
+  const currentNow = now.value;
   const lastSeen = new Date(agent.updated_at?.toString());
-  const diffMs = now.getTime() - lastSeen.getTime();
+  const diffMs = currentNow.getTime() - lastSeen.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
@@ -106,6 +112,18 @@ function getLastSeenText(agent: Agent) {
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   return `${diffDays}d ago`;
+}
+
+// Refresh agent list for live status updates
+async function refreshAgents() {
+  const id = router.currentRoute.value.params["wID"] as string;
+  if (!id) return;
+  try {
+    const res = await AgentService.list(id);
+    state.agents = res.data;
+  } catch (e) {
+    // Silent fail - don't disrupt UI
+  }
 }
 
 onMounted(async () => {
@@ -129,6 +147,25 @@ onMounted(async () => {
     console.log(state.netInfoByAgent)
   } finally {
     state.loading = false
+  }
+
+  // Set up interval to update "now" every 30 seconds for live status display
+  nowInterval = setInterval(() => {
+    now.value = new Date();
+  }, 30000);
+
+  // Poll agents every 30 seconds to get updated_at from server
+  agentPollInterval = setInterval(refreshAgents, 30000);
+})
+
+onUnmounted(() => {
+  if (nowInterval) {
+    clearInterval(nowInterval);
+    nowInterval = null;
+  }
+  if (agentPollInterval) {
+    clearInterval(agentPollInterval);
+    agentPollInterval = null;
   }
 })
 </script>
@@ -313,10 +350,10 @@ onMounted(async () => {
               v-if="agent.initialized" 
               :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}/deactivate`"
               class="btn btn-sm btn-outline-warning"
-              title="Deactivate agent"
+              title="Regenerate agent credentials for reinstallation"
             >
-              <i class="bi bi-moon-stars"></i>
-              <span class="d-none d-lg-inline">&nbsp;Deactivate</span>
+              <i class="bi bi-arrow-repeat"></i>
+              <span class="d-none d-lg-inline">&nbsp;Regenerate</span>
             </router-link>
             <router-link 
               :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}/edit`"
