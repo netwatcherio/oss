@@ -855,7 +855,15 @@ class WorkspaceNetworkVisualization {
     const clickedNode = this.nodes.find(n => n.id === targetId);
     const relevantPathIds = new Set<string>(clickedNode?.path_ids || []);
     
-    // Special handling for AGENT nodes
+    // Build set of agent node IDs for checking if target is an agent
+    const agentNodeIds = new Set<string>();
+    const agentIPs = new Set<string>();
+    this.nodes.filter(n => n.type === 'agent').forEach(n => {
+      agentNodeIds.add(n.id);
+      if (n.ip) agentIPs.add(n.ip);
+    });
+    
+    // Special handling for AGENT nodes - ONLY show agent-to-agent paths
     // path_id format is "sourceAgentId:target" (e.g., "1:google.com", "3:agent:1")
     if (clickedNode?.type === 'agent' && clickedNode.agent_id) {
       const agentId = clickedNode.agent_id;
@@ -865,24 +873,33 @@ class WorkspaceNetworkVisualization {
           const sourceAgentId = parseInt(sourceAgentStr, 10);
           const pathTarget = targetParts.join(':'); // rejoin in case target has ':' like "agent:3"
           
-          // Include paths ORIGINATING from this agent
-          if (sourceAgentId === agentId) {
-            relevantPathIds.add(link.path_id);
-          }
-          // Include paths TARGETING this agent (agent-to-agent)
-          if (pathTarget === targetId || pathTarget === `agent:${agentId}`) {
-            relevantPathIds.add(link.path_id);
+          // Check if this path's target is an agent (agent-to-agent only)
+          const targetIsAgent = pathTarget.startsWith('agent:') || agentIPs.has(pathTarget);
+          
+          if (targetIsAgent) {
+            // Include paths ORIGINATING from this agent to another agent
+            if (sourceAgentId === agentId) {
+              relevantPathIds.add(link.path_id);
+            }
+            // Include paths TARGETING this agent (reverse direction)
+            if (pathTarget === targetId || pathTarget === `agent:${agentId}`) {
+              relevantPathIds.add(link.path_id);
+            }
           }
         }
       });
     }
-    // For destination nodes
+    // For destination nodes - include ALL paths to this destination from any agent
     else if (clickedNode?.type === 'destination') {
       this.links.forEach(link => {
         if (link.path_id) {
           const [, ...targetParts] = link.path_id.split(':');
           const pathTarget = targetParts.join(':');
-          if (pathTarget === targetId || pathTarget === clickedNode.label) {
+          // Match by ID, label, hostname, or IP
+          if (pathTarget === targetId || 
+              pathTarget === clickedNode.label ||
+              pathTarget === clickedNode.hostname ||
+              pathTarget === clickedNode.ip) {
             relevantPathIds.add(link.path_id);
           }
         }
