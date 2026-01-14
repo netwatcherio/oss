@@ -83,11 +83,11 @@
                 </td>
                 <td class="endpoints-cell">
                   <template v-if="dest.endpoint_ips?.length">
-                    <span v-for="ip in dest.endpoint_ips.slice(0, 3)" :key="ip" class="endpoint-ip">
-                      {{ ip }}
-                    </span>
-                    <span v-if="dest.endpoint_ips.length > 3" class="text-muted">
-                      +{{ dest.endpoint_ips.length - 3 }} more
+                    <span class="endpoint-list">
+                      {{ dest.endpoint_ips.slice(0, 3).join(', ') }}
+                      <span v-if="dest.endpoint_ips.length > 3" class="text-muted">
+                        +{{ dest.endpoint_ips.length - 3 }} more
+                      </span>
                     </span>
                   </template>
                   <span v-else class="text-muted">-</span>
