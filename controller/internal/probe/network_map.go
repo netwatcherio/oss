@@ -417,9 +417,10 @@ LIMIT 5000
 }
 
 type trafficStats struct {
-	AvgRTT     float64
-	PacketLoss float64
-	Count      int
+	AvgRTT      float64
+	PacketLoss  float64
+	Count       int
+	TargetAgent uint // Track if this is targeting another agent
 }
 
 func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]trafficStats, error) {
@@ -439,6 +440,7 @@ func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []u
 SELECT 
     agent_id,
     target,
+    target_agent,
     payload_raw
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
@@ -456,18 +458,20 @@ LIMIT 5000
 
 	// Aggregate in Go
 	type trafficAccum struct {
-		totalRTT  float64
-		totalLoss float64
-		count     int
+		totalRTT    float64
+		totalLoss   float64
+		count       int
+		targetAgent uint
 	}
 	accum := make(map[string]*trafficAccum)
 
 	for rows.Next() {
 		var agentID uint64
 		var target string
+		var targetAgent uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
 			continue
 		}
 
@@ -486,7 +490,7 @@ LIMIT 5000
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
 		if accum[key] == nil {
-			accum[key] = &trafficAccum{}
+			accum[key] = &trafficAccum{targetAgent: uint(targetAgent)}
 		}
 		accum[key].totalRTT += payload.AverageRTT
 		accum[key].totalLoss += payload.LossPercentage
@@ -497,9 +501,10 @@ LIMIT 5000
 	for key, a := range accum {
 		if a.count > 0 {
 			results[key] = trafficStats{
-				AvgRTT:     a.totalRTT / float64(a.count),
-				PacketLoss: a.totalLoss / float64(a.count),
-				Count:      a.count,
+				AvgRTT:      a.totalRTT / float64(a.count),
+				PacketLoss:  a.totalLoss / float64(a.count),
+				Count:       a.count,
+				TargetAgent: a.targetAgent,
 			}
 		}
 	}
@@ -822,52 +827,76 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			continue
 		}
 		agentID := parseUint(parts[0])
-		target := stripPort(parts[1]) // Normalize target (remove port) for matching
+		rawTarget := stripPort(parts[1]) // Normalize target (remove port) for matching
 
-		if destMetrics[target] == nil {
-			destMetrics[target] = &DestinationSummary{Target: target}
-			destAgents[target] = make(map[uint]bool)
-			destProbes[target] = make(map[string]bool)
+		// Resolve destination key - if targeting an agent, use agent node
+		var destKey, destLabel string
+		var destType string = "destination"
+
+		if stats.TargetAgent > 0 {
+			// Targeting another agent - use agent node ID
+			destKey = fmt.Sprintf("agent:%d", stats.TargetAgent)
+			destType = "agent"
+			if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+				destLabel = fmt.Sprintf("%s (%s)", targetAgent.Name, rawTarget)
+				if targetAgent.PublicIPOverride != "" {
+					rawTarget = targetAgent.PublicIPOverride
+				}
+			} else {
+				destLabel = rawTarget
+			}
+		} else {
+			// Regular destination
+			destKey = rawTarget
+			destLabel = rawTarget
 		}
-		destAgents[target][agentID] = true
-		destProbes[target]["TRAFFICSIM"] = true
+
+		if destMetrics[rawTarget] == nil {
+			destMetrics[rawTarget] = &DestinationSummary{Target: rawTarget, Hostname: destLabel}
+			destAgents[rawTarget] = make(map[uint]bool)
+			destProbes[rawTarget] = make(map[string]bool)
+		}
+		destAgents[rawTarget][agentID] = true
+		destProbes[rawTarget]["TRAFFICSIM"] = true
 
 		// Update metrics
-		if destMetrics[target].AvgLatency == 0 {
-			destMetrics[target].AvgLatency = stats.AvgRTT
+		if destMetrics[rawTarget].AvgLatency == 0 {
+			destMetrics[rawTarget].AvgLatency = stats.AvgRTT
 		} else {
-			destMetrics[target].AvgLatency = (destMetrics[target].AvgLatency + stats.AvgRTT) / 2
+			destMetrics[rawTarget].AvgLatency = (destMetrics[rawTarget].AvgLatency + stats.AvgRTT) / 2
 		}
-		destMetrics[target].PacketLoss = (destMetrics[target].PacketLoss + stats.PacketLoss) / 2
+		destMetrics[rawTarget].PacketLoss = (destMetrics[rawTarget].PacketLoss + stats.PacketLoss) / 2
 
-		// Create destination node if not exists
-		if _, exists := nodeMap[target]; !exists {
-			nodeMap[target] = &NetworkMapNode{
-				ID:        target,
-				Type:      "destination",
-				Label:     target,
-				IP:        target,
-				PathCount: 1,
-				Layer:     100,
-				Status:    "healthy",
+		// Only create destination node if NOT targeting an agent (agent nodes already exist)
+		if destType == "destination" {
+			if _, exists := nodeMap[destKey]; !exists {
+				nodeMap[destKey] = &NetworkMapNode{
+					ID:        destKey,
+					Type:      "destination",
+					Label:     destLabel,
+					IP:        rawTarget,
+					PathCount: 1,
+					Layer:     100,
+					Status:    "healthy",
+				}
+			}
+
+			// Update node
+			if node, exists := nodeMap[destKey]; exists {
+				node.AvgLatency = (node.AvgLatency + stats.AvgRTT) / 2
+				node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
 			}
 		}
 
-		// Update node
-		if node, exists := nodeMap[target]; exists {
-			node.AvgLatency = (node.AvgLatency + stats.AvgRTT) / 2
-			node.PacketLoss = (node.PacketLoss + stats.PacketLoss) / 2
-		}
-
 		// Create direct agent-to-destination edge if no MTR path exists
-		if mtrDestinations[target] == nil || !mtrDestinations[target][agentID] {
+		if mtrDestinations[rawTarget] == nil || !mtrDestinations[rawTarget][agentID] {
 			agentNodeID := fmt.Sprintf("agent:%d", agentID)
-			edgeID := fmt.Sprintf("%s->%s", agentNodeID, target)
+			edgeID := fmt.Sprintf("%s->%s", agentNodeID, destKey)
 			if _, exists := edgeMap[edgeID]; !exists {
 				edgeMap[edgeID] = &NetworkMapEdge{
 					ID:         edgeID,
 					Source:     agentNodeID,
-					Target:     target,
+					Target:     destKey,
 					AvgLatency: stats.AvgRTT,
 					PacketLoss: stats.PacketLoss,
 					PathCount:  1,
