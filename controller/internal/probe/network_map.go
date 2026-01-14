@@ -563,15 +563,43 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		var lastHopID string
 
 		log.Printf("[NetworkMap] Processing trace agent %d -> %s with %d hops", trace.AgentID, trace.Target, len(trace.Hops))
-		for i, hop := range trace.Hops {
-			hopNum := i + 1
 
-			// Generate hop node ID - keyed by IP
-			var hopNodeID string
+		// First pass: identify context for unknown hops (prev/next known IPs)
+		// This allows unknowns to merge when they're between the same known infrastructure
+		hopContexts := make([]struct {
+			PrevKnownIP string
+			NextKnownIP string
+		}, len(trace.Hops))
+
+		lastKnownIP := ""
+		for i, hop := range trace.Hops {
 			if hop.IP != "" {
+				lastKnownIP = hop.IP
+			}
+			hopContexts[i].PrevKnownIP = lastKnownIP
+		}
+
+		// Reverse pass for next known IP
+		nextKnownIP := destKey // destination is the final known IP
+		for i := len(trace.Hops) - 1; i >= 0; i-- {
+			if trace.Hops[i].IP != "" {
+				nextKnownIP = trace.Hops[i].IP
+			}
+			hopContexts[i].NextKnownIP = nextKnownIP
+		}
+
+		for i, hop := range trace.Hops {
+			// Generate hop node ID - known IPs merge by IP, unknowns merge by context
+			var hopNodeID string
+			isUnknown := hop.IP == ""
+
+			if !isUnknown {
 				hopNodeID = hop.IP // KEY BY IP for shared hop detection
 			} else {
-				hopNodeID = fmt.Sprintf("unknown-hop-%d-%d", trace.AgentID, hopNum)
+				// Unknown hop: key by surrounding known IPs so similar paths merge
+				// Format: unknown:{prevKnownIP}:{nextKnownIP}
+				ctx := hopContexts[i]
+				hopNodeID = fmt.Sprintf("unknown:%s:%s", ctx.PrevKnownIP, ctx.NextKnownIP)
 			}
 
 			// Determine status based on metrics
@@ -580,29 +608,33 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 				hopStatus = "critical"
 			} else if hop.PacketLoss >= 10 || hop.AvgLatency > 100 {
 				hopStatus = "degraded"
-			} else if hop.IP == "" {
+			} else if isUnknown {
 				hopStatus = "unknown"
 			}
 
 			// Create or update hop node
 			if _, exists := nodeMap[hopNodeID]; !exists {
+				label := hop.IP
+				if isUnknown {
+					label = "?"
+				}
 				nodeMap[hopNodeID] = &NetworkMapNode{
 					ID:           hopNodeID,
 					Type:         "hop",
-					Label:        fmt.Sprintf("%d", hopNum),
+					Label:        label,
 					IP:           hop.IP,
 					Hostname:     hop.Hostname,
-					HopNumber:    hopNum,
+					HopNumber:    0, // Don't track hop number since it varies by source
 					AvgLatency:   hop.AvgLatency,
 					PacketLoss:   hop.PacketLoss,
 					PathCount:    1,
-					Layer:        hopNum,
+					Layer:        i + 1, // Use for initial positioning only
 					Status:       hopStatus,
 					SharedAgents: []uint{trace.AgentID},
 					PathIDs:      []string{pathID},
 				}
 			} else {
-				// Aggregate - this is a SHARED hop (same IP from different paths)
+				// Aggregate - this is a SHARED hop (same IP or same context from different paths)
 				node := nodeMap[hopNodeID]
 				node.AvgLatency = (node.AvgLatency*float64(node.PathCount) + hop.AvgLatency) / float64(node.PathCount+1)
 				node.PacketLoss = (node.PacketLoss*float64(node.PathCount) + hop.PacketLoss) / float64(node.PathCount+1)

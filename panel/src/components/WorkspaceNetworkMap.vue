@@ -541,45 +541,80 @@ class WorkspaceNetworkVisualization {
     const hopNodes = this.nodes.filter(n => n.type === 'hop');
     const destNodes = this.nodes.filter(n => n.type === 'destination');
 
-    // Fix agent positions on left
-    agentNodes.forEach((node, i) => {
-      node.fx = 30;
-      node.fy = (this.height / (agentNodes.length + 1)) * (i + 1);
+    // Build adjacency list for BFS depth calculation
+    const adjacency = new Map<string, Set<string>>();
+    this.links.forEach(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+      const targetId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+      if (!adjacency.has(sourceId)) adjacency.set(sourceId, new Set());
+      if (!adjacency.has(targetId)) adjacency.set(targetId, new Set());
+      adjacency.get(sourceId)!.add(targetId);
+      adjacency.get(targetId)!.add(sourceId);
     });
 
-    // Fix destination positions on right (leave room for labels)
-    destNodes.forEach((node, i) => {
-      node.fx = this.width - 150;
-      node.fy = (this.height / (destNodes.length + 1)) * (i + 1);
-    });
-
-    // Position hops by hop number, spread vertically
-    const maxHop = Math.max(...hopNodes.map(n => n.hop_number || 1), 1);
-    const hopWidth = (this.width - 220) / (maxHop + 1);
+    // BFS from agents to calculate depth (layer) for each node
+    const nodeDepth = new Map<string, number>();
+    const queue: { id: string; depth: number }[] = [];
     
-    // Group hops by hop number
-    const hopsByNum: Record<number, D3Node[]> = {};
-    hopNodes.forEach(node => {
-      const num = node.hop_number || 1;
-      if (!hopsByNum[num]) hopsByNum[num] = [];
-      hopsByNum[num].push(node);
+    // Start BFS from all agents (layer 0)
+    agentNodes.forEach(n => {
+      nodeDepth.set(n.id, 0);
+      queue.push({ id: n.id, depth: 0 });
     });
 
-    // Position each hop group
-    Object.entries(hopsByNum).forEach(([numStr, nodes]) => {
-      const num = parseInt(numStr);
-      const xPos = 60 + hopWidth * num;
-      nodes.forEach((node, i) => {
+    while (queue.length > 0) {
+      const { id, depth } = queue.shift()!;
+      const neighbors = adjacency.get(id) || new Set();
+      neighbors.forEach(neighborId => {
+        if (!nodeDepth.has(neighborId)) {
+          nodeDepth.set(neighborId, depth + 1);
+          queue.push({ id: neighborId, depth: depth + 1 });
+        }
+      });
+    }
+
+    // Find max depth for scaling
+    const maxDepth = Math.max(...Array.from(nodeDepth.values()), 1);
+    const layerWidth = (this.width - 200) / (maxDepth + 1);
+
+    // Group nodes by depth layer
+    const nodesByLayer: Map<number, D3Node[]> = new Map();
+    this.nodes.forEach(node => {
+      let depth = nodeDepth.get(node.id) ?? 0;
+      // Force destinations to rightmost layer
+      if (node.type === 'destination') {
+        depth = maxDepth;
+      }
+      if (!nodesByLayer.has(depth)) nodesByLayer.set(depth, []);
+      nodesByLayer.get(depth)!.push(node);
+    });
+
+    // Position all nodes with fixed positions (rigid layout)
+    nodesByLayer.forEach((layerNodes, depth) => {
+      const xPos = 50 + layerWidth * depth;
+      const ySpacing = this.height / (layerNodes.length + 1);
+      
+      layerNodes.forEach((node, i) => {
+        node.fx = xPos;
+        node.fy = ySpacing * (i + 1);
         node.x = xPos;
-        node.y = (this.height / (nodes.length + 1)) * (i + 1);
+        node.y = ySpacing * (i + 1);
       });
     });
 
-    // Tighter simulation forces for clean layout
+    // Destinations get extra right margin for labels
+    destNodes.forEach((node, i) => {
+      node.fx = this.width - 120;
+      if (!nodesByLayer.get(maxDepth)?.includes(node)) {
+        node.fy = (this.height / (destNodes.length + 1)) * (i + 1);
+      }
+    });
+
+    // Minimal simulation forces - nodes are fixed, just need links to render
     this.simulation
-      .force('link', d3.forceLink<D3Node, D3Link>(this.links).id(d => d.id).distance(30).strength(0.8))
-      .force('charge', d3.forceManyBody().strength(-50))
-      .force('collision', d3.forceCollide(12));
+      .force('link', d3.forceLink<D3Node, D3Link>(this.links).id(d => d.id).distance(40).strength(0.1))
+      .force('charge', null)  // Disable charge in rigid mode
+      .force('collision', null);  // Disable collision in rigid mode
   }
 
   private createDragBehavior() {
