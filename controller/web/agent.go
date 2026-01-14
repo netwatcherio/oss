@@ -35,11 +35,11 @@ type agentLoginResponse struct {
 //	api := app.Party("/api")
 //	agentAuth(api, r.DB)
 func agentAuth(api iris.Party, db *gorm.DB) {
-	// Base: /workspaces/{workspaceID}/agents/{agentID}
+	// Base: /agent
 	base := api.Party("/agent")
 
-	// POST /workspaces/{workspaceID}/agents/{agentID}/login
-	base.Post("/", func(ctx iris.Context) {
+	// POST /agent or /agent/login - both work for agent authentication
+	loginHandler := func(ctx iris.Context) {
 		ctx.ContentType("application/json")
 
 		var req agentLoginRequest
@@ -99,5 +99,9 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 		// 3) Neither PSK nor PIN
 		ctx.StatusCode(http.StatusBadRequest)
 		_ = ctx.JSON(agentLoginResponse{Error: "psk_or_pin_required"})
-	})
+	}
+
+	// Register handler on both routes for compatibility
+	base.Post("/", loginHandler)
+	base.Post("/login", loginHandler)
 }

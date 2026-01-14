@@ -47,7 +47,7 @@ const linuxInstallCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
   const host = window.location.host;  // e.g., api.netwatcher.io
   const useSSL = window.location.protocol === 'https:';
-  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/main/install.sh | sudo bash -s -- \\
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
   --host ${host} \\
   --ssl ${useSSL} \\
   --workspace ${state.workspace.id} \\

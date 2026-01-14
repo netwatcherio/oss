@@ -425,7 +425,7 @@ func GetLatestSysInfoForAgent(
 
 // GetProbeDataAggregated returns aggregated rows for a given probe using time-bucket averaging.
 // aggregateSec specifies the bucket size in seconds (e.g., 60 = 1 minute buckets).
-// This reduces data transfer by grouping raw points into aggregated summaries.
+// This fetches raw data and aggregates in Go for robustness with JSON parsing.
 func GetProbeDataAggregated(
 	ctx context.Context,
 	db *sql.DB,
@@ -440,115 +440,295 @@ func GetProbeDataAggregated(
 		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
 	}
 
-	var clauses []string
-	clauses = append(clauses, fmt.Sprintf("probe_id = %d", probeID))
-	if probeType != "" {
-		clauses = append(clauses, fmt.Sprintf("type = %s", chQuoteString(probeType)))
-	}
-	if !from.IsZero() {
-		clauses = append(clauses, fmt.Sprintf("created_at >= %s", chQuoteTime(from)))
-	}
-	if !to.IsZero() {
-		clauses = append(clauses, fmt.Sprintf("created_at <= %s", chQuoteTime(to)))
+	// Fetch raw data from ClickHouse
+	rawData, err := GetProbeDataByProbe(ctx, db, probeID, from, to, false, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch raw probe data: %w", err)
 	}
 
-	where := strings.Join(clauses, " AND ")
+	if len(rawData) == 0 {
+		return []ProbeData{}, nil
+	}
 
-	// Build aggregation query based on probe type
-	var q string
+	// Aggregate in Go based on probe type
+	bucketDuration := time.Duration(aggregateSec) * time.Second
+
 	switch probeType {
 	case "PING":
-		q = fmt.Sprintf(`
-SELECT 
-    toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
-    max(created_at) as latest_created_at,
-    max(received_at) as latest_received_at,
-    type,
-    probe_id,
-    any(agent_id) as agent_id,
-    any(probe_agent_id) as probe_agent_id,
-    max(triggered) as triggered,
-    '' as triggered_reason,
-    any(target) as target,
-    any(target_agent) as target_agent,
-    concat('{',
-        '"latency":', toString(round(avg(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
-        '"minLatency":', toString(round(min(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
-        '"maxLatency":', toString(round(max(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
-        '"avgLatency":', toString(round(avg(JSONExtractFloat(payload_raw, 'latency')), 2)), ',',
-        '"packetLoss":', toString(round(avg(JSONExtractFloat(payload_raw, 'packetLoss')), 2)), ',',
-        '"packetsSent":', toString(sum(JSONExtractUInt(payload_raw, 'packetsSent'))), ',',
-        '"packetsLost":', toString(sum(JSONExtractUInt(payload_raw, 'packetsLost'))), ',',
-        '"jitter":', toString(round(avg(JSONExtractFloat(payload_raw, 'jitter')), 2)),
-    '}') as payload_raw
-FROM probe_data
-WHERE %s
-GROUP BY bucket, type, probe_id
-ORDER BY bucket DESC
-`, aggregateSec, where)
-
+		return aggregatePingData(rawData, bucketDuration, limit), nil
 	case "TRAFFICSIM":
-		q = fmt.Sprintf(`
-SELECT 
-    toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
-    max(created_at) as latest_created_at,
-    max(received_at) as latest_received_at,
-    type,
-    probe_id,
-    any(agent_id) as agent_id,
-    any(probe_agent_id) as probe_agent_id,
-    max(triggered) as triggered,
-    '' as triggered_reason,
-    any(target) as target,
-    any(target_agent) as target_agent,
-    concat('{',
-        '"reportTime":"', formatDateTime(bucket, '%%Y-%%m-%%dT%%H:%%i:%%sZ'), '",',
-        '"averageRTT":', toString(round(avg(JSONExtractFloat(payload_raw, 'averageRTT')), 2)), ',',
-        '"minRTT":', toString(round(min(JSONExtractFloat(payload_raw, 'minRTT')), 2)), ',',
-        '"maxRTT":', toString(round(max(JSONExtractFloat(payload_raw, 'maxRTT')), 2)), ',',
-        '"totalPackets":', toString(sum(JSONExtractUInt(payload_raw, 'totalPackets'))), ',',
-        '"lostPackets":', toString(sum(JSONExtractUInt(payload_raw, 'lostPackets'))), ',',
-        '"outOfSequence":', toString(sum(JSONExtractUInt(payload_raw, 'outOfSequence'))), ',',
-        '"duplicates":', toString(sum(JSONExtractUInt(payload_raw, 'duplicates'))),
-    '}') as payload_raw
-FROM probe_data
-WHERE %s
-GROUP BY bucket, type, probe_id
-ORDER BY bucket DESC
-`, aggregateSec, where)
-
+		return aggregateTrafficSimData(rawData, bucketDuration, limit), nil
 	default:
-		// For other types, fall back to non-aggregated
-		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
+		// For other types, just bucket by time without payload aggregation
+		return bucketProbeData(rawData, bucketDuration, limit), nil
+	}
+}
+
+// pingAggInputPayload represents the JSON structure for PING probe data (used for aggregation input)
+type pingAggInputPayload struct {
+	Latency     float64 `json:"latency"`
+	PacketLoss  float64 `json:"packetLoss"`
+	PacketsSent uint64  `json:"packetsSent"`
+	PacketsLost uint64  `json:"packetsLost"`
+	Jitter      float64 `json:"jitter"`
+}
+
+// AggregatedPingPayload represents aggregated PING data
+type AggregatedPingPayload struct {
+	Latency     float64 `json:"latency"`
+	MinLatency  float64 `json:"minLatency"`
+	MaxLatency  float64 `json:"maxLatency"`
+	AvgLatency  float64 `json:"avgLatency"`
+	PacketLoss  float64 `json:"packetLoss"`
+	PacketsSent uint64  `json:"packetsSent"`
+	PacketsRecv uint64  `json:"packetsRecv"`
+}
+
+// TrafficSimPayload represents the JSON structure for TRAFFICSIM probe data
+type TrafficSimPayload struct {
+	ReportTime    string  `json:"reportTime"`
+	AverageRTT    float64 `json:"averageRTT"`
+	MinRTT        float64 `json:"minRTT"`
+	MaxRTT        float64 `json:"maxRTT"`
+	TotalPackets  uint64  `json:"totalPackets"`
+	LostPackets   uint64  `json:"lostPackets"`
+	OutOfSequence uint64  `json:"outOfSequence"`
+	Duplicates    uint64  `json:"duplicates"`
+}
+
+func getBucketKey(t time.Time, duration time.Duration) time.Time {
+	return t.Truncate(duration)
+}
+
+func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit int) []ProbeData {
+	type pingBucket struct {
+		latencies    []float64
+		minLatencies []float64
+		maxLatencies []float64
+		packetLoss   []float64
+		packetsSent  uint64
+		packetsRecv  uint64
+		lastData     ProbeData
 	}
 
-	if limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", limit)
-	}
+	buckets := make(map[time.Time]*pingBucket)
 
-	rows, err := db.QueryContext(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("aggregated query failed: %w", err)
-	}
-	defer rows.Close()
-
-	var out []ProbeData
-	for rows.Next() {
-		var r ProbeData
-		var bucket time.Time // We select bucket but scan into created_at below
-		var trigBool bool
-		var typeStr string
-		var payloadStr string
-		if err := rows.Scan(
-			&bucket, &r.CreatedAt, &r.ReceivedAt, &typeStr, &r.ProbeID, &r.AgentID, &r.ProbeAgentID,
-			&trigBool, &r.TriggeredReason, &r.Target, &r.TargetAgent, &payloadStr,
-		); err != nil {
-			return nil, err
+	for _, d := range rawData {
+		if d.Payload == nil || len(d.Payload) == 0 {
+			continue
 		}
-		r.Type = Type(typeStr)
-		r.Triggered = trigBool
-		r.Payload = json.RawMessage(payloadStr)
-		out = append(out, r)
+		var p PingPayload
+		if err := json.Unmarshal(d.Payload, &p); err != nil {
+			continue // Skip malformed payloads
+		}
+
+		key := getBucketKey(d.CreatedAt, bucketDuration)
+		b, ok := buckets[key]
+		if !ok {
+			b = &pingBucket{}
+			buckets[key] = b
+		}
+
+		// Use the existing PingPayload fields - AvgRtt, MinRtt, MaxRtt are time.Duration (nanoseconds)
+		avg := float64(p.AvgRtt) / float64(time.Millisecond)
+		minRtt := float64(p.MinRtt) / float64(time.Millisecond)
+		maxRtt := float64(p.MaxRtt) / float64(time.Millisecond)
+		b.latencies = append(b.latencies, avg)
+		b.minLatencies = append(b.minLatencies, minRtt)
+		b.maxLatencies = append(b.maxLatencies, maxRtt)
+		b.packetLoss = append(b.packetLoss, p.PacketLoss)
+		b.packetsSent += uint64(p.PacketsSent)
+		b.packetsRecv += uint64(p.PacketsRecv)
+
+		// Keep the most recent data for metadata
+		if d.CreatedAt.After(b.lastData.CreatedAt) {
+			b.lastData = d
+		}
 	}
-	return out, rows.Err()
+
+	// Convert buckets to ProbeData
+	result := make([]ProbeData, 0, len(buckets))
+	for bucketTime, b := range buckets {
+		if len(b.latencies) == 0 {
+			continue
+		}
+
+		agg := AggregatedPingPayload{
+			Latency:     avg(b.latencies),
+			MinLatency:  minF(b.minLatencies),
+			MaxLatency:  maxF(b.maxLatencies),
+			AvgLatency:  avg(b.latencies),
+			PacketLoss:  avg(b.packetLoss),
+			PacketsSent: b.packetsSent,
+			PacketsRecv: b.packetsRecv,
+		}
+
+		payload, _ := json.Marshal(agg)
+		pd := b.lastData
+		pd.CreatedAt = bucketTime
+		pd.Payload = payload
+		result = append(result, pd)
+	}
+
+	// Sort by time descending
+	sortProbeDataDesc(result)
+
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result
+}
+
+func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, limit int) []ProbeData {
+	type tsBucket struct {
+		rtts          []float64
+		minRTT        float64
+		maxRTT        float64
+		totalPackets  uint64
+		lostPackets   uint64
+		outOfSequence uint64
+		duplicates    uint64
+		lastData      ProbeData
+		initialized   bool
+	}
+
+	buckets := make(map[time.Time]*tsBucket)
+
+	for _, d := range rawData {
+		if d.Payload == nil || len(d.Payload) == 0 {
+			continue
+		}
+		var p TrafficSimPayload
+		if err := json.Unmarshal(d.Payload, &p); err != nil {
+			continue
+		}
+
+		key := getBucketKey(d.CreatedAt, bucketDuration)
+		b, ok := buckets[key]
+		if !ok {
+			b = &tsBucket{minRTT: p.MinRTT, maxRTT: p.MaxRTT}
+			buckets[key] = b
+		}
+
+		b.rtts = append(b.rtts, p.AverageRTT)
+		if !b.initialized || p.MinRTT < b.minRTT {
+			b.minRTT = p.MinRTT
+		}
+		if p.MaxRTT > b.maxRTT {
+			b.maxRTT = p.MaxRTT
+		}
+		b.totalPackets += p.TotalPackets
+		b.lostPackets += p.LostPackets
+		b.outOfSequence += p.OutOfSequence
+		b.duplicates += p.Duplicates
+		b.initialized = true
+
+		if d.CreatedAt.After(b.lastData.CreatedAt) {
+			b.lastData = d
+		}
+	}
+
+	result := make([]ProbeData, 0, len(buckets))
+	for bucketTime, b := range buckets {
+		if len(b.rtts) == 0 {
+			continue
+		}
+
+		agg := TrafficSimPayload{
+			ReportTime:    bucketTime.UTC().Format(time.RFC3339),
+			AverageRTT:    avg(b.rtts),
+			MinRTT:        b.minRTT,
+			MaxRTT:        b.maxRTT,
+			TotalPackets:  b.totalPackets,
+			LostPackets:   b.lostPackets,
+			OutOfSequence: b.outOfSequence,
+			Duplicates:    b.duplicates,
+		}
+
+		payload, _ := json.Marshal(agg)
+		pd := b.lastData
+		pd.CreatedAt = bucketTime
+		pd.Payload = payload
+		result = append(result, pd)
+	}
+
+	sortProbeDataDesc(result)
+
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result
+}
+
+func bucketProbeData(rawData []ProbeData, bucketDuration time.Duration, limit int) []ProbeData {
+	buckets := make(map[time.Time]ProbeData)
+
+	for _, d := range rawData {
+		key := getBucketKey(d.CreatedAt, bucketDuration)
+		if existing, ok := buckets[key]; !ok || d.CreatedAt.After(existing.CreatedAt) {
+			buckets[key] = d
+		}
+	}
+
+	result := make([]ProbeData, 0, len(buckets))
+	for _, d := range buckets {
+		result = append(result, d)
+	}
+
+	sortProbeDataDesc(result)
+
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result
+}
+
+func avg(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	return sum / float64(len(vals))
+}
+
+func minF(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+func maxF(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
+func sortProbeDataDesc(data []ProbeData) {
+	for i := 0; i < len(data)-1; i++ {
+		for j := i + 1; j < len(data); j++ {
+			if data[j].CreatedAt.After(data[i].CreatedAt) {
+				data[i], data[j] = data[j], data[i]
+			}
+		}
+	}
 }

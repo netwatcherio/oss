@@ -16,7 +16,7 @@ This guide covers installing, configuring, and managing the NetWatcher Agent on 
 
 ```bash
 # Download and run the installer
-curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/main/install.sh | sudo bash -s -- \
+curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \
   --host YOUR_CONTROLLER_HOST \
   --ssl true \
   --workspace YOUR_WORKSPACE_ID \
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/main/install.sh 
 
 ```powershell
 # Download the installer
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/main/install.ps1" -OutFile "install.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
 
 # Run the installer
 .\install.ps1 -Host "YOUR_CONTROLLER_HOST" -SSL $true -Workspace YOUR_WORKSPACE_ID -Id YOUR_AGENT_ID -Pin "YOUR_AGENT_PIN"
