@@ -38,10 +38,38 @@ const validation = computed(() => ({
 
 const isFormValid = computed(() => validation.value.name.valid);
 
-// Installation command with PIN
-const installCommand = computed(() => {
+// GitHub repository for install scripts
+const agentGitHubUrl = 'https://github.com/netwatcherio/agent';
+const agentReleasesUrl = 'https://github.com/netwatcherio/agent/releases';
+
+// Linux/macOS install script command
+const linuxInstallCommand = computed(() => {
   if (!state.createdAgent || !state.agentPin) return "";
-  const host = window.location.host; // host:port without protocol
+  const host = window.location.host;  // e.g., api.netwatcher.io
+  const useSSL = window.location.protocol === 'https:';
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/main/install.sh | sudo bash -s -- \\
+  --host ${host} \\
+  --ssl ${useSSL} \\
+  --workspace ${state.workspace.id} \\
+  --id ${state.createdAgent.id} \\
+  --pin ${state.agentPin}`;
+});
+
+// Windows PowerShell install command  
+const windowsInstallCommand = computed(() => {
+  if (!state.createdAgent || !state.agentPin) return "";
+  const host = window.location.host;
+  const useSSL = window.location.protocol === 'https:';
+  return `# Download the installer
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/main/install.ps1" -OutFile "install.ps1"
+# Run the installer
+.\\install.ps1 -Host "${host}" -SSL $${useSSL ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.createdAgent.id} -Pin "${state.agentPin}"`;
+});
+
+// Docker command (alternative)
+const dockerInstallCommand = computed(() => {
+  if (!state.createdAgent || !state.agentPin) return "";
+  const host = window.location.host;
   const useSSL = window.location.protocol === 'https:';
   return `docker run -d --name netwatcher-agent \\
   -e CONTROLLER_HOST="${host}" \\
@@ -51,18 +79,6 @@ const installCommand = computed(() => {
   -e AGENT_PIN="${state.agentPin}" \\
   --restart unless-stopped \\
   netwatcher/agent:latest`;
-});
-
-const binaryCommand = computed(() => {
-  if (!state.createdAgent || !state.agentPin) return "";
-  const host = window.location.host;
-  const useSSL = window.location.protocol === 'https:';
-  return `CONTROLLER_HOST="${host}" \\
-CONTROLLER_SSL="${useSSL}" \\
-WORKSPACE_ID="${state.workspace.id}" \\
-AGENT_ID="${state.createdAgent.id}" \\
-AGENT_PIN="${state.agentPin}" \\
-./netwatcher-agent`;
 });
 
 onMounted(async () => {
@@ -316,28 +332,55 @@ async function submit() {
             </p>
           </div>
 
-          <!-- Docker Command -->
+          <!-- GitHub Link -->
           <div class="setup-section">
-            <h6><i class="bi bi-box me-2"></i>Docker Installation</h6>
+            <h6><i class="bi bi-github me-2"></i>Installation Resources</h6>
+            <div class="d-flex gap-2 flex-wrap">
+              <a :href="agentGitHubUrl" target="_blank" class="btn btn-outline-dark btn-sm">
+                <i class="bi bi-github me-1"></i>Agent Repository
+              </a>
+              <a :href="agentReleasesUrl" target="_blank" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-download me-1"></i>Download Releases
+              </a>
+            </div>
+          </div>
+
+          <!-- Linux/macOS Command -->
+          <div class="setup-section">
+            <h6><i class="bi bi-terminal me-2"></i>Linux / macOS (Recommended)</h6>
             <div class="command-block">
-              <pre class="command-code">{{ installCommand }}</pre>
+              <pre class="command-code">{{ linuxInstallCommand }}</pre>
               <button 
                 class="btn btn-sm btn-outline-secondary copy-btn"
-                @click="copyToClipboard(installCommand)"
+                @click="copyToClipboard(linuxInstallCommand)"
               >
                 <i class="bi bi-clipboard"></i> Copy
               </button>
             </div>
           </div>
 
-          <!-- Binary Command -->
+          <!-- Windows Command -->
           <div class="setup-section">
-            <h6><i class="bi bi-terminal me-2"></i>Binary Installation</h6>
+            <h6><i class="bi bi-windows me-2"></i>Windows PowerShell</h6>
             <div class="command-block">
-              <pre class="command-code">{{ binaryCommand }}</pre>
+              <pre class="command-code">{{ windowsInstallCommand }}</pre>
               <button 
                 class="btn btn-sm btn-outline-secondary copy-btn"
-                @click="copyToClipboard(binaryCommand)"
+                @click="copyToClipboard(windowsInstallCommand)"
+              >
+                <i class="bi bi-clipboard"></i> Copy
+              </button>
+            </div>
+          </div>
+
+          <!-- Docker Command (Alternative) -->
+          <div class="setup-section">
+            <h6><i class="bi bi-box me-2"></i>Docker (Alternative)</h6>
+            <div class="command-block">
+              <pre class="command-code">{{ dockerInstallCommand }}</pre>
+              <button 
+                class="btn btn-sm btn-outline-secondary copy-btn"
+                @click="copyToClipboard(dockerInstallCommand)"
               >
                 <i class="bi bi-clipboard"></i> Copy
               </button>
