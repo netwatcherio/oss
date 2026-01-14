@@ -699,7 +699,6 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 
 		agentNodeID := fmt.Sprintf("agent:%d", trace.AgentID)
-		pathID := fmt.Sprintf("%d:%s", trace.AgentID, trace.Target)
 
 		// Determine destination key - for agent-to-agent, use target agent's NODE ID
 		destKey := trace.Target
@@ -728,6 +727,9 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 				}
 			}
 		}
+
+		// Create pathID using destKey (so agent-to-agent uses agent:X format)
+		pathID := fmt.Sprintf("%d:%s", trace.AgentID, destKey)
 
 		// Track destination for this path
 		if destMetrics[destKey] == nil {
