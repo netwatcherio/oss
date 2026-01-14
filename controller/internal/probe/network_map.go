@@ -66,13 +66,13 @@ type NetworkMapNode struct {
 
 // NetworkMapEdge represents an edge (link) between nodes
 type NetworkMapEdge struct {
-	ID         string  `json:"id"`
-	Source     string  `json:"source"`
-	Target     string  `json:"target"`
-	AvgLatency float64 `json:"avg_latency"`
-	PacketLoss float64 `json:"packet_loss"`
-	PathCount  int     `json:"path_count"`
-	PathID     string  `json:"path_id,omitempty"` // Unique path identifier (agent:target)
+	ID         string   `json:"id"`
+	Source     string   `json:"source"`
+	Target     string   `json:"target"`
+	AvgLatency float64  `json:"avg_latency"`
+	PacketLoss float64  `json:"packet_loss"`
+	PathCount  int      `json:"path_count"`
+	PathIDs    []string `json:"path_ids,omitempty"` // All path identifiers that use this edge (agent:target format)
 }
 
 // DestinationSummary provides quick overview of a destination's health
@@ -856,10 +856,11 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					AvgLatency: hop.AvgLatency,
 					PacketLoss: hop.PacketLoss,
 					PathCount:  1,
-					PathID:     pathID,
+					PathIDs:    []string{pathID},
 				}
 			} else {
 				edgeMap[edgeID].PathCount++
+				edgeMap[edgeID].PathIDs = append(edgeMap[edgeID].PathIDs, pathID)
 			}
 
 			// Update for next iteration
@@ -899,10 +900,11 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					Source:    lastHopID,
 					Target:    destKey,
 					PathCount: 1,
-					PathID:    pathID,
+					PathIDs:   []string{pathID},
 				}
 			} else {
 				edgeMap[edgeID].PathCount++
+				edgeMap[edgeID].PathIDs = append(edgeMap[edgeID].PathIDs, pathID)
 			}
 		} else if len(trace.Hops) == 0 {
 			// No hops - direct connection from agent to destination
@@ -913,8 +915,11 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					Source:    agentNodeID,
 					Target:    destKey,
 					PathCount: 1,
-					PathID:    pathID,
+					PathIDs:   []string{pathID},
 				}
+			} else {
+				edgeMap[edgeID].PathCount++
+				edgeMap[edgeID].PathIDs = append(edgeMap[edgeID].PathIDs, pathID)
 			}
 		}
 	}

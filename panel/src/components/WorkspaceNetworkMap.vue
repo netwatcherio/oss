@@ -868,8 +868,8 @@ class WorkspaceNetworkVisualization {
     if (clickedNode?.type === 'agent' && clickedNode.agent_id) {
       const agentId = clickedNode.agent_id;
       this.links.forEach(link => {
-        if (link.path_id) {
-          const [sourceAgentStr, ...targetParts] = link.path_id.split(':');
+        (link.path_ids || []).forEach(pathId => {
+          const [sourceAgentStr, ...targetParts] = pathId.split(':');
           const sourceAgentId = parseInt(sourceAgentStr, 10);
           const pathTarget = targetParts.join(':'); // rejoin in case target has ':' like "agent:3"
           
@@ -879,30 +879,30 @@ class WorkspaceNetworkVisualization {
           if (targetIsAgent) {
             // Include paths ORIGINATING from this agent to another agent
             if (sourceAgentId === agentId) {
-              relevantPathIds.add(link.path_id);
+              relevantPathIds.add(pathId);
             }
             // Include paths TARGETING this agent (reverse direction)
             if (pathTarget === targetId || pathTarget === `agent:${agentId}`) {
-              relevantPathIds.add(link.path_id);
+              relevantPathIds.add(pathId);
             }
           }
-        }
+        });
       });
     }
     // For destination nodes - include ALL paths to this destination from any agent
     else if (clickedNode?.type === 'destination') {
       this.links.forEach(link => {
-        if (link.path_id) {
-          const [, ...targetParts] = link.path_id.split(':');
+        (link.path_ids || []).forEach(pathId => {
+          const [, ...targetParts] = pathId.split(':');
           const pathTarget = targetParts.join(':');
           // Match by ID, label, hostname, or IP
           if (pathTarget === targetId || 
               pathTarget === clickedNode.label ||
               pathTarget === clickedNode.hostname ||
               pathTarget === clickedNode.ip) {
-            relevantPathIds.add(link.path_id);
+            relevantPathIds.add(pathId);
           }
-        }
+        });
       });
     }
     
@@ -945,8 +945,9 @@ class WorkspaceNetworkVisualization {
     });
     
     this.links.forEach(link => {
-      // Only include edges whose path_id is in our relevant set
-      if (link.path_id && relevantPathIds.has(link.path_id)) {
+      // Check if this edge has ANY path_id that's in our relevant set
+      const hasMatchingPath = (link.path_ids || []).some(pid => relevantPathIds.has(pid));
+      if (hasMatchingPath) {
         connectedEdgeIds.add(link.id);
         
         const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
@@ -1001,7 +1002,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   avg_latency: number;
   packet_loss: number;
   path_count: number;
-  path_id?: string;
+  path_ids?: string[];
 }
 
 </script>

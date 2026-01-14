@@ -358,7 +358,7 @@ export interface NetworkMapEdge {
     avg_latency: number;
     packet_loss: number;
     path_count: number;
-    path_id?: string;
+    path_ids?: string[]; // All paths that use this edge
 }
 
 export interface DestinationSummary {
