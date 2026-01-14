@@ -461,8 +461,8 @@ func GetProbeDataAggregated(
 		q = fmt.Sprintf(`
 SELECT 
     toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
-    max(created_at) as created_at,
-    max(received_at) as received_at,
+    max(created_at) as latest_created_at,
+    max(received_at) as latest_received_at,
     type,
     probe_id,
     any(agent_id) as agent_id,
@@ -491,8 +491,8 @@ ORDER BY bucket DESC
 		q = fmt.Sprintf(`
 SELECT 
     toStartOfInterval(created_at, INTERVAL %d SECOND) as bucket,
-    max(created_at) as created_at,
-    max(received_at) as received_at,
+    max(created_at) as latest_created_at,
+    max(received_at) as latest_received_at,
     type,
     probe_id,
     any(agent_id) as agent_id,
