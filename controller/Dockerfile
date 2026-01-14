@@ -16,19 +16,23 @@ COPY . .
 # Build with optimizations
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o main .
 
-# Runtime stage
-FROM alpine:3.19
+# Runtime stage - using Debian slim for better package availability
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
 # Install runtime dependencies (whois needed for WHOIS lookups)
-RUN apk add --no-cache ca-certificates tzdata whois
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    whois \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
 COPY --from=builder /app/main .
 
 # Create non-root user
-RUN adduser -D -g '' appuser
+RUN useradd -r -s /bin/false appuser
 USER appuser
 
 EXPOSE 8080
