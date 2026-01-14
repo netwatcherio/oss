@@ -304,8 +304,22 @@ const highlightDestination = (target: string) => {
   }
 };
 
+// Debounce function for resize
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+const handleResize = () => {
+  if (resizeTimeout) clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    if (visualization && containerRef.value) {
+      visualization.resize(containerRef.value.clientWidth);
+    }
+  }, 200);
+};
+
 onMounted(async () => {
   await fetchMapData();
+  
+  // Add resize listener for responsive visualization
+  window.addEventListener('resize', handleResize);
   
   // Subscribe to workspace updates
   if (props.workspaceId) {
@@ -319,6 +333,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
+  if (resizeTimeout) clearTimeout(resizeTimeout);
   visualization?.destroy();
 });
 
@@ -346,13 +362,15 @@ watch(() => props.workspaceId, (newId, oldId) => {
 
 // Helper functions for route display
 const formatPathId = (pathId: string): string => {
-  // Format: "agentId:target" -> "Agent X → target"
+  // Format: "agentId:target" -> "Agent Name → Target Name"
   const parts = pathId.split(':');
   if (parts.length >= 2) {
     const agentId = parseInt(parts[0]);
-    const target = parts.slice(1).join(':'); // Handle IPv6
+    const target = parts.slice(1).join(':'); // Handle IPv6 or "agent:X"
     const agentName = getAgentName(agentId);
-    return `${agentName} → ${target}`;
+    // Resolve target - if it's "agent:X", convert to agent name
+    const targetLabel = getDestinationLabel(target);
+    return `${agentName} → ${targetLabel}`;
   }
   return pathId;
 };
@@ -409,7 +427,8 @@ class WorkspaceNetworkVisualization {
   ) {
     this.container = container;
     this.onNodeClick = onNodeClick;
-    this.width = Math.min(container.clientWidth, 1200) - this.margin.left - this.margin.right;
+    // Use full container width (no cap) for responsiveness
+    this.width = container.clientWidth - this.margin.left - this.margin.right;
     this.height = 550 - this.margin.top - this.margin.bottom;
 
     this.processData(data);
@@ -439,10 +458,15 @@ class WorkspaceNetworkVisualization {
   private initializeSVG() {
     d3.select(this.container).selectAll('*').remove();
 
+    const totalWidth = this.width + this.margin.left + this.margin.right;
+    const totalHeight = this.height + this.margin.top + this.margin.bottom;
+    
     this.svg = d3.select(this.container)
       .append('svg')
-      .attr('width', this.width + this.margin.left + this.margin.right)
-      .attr('height', this.height + this.margin.top + this.margin.bottom);
+      .attr('width', '100%')  // Responsive width
+      .attr('height', totalHeight)
+      .attr('viewBox', `0 0 ${totalWidth} ${totalHeight}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
 
     // Add defs for gradients
     const defs = this.svg.append('defs');
@@ -848,6 +872,29 @@ class WorkspaceNetworkVisualization {
   public destroy() {
     this.simulation.stop();
     d3.select(this.container).selectAll('*').remove();
+  }
+
+  public resize(newWidth: number) {
+    const adjustedWidth = newWidth - this.margin.left - this.margin.right;
+    if (Math.abs(adjustedWidth - this.width) < 50) return; // Skip small changes
+    
+    this.width = adjustedWidth;
+    const totalWidth = this.width + this.margin.left + this.margin.right;
+    const totalHeight = this.height + this.margin.top + this.margin.bottom;
+    
+    // Update SVG viewBox
+    this.svg
+      .attr('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+    
+    // Update simulation center force
+    this.simulation.force('center', d3.forceCenter(this.width / 2, this.height / 2));
+    
+    // Re-apply layout if hierarchical
+    if (this.layoutMode === 'hierarchical') {
+      this.applyHierarchicalLayout();
+    }
+    
+    this.simulation.alpha(0.3).restart();
   }
 
   public highlightPath(targetId: string) {

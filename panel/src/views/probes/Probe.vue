@@ -862,6 +862,8 @@ watch(
           range
           :dark="isDark"
           :enable-time-picker="true"
+          :multi-calendars="true"
+          :auto-apply="true"
           :preset-dates="[
             { label: 'Last Hour', value: [new Date(Date.now() - 60*60*1000), new Date()] },
             { label: 'Last 3 Hours', value: [new Date(Date.now() - 3*60*60*1000), new Date()] },
@@ -870,7 +872,6 @@ watch(
             { label: 'Last 7 Days', value: [new Date(Date.now() - 7*24*60*60*1000), new Date()] },
             { label: 'Last 30 Days', value: [new Date(Date.now() - 30*24*60*60*1000), new Date()] }
           ]"
-          :timezone="Intl.DateTimeFormat().resolvedOptions().timeZone"
           format="MMM dd, yyyy HH:mm"
           preview-format="MMM dd, yyyy HH:mm"
           input-class-name="date-picker-input"

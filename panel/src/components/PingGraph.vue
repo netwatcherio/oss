@@ -304,10 +304,18 @@ export default defineComponent({
         points: []
       };
 
-      // Y-axis scaling (based on 90th percentile of Avg RTT)
-      const avgVals = decimated.map(d => toMs(d.avg_rtt)).sort((a, b) => a - b);
-      const p90 = avgVals.length ? avgVals[Math.floor(avgVals.length * 0.9)] : 0;
-      const yMax = Math.min(Math.ceil((p90 * 1.5) / 50) * 50 || 100, 500);
+      // Y-axis scaling - include ALL RTT values (min, avg, max) to prevent overflow
+      // Use 95th percentile of max RTT with 20% headroom, round to nice number
+      const allRttVals = decimated.flatMap(d => [toMs(d.min_rtt), toMs(d.avg_rtt), toMs(d.max_rtt)]).filter(v => v > 0).sort((a, b) => a - b);
+      const p95Max = allRttVals.length ? allRttVals[Math.floor(allRttVals.length * 0.95)] : 100;
+      const actualMax = allRttVals.length ? allRttVals[allRttVals.length - 1] : 100;
+      // Use whichever is larger: p95 with headroom, or actual max (to never cut off data)
+      const rawMax = Math.max(p95Max * 1.2, actualMax * 1.05);
+      // Round up to nice intervals: <100→10s, <500→50s, <1000→100s, else 500s
+      const yMax = rawMax < 100 ? Math.ceil(rawMax / 10) * 10 :
+                   rawMax < 500 ? Math.ceil(rawMax / 50) * 50 :
+                   rawMax < 1000 ? Math.ceil(rawMax / 100) * 100 :
+                   Math.ceil(rawMax / 500) * 500;
 
       if (showAll) {
         const anomalyThreshold = 300; // ms

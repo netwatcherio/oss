@@ -1115,11 +1115,24 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 	}
 
-	// Build destination summaries
+	// Build a set of ALL endpoint IPs across all destinations
+	// These should NOT appear as separate destinations (they're already endpoints of hostnames)
+	allEndpointIPs := make(map[string]bool)
+	for _, endpoints := range destEndpoints {
+		for ip := range endpoints {
+			allEndpointIPs[ip] = true
+		}
+	}
+
+	// Build destination summaries (filtering out endpoint IPs that belong to other destinations)
 	destinations := make([]DestinationSummary, 0, len(destMetrics))
 	for target, summary := range destMetrics {
 		if target == "" {
 			continue
+		}
+		// Skip if this target is an endpoint IP of another destination (not the parent)
+		if allEndpointIPs[target] && destEndpoints[target] == nil {
+			continue // This target IP is an endpoint of a different hostname destination
 		}
 		summary.AgentCount = len(destAgents[target])
 		summary.ProbeTypes = make([]string, 0, len(destProbes[target]))
