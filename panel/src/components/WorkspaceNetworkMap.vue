@@ -73,8 +73,13 @@
                   </span>
                 </td>
                 <td class="target-cell">
-                  <div class="target-name">{{ dest.hostname || dest.target }}</div>
-                  <div v-if="dest.hostname && dest.hostname !== dest.target" class="target-ip">{{ dest.target }}</div>
+                  <span v-if="isAgentTarget(dest.target)" class="agent-badge-inline">
+                    <i class="bi bi-hdd-network"></i> {{ getDestinationLabel(dest.target) }}
+                  </span>
+                  <template v-else>
+                    <div class="target-name">{{ dest.hostname || dest.target }}</div>
+                    <div v-if="dest.hostname && dest.hostname !== dest.target" class="target-ip">{{ dest.target }}</div>
+                  </template>
                 </td>
                 <td class="endpoints-cell">
                   <template v-if="dest.endpoint_ips?.length">
@@ -358,6 +363,20 @@ const getAgentName = (agentId: number): string => {
     n => n.type === 'agent' && n.id === `agent:${agentId}`
   );
   return agentNode?.label || `Agent ${agentId}`;
+};
+
+// Get display label for destination target (resolves agent:ID to agent name)
+const getDestinationLabel = (target: string): string => {
+  if (target.startsWith('agent:')) {
+    const agentId = parseInt(target.substring(6), 10);
+    return getAgentName(agentId);
+  }
+  return target;
+};
+
+// Check if destination target is an agent
+const isAgentTarget = (target: string): boolean => {
+  return target.startsWith('agent:');
 };
 
 // Expose refresh method for parent components
@@ -832,63 +851,64 @@ class WorkspaceNetworkVisualization {
   }
 
   public highlightPath(targetId: string) {
-    // Find all nodes and edges connected to the target in BOTH directions
-    const connectedNodeIds = new Set<string>([targetId]);
-    const connectedEdgeIds = new Set<string>();
-
-    // Build adjacency maps for bidirectional traversal
-    const incomingEdges = new Map<string, string[]>(); // target -> sources
-    const outgoingEdges = new Map<string, string[]>(); // source -> targets
+    // Find the clicked node and get its path_ids
+    const clickedNode = this.nodes.find(n => n.id === targetId);
+    const relevantPathIds = new Set<string>(clickedNode?.path_ids || []);
     
-    this.links.forEach(link => {
-      const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
-      const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
-      
-      // Incoming edges (for backwards traversal)
-      if (!incomingEdges.has(targetLinkId)) {
-        incomingEdges.set(targetLinkId, []);
-      }
-      incomingEdges.get(targetLinkId)!.push(sourceId);
-      
-      // Outgoing edges (for forwards traversal)
-      if (!outgoingEdges.has(sourceId)) {
-        outgoingEdges.set(sourceId, []);
-      }
-      outgoingEdges.get(sourceId)!.push(targetLinkId);
-    });
-
-    // BFS in BOTH directions from the clicked node
-    const queue = [targetId];
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      
-      // Traverse backwards (incoming edges)
-      const sources = incomingEdges.get(nodeId) || [];
-      sources.forEach(sourceId => {
-        if (!connectedNodeIds.has(sourceId)) {
-          connectedNodeIds.add(sourceId);
-          queue.push(sourceId);
-        }
-      });
-      
-      // Traverse forwards (outgoing edges)
-      const targets = outgoingEdges.get(nodeId) || [];
-      targets.forEach(tgtId => {
-        if (!connectedNodeIds.has(tgtId)) {
-          connectedNodeIds.add(tgtId);
-          queue.push(tgtId);
+    // For destinations and agents, include paths where the node IS the destination
+    // Check if this is a destination node
+    const isDestination = clickedNode?.type === 'destination' || clickedNode?.type === 'agent';
+    if (isDestination) {
+      // Add path IDs that end at this destination (path_id format is "agentId:target")
+      this.links.forEach(link => {
+        if (link.path_id) {
+          const pathTarget = link.path_id.split(':')[1];
+          if (pathTarget === targetId || (clickedNode?.type === 'agent' && targetId === `agent:${clickedNode.agent_id}`)) {
+            relevantPathIds.add(link.path_id);
+          }
         }
       });
     }
-
-    // Collect ALL edges between connected nodes
-    this.links.forEach(link => {
-      const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
-      const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+    
+    // If no path_ids found, fall back to showing edges connected directly to this node
+    if (relevantPathIds.size === 0) {
+      // Fallback: show only edges directly connected to this node
+      const connectedEdgeIds = new Set<string>();
+      const connectedNodeIds = new Set<string>([targetId]);
       
-      // If both source and target are in connected set, include this edge
-      if (connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetLinkId)) {
+      this.links.forEach(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+        const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+        
+        if (sourceId === targetId || targetLinkId === targetId) {
+          connectedEdgeIds.add(link.id);
+          connectedNodeIds.add(sourceId);
+          connectedNodeIds.add(targetLinkId);
+        }
+      });
+      
+      this.g.selectAll('.nodes g')
+        .style('opacity', (d: any) => connectedNodeIds.has(d.id) ? 1 : 0.2);
+      
+      this.g.selectAll('.links line')
+        .style('opacity', (d: any) => connectedEdgeIds.has(d.id) ? 1 : 0.1)
+        .style('stroke-width', (d: any) => connectedEdgeIds.has(d.id) ? 4 : 2);
+      return;
+    }
+    
+    // Collect nodes and edges that belong to the relevant paths
+    const connectedNodeIds = new Set<string>([targetId]);
+    const connectedEdgeIds = new Set<string>();
+    
+    this.links.forEach(link => {
+      // Only include edges whose path_id is in our relevant set
+      if (link.path_id && relevantPathIds.has(link.path_id)) {
         connectedEdgeIds.add(link.id);
+        
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+        const targetLinkId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+        connectedNodeIds.add(sourceId);
+        connectedNodeIds.add(targetLinkId);
       }
     });
 
