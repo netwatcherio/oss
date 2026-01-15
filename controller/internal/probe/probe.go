@@ -539,13 +539,14 @@ func expandAgentProbe(ctx context.Context, db *gorm.DB, ch *sql.DB,
 }
 
 // createExpandedProbe creates a concrete probe from an AGENT probe template.
-func createExpandedProbe(source *Probe, probeType Type, targetIP string, sourceAgentID uint) Probe {
+// targetAgentID is the ID of the agent being targeted by this probe.
+func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetAgentID uint) Probe {
 	return Probe{
 		ID:          source.ID, // Keep original ID for data correlation
 		CreatedAt:   source.CreatedAt,
 		UpdatedAt:   source.UpdatedAt,
 		WorkspaceID: source.WorkspaceID,
-		AgentID:     source.AgentID, // Original source agent owns this correlation
+		AgentID:     source.AgentID, // Original source agent owns this probe
 		Type:        probeType,
 		Enabled:     source.Enabled,
 		IntervalSec: source.IntervalSec,
@@ -558,7 +559,7 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, sourceA
 			{
 				ProbeID:   source.ID,
 				Target:    targetIP,
-				AgentID:   &sourceAgentID, // Track the source agent for data attribution
+				AgentID:   &targetAgentID, // TARGET agent ID - used for bidirectional detection
 				CreatedAt: source.CreatedAt,
 				UpdatedAt: source.UpdatedAt,
 			},
