@@ -3,6 +3,8 @@ package web
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
@@ -106,5 +108,94 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 			return
 		}
 		_ = ctx.JSON(iris.Map{"ok": true})
+	})
+
+	// -------------------- Workspace-Level Probe Operations --------------------
+	// These endpoints operate across agents within a workspace
+
+	wsProbes := api.Party("/workspaces/{id:uint}/probes")
+	wsProbes.Use(RequireWorkspaceAccess(wsStore))
+
+	// GET /workspaces/{id}/probes/matching?source={agentID}&dest={agentID,agentID,...}&types={TYPE,TYPE,...}
+	// Find probes from source agent that target the specified destination agents
+	wsProbes.Get("/matching", func(ctx iris.Context) {
+		sourceIDInt, _ := strconv.Atoi(ctx.URLParam("source"))
+		sourceID := uint(sourceIDInt)
+		destIDsStr := ctx.URLParam("dest")
+		typesStr := ctx.URLParam("types")
+
+		if sourceID == 0 || destIDsStr == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "source and dest query params required"})
+			return
+		}
+
+		// Parse dest agent IDs
+		var destIDs []uint
+		for _, s := range strings.Split(destIDsStr, ",") {
+			if id, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32); err == nil {
+				destIDs = append(destIDs, uint(id))
+			}
+		}
+
+		if len(destIDs) == 0 {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "dest must contain valid agent IDs"})
+			return
+		}
+
+		// Parse probe types (optional)
+		var probeTypes []probe.Type
+		if typesStr != "" {
+			for _, s := range strings.Split(typesStr, ",") {
+				probeTypes = append(probeTypes, probe.Type(strings.TrimSpace(s)))
+			}
+		}
+
+		matches, err := probe.FindMatchingProbes(ctx.Request().Context(), db, sourceID, destIDs, probeTypes)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(NewListResponse(matches))
+	})
+
+	// POST /workspaces/{id}/probes/copy - Copy probes between agents
+	// Requires CanEdit (USER+) permission
+	wsProbes.Post("/copy", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+
+		var input probe.CopyInput
+		if err := ctx.ReadJSON(&input); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid input: " + err.Error()})
+			return
+		}
+
+		// Set workspace ID from route
+		input.WorkspaceID = wsID
+
+		// Validation
+		if input.SourceAgentID == 0 {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "source_agent_id required"})
+			return
+		}
+		if len(input.DestAgentIDs) == 0 {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "dest_agent_ids required"})
+			return
+		}
+
+		result, err := probe.CopyProbes(ctx.Request().Context(), db, input)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(result)
 	})
 }

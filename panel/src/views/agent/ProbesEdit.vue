@@ -16,7 +16,27 @@ const state = reactive({
   selectedType: 'all',
   // Modal state
   showProbeModal: false,
-  selectedProbe: null as Probe | null
+  selectedProbe: null as Probe | null,
+  // Copy modal state
+  showCopyModal: false,
+  copySelectedProbes: [] as number[],
+  copyDestAgents: [] as number[],
+  copyMatchTargets: false,
+  copySkipDuplicates: true,
+  copyLoading: false,
+  copyResults: null as {
+    created: number;
+    skipped: number;
+    errors: number;
+    results: Array<{
+      source_probe_id: number;
+      dest_agent_id: number;
+      new_probe_id?: number;
+      skipped: boolean;
+      skip_reason?: string;
+      error?: string;
+    }>;
+  } | null
 })
 
 // Modal functions
@@ -39,6 +59,83 @@ function formatInterval(seconds: number): string {
 function formatDate(dateStr: string): string {
   if (!dateStr) return 'N/A';
   return new Date(dateStr).toLocaleString();
+}
+
+// Copy modal functions
+function openCopyModal() {
+  // Pre-select general probes (non-built-in, non-server)
+  state.copySelectedProbes = generalProbes.value.map(p => p.id);
+  state.copyDestAgents = [];
+  state.copyMatchTargets = false;
+  state.copySkipDuplicates = true;
+  state.copyResults = null;
+  state.showCopyModal = true;
+}
+
+function closeCopyModal() {
+  state.showCopyModal = false;
+  state.copyResults = null;
+}
+
+function toggleProbeSelection(probeId: number) {
+  const idx = state.copySelectedProbes.indexOf(probeId);
+  if (idx >= 0) {
+    state.copySelectedProbes.splice(idx, 1);
+  } else {
+    state.copySelectedProbes.push(probeId);
+  }
+}
+
+function toggleAgentSelection(agentId: number) {
+  const idx = state.copyDestAgents.indexOf(agentId);
+  if (idx >= 0) {
+    state.copyDestAgents.splice(idx, 1);
+  } else {
+    state.copyDestAgents.push(agentId);
+  }
+}
+
+function isProbeSelected(probeId: number): boolean {
+  return state.copySelectedProbes.includes(probeId);
+}
+
+function isAgentSelected(agentId: number): boolean {
+  return state.copyDestAgents.includes(agentId);
+}
+
+// Get other agents (exclude current agent)
+const otherAgents = computed(() => {
+  return state.agents.filter(a => a.id !== state.agent.id);
+});
+
+async function executeCopy() {
+  if (state.copySelectedProbes.length === 0 || state.copyDestAgents.length === 0) {
+    return;
+  }
+
+  state.copyLoading = true;
+  state.copyResults = null;
+
+  try {
+    const result = await ProbeService.copy(state.workspace.id, {
+      source_agent_id: state.agent.id,
+      dest_agent_ids: state.copyDestAgents,
+      probe_ids: state.copySelectedProbes,
+      match_targets: state.copyMatchTargets,
+      skip_duplicates: state.copySkipDuplicates
+    });
+    state.copyResults = result;
+  } catch (error) {
+    console.error('Copy failed:', error);
+    state.copyResults = {
+      created: 0,
+      skipped: 0,
+      errors: 1,
+      results: []
+    };
+  } finally {
+    state.copyLoading = false;
+  }
 }
 
 
@@ -275,6 +372,9 @@ const generalProbes = computed(() => {
         {title: state.agent.name || 'Loading...', link: `/workspaces/${state.workspace.id}/agents/${state.agent.id}`}
       ]">
       <div class="d-flex gap-2">
+        <button @click="openCopyModal" class="btn btn-outline-secondary" :class="{'disabled': state.loading || generalProbes.length === 0}">
+          <i class="bi bi-copy"></i>&nbsp;Copy to Agents
+        </button>
         <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`" class="btn btn-primary" :class="{'disabled': state.loading}">
           <i class="bi bi-plus-lg"></i>&nbsp;Add Probe
         </router-link>
@@ -628,6 +728,139 @@ const generalProbes = computed(() => {
               <i class="bi bi-trash"></i> Delete Probe
             </router-link>
             <button class="btn btn-secondary" @click="closeProbeModal">Close</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Copy to Agents Modal -->
+    <Teleport to="body">
+      <div v-if="state.showCopyModal" class="modal-backdrop" @click="closeCopyModal">
+        <div class="modal-dialog copy-modal" @click.stop>
+          <div class="modal-header">
+            <div class="modal-title-row">
+              <div class="modal-icon icon-blue">
+                <i class="bi bi-copy"></i>
+              </div>
+              <div>
+                <h5 class="modal-title">Copy Probes to Other Agents</h5>
+                <p class="modal-subtitle">Select probes and destination agents</p>
+              </div>
+            </div>
+            <button class="modal-close" @click="closeCopyModal">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          
+          <div class="modal-body">
+            <!-- Results Display (shown after copy) -->
+            <div v-if="state.copyResults" class="copy-results">
+              <div class="results-summary">
+                <div class="result-stat success" v-if="state.copyResults.created > 0">
+                  <i class="bi bi-check-circle-fill"></i>
+                  <span>{{ state.copyResults.created }} Created</span>
+                </div>
+                <div class="result-stat warning" v-if="state.copyResults.skipped > 0">
+                  <i class="bi bi-dash-circle-fill"></i>
+                  <span>{{ state.copyResults.skipped }} Skipped (duplicates)</span>
+                </div>
+                <div class="result-stat error" v-if="state.copyResults.errors > 0">
+                  <i class="bi bi-x-circle-fill"></i>
+                  <span>{{ state.copyResults.errors }} Errors</span>
+                </div>
+              </div>
+              
+              <button class="btn btn-primary w-100 mt-3" @click="closeCopyModal">
+                Done
+              </button>
+            </div>
+
+            <!-- Selection Form (shown before copy) -->
+            <div v-else class="copy-form">
+              <!-- Probe Selection -->
+              <div class="selection-section">
+                <h6 class="section-label">
+                  <i class="bi bi-box"></i>
+                  Select Probes to Copy
+                  <span class="badge bg-secondary">{{ state.copySelectedProbes.length }}</span>
+                </h6>
+                <div class="selection-list">
+                  <div 
+                    v-for="probe in generalProbes" 
+                    :key="probe.id" 
+                    class="selection-item"
+                    :class="{ selected: isProbeSelected(probe.id) }"
+                    @click="toggleProbeSelection(probe.id)"
+                  >
+                    <div class="item-check">
+                      <i :class="isProbeSelected(probe.id) ? 'bi bi-check-square-fill' : 'bi bi-square'"></i>
+                    </div>
+                    <div class="item-info">
+                      <span class="item-type">{{ probe.type }}</span>
+                      <span v-if="probe.targets && probe.targets.length > 0" class="item-target">
+                        → {{ probe.targets[0].target || getAgentName(probe.targets[0].agent_id || 0) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="generalProbes.length === 0" class="empty-selection">
+                    No probes available to copy
+                  </div>
+                </div>
+              </div>
+
+              <!-- Agent Selection -->
+              <div class="selection-section">
+                <h6 class="section-label">
+                  <i class="bi bi-cpu"></i>
+                  Select Destination Agents
+                  <span class="badge bg-secondary">{{ state.copyDestAgents.length }}</span>
+                </h6>
+                <div class="selection-list">
+                  <div 
+                    v-for="agent in otherAgents" 
+                    :key="agent.id" 
+                    class="selection-item"
+                    :class="{ selected: isAgentSelected(agent.id) }"
+                    @click="toggleAgentSelection(agent.id)"
+                  >
+                    <div class="item-check">
+                      <i :class="isAgentSelected(agent.id) ? 'bi bi-check-square-fill' : 'bi bi-square'"></i>
+                    </div>
+                    <div class="item-info">
+                      <span class="item-name">{{ agent.name }}</span>
+                      <span v-if="agent.location" class="item-location">{{ agent.location }}</span>
+                    </div>
+                  </div>
+                  <div v-if="otherAgents.length === 0" class="empty-selection">
+                    No other agents in workspace
+                  </div>
+                </div>
+              </div>
+
+              <!-- Options -->
+              <div class="copy-options">
+                <label class="option-item">
+                  <input type="checkbox" v-model="state.copySkipDuplicates">
+                  <span>Skip probes that already exist on destination</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer" v-if="!state.copyResults">
+            <button class="btn btn-secondary" @click="closeCopyModal">Cancel</button>
+            <button 
+              class="btn btn-primary" 
+              @click="executeCopy"
+              :disabled="state.copyLoading || state.copySelectedProbes.length === 0 || state.copyDestAgents.length === 0"
+            >
+              <span v-if="state.copyLoading">
+                <i class="bi bi-arrow-repeat spin"></i> Copying...
+              </span>
+              <span v-else>
+                <i class="bi bi-copy"></i> Copy {{ state.copySelectedProbes.length }} Probes to {{ state.copyDestAgents.length }} Agents
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -1501,5 +1734,210 @@ const generalProbes = computed(() => {
 /* Make probe cards clickable */
 .probe-card:not(.skeleton) {
   cursor: pointer;
+}
+
+/* ==================== Copy Modal Styles ==================== */
+.copy-modal {
+  width: 600px;
+  max-width: 95vw;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.copy-modal .modal-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.copy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.selection-section {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.section-label i {
+  color: #6b7280;
+}
+
+.section-label .badge {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.selection-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.selection-item:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.selection-item.selected {
+  border-color: #3b82f6;
+  background: #dbeafe;
+}
+
+.item-check {
+  font-size: 1.125rem;
+  color: #9ca3af;
+}
+
+.selection-item.selected .item-check {
+  color: #3b82f6;
+}
+
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-type {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #111827;
+}
+
+.item-target,
+.item-location {
+  font-size: 0.75rem;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #111827;
+}
+
+.empty-selection {
+  text-align: center;
+  padding: 1.5rem;
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.copy-options {
+  padding: 0.75rem;
+  background: #f3f4f6;
+  border-radius: 6px;
+}
+
+.option-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #374151;
+  cursor: pointer;
+}
+
+.option-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+}
+
+/* Copy Results */
+.copy-results {
+  text-align: center;
+  padding: 1rem;
+}
+
+.results-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.result-stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.result-stat.success {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.result-stat.success i {
+  color: #10b981;
+}
+
+.result-stat.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.result-stat.warning i {
+  color: #f59e0b;
+}
+
+.result-stat.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.result-stat.error i {
+  color: #ef4444;
+}
+
+/* Spin animation for loading */
+@keyframes spin-animation {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  display: inline-block;
+  animation: spin-animation 1s linear infinite;
 }
 </style>

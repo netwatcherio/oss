@@ -325,9 +325,9 @@ onUnmounted(() => {
           <!--      todo add section panel on agent creation for pin      -->
             
             <div class="agent-stats">
-              <div class="mini-stat" v-if="(state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider">
+              <div class="mini-stat" v-if="state.netInfoByAgent[agent.id]?.internet_provider">
                 <i class="bi bi-signpost"></i>
-                <span>{{ (state.netInfoByAgent[agent.id] as NetInfoPayload).internet_provider}} </span>
+                <span>{{ state.netInfoByAgent[agent.id]?.internet_provider }} </span>
               </div>
 
               <div class="mini-stat">

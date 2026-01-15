@@ -118,6 +118,35 @@ type UpdateInput struct {
 	ReplaceAgentTargets []uint
 }
 
+// CopyInput defines parameters for copying probes to destination agents
+type CopyInput struct {
+	SourceAgentID  uint   `json:"source_agent_id"`       // Agent to copy probes FROM
+	DestAgentIDs   []uint `json:"dest_agent_ids"`        // Agents to copy probes TO
+	WorkspaceID    uint   `json:"workspace_id"`          // Workspace context
+	ProbeIDs       []uint `json:"probe_ids,omitempty"`   // Specific probes to copy (if empty, copies all)
+	ProbeTypes     []Type `json:"probe_types,omitempty"` // Filter by type (AGENT, MTR, PING, TRAFFICSIM)
+	MatchTargets   bool   `json:"match_targets"`         // Only copy probes with targets matching dest agents
+	SkipDuplicates bool   `json:"skip_duplicates"`       // Skip probes that already exist on dest (recommended)
+}
+
+// CopyResult contains the result of copying a single probe
+type CopyResult struct {
+	SourceProbeID uint   `json:"source_probe_id"`
+	DestAgentID   uint   `json:"dest_agent_id"`
+	NewProbeID    uint   `json:"new_probe_id,omitempty"`
+	Skipped       bool   `json:"skipped"`
+	SkipReason    string `json:"skip_reason,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// CopyOutput contains overall copy operation results
+type CopyOutput struct {
+	Created int          `json:"created"`
+	Skipped int          `json:"skipped"`
+	Errors  int          `json:"errors"`
+	Results []CopyResult `json:"results"`
+}
+
 // -------------------- Helpers --------------------
 
 func coalesceJSON(j datatypes.JSON) datatypes.JSON {
@@ -800,6 +829,158 @@ func FindTrafficSimClients(ctx context.Context, db *gorm.DB, serverAgentID uint)
 		Where("probes.type = ? AND t.agent_id = ?", TypeTrafficSim, serverAgentID).
 		Find(&out).Error
 	return out, err
+}
+
+// FindMatchingProbes finds probes from sourceAgent that target any of the destination agents.
+// Useful for discovering which probes should be "mirrored" to establish bidirectional flows.
+func FindMatchingProbes(ctx context.Context, db *gorm.DB, sourceAgentID uint, destAgentIDs []uint, probeTypes []Type) ([]Probe, error) {
+	if len(destAgentIDs) == 0 {
+		return nil, fmt.Errorf("%w: destAgentIDs required", ErrBadInput)
+	}
+
+	var probes []Probe
+
+	query := db.WithContext(ctx).
+		Preload("Targets").
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id").
+		Where("probes.agent_id = ?", sourceAgentID).
+		Where("t.agent_id IN ?", destAgentIDs)
+
+	if len(probeTypes) > 0 {
+		query = query.Where("probes.type IN ?", probeTypes)
+	}
+
+	err := query.Distinct().Find(&probes).Error
+	return probes, err
+}
+
+// CopyProbes copies probes from a source agent to one or more destination agents.
+// - SkipDuplicates: if true, probes that already exist on the dest agent are skipped
+// - MatchTargets: if true, only copies probes whose targets include one of the dest agents
+func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, error) {
+	if in.SourceAgentID == 0 {
+		return nil, fmt.Errorf("%w: source_agent_id required", ErrBadInput)
+	}
+	if len(in.DestAgentIDs) == 0 {
+		return nil, fmt.Errorf("%w: dest_agent_ids required", ErrBadInput)
+	}
+	if in.WorkspaceID == 0 {
+		return nil, fmt.Errorf("%w: workspace_id required", ErrBadInput)
+	}
+
+	output := &CopyOutput{}
+
+	// 1. Get source probes
+	var sourceProbes []Probe
+	query := db.WithContext(ctx).Preload("Targets").Where("agent_id = ?", in.SourceAgentID)
+
+	if len(in.ProbeIDs) > 0 {
+		query = query.Where("id IN ?", in.ProbeIDs)
+	}
+	if len(in.ProbeTypes) > 0 {
+		query = query.Where("type IN ?", in.ProbeTypes)
+	}
+
+	if err := query.Find(&sourceProbes).Error; err != nil {
+		return nil, err
+	}
+
+	log.Infof("[COPY] Found %d source probes from agent %d", len(sourceProbes), in.SourceAgentID)
+
+	// 2. If MatchTargets is set, filter to probes targeting dest agents
+	if in.MatchTargets {
+		destAgentSet := make(map[uint]bool)
+		for _, id := range in.DestAgentIDs {
+			destAgentSet[id] = true
+		}
+
+		var filtered []Probe
+		for _, p := range sourceProbes {
+			for _, t := range p.Targets {
+				if t.AgentID != nil && destAgentSet[*t.AgentID] {
+					filtered = append(filtered, p)
+					break
+				}
+			}
+		}
+		sourceProbes = filtered
+		log.Infof("[COPY] After target matching filter: %d probes", len(sourceProbes))
+	}
+
+	// 3. Copy to each destination agent
+	for _, destAgentID := range in.DestAgentIDs {
+		// Skip if dest is same as source
+		if destAgentID == in.SourceAgentID {
+			continue
+		}
+
+		for _, srcProbe := range sourceProbes {
+			result := CopyResult{
+				SourceProbeID: srcProbe.ID,
+				DestAgentID:   destAgentID,
+			}
+
+			// Build CreateInput for the copy
+			copyInput := CreateInput{
+				WorkspaceID: in.WorkspaceID,
+				AgentID:     destAgentID,
+				Type:        srcProbe.Type,
+				Enabled:     srcProbe.Enabled,
+				IntervalSec: srcProbe.IntervalSec,
+				TimeoutSec:  srcProbe.TimeoutSec,
+				Count:       srcProbe.Count,
+				DurationSec: srcProbe.DurationSec,
+				Server:      srcProbe.Server,
+				Labels:      srcProbe.Labels,
+				Metadata:    srcProbe.Metadata,
+			}
+
+			// Convert targets
+			for _, t := range srcProbe.Targets {
+				if t.AgentID != nil {
+					copyInput.AgentTargets = append(copyInput.AgentTargets, *t.AgentID)
+				} else if t.Target != "" {
+					copyInput.Targets = append(copyInput.Targets, t.Target)
+				}
+			}
+
+			// Check for duplicates if requested
+			if in.SkipDuplicates {
+				if err := checkDuplicateProbe(ctx, db, copyInput); err != nil {
+					if errors.Is(err, ErrDuplicate) {
+						result.Skipped = true
+						result.SkipReason = "duplicate exists"
+						output.Skipped++
+						output.Results = append(output.Results, result)
+						log.Infof("[COPY] Skipped duplicate: probe %d -> agent %d", srcProbe.ID, destAgentID)
+						continue
+					}
+					// Other error
+					result.Error = err.Error()
+					output.Errors++
+					output.Results = append(output.Results, result)
+					continue
+				}
+			}
+
+			// Create the probe copy
+			newProbe, err := Create(ctx, db, copyInput)
+			if err != nil {
+				result.Error = err.Error()
+				output.Errors++
+				log.Warnf("[COPY] Failed to create probe copy: %v", err)
+			} else {
+				result.NewProbeID = newProbe.ID
+				output.Created++
+				log.Infof("[COPY] Created probe %d (copy of %d) on agent %d", newProbe.ID, srcProbe.ID, destAgentID)
+			}
+
+			output.Results = append(output.Results, result)
+		}
+	}
+
+	log.Infof("[COPY] Complete: %d created, %d skipped, %d errors", output.Created, output.Skipped, output.Errors)
+	return output, nil
 }
 
 // -------------------- Small utilities --------------------

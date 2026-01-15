@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"netwatcher-controller/internal/alert"
 
@@ -31,20 +32,33 @@ func SaveRecordWithAlertEval(
 		return nil
 	}
 
-	// Look up the probe to get workspace ID
+	// Look up the probe to get workspace ID and details
 	var probe Probe
-	if err := pg.WithContext(ctx).First(&probe, data.ProbeID).Error; err != nil {
+	if err := pg.WithContext(ctx).Preload("Targets").First(&probe, data.ProbeID).Error; err != nil {
 		// Don't fail the save operation if we can't find the probe
 		log.Warnf("alert_hook: could not find probe %d for alert evaluation: %v", data.ProbeID, err)
 		return nil
 	}
 
-	// Look up the agent to get workspace ID
-	type agentWS struct {
-		WorkspaceID uint
+	// Build probe target string
+	var targetStr string
+	if len(probe.Targets) > 0 {
+		targets := make([]string, 0, len(probe.Targets))
+		for _, t := range probe.Targets {
+			if t.Target != "" {
+				targets = append(targets, t.Target)
+			}
+		}
+		targetStr = strings.Join(targets, ", ")
 	}
-	var agent agentWS
-	if err := pg.WithContext(ctx).Table("agents").Select("workspace_id").Where("id = ?", probe.AgentID).First(&agent).Error; err != nil {
+
+	// Look up the agent to get workspace ID and name
+	type agentInfo struct {
+		WorkspaceID uint
+		Name        string
+	}
+	var agent agentInfo
+	if err := pg.WithContext(ctx).Table("agents").Select("workspace_id, name").Where("id = ?", probe.AgentID).First(&agent).Error; err != nil {
 		log.Warnf("alert_hook: could not find agent %d for alert evaluation: %v", probe.AgentID, err)
 		return nil
 	}
@@ -56,8 +70,19 @@ func SaveRecordWithAlertEval(
 		return nil
 	}
 
+	// Build probe context with enriched information
+	pctx := alert.ProbeContext{
+		ProbeID:     data.ProbeID,
+		ProbeType:   kind,
+		ProbeName:   string(probe.Type), // Use probe type as display name
+		ProbeTarget: targetStr,
+		AgentID:     probe.AgentID,
+		AgentName:   agent.Name,
+		WorkspaceID: agent.WorkspaceID,
+	}
+
 	// Evaluate alerts (non-blocking, log errors)
-	if err := alert.EvaluateProbeData(ctx, pg, data.ProbeID, agent.WorkspaceID, kind, payloadJSON); err != nil {
+	if err := alert.EvaluateProbeData(ctx, pg, pctx, payloadJSON); err != nil {
 		log.Warnf("alert_hook: alert evaluation failed: %v", err)
 	}
 

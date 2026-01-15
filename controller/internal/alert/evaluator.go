@@ -18,8 +18,19 @@ type ProbeDataPayload struct {
 	AverageRTT float64 `json:"averageRTT"`
 }
 
+// ProbeContext provides contextual information about the probe being evaluated
+type ProbeContext struct {
+	ProbeID     uint
+	ProbeType   string
+	ProbeName   string
+	ProbeTarget string
+	AgentID     uint
+	AgentName   string
+	WorkspaceID uint
+}
+
 // EvaluateProbeData checks probe data against alert rules and creates alerts if thresholds are exceeded
-func EvaluateProbeData(ctx context.Context, db *gorm.DB, probeID uint, workspaceID uint, probeType string, payloadJSON []byte) error {
+func EvaluateProbeData(ctx context.Context, db *gorm.DB, pctx ProbeContext, payloadJSON []byte) error {
 	// Parse payload
 	var payload ProbeDataPayload
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
@@ -30,7 +41,7 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, probeID uint, workspace
 	// Get relevant alert rules for this probe
 	var rules []AlertRule
 	err := db.WithContext(ctx).
-		Where("enabled = true AND workspace_id = ? AND (probe_id = ? OR probe_id IS NULL)", workspaceID, probeID).
+		Where("enabled = true AND workspace_id = ? AND (probe_id = ? OR probe_id IS NULL)", pctx.WorkspaceID, pctx.ProbeID).
 		Find(&rules).Error
 	if err != nil {
 		return fmt.Errorf("failed to fetch alert rules: %w", err)
@@ -41,7 +52,7 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, probeID uint, workspace
 	}
 
 	for _, rule := range rules {
-		value := getMetricValue(&payload, rule.Metric, probeType)
+		value := getMetricValue(&payload, rule.Metric, pctx.ProbeType)
 		if value == nil {
 			continue // Metric not applicable to this probe type
 		}
@@ -58,23 +69,35 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, probeID uint, workspace
 				continue
 			}
 
-			// Create new alert
+			// Create new alert with context
 			message := fmt.Sprintf("%s exceeded threshold: %.2f (threshold: %.2f)",
 				rule.Metric, *value, rule.Threshold)
 
-			_, err = CreateAlert(ctx, db, &rule, *value, message)
+			actx := &AlertContext{
+				ProbeID:     pctx.ProbeID,
+				ProbeType:   pctx.ProbeType,
+				ProbeName:   pctx.ProbeName,
+				ProbeTarget: pctx.ProbeTarget,
+				AgentID:     pctx.AgentID,
+				AgentName:   pctx.AgentName,
+			}
+
+			alertInstance, err := CreateAlert(ctx, db, &rule, *value, message, actx)
 			if err != nil {
 				log.Errorf("alert.EvaluateProbeData: failed to create alert: %v", err)
 				continue
 			}
 
-			log.Infof("Alert triggered: rule=%d, probe=%d, metric=%s, value=%.2f, threshold=%.2f",
-				rule.ID, probeID, rule.Metric, *value, rule.Threshold)
+			// Dispatch notifications
+			go DispatchNotifications(ctx, db, &rule, alertInstance)
+
+			log.Infof("Alert triggered: rule=%d, probe=%d (%s), metric=%s, value=%.2f, threshold=%.2f",
+				rule.ID, pctx.ProbeID, pctx.ProbeType, rule.Metric, *value, rule.Threshold)
 		} else {
 			// Check if we should auto-resolve an active alert
 			var activeAlert Alert
 			err := db.WithContext(ctx).
-				Where("alert_rule_id = ? AND probe_id = ? AND status = ?", rule.ID, probeID, StatusActive).
+				Where("alert_rule_id = ? AND probe_id = ? AND status = ?", rule.ID, pctx.ProbeID, StatusActive).
 				First(&activeAlert).Error
 
 			if err == nil {
@@ -82,7 +105,7 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, probeID uint, workspace
 				if err := ResolveAlert(ctx, db, activeAlert.ID); err != nil {
 					log.Warnf("alert.EvaluateProbeData: failed to auto-resolve alert %d: %v", activeAlert.ID, err)
 				} else {
-					log.Infof("Alert auto-resolved: id=%d, rule=%d, probe=%d", activeAlert.ID, rule.ID, probeID)
+					log.Infof("Alert auto-resolved: id=%d, rule=%d, probe=%d", activeAlert.ID, rule.ID, pctx.ProbeID)
 				}
 			}
 		}

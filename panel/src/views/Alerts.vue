@@ -1,8 +1,11 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed } from "vue";
+import { useRouter } from "vue-router";
 import Title from "@/components/Title.vue";
 import { AlertService, WorkspaceService, type Alert } from "@/services/apiService";
 import type { Workspace } from "@/types";
+
+const router = useRouter();
 
 const state = reactive({
   alerts: [] as Alert[],
@@ -44,6 +47,27 @@ function getStatusClass(status: string): string {
     case 'acknowledged': return 'bg-warning text-dark';
     case 'resolved': return 'bg-success';
     default: return 'bg-secondary';
+  }
+}
+
+function getProbeTypeClass(probeType: string): string {
+  switch (probeType?.toUpperCase()) {
+    case 'PING': return 'bg-info';
+    case 'MTR': return 'bg-primary';
+    case 'TRAFFICSIM': return 'bg-purple';
+    default: return 'bg-secondary';
+  }
+}
+
+function navigateToAgent(alert: Alert) {
+  if (alert.agent_id) {
+    router.push(`/workspaces/${alert.workspace_id}/agents/${alert.agent_id}`);
+  }
+}
+
+function navigateToProbe(alert: Alert) {
+  if (alert.agent_id && alert.probe_id) {
+    router.push(`/workspaces/${alert.workspace_id}/agents/${alert.agent_id}?probe=${alert.probe_id}`);
   }
 }
 
@@ -198,9 +222,11 @@ onMounted(loadData);
               <th>Status</th>
               <th>Severity</th>
               <th>Workspace</th>
+              <th>Agent</th>
+              <th>Probe</th>
+              <th>Target</th>
               <th>Metric</th>
               <th>Value</th>
-              <th>Message</th>
               <th>Triggered</th>
               <th class="text-end">Actions</th>
             </tr>
@@ -218,13 +244,41 @@ onMounted(loadData);
                 </span>
               </td>
               <td>{{ getWorkspaceName(alert.workspace_id) }}</td>
+              <td>
+                <a 
+                  v-if="alert.agent_id" 
+                  href="#"
+                  class="text-decoration-none agent-link"
+                  @click.prevent="navigateToAgent(alert)"
+                >
+                  <i class="bi bi-hdd-network me-1"></i>
+                  {{ alert.agent_name || `Agent ${alert.agent_id}` }}
+                </a>
+                <span v-else class="text-muted">-</span>
+              </td>
+              <td>
+                <a
+                  v-if="alert.probe_id && alert.agent_id"
+                  href="#"
+                  class="text-decoration-none probe-link"
+                  @click.prevent="navigateToProbe(alert)"
+                >
+                  <span 
+                    class="badge me-1" 
+                    :class="getProbeTypeClass(alert.probe_type || '')"
+                  >{{ alert.probe_type || 'PROBE' }}</span>
+                  <span class="probe-name">{{ alert.probe_name || `#${alert.probe_id}` }}</span>
+                </a>
+                <span v-else class="text-muted">-</span>
+              </td>
+              <td class="text-truncate target-cell" :title="alert.probe_target">
+                <code v-if="alert.probe_target">{{ alert.probe_target }}</code>
+                <span v-else class="text-muted">-</span>
+              </td>
               <td>{{ formatMetric(alert.metric) }}</td>
               <td>
                 <strong>{{ alert.value.toFixed(2) }}</strong>
                 <span class="text-muted"> / {{ alert.threshold }}</span>
-              </td>
-              <td class="text-truncate" style="max-width: 200px;">
-                {{ alert.message || '-' }}
               </td>
               <td>
                 <small>{{ formatTime(alert.triggered_at) }}</small>
@@ -318,6 +372,35 @@ onMounted(loadData);
   border-bottom: 2px solid var(--border-color, #e9ecef);
 }
 
+.agent-link, .probe-link {
+  color: var(--bs-primary);
+  transition: color 0.15s;
+}
+
+.agent-link:hover, .probe-link:hover {
+  color: var(--bs-primary-dark, #0056b3);
+  text-decoration: underline !important;
+}
+
+.probe-name {
+  font-size: 0.875rem;
+}
+
+.target-cell {
+  max-width: 150px;
+}
+
+.target-cell code {
+  font-size: 0.8rem;
+  background: var(--bg-subtle, #f8f9fa);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+}
+
+.bg-purple {
+  background-color: #7c3aed !important;
+}
+
 /* Dark mode support */
 :global([data-theme="dark"]) .stat-card {
   background: #1f2937;
@@ -330,5 +413,8 @@ onMounted(loadData);
 :global([data-theme="dark"]) .table th {
   background-color: #374151;
 }
-</style>
 
+:global([data-theme="dark"]) .target-cell code {
+  background: #374151;
+}
+</style>

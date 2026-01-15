@@ -388,6 +388,59 @@ export const ProbeService = {
         const { data } = await request.get<ProbeData>(`/workspaces/${workspaceId}/agents/${agentId}/sysinfo`);
         return data;
     },
+
+    /**
+     * Find probes from source agent that target the specified destination agents.
+     * Useful for discovering which probes should be copied to establish bidirectional flows.
+     */
+    async findMatching(
+        workspaceId: number | string,
+        sourceAgentId: number | string,
+        destAgentIds: number[],
+        types?: string[]
+    ) {
+        const qs = new URLSearchParams();
+        qs.set("source", String(sourceAgentId));
+        qs.set("dest", destAgentIds.join(","));
+        if (types && types.length > 0) {
+            qs.set("types", types.join(","));
+        }
+        const { data } = await request.get<ListResponse<Probe>>(
+            `/workspaces/${workspaceId}/probes/matching?${qs.toString()}`
+        );
+        return data.data || [];
+    },
+
+    /**
+     * Copy probes from one agent to other agents.
+     * Returns detailed results including created/skipped/error counts.
+     */
+    async copy(
+        workspaceId: number | string,
+        input: {
+            source_agent_id: number;
+            dest_agent_ids: number[];
+            probe_ids?: number[];
+            probe_types?: string[];
+            match_targets?: boolean;
+            skip_duplicates?: boolean;
+        }
+    ) {
+        const { data } = await request.post<{
+            created: number;
+            skipped: number;
+            errors: number;
+            results: Array<{
+                source_probe_id: number;
+                dest_agent_id: number;
+                new_probe_id?: number;
+                skipped: boolean;
+                skip_reason?: string;
+                error?: string;
+            }>;
+        }>(`/workspaces/${workspaceId}/probes/copy`, input);
+        return data;
+    },
 };
 
 /** ===== Public agent bootstrap/auth (no JWT) ===== */
@@ -496,6 +549,11 @@ export interface Alert {
     workspace_id: number;
     probe_id?: number;
     agent_id?: number;
+    // Contextual fields for enhanced display
+    probe_type?: string;
+    probe_name?: string;
+    probe_target?: string;
+    agent_name?: string;
     metric: string;
     value: number;
     threshold: number;

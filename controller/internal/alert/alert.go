@@ -92,6 +92,12 @@ type Alert struct {
 	ProbeID     *uint `gorm:"index" json:"probe_id,omitempty"`
 	AgentID     *uint `gorm:"index" json:"agent_id,omitempty"`
 
+	// Contextual fields (denormalized for historical accuracy)
+	ProbeType   string `gorm:"size:64" json:"probe_type,omitempty"`
+	ProbeName   string `gorm:"size:256" json:"probe_name,omitempty"`
+	ProbeTarget string `gorm:"size:512" json:"probe_target,omitempty"`
+	AgentName   string `gorm:"size:256" json:"agent_name,omitempty"`
+
 	Metric    Metric   `gorm:"type:VARCHAR(32)" json:"metric"`
 	Value     float64  `json:"value"`
 	Threshold float64  `json:"threshold"`
@@ -266,8 +272,18 @@ func DeleteRule(ctx context.Context, db *gorm.DB, id uint) error {
 
 // -------------------- Alert CRUD --------------------
 
-// CreateAlert creates a new alert instance
-func CreateAlert(ctx context.Context, db *gorm.DB, rule *AlertRule, value float64, message string) (*Alert, error) {
+// AlertContext provides contextual information about the probe/agent for alert display
+type AlertContext struct {
+	ProbeID     uint
+	ProbeType   string
+	ProbeName   string
+	ProbeTarget string
+	AgentID     uint
+	AgentName   string
+}
+
+// CreateAlert creates a new alert instance with optional contextual information
+func CreateAlert(ctx context.Context, db *gorm.DB, rule *AlertRule, value float64, message string, actx *AlertContext) (*Alert, error) {
 	alert := &Alert{
 		AlertRuleID: rule.ID,
 		WorkspaceID: rule.WorkspaceID,
@@ -282,6 +298,20 @@ func CreateAlert(ctx context.Context, db *gorm.DB, rule *AlertRule, value float6
 		TriggeredAt: time.Now(),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+	}
+
+	// Populate contextual fields if provided
+	if actx != nil {
+		if actx.ProbeID != 0 {
+			alert.ProbeID = &actx.ProbeID
+		}
+		if actx.AgentID != 0 {
+			alert.AgentID = &actx.AgentID
+		}
+		alert.ProbeType = actx.ProbeType
+		alert.ProbeName = actx.ProbeName
+		alert.ProbeTarget = actx.ProbeTarget
+		alert.AgentName = actx.AgentName
 	}
 
 	if err := db.WithContext(ctx).Create(alert).Error; err != nil {

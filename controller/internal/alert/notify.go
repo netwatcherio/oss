@@ -21,12 +21,28 @@ type NotificationPayload struct {
 	WorkspaceID uint      `json:"workspace_id"`
 	ProbeID     *uint     `json:"probe_id,omitempty"`
 	AgentID     *uint     `json:"agent_id,omitempty"`
+	ProbeType   string    `json:"probe_type,omitempty"`
+	ProbeName   string    `json:"probe_name,omitempty"`
+	ProbeTarget string    `json:"probe_target,omitempty"`
+	AgentName   string    `json:"agent_name,omitempty"`
+	PanelURL    string    `json:"panel_url,omitempty"`
 	Metric      string    `json:"metric"`
 	Value       float64   `json:"value"`
 	Threshold   float64   `json:"threshold"`
 	Severity    string    `json:"severity"`
 	Message     string    `json:"message"`
 	TriggeredAt time.Time `json:"triggered_at"`
+}
+
+// buildPanelURL constructs a deep link to the relevant agent/probe page
+func buildPanelURL(a *Alert) string {
+	if a.ProbeID != nil && a.AgentID != nil {
+		return fmt.Sprintf("/workspaces/%d/agents/%d?probe=%d", a.WorkspaceID, *a.AgentID, *a.ProbeID)
+	}
+	if a.AgentID != nil {
+		return fmt.Sprintf("/workspaces/%d/agents/%d", a.WorkspaceID, *a.AgentID)
+	}
+	return fmt.Sprintf("/workspaces/%d", a.WorkspaceID)
 }
 
 // DispatchNotifications sends notifications through all configured channels
@@ -36,6 +52,11 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB, rule *AlertRule, al
 		WorkspaceID: alertInstance.WorkspaceID,
 		ProbeID:     alertInstance.ProbeID,
 		AgentID:     alertInstance.AgentID,
+		ProbeType:   alertInstance.ProbeType,
+		ProbeName:   alertInstance.ProbeName,
+		ProbeTarget: alertInstance.ProbeTarget,
+		AgentName:   alertInstance.AgentName,
+		PanelURL:    buildPanelURL(alertInstance),
 		Metric:      string(alertInstance.Metric),
 		Value:       alertInstance.Value,
 		Threshold:   alertInstance.Threshold,
