@@ -61,7 +61,7 @@ const windowsInstallCommand = computed(() => {
   return `# Download the installer
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
 # Run the installer
-.\\install.ps1 -Host "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.newPin}"`;
+.\\install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.newPin}"`;
 });
 
 // Docker command
