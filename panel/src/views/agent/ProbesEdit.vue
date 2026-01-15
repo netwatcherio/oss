@@ -1744,11 +1744,15 @@ const generalProbes = computed(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .copy-modal .modal-body {
   overflow-y: auto;
   flex: 1;
+  pointer-events: auto;
 }
 
 .copy-form {
@@ -1789,6 +1793,7 @@ const generalProbes = computed(() => {
   gap: 0.5rem;
   max-height: 180px;
   overflow-y: auto;
+  pointer-events: auto;
 }
 
 .selection-item {
@@ -1801,6 +1806,7 @@ const generalProbes = computed(() => {
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s;
+  pointer-events: auto;
 }
 
 .selection-item:hover {

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {onMounted, onUnmounted, reactive, computed} from "vue";
+import {onMounted, onUnmounted, reactive, computed, ref} from "vue";
 import { useRouter } from "vue-router";
 import type {
   Agent,
@@ -22,6 +22,10 @@ import { websocketService, type SpeedtestUpdateEvent } from "@/services/websocke
 // Cleanup functions for WebSocket subscriptions
 let unsubscribeSpeedtest: (() => void) | null = null;
 let unsubscribeWs: (() => void) | null = null;
+
+// Reactive now for live countdown updates
+const now = ref(new Date());
+let countdownInterval: ReturnType<typeof setInterval> | null = null;
 
 
 const router = useRouter();
@@ -252,8 +256,7 @@ function formatTimeUntil(date: Date): string {
 
 function formatTimeRemaining(expiresAt: string): string {
   const expires = new Date(expiresAt);
-  const now = new Date();
-  const diff = expires.getTime() - now.getTime();
+  const diff = expires.getTime() - now.value.getTime();
   
   if (diff <= 0) return 'Expired';
   
@@ -388,9 +391,14 @@ onMounted(async () => {
     state.ready = true; // Still show the page to allow running tests
     state.loading = false;
   }
+
+  // Start countdown interval for live timer updates (every second)
+  countdownInterval = setInterval(() => {
+    now.value = new Date();
+  }, 1000);
 })
 
-// Cleanup WebSocket subscriptions on unmount
+// Cleanup WebSocket subscriptions and countdown interval on unmount
 onUnmounted(() => {
   if (unsubscribeSpeedtest) {
     unsubscribeSpeedtest();
@@ -399,6 +407,10 @@ onUnmounted(() => {
   if (unsubscribeWs) {
     unsubscribeWs();
     unsubscribeWs = null;
+  }
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
   }
 })
 

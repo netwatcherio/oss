@@ -307,7 +307,7 @@ onUnmounted(() => {
 
     <!-- Agents Grid -->
     <div class="agents-grid" v-else-if="!state.showNetworkMap">
-      <div v-for="agent in state.agents" :key="agent.id" class="agent-card-wrapper">
+      <div v-for="agent in filteredAgents" :key="agent.id" class="agent-card-wrapper">
         <AgentCard
           :title="agent.name"
           :subtitle="(agent.version?' ':'') + agent.location"
