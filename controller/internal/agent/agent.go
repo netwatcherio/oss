@@ -71,13 +71,11 @@ type Auth struct {
 	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	WorkspaceID uint   `gorm:"index" json:"workspace_id"`
-	AgentID     uint   `gorm:"index" json:"agent_id"`
-	PinHash     string `gorm:"size:255;index" json:"-"`
-	// Unique across *active* (unconsumed) PINs
-	PinIndex  string     `gorm:"size:64;uniqueIndex" json:"-"`
-	Consumed  *time.Time `json:"-"`
-	ExpiresAt *time.Time `json:"-"`
+	WorkspaceID uint       `gorm:"index:idx_agent_pins_scope" json:"workspace_id"`
+	AgentID     uint       `gorm:"index:idx_agent_pins_scope" json:"agent_id"`
+	PinHash     string     `gorm:"size:255" json:"-"`
+	Consumed    *time.Time `gorm:"index" json:"-"`
+	ExpiresAt   *time.Time `json:"-"`
 }
 
 func (Auth) TableName() string { return "agent_pins" }
@@ -121,7 +119,7 @@ type BootstrapOutput struct {
 // -------------------- Public API --------------------
 
 // CreateAgent inserts Agent, default probes, and issues a bootstrap PIN (in agent_pins).
-func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput, pinPepper string) (*CreateOutput, error) {
+func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput) (*CreateOutput, error) {
 	pinLen := in.PinLength
 	if pinLen <= 0 {
 		pinLen = 9
@@ -155,51 +153,33 @@ func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput, pinPepper str
 			return err
 		}
 
-		// 3) Issue unique PIN
+		// 3) Issue PIN (simplified - no pepper/index needed)
 		var expiresAt *time.Time
 		if in.PINTTL != nil && *in.PINTTL > 0 {
 			t := now.Add(*in.PINTTL)
 			expiresAt = &t
 		}
 
-		const maxAttempts = 10
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			p, err := generateNumericPIN(pinLen)
-			if err != nil {
-				return err
-			}
-			index := computePinIndex(pinPepper, p)
-
-			// Fast uniqueness probe on active pins
-			var dup Auth
-			if err := tx.Where("pin_index = ? AND consumed IS NULL", index).First(&dup).Error; err == nil {
-				continue // collision; try again
-			}
-
-			hash, err := bcrypt.GenerateFromPassword([]byte(p), bcrypt.DefaultCost)
-			if err != nil {
-				return err
-			}
-
-			ap := &Auth{
-				WorkspaceID: a.WorkspaceID,
-				AgentID:     a.ID,
-				PinHash:     string(hash),
-				PinIndex:    index,
-				ExpiresAt:   expiresAt,
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			if err := tx.Create(ap).Error; err != nil {
-				continue // handle race on unique index
-			}
-
-			pinPlain = p
-			break
+		p, err := generateNumericPIN(pinLen)
+		if err != nil {
+			return err
 		}
-		if pinPlain == "" {
-			return errors.New("failed to generate unique PIN")
+		hash, err := bcrypt.GenerateFromPassword([]byte(p), bcrypt.DefaultCost)
+		if err != nil {
+			return err
 		}
+		ap := &Auth{
+			WorkspaceID: a.WorkspaceID,
+			AgentID:     a.ID,
+			PinHash:     string(hash),
+			ExpiresAt:   expiresAt,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := tx.Create(ap).Error; err != nil {
+			return err
+		}
+		pinPlain = p
 		return nil
 	})
 	if err != nil {
@@ -308,7 +288,8 @@ func DeleteAgent(ctx context.Context, db *gorm.DB, id uint) error {
 // -------------------- PIN operations --------------------
 
 // IssuePIN creates a new one-time PIN row for an agent.
-func IssuePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pinLen int, pinPepper string, ttl *time.Duration) (plaintext string, err error) {
+// Simplified: no longer requires pinPepper - uses workspace+agent scoped lookup.
+func IssuePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pinLen int, ttl *time.Duration) (plaintext string, err error) {
 	if pinLen <= 0 {
 		pinLen = 9
 	}
@@ -319,75 +300,67 @@ func IssuePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pinLe
 		expiresAt = &t
 	}
 
-	const maxAttempts = 10
 	return plaintext, db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			p, err := generateNumericPIN(pinLen)
-			if err != nil {
-				return err
-			}
-			index := computePinIndex(pinPepper, p)
-
-			var dup Auth
-			if err := tx.Where("pin_index = ? AND consumed IS NULL", index).First(&dup).Error; err == nil {
-				continue
-			}
-			hash, err := bcrypt.GenerateFromPassword([]byte(p), bcrypt.DefaultCost)
-			if err != nil {
-				return err
-			}
-			ap := &Auth{
-				WorkspaceID: workspaceID,
-				AgentID:     agentID,
-				PinHash:     string(hash),
-				PinIndex:    index,
-				ExpiresAt:   expiresAt,
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			if err := tx.Create(ap).Error; err != nil {
-				continue
-			}
-			plaintext = p
-			return nil
+		p, err := generateNumericPIN(pinLen)
+		if err != nil {
+			return err
 		}
-		return errors.New("failed to issue unique PIN")
+		hash, err := bcrypt.GenerateFromPassword([]byte(p), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		ap := &Auth{
+			WorkspaceID: workspaceID,
+			AgentID:     agentID,
+			PinHash:     string(hash),
+			ExpiresAt:   expiresAt,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := tx.Create(ap).Error; err != nil {
+			return err
+		}
+		plaintext = p
+		return nil
 	})
 }
 
 // ConsumePIN validates and consumes a PIN for an agent.
-func ConsumePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pin, pinPepper string) (*Auth, error) {
-	index := computePinIndex(pinPepper, pin)
-
-	var ap Auth
+// Simplified: uses workspace+agent scoped lookup with bcrypt verification.
+func ConsumePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pin string) (*Auth, error) {
+	// Find all unconsumed PINs for this agent, ordered by newest first
+	var pins []Auth
 	err := db.WithContext(ctx).
-		Where("pin_index = ? AND consumed IS NULL", index).
-		First(&ap).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
+		Where("workspace_id = ? AND agent_id = ? AND consumed IS NULL", workspaceID, agentID).
+		Order("created_at DESC").
+		Find(&pins).Error
 	if err != nil {
 		return nil, err
 	}
-	// Scope checks
-	if ap.WorkspaceID != workspaceID || ap.AgentID != agentID {
-		return nil, ErrPINMismatch
+	if len(pins) == 0 {
+		return nil, ErrNotFound
 	}
-	// Expiry
-	if ap.ExpiresAt != nil && time.Now().After(*ap.ExpiresAt) {
-		return nil, ErrPINExpired
+
+	// Try to match against each unconsumed PIN
+	for _, ap := range pins {
+		// Check expiry first
+		if ap.ExpiresAt != nil && time.Now().After(*ap.ExpiresAt) {
+			continue // Try next PIN
+		}
+		// bcrypt compare
+		if err := bcrypt.CompareHashAndPassword([]byte(ap.PinHash), []byte(pin)); err != nil {
+			continue // Wrong PIN, try next
+		}
+		// Match! Mark consumed
+		now := time.Now()
+		if err := db.WithContext(ctx).Model(&ap).Update("consumed", &now).Error; err != nil {
+			return nil, err
+		}
+		ap.Consumed = &now
+		return &ap, nil
 	}
-	// Hash compare
-	if err := bcrypt.CompareHashAndPassword([]byte(ap.PinHash), []byte(pin)); err != nil {
-		return nil, ErrInvalidPIN
-	}
-	// Mark consumed
-	now := time.Now()
-	if err := db.WithContext(ctx).Model(&ap).Update("consumed", &now).Error; err != nil {
-		return nil, err
-	}
-	ap.Consumed = &now
-	return &ap, nil
+
+	return nil, ErrInvalidPIN
 }
 
 // -------------------- PSK operations --------------------
@@ -430,14 +403,14 @@ func RotatePSK(ctx context.Context, db *gorm.DB, workspaceID, agentID uint) (str
 // BootstrapWithPIN consumes a PIN, generates & stores a server PSK (bcrypt), and
 // (optionally) registers an ed25519 credential in agent_credentials. Returns the
 // plaintext PSK exactly once.
-func BootstrapWithPIN(ctx context.Context, db *gorm.DB, in BootstrapWithPINInput, pinPepper string) (*BootstrapOutput, error) {
+func BootstrapWithPIN(ctx context.Context, db *gorm.DB, in BootstrapWithPINInput) (*BootstrapOutput, error) {
 	a, err := GetAgentByWorkspaceAndID(ctx, db, in.WorkspaceID, in.AgentID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 1) Validate & consume PIN
-	if _, err := ConsumePIN(ctx, db, in.WorkspaceID, in.AgentID, in.PIN, pinPepper); err != nil {
+	// 1) Validate & consume PIN (simplified - no pepper needed)
+	if _, err := ConsumePIN(ctx, db, in.WorkspaceID, in.AgentID, in.PIN); err != nil {
 		return nil, fmt.Errorf("pin verification failed: %w", err)
 	}
 
@@ -451,7 +424,7 @@ func BootstrapWithPIN(ctx context.Context, db *gorm.DB, in BootstrapWithPINInput
 		Updates(map[string]any{
 			"psk_hash":    pskHash,
 			"updated_at":  time.Now(),
-			"initialized": true, // this initializes it?
+			"initialized": true,
 		}).Error; err != nil {
 		return nil, err
 	}
@@ -504,12 +477,6 @@ func generatePSKAndHash() (pskPlain string, pskHash string, err error) {
 		return "", "", err
 	}
 	return pskPlain, string(hash), nil
-}
-
-// computePinIndex = hex(sha256(pepper + ":" + pin))
-func computePinIndex(pepper, pin string) string {
-	sum := sha256.Sum256([]byte(pepper + ":" + pin))
-	return hex.EncodeToString(sum[:])
 }
 
 func keyFP(pub []byte) string {

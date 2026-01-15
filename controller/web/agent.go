@@ -3,7 +3,6 @@ package web
 import (
 	"net/http"
 	"netwatcher-controller/internal/agent"
-	"os"
 	"time"
 
 	"github.com/kataras/iris/v12"
@@ -73,12 +72,11 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 
 		// 2) No PSK → try PIN bootstrap, if provided
 		if req.PIN != "" {
-			pepper := os.Getenv("PIN_PEPPER")
 			out, err := agent.BootstrapWithPIN(ctx, db, agent.BootstrapWithPINInput{
 				WorkspaceID: req.WorkspaceID,
 				AgentID:     req.AgentID,
 				PIN:         req.PIN,
-			}, pepper)
+			})
 			if err != nil {
 				ctx.StatusCode(http.StatusUnauthorized)
 				_ = ctx.JSON(agentLoginResponse{Error: "pin_verification_failed"})

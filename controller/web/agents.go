@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
-	"os"
 	"time"
 
 	"netwatcher-controller/internal/agent"
@@ -61,7 +60,6 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 			d := time.Duration(body.PinTTLSeconds) * time.Second
 			ttl = &d
 		}
-		pinPepper := os.Getenv("PIN_PEPPER")
 		out, err := agent.CreateAgent(ctx.Request().Context(), db, agent.CreateInput{
 			WorkspaceID:      wsID,
 			Name:             body.Name,
@@ -73,7 +71,7 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 			Labels:           jsonFromMap(body.Labels),
 			Metadata:         jsonFromMap(body.Metadata),
 			PINTTL:           ttl,
-		}, pinPepper)
+		})
 		if err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -205,8 +203,7 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 			d := time.Duration(body.TTLSeconds) * time.Second
 			ttl = &d
 		}
-		pinPepper := os.Getenv("PIN_PEPPER")
-		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), pinPepper, ttl)
+		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
 		if err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -244,8 +241,7 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 			d := time.Duration(body.TTLSeconds) * time.Second
 			ttl = &d
 		}
-		pinPepper := os.Getenv("PIN_PEPPER")
-		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), pinPepper, ttl)
+		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
 		if err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
