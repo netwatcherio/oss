@@ -474,15 +474,30 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	// Create PING probe targeting the target agent
 	expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
 
-	// Create TRAFFICSIM probe only if target agent has a server
-	if hasTrafficSimServer(ctx, db, targetAgentID) {
+	// Create TRAFFICSIM probe in two cases:
+	// 1. Target agent has a server (we connect to them as a client)
+	// 2. Owner agent has a server (they connect to us, we do bidirectional testing)
+	targetHasServer := hasTrafficSimServer(ctx, db, targetAgentID)
+	ownerHasServer := hasTrafficSimServer(ctx, db, agentProbe.AgentID)
+
+	if targetHasServer {
+		// Standard case: create client probe to connect to target's server
 		tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
-		// Get the server port from the target's TrafficSim server config
 		port := getTrafficSimServerPort(ctx, db, targetAgentID)
 		if port != "" {
 			tsProbe.Targets[0].Target = targetIP + ":" + port
 		}
 		expanded = append(expanded, tsProbe)
+	} else if ownerHasServer {
+		// Bidirectional case: owner has server, target will connect to us
+		// Create a "virtual" TRAFFICSIM probe for the server to use when reporting reverse data
+		// This probe indicates that when the target connects, we should do bidirectional testing
+		tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
+		tsProbe.Server = false // Mark as client probe (for data association)
+		// No port needed - the server will use the existing connection from the client
+		tsProbe.Targets[0].Target = targetIP + ":bidir" // Special marker for bidirectional
+		expanded = append(expanded, tsProbe)
+		log.Infof("[BIDIR-DEBUG] Created bidirectional TRAFFICSIM probe for owner %d -> target %d", agentProbe.AgentID, targetAgentID)
 	}
 
 	log.Infof("[BIDIR-DEBUG] expandAgentProbeForOwner: AGENT probe %d (owned by agent %d) expanded into %d probes (MTR/PING/TS) targeting agent %d @ %s",
