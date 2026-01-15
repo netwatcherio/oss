@@ -809,6 +809,194 @@ Perform a WHOIS query for an IP address or domain name.
 
 ---
 
+## Alert Endpoints
+
+### `GET /workspaces/alerts`
+
+List alerts across all workspaces the user has access to.
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `status` | string | - | Filter by status: `active`, `acknowledged`, `resolved` |
+| `limit` | int | 50 | Max results |
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "id": 123,
+      "workspace_id": 1,
+      "probe_id": 45,
+      "agent_id": 10,
+      "probe_type": "PING",
+      "probe_name": "Core Router",
+      "probe_target": "10.0.0.1",
+      "agent_name": "Edge-Node-01",
+      "metric": "packet_loss",
+      "value": 5.2,
+      "threshold": 1.0,
+      "severity": "critical",
+      "status": "active",
+      "triggered_at": "2026-01-12T20:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /workspaces/alerts/count`
+
+Get count of active alerts across all workspaces.
+
+**Response:**
+```json
+{
+  "count": 5
+}
+```
+
+---
+
+### `PATCH /alerts/{id}`
+
+Update alert status (acknowledge or resolve).
+
+**Request Body:**
+```json
+{
+  "status": "acknowledged"
+}
+```
+
+---
+
+### `GET /workspaces/{id}/alert-rules`
+
+List alert rules for a workspace.
+
+**Required Role:** Any workspace member
+
+---
+
+### `POST /workspaces/{id}/alert-rules`
+
+Create a new alert rule.
+
+**Required Role:** `ADMIN`
+
+**Request Body:**
+```json
+{
+  "name": "High Packet Loss",
+  "metric": "packet_loss",
+  "operator": ">",
+  "threshold": 5.0,
+  "severity": "critical",
+  "notify_panel": true,
+  "notify_webhook": true,
+  "webhook_url": "https://hooks.example.com/alert",
+  "webhook_secret": "optional-hmac-secret",
+  "probe_id": null,
+  "agent_id": null,
+  "enabled": true
+}
+```
+
+---
+
+### `PATCH /workspaces/{id}/alert-rules/{ruleId}`
+
+Update an alert rule.
+
+**Required Role:** `ADMIN`
+
+---
+
+### `DELETE /workspaces/{id}/alert-rules/{ruleId}`
+
+Delete an alert rule.
+
+**Required Role:** `ADMIN`
+
+---
+
+## Probe Copy Endpoint
+
+### `POST /workspaces/{id}/agents/{agentID}/probes/copy`
+
+Copy probes from one agent to multiple destination agents.
+
+**Required Role:** `USER`
+
+**Request Body:**
+```json
+{
+  "source_agent_id": 10,
+  "dest_agent_ids": [11, 12, 13],
+  "workspace_id": 1,
+  "probe_ids": [],
+  "probe_types": ["AGENT", "MTR"],
+  "match_targets": false,
+  "skip_duplicates": true
+}
+```
+
+**Response:**
+```json
+{
+  "created": 6,
+  "skipped": 2,
+  "errors": 0,
+  "results": [
+    {
+      "source_probe_id": 100,
+      "dest_agent_id": 11,
+      "new_probe_id": 150
+    },
+    {
+      "source_probe_id": 101,
+      "dest_agent_id": 11,
+      "skipped": true,
+      "skip_reason": "duplicate exists"
+    }
+  ]
+}
+```
+
+**Options:**
+| Field | Description |
+|-------|-------------|
+| `probe_ids` | Specific probes to copy (empty = all) |
+| `probe_types` | Filter by type (AGENT, MTR, PING, etc.) |
+| `match_targets` | Only copy probes targeting dest agents |
+| `skip_duplicates` | Skip if probe already exists on dest |
+
+---
+
+## Bidirectional Probes
+
+When creating AGENT probes, set `bidirectional: true` to automatically create reciprocal probes:
+
+**Request Body:**
+```json
+{
+  "type": "AGENT",
+  "agent_targets": [20],
+  "bidirectional": true
+}
+```
+
+This creates:
+- Primary probe: Agent A → Agent B
+- Reverse probe: Agent B → Agent A
+
+Both probes are created atomically within a single transaction.
+
+---
+
 ## Health Check
 
 ### `GET /healthz`
@@ -821,3 +1009,4 @@ Returns service health status.
   "ok": true
 }
 ```
+

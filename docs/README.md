@@ -15,6 +15,7 @@ Welcome to the NetWatcher documentation. This folder contains comprehensive tech
 | [Data Models](./data-models.md) | Database schemas and TypeScript interfaces |
 | [Deployment](./deployment.md) | Production and development deployment guides |
 | [Development Guide](./development.md) | Setup, building, debugging, and contributing |
+| [Alerting](./alerting.md) | Alert rules, notifications, and webhook configuration |
 | [Simplifications](./simplifications.md) | Recommendations for code cleanup and improvements |
 
 ---

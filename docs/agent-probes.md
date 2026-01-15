@@ -281,6 +281,7 @@ When you create an AGENT probe targeting another agent, the controller automatic
 - Flow statistics tracking (RTT, jitter, packet loss)
 - Cycle-based reporting (60 packets per cycle)
 - Automatic MTR triggering when packet loss exceeds 5%
+- Bidirectional measurement via server-side probe detection
 - Graceful shutdown handling
 
 **Usage:**
@@ -294,6 +295,24 @@ TrafficSim operates in two modes:
 | `server` | `true` for server mode, `false` for client |
 | `targets[].target` | Server IP:port for client mode |
 | `targets[].agent_id` | Target agent for auto-resolution |
+
+**Bidirectional Measurement:**
+
+When Agent A (client) connects to Agent B (server), the server performs bidirectional detection:
+
+1. **Probe Discovery**: Server queries its local mission list for probes targeting the connecting client's agent ID
+2. **Reverse Probe Identification**: If a matching probe exists (e.g., an expanded `:bidir` probe), the server uses that probe ID for return-path reporting
+3. **Dual Reporting**: Forward metrics use the client's probe ID; reverse metrics use the server's matched probe ID
+
+**The `:bidir` Marker:**
+
+For AGENT probes with bidirectional targeting, the controller creates expansion probes with a special marker:
+
+```
+Target format: <ip>:bidir
+```
+
+These probes are **not** executed as active clients—they exist only as anchors for the server to discover when a client connects. The agent worker (`workers/probes.go`) explicitly skips starting clients for `:bidir` marked probes.
 
 **See Also:** [TrafficSim Architecture](./trafficsim-architecture.md)
 

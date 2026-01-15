@@ -47,6 +47,7 @@ See [docs/development.md](./docs/development.md) for detailed setup instructions
 | [Panel Architecture](./docs/panel-architecture.md) | Frontend design and patterns |
 | [Agent Probes](./docs/agent-probes.md) | Probe types and configuration |
 | [TrafficSim](./docs/trafficsim-architecture.md) | Inter-agent traffic simulation |
+| [Alerting](./docs/alerting.md) | Alert rules and notifications |
 
 ## Environment Variables
 
