@@ -4,7 +4,10 @@ package web
 import (
 	"net/http"
 	"strings"
+	"time"
 
+	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/workspace"
 
@@ -16,16 +19,55 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore) 
 	wsParty := api.Party("/workspaces")
 	store := workspace.NewStore(db)
 
-	// GET /workspaces - returns all workspaces where user is a member
+	// GET /workspaces - returns all workspaces where user is a member, with stats
 	wsParty.Get("/", func(ctx iris.Context) {
 		uid := currentUserID(ctx)
-		out, err := store.ListWorkspacesByUserID(ctx.Request().Context(), uid)
+		workspaces, err := store.ListWorkspacesByUserID(ctx.Request().Context(), uid)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(out)
+
+		// Build enriched response with stats for each workspace
+		type WorkspaceWithStats struct {
+			workspace.Workspace
+			AgentCount   int `json:"agent_count"`
+			OnlineAgents int `json:"online_agents"`
+			MemberCount  int `json:"member_count"`
+			AlertCount   int `json:"alert_count"`
+		}
+
+		result := make([]WorkspaceWithStats, 0, len(workspaces))
+		onlineThreshold := time.Now().Add(-2 * time.Minute) // Consider online if seen in last 2 minutes
+
+		for _, ws := range workspaces {
+			stats := WorkspaceWithStats{Workspace: ws}
+
+			// Get agent counts
+			agents, _, _ := agent.ListAgentsByWorkspace(ctx.Request().Context(), db, ws.ID, 1000, 0)
+			stats.AgentCount = len(agents)
+
+			// Count online agents
+			for _, a := range agents {
+				if a.UpdatedAt.After(onlineThreshold) {
+					stats.OnlineAgents++
+				}
+			}
+
+			// Get member count
+			members, _ := store.ListMembers(ctx.Request().Context(), ws.ID)
+			stats.MemberCount = len(members)
+
+			// Get active alerts count
+			activeStatus := alert.StatusActive
+			alerts, _ := alert.ListAlerts(ctx.Request().Context(), db, &ws.ID, &activeStatus, 0)
+			stats.AlertCount = len(alerts)
+
+			result = append(result, stats)
+		}
+
+		_ = ctx.JSON(result)
 	})
 
 	// POST /workspaces

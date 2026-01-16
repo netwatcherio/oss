@@ -164,6 +164,14 @@ export interface Workspace {
     description: string;
 }
 
+/** Workspace with aggregate stats from list endpoint */
+export interface WorkspaceWithStats extends Workspace {
+    agent_count: number;
+    online_agents: number;
+    member_count: number;
+    alert_count: number;
+}
+
 /** Standardized list response wrapper from controller */
 export interface ListResponse<T> {
     data: T[];
