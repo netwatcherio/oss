@@ -17,10 +17,29 @@
           <i class="bi bi-aspect-ratio"></i>
           Reset View
         </button>
-        <button @click="toggleLayout" class="control-btn">
-          <i class="bi bi-grid-3x3-gap"></i>
-          {{ layoutMode === 'force' ? 'Hierarchical' : 'Force' }}
-        </button>
+        <div class="layout-toggle">
+          <button 
+            @click="layoutMode = 'force'; updateLayout()" 
+            class="layout-btn" 
+            :class="{ active: layoutMode === 'force' }"
+          >
+            <i class="bi bi-stars"></i> Force
+          </button>
+          <button 
+            @click="layoutMode = 'hierarchical'; updateLayout()"
+            class="layout-btn"
+            :class="{ active: layoutMode === 'hierarchical' }"
+          >
+            <i class="bi bi-diagram-3"></i> Hierarchical
+          </button>
+          <button 
+            @click="layoutMode = 'concentric'; updateLayout()"
+            class="layout-btn"
+            :class="{ active: layoutMode === 'concentric' }"
+          >
+            <i class="bi bi-bullseye"></i> Concentric
+          </button>
+        </div>
         <select v-model="colorMode" class="control-select">
           <option value="combined">Combined Metrics</option>
           <option value="latency">Latency Only</option>
@@ -113,61 +132,73 @@
       </div>
     </div>
     
-    <div v-if="selectedNode" class="node-detail-panel">
-      <button class="close-btn" @click="selectedNode = null">
-        <i class="bi bi-x-lg"></i>
-      </button>
-      <h4>{{ selectedNode.label || selectedNode.ip || 'Unknown' }}</h4>
-      <div class="detail-row" v-if="selectedNode.type">
-        <span class="label">Type:</span>
-        <span class="value badge" :class="'badge-' + selectedNode.type">{{ selectedNode.type }}</span>
-      </div>
-      <div class="detail-row" v-if="selectedNode.ip">
-        <span class="label">IP:</span>
-        <span class="value mono">{{ selectedNode.ip }}</span>
-      </div>
-      <div class="detail-row" v-if="selectedNode.hostname">
-        <span class="label">Hostname:</span>
-        <span class="value">{{ selectedNode.hostname }}</span>
-      </div>
-      <div class="detail-row" v-if="selectedNode.hop_number">
-        <span class="label">Hop:</span>
-        <span class="value">#{{ selectedNode.hop_number }}</span>
-      </div>
-      <div class="detail-row">
-        <span class="label">Avg Latency:</span>
-        <span class="value" :class="getLatencyClass(selectedNode.avg_latency)">
-          {{ selectedNode.avg_latency?.toFixed(2) || '0' }} ms
-        </span>
-      </div>
-      <div class="detail-row">
-        <span class="label">Packet Loss:</span>
-        <span class="value" :class="getPacketLossClass(selectedNode.packet_loss)">
-          {{ selectedNode.packet_loss?.toFixed(1) || '0' }}%
-        </span>
-      </div>
-      <div class="detail-row" v-if="selectedNode.path_count">
-        <span class="label">Paths:</span>
-        <span class="value">{{ selectedNode.path_count }}</span>
-      </div>
-      <div class="detail-section" v-if="aggregatedRoutes.length > 0">
-        <span class="section-title"><i class="bi bi-arrow-right-circle"></i> Routes through this node</span>
-        <div class="routes-list">
-          <div v-for="{ route, count } in aggregatedRoutes" :key="route" class="route-item">
-            <span class="route-path">{{ route }}</span>
-            <span v-if="count > 1" class="route-count">×{{ count }}</span>
-          </div>
-          <div v-if="selectedNode.path_ids && selectedNode.path_ids.length > aggregatedRoutes.length" class="route-item text-muted">
-            <i class="bi bi-three-dots"></i> {{ selectedNode.path_ids.length - aggregatedRoutes.length }} more routes
-          </div>
+    <div v-if="selectedNode" class="node-detail-panel" :class="{ minimized: panelMinimized }">
+      <div class="panel-header">
+        <h4 v-show="!panelMinimized">{{ selectedNode.hostname || selectedNode.label || selectedNode.ip || 'Unknown' }}</h4>
+        <div class="panel-controls">
+          <button class="panel-btn" @click="panelLocked = !panelLocked" :class="{ active: panelLocked }" title="Lock panel">
+            <i :class="panelLocked ? 'bi bi-lock-fill' : 'bi bi-unlock'"></i>
+          </button>
+          <button class="panel-btn" @click="panelMinimized = !panelMinimized" title="Minimize">
+            <i :class="panelMinimized ? 'bi bi-chevron-expand' : 'bi bi-dash-lg'"></i>
+          </button>
+          <button class="panel-btn close" @click="closePanel" title="Close">
+            <i class="bi bi-x-lg"></i>
+          </button>
         </div>
       </div>
-      <div class="detail-section" v-if="selectedNode.shared_agents && selectedNode.shared_agents.length > 1">
-        <span class="section-title"><i class="bi bi-share"></i> Shared by {{ selectedNode.shared_agents.length }} agents</span>
-        <div class="shared-agents">
-          <span v-for="(agentId, index) in selectedNode.shared_agents" :key="agentId" class="agent-badge">
-            {{ getAgentName(agentId) }}<span v-if="index < selectedNode.shared_agents.length - 1">, </span>
+      <div v-show="!panelMinimized" class="panel-content">
+        <div class="detail-row" v-if="selectedNode.type">
+          <span class="label">Type:</span>
+          <span class="value badge" :class="'badge-' + selectedNode.type">{{ selectedNode.type }}</span>
+        </div>
+        <div class="detail-row" v-if="selectedNode.ip">
+          <span class="label">IP:</span>
+          <span class="value mono">{{ selectedNode.ip }}</span>
+        </div>
+        <div class="detail-row" v-if="selectedNode.hostname">
+          <span class="label">Hostname:</span>
+          <span class="value">{{ selectedNode.hostname }}</span>
+        </div>
+        <div class="detail-row" v-if="selectedNode.hop_number">
+          <span class="label">Hop:</span>
+          <span class="value">#{{ selectedNode.hop_number }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Avg Latency:</span>
+          <span class="value" :class="getLatencyClass(selectedNode.avg_latency)">
+            {{ selectedNode.avg_latency?.toFixed(2) || '0' }} ms
           </span>
+        </div>
+        <div class="detail-row">
+          <span class="label">Packet Loss:</span>
+          <span class="value" :class="getPacketLossClass(selectedNode.packet_loss)">
+            {{ selectedNode.packet_loss?.toFixed(1) || '0' }}%
+          </span>
+        </div>
+        <div class="detail-row" v-if="selectedNode.path_count">
+          <span class="label">Paths:</span>
+          <span class="value">{{ selectedNode.path_count }}</span>
+        </div>
+        <div class="detail-section" v-if="aggregatedRoutes.length > 0">
+          <span class="section-title"><i class="bi bi-arrow-right-circle"></i> Routes through this node</span>
+          <div class="routes-list">
+            <div v-for="{ route, count } in aggregatedRoutes" :key="route" class="route-item">
+              <span class="route-path">{{ route }}</span>
+              <span v-if="count > 1" class="route-count">×{{ count }}</span>
+            </div>
+            <div v-if="selectedNode.path_ids && selectedNode.path_ids.length > aggregatedRoutes.length" class="route-item text-muted">
+              <i class="bi bi-three-dots"></i> {{ selectedNode.path_ids.length - aggregatedRoutes.length }} more routes
+            </div>
+          </div>
+        </div>
+        <div class="detail-section" v-if="selectedNode.shared_agents && selectedNode.shared_agents.length > 1">
+          <span class="section-title"><i class="bi bi-share"></i> Shared by {{ selectedNode.shared_agents.length }} agents</span>
+          <div class="shared-agents">
+            <span v-for="(agentId, index) in selectedNode.shared_agents" :key="agentId" class="agent-badge">
+              {{ getAgentName(agentId) }}<span v-if="index < selectedNode.shared_agents.length - 1">, </span>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -193,14 +224,22 @@ const emit = defineEmits<{
 
 const containerRef = ref<HTMLElement | null>(null);
 const colorMode = ref<'combined' | 'latency' | 'packetLoss'>('combined');
-const layoutMode = ref<'force' | 'hierarchical'>('hierarchical');
+const layoutMode = ref<'force' | 'hierarchical' | 'concentric'>('hierarchical');
 const loading = ref(false);
 const mapData = ref<NetworkMapData | null>(props.initialData || null);
 const selectedNode = ref<NetworkMapNode | null>(null);
 const isPulsing = ref(false);
 const isLive = ref(false);
+const panelLocked = ref(false);
+const panelMinimized = ref(false);
 
 let visualization: WorkspaceNetworkVisualization | null = null;
+
+const closePanel = () => {
+  selectedNode.value = null;
+  panelLocked.value = false;
+  panelMinimized.value = false;
+};
 
 // WebSocket subscription for live updates
 const { subscribe, connected } = useWebSocket();
@@ -240,8 +279,7 @@ const resetView = () => {
   visualization?.resetZoom();
 };
 
-const toggleLayout = () => {
-  layoutMode.value = layoutMode.value === 'force' ? 'hierarchical' : 'force';
+const updateLayout = () => {
   if (visualization) {
     visualization.setLayout(layoutMode.value);
   }
@@ -260,6 +298,9 @@ const createVisualization = () => {
     colorMode.value,
     layoutMode.value,
     (node) => {
+      // Respect panel lock - don't change selection when locked
+      if (panelLocked.value) return;
+      
       selectedNode.value = node;
       emit('node-select', node);
       // Highlight paths through this node
@@ -441,7 +482,7 @@ class WorkspaceNetworkVisualization {
     container: HTMLElement,
     data: NetworkMapData,
     private colorMode: 'combined' | 'latency' | 'packetLoss',
-    private layoutMode: 'force' | 'hierarchical',
+    private layoutMode: 'force' | 'hierarchical' | 'concentric',
     onNodeClick?: (node: NetworkMapNode) => void
   ) {
     this.container = container;
@@ -538,6 +579,8 @@ class WorkspaceNetworkVisualization {
 
     if (this.layoutMode === 'hierarchical') {
       this.applyHierarchicalLayout();
+    } else if (this.layoutMode === 'concentric') {
+      this.applyConcentricLayout();
     }
 
     // Links - teal color like reference
@@ -548,8 +591,8 @@ class WorkspaceNetworkVisualization {
       .enter()
       .append('line')
       .attr('stroke', '#14b8a6')
-      .attr('stroke-opacity', 0.8)
-      .attr('stroke-width', 2);
+      .attr('stroke-opacity', 0.35)
+      .attr('stroke-width', 1);
 
     // Nodes
     const nodeSelection = this.g.append('g')
@@ -737,6 +780,114 @@ class WorkspaceNetworkVisualization {
       .force('collision', null);  // Disable collision in rigid mode
   }
 
+  private applyConcentricLayout() {
+    const centerX = this.width / 2;
+    const centerY = this.height / 2;
+    
+    // Layout: agents on LEFT, destinations on RIGHT, hops in CENTER rings
+    const sideMargin = 80;  // Space for agent/destination columns on sides
+    const nodeSpacing = 45; // Vertical spacing between nodes in columns
+    
+    // Separate nodes by type
+    const agentNodes = this.nodes.filter(n => n.type === 'agent');
+    const destNodes = this.nodes.filter(n => n.type === 'destination');
+    const hopNodes = this.nodes.filter(n => n.type === 'hop');
+    
+    // Position agents in a column on the LEFT
+    agentNodes.sort((a, b) => (b.path_count || 0) - (a.path_count || 0));
+    const agentColumnHeight = (agentNodes.length - 1) * nodeSpacing;
+    const agentStartY = centerY - agentColumnHeight / 2;
+    agentNodes.forEach((node, i) => {
+      node.fx = sideMargin;
+      node.fy = agentStartY + i * nodeSpacing;
+      node.x = node.fx;
+      node.y = node.fy;
+    });
+    
+    // Position destinations in a column on the RIGHT
+    destNodes.sort((a, b) => (b.path_count || 0) - (a.path_count || 0));
+    const destColumnHeight = (destNodes.length - 1) * nodeSpacing;
+    const destStartY = centerY - destColumnHeight / 2;
+    destNodes.forEach((node, i) => {
+      node.fx = this.width - sideMargin;
+      node.fy = destStartY + i * nodeSpacing;
+      node.x = node.fx;
+      node.y = node.fy;
+    });
+    
+    // Center area for hop rings
+    const circleRadius = Math.min((this.width - sideMargin * 2 - 60) / 2, this.height / 2 - 40);
+    
+    // Position hops in concentric rings in the center
+    if (hopNodes.length > 0) {
+      // Build adjacency for BFS depth from agents
+      const adjacency = new Map<string, Set<string>>();
+      this.links.forEach(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as D3Node).id;
+        const targetId = typeof link.target === 'string' ? link.target : (link.target as D3Node).id;
+        if (!adjacency.has(sourceId)) adjacency.set(sourceId, new Set());
+        if (!adjacency.has(targetId)) adjacency.set(targetId, new Set());
+        adjacency.get(sourceId)!.add(targetId);
+        adjacency.get(targetId)!.add(sourceId);
+      });
+
+      // BFS from agents
+      const nodeDepth = new Map<string, number>();
+      const queue: { id: string; depth: number }[] = [];
+      agentNodes.forEach(n => {
+        nodeDepth.set(n.id, 0);
+        queue.push({ id: n.id, depth: 0 });
+      });
+      while (queue.length > 0) {
+        const { id, depth } = queue.shift()!;
+        const neighbors = adjacency.get(id) || new Set();
+        neighbors.forEach(neighborId => {
+          if (!nodeDepth.has(neighborId)) {
+            nodeDepth.set(neighborId, depth + 1);
+            queue.push({ id: neighborId, depth: depth + 1 });
+          }
+        });
+      }
+
+      // Group hops by depth
+      const hopsByDepth = new Map<number, D3Node[]>();
+      hopNodes.forEach(node => {
+        const depth = nodeDepth.get(node.id) ?? 1;
+        if (!hopsByDepth.has(depth)) hopsByDepth.set(depth, []);
+        hopsByDepth.get(depth)!.push(node);
+      });
+      
+      // Sort depths: closest to agents on outer ring, furthest in center
+      const hopDepths = Array.from(hopsByDepth.keys()).sort((a, b) => a - b);
+      const ringCount = hopDepths.length || 1;
+      const ringSpacing = Math.min(circleRadius / (ringCount + 0.5), 40);
+      
+      // Position hops on rings - closest (low depth) at OUTER, furthest at center
+      hopDepths.forEach((depth, depthIndex) => {
+        const layerHops = hopsByDepth.get(depth) || [];
+        layerHops.sort((a, b) => (b.path_count || 0) - (a.path_count || 0));
+        
+        // Outer rings for closest hops (low depth), inner for furthest
+        const radius = circleRadius - (ringSpacing * depthIndex);
+        const angleStep = (2 * Math.PI) / Math.max(layerHops.length, 1);
+        
+        layerHops.forEach((node, i) => {
+          const angle = angleStep * i - Math.PI / 2; // Start from top
+          node.fx = centerX + radius * Math.cos(angle);
+          node.fy = centerY + radius * Math.sin(angle);
+          node.x = node.fx;
+          node.y = node.fy;
+        });
+      });
+    }
+
+    // Update simulation forces
+    this.simulation
+      .force('link', d3.forceLink<D3Node, D3Link>(this.links).id(d => d.id).distance(50).strength(0.05))
+      .force('charge', null)
+      .force('collision', null);
+  }
+
   private createDragBehavior() {
     return d3.drag<SVGGElement, D3Node>()
       .on('start', (event, d) => {
@@ -866,10 +1017,12 @@ class WorkspaceNetworkVisualization {
       .text(d => d.label);
   }
 
-  public setLayout(mode: 'force' | 'hierarchical') {
+  public setLayout(mode: 'force' | 'hierarchical' | 'concentric') {
     this.layoutMode = mode;
     if (mode === 'hierarchical') {
       this.applyHierarchicalLayout();
+    } else if (mode === 'concentric') {
+      this.applyConcentricLayout();
     } else {
       this.nodes.forEach(node => {
         if (node.type !== 'agent' && node.type !== 'destination') {
@@ -908,9 +1061,11 @@ class WorkspaceNetworkVisualization {
     // Update simulation center force
     this.simulation.force('center', d3.forceCenter(this.width / 2, this.height / 2));
     
-    // Re-apply layout if hierarchical
+    // Re-apply layout if hierarchical or concentric
     if (this.layoutMode === 'hierarchical') {
       this.applyHierarchicalLayout();
+    } else if (this.layoutMode === 'concentric') {
+      this.applyConcentricLayout();
     }
     
     this.simulation.alpha(0.3).restart();
@@ -1212,6 +1367,39 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   color: var(--map-control-text);
 }
 
+/* Layout toggle segmented control */
+.layout-toggle {
+  display: flex;
+  background: var(--map-control-bg);
+  border-radius: 6px;
+  padding: 2px;
+  border: 1px solid var(--map-control-border);
+}
+
+.layout-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--map-control-text);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.layout-btn.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.layout-btn:hover:not(.active) {
+  background: var(--map-control-hover-bg);
+}
+
 .network-map {
   width: 100%;
   height: 550px;
@@ -1267,19 +1455,64 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   padding-right: 24px;
 }
 
-.close-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: none;
-  border: none;
-  color: var(--map-text-muted);
-  cursor: pointer;
-  padding: 4px;
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.close-btn:hover {
+.panel-header h4 {
+  margin: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-detail-panel.minimized {
+  min-width: auto;
+  padding: 8px 12px;
+}
+
+.node-detail-panel.minimized .panel-header {
+  justify-content: flex-end;
+}
+
+.panel-controls {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.panel-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--map-text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.panel-btn:hover {
   color: var(--map-title-color);
+  background: rgba(255,255,255,0.05);
+}
+
+.panel-btn.active {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.panel-btn.close:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.panel-content {
+  /* Container for minimizable content */
 }
 
 .detail-row {
