@@ -80,12 +80,63 @@
         
         <!-- Expanded View - Show Recent Traces -->
         <div v-if="expandedGroups[group.signature]" class="route-expanded">
+          <!-- Route Change Diff Display -->
+          <div v-if="group.isRouteChange && group.changedFromHops" class="route-diff">
+            <div class="diff-header">
+              <i class="bi bi-arrow-repeat me-2"></i>
+              <strong>Route Change Detected</strong>
+              <span v-if="group.routeChangeAt" class="diff-time">
+                <i class="bi bi-clock ms-3 me-1"></i>
+                {{ formatRouteChangeTime(group.routeChangeAt) }}
+              </span>
+            </div>
+            <div class="diff-content">
+              <div class="diff-column diff-old">
+                <div class="diff-label">Previous Route</div>
+                <div class="diff-hops">
+                  <div 
+                    v-for="(ip, idx) in group.changedFromHops" 
+                    :key="'old-'+idx" 
+                    class="diff-hop"
+                    :class="{ 'diff-removed': !group.hopIps.includes(ip), 'diff-unchanged': group.hopIps[idx] === ip }"
+                  >
+                    <span class="hop-num">{{ idx + 1 }}</span>
+                    <span class="hop-ip">{{ ip }}</span>
+                    <i v-if="!group.hopIps.includes(ip)" class="bi bi-dash-circle-fill text-danger ms-1"></i>
+                  </div>
+                </div>
+              </div>
+              <div class="diff-arrow">
+                <i class="bi bi-arrow-right-circle-fill"></i>
+              </div>
+              <div class="diff-column diff-new">
+                <div class="diff-label">Current Route</div>
+                <div class="diff-hops">
+                  <div 
+                    v-for="(ip, idx) in group.hopIps" 
+                    :key="'new-'+idx" 
+                    class="diff-hop"
+                    :class="{ 'diff-added': !group.changedFromHops?.includes(ip), 'diff-unchanged': group.changedFromHops?.[idx] === ip }"
+                  >
+                    <span class="hop-num">{{ idx + 1 }}</span>
+                    <span class="hop-ip">{{ ip }}</span>
+                    <i v-if="!group.changedFromHops?.includes(ip)" class="bi bi-plus-circle-fill text-success ms-1"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="trace-list">
             <div 
-              v-for="(trace, traceIdx) in group.traces.slice(0, 5)" 
+              v-for="(trace, traceIdx) in getRecentTraces(group)" 
               :key="traceIdx"
               class="trace-row"
             >
+              <div class="trace-timestamp">
+                <i class="bi bi-clock me-1"></i>
+                {{ formatTraceTimestamp(trace) }}
+              </div>
               <MtrTable :probe-data="trace" :show-copy="true" />
             </div>
             <div v-if="group.traces.length > 5" class="more-traces">
@@ -128,6 +179,7 @@ interface RouteGroup {
   sourceIp: string;
   destIp: string;
   hopCount: number;
+  hopIps: string[];          // Array of hop IPs for diff comparison
   traces: ProbeData[];
   count: number;
   firstSeen: Date;
@@ -136,6 +188,9 @@ interface RouteGroup {
   maxLoss: number;
   hasIssues: boolean;
   isRouteChange: boolean;
+  changedFromSignature: string | null;  // Previous route signature for diff
+  changedFromHops: string[] | null;     // Previous route hops for diff
+  routeChangeAt: Date | null;           // When the route change was first detected
 }
 
 const props = defineProps<{
@@ -159,6 +214,7 @@ const routeGroups = computed<RouteGroup[]>(() => {
   
   const groups = new Map<string, RouteGroup>();
   let prevSignature = '';
+  let prevHopIps: string[] = [];
   
   // Sort by time ascending for route change detection
   const sortedData = [...props.mtrData].sort((a, b) => 
@@ -213,13 +269,20 @@ const routeGroups = computed<RouteGroup[]>(() => {
       group.firstSeen = timestamp < group.firstSeen ? timestamp : group.firstSeen;
       group.lastSeen = timestamp > group.lastSeen ? timestamp : group.lastSeen;
       group.hasIssues = group.hasIssues || hasIssues;
-      group.isRouteChange = group.isRouteChange || isRouteChange;
+      // Keep track of route change status and previous route
+      if (isRouteChange && !group.isRouteChange) {
+        group.isRouteChange = true;
+        group.changedFromSignature = prevSignature;
+        group.changedFromHops = [...prevHopIps];
+        group.routeChangeAt = timestamp;
+      }
     } else {
       groups.set(signature, {
         signature,
         sourceIp,
         destIp,
         hopCount: hops.length,
+        hopIps,
         traces: [trace],
         count: 1,
         firstSeen: timestamp,
@@ -228,14 +291,21 @@ const routeGroups = computed<RouteGroup[]>(() => {
         maxLoss,
         hasIssues,
         isRouteChange,
+        changedFromSignature: isRouteChange ? prevSignature : null,
+        changedFromHops: isRouteChange ? [...prevHopIps] : null,
+        routeChangeAt: isRouteChange ? timestamp : null,
       });
     }
     
     prevSignature = signature;
+    prevHopIps = hopIps;
   }
   
-  // Sort: issues first, then by count descending
+  // Sort: route changes first, then issues, then by count descending
   return Array.from(groups.values()).sort((a, b) => {
+    // Route changes that are also issues go first
+    if (a.isRouteChange && !b.isRouteChange) return -1;
+    if (!a.isRouteChange && b.isRouteChange) return 1;
     if (a.hasIssues && !b.hasIssues) return -1;
     if (!a.hasIssues && b.hasIssues) return 1;
     return b.count - a.count;
@@ -267,13 +337,73 @@ const toggleGroup = (signature: string) => {
   expandedGroups[signature] = !expandedGroups[signature];
 };
 
+// Get 5 most recent traces for expanded view, sorted newest first
+const getRecentTraces = (group: RouteGroup): ProbeData[] => {
+  return [...group.traces]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 5);
+};
+
+// Format a single trace timestamp with date and time
+const formatTraceTimestamp = (trace: ProbeData): string => {
+  const payload = trace.payload as any;
+  const timestamp = new Date(payload?.stop_timestamp || trace.created_at);
+  const today = new Date();
+  const isToday = timestamp.toDateString() === today.toDateString();
+  
+  const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  
+  if (isToday) {
+    return `Today at ${formatTime(timestamp)}`;
+  }
+  
+  return timestamp.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+};
+
+// Format time when a route change was detected
+const formatRouteChangeTime = (date: Date): string => {
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  
+  const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  
+  if (isToday) {
+    return `Today at ${formatTime(date)}`;
+  }
+  
+  // Check if yesterday
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Yesterday at ${formatTime(date)}`;
+  }
+  
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+};
+
 const formatTimeRange = (group: RouteGroup): string => {
+  const now = new Date();
   const sameDay = group.firstSeen.toDateString() === group.lastSeen.toDateString();
+  const isToday = group.lastSeen.toDateString() === now.toDateString();
   const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   
-  if (group.count === 1) return formatTime(group.lastSeen);
-  if (sameDay) return `${formatTime(group.firstSeen)} - ${formatTime(group.lastSeen)}`;
+  if (group.count === 1) {
+    return isToday ? formatTime(group.lastSeen) : `${formatDate(group.lastSeen)} ${formatTime(group.lastSeen)}`;
+  }
+  if (sameDay) {
+    return `${formatTime(group.firstSeen)} - ${formatTime(group.lastSeen)}`;
+  }
   return `${formatDate(group.firstSeen)} - ${formatDate(group.lastSeen)}`;
 };
 
@@ -493,6 +623,20 @@ const getLossClass = (loss: number): string => {
   gap: 0.75rem;
 }
 
+.trace-timestamp {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bs-tertiary-bg);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.trace-timestamp i {
+  opacity: 0.7;
+}
+
 .more-traces {
   text-align: center;
   padding: 0.5rem;
@@ -513,6 +657,104 @@ const getLossClass = (loss: number): string => {
   color: var(--bs-secondary-color);
 }
 
+/* Route Diff Styles */
+.route-diff {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--bs-tertiary-bg);
+  border-radius: 8px;
+  border: 1px solid var(--bs-info);
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  color: var(--bs-info);
+  font-size: 0.9rem;
+}
+
+.diff-time {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+  font-weight: normal;
+}
+
+.diff-content {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.diff-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.diff-old .diff-label { color: var(--bs-danger); }
+.diff-new .diff-label { color: var(--bs-success); }
+
+.diff-hops {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.diff-hop {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bs-body-bg);
+  border-radius: 4px;
+  font-family: var(--bs-font-monospace);
+  font-size: 0.75rem;
+}
+
+.diff-hop .hop-num {
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+  min-width: 1.5rem;
+}
+
+.diff-hop .hop-ip {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-hop.diff-removed {
+  background: rgba(var(--bs-danger-rgb), 0.15);
+  color: var(--bs-danger);
+}
+
+.diff-hop.diff-added {
+  background: rgba(var(--bs-success-rgb), 0.15);
+  color: var(--bs-success);
+}
+
+.diff-hop.diff-unchanged {
+  opacity: 0.6;
+}
+
+.diff-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 1.5rem;
+  color: var(--bs-info);
+  font-size: 1.25rem;
+}
+
 @media (max-width: 768px) {
   .route-main {
     flex-wrap: wrap;
@@ -526,6 +768,15 @@ const getLossClass = (loss: number): string => {
   
   .expand-icon {
     display: none;
+  }
+  
+  .diff-content {
+    flex-direction: column;
+  }
+  
+  .diff-arrow {
+    transform: rotate(90deg);
+    padding: 0.5rem 0;
   }
 }
 </style>
