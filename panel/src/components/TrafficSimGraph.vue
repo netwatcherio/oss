@@ -78,9 +78,15 @@ export default {
     intervalSec: {
       type: Number,
       default: 60 // Default to 60 seconds if not provided
+    },
+    // Pass current time range so we can emit changes for data reload
+    currentTimeRange: {
+      type: Array as () => [Date, Date] | null,
+      default: null
     }
   },
-  setup(props: { trafficResults: TrafficSimResult[]; intervalSec: number }) {
+  emits: ['time-range-change'],
+  setup(props: { trafficResults: TrafficSimResult[]; intervalSec: number; currentTimeRange: [Date, Date] | null }, { emit }: { emit: (event: 'time-range-change', payload: [Date, Date]) => void }) {
     const trafficGraph = ref(null);
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref('all');

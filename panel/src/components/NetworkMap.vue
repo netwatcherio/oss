@@ -136,6 +136,9 @@ class NetworkVisualization {
     const linkMap = new Map<string, Link>();
 
     mtrResults.forEach((result, pathIndex) => {
+      // Guard: skip results with missing or malformed data
+      if (!result?.report?.hops) return;
+      
       let prevNode: Node | null = null;
 
       result.report.hops.forEach((hop, hopIndex) => {
@@ -145,7 +148,7 @@ class NetworkVisualization {
         let ip: string | undefined;
         let isUnknown = false;
 
-        if (hop.hosts.length > 0) {
+        if (hop.hosts && hop.hosts.length > 0) {
           hostname = hop.hosts[0].hostname;
           ip = hop.hosts[0].ip;
           nodeId = ip || `hop-${hopNum}`;

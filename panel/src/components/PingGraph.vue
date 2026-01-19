@@ -116,9 +116,15 @@ export default defineComponent({
     aggregationBucketSec: {
       type: Number,
       default: 0 // 0 means no aggregation, use intervalSec
+    },
+    // Pass current time range so we can emit changes for data reload
+    currentTimeRange: {
+      type: Array as PropType<[Date, Date] | null>,
+      default: null
     }
   },
-  setup(props) {
+  emits: ['time-range-change'],
+  setup(props, { emit }) {
     const latencyGraph = ref<HTMLElement | null>(null);
     const chart = ref<ApexCharts | null>(null);
     const selectedRange = ref<'all' | '1h' | '6h' | '24h' | '7d'>('all');
@@ -386,7 +392,26 @@ export default defineComponent({
             tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true },
             autoSelected: 'zoom'
           },
-          dropShadow: { enabled: false }
+          dropShadow: { enabled: false },
+          events: {
+            // Emit time range change when user zooms in/out
+            zoomed: (chartContext: any, { xaxis }: any) => {
+              if (xaxis && xaxis.min && xaxis.max) {
+                const newFrom = new Date(xaxis.min);
+                const newTo = new Date(xaxis.max);
+                console.log('[PingGraph] Zoomed to:', newFrom.toISOString(), '->', newTo.toISOString());
+                emit('time-range-change', [newFrom, newTo]);
+              }
+            },
+            // Emit original time range when user resets zoom
+            beforeResetZoom: () => {
+              if (props.currentTimeRange && props.currentTimeRange.length === 2) {
+                console.log('[PingGraph] Reset zoom, restoring original range');
+                emit('time-range-change', props.currentTimeRange);
+              }
+              return undefined; // Allow default behavior
+            }
+          }
         },
         colors: ['#10b981', '#3b82f6', '#f97316', '#fbbf24'],
         stroke: { width: [2, 3, 2, 2], curve: 'smooth', dashArray: [0, 0, 0, 0] },

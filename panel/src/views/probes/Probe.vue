@@ -1002,28 +1002,6 @@ const { connected: wsConnected } = useProbeSubscription(
   handleLiveProbeData
 );
 
-// Watch for timeRange changes - skip if called during initial mount
-let initialLoad = true;
-watch(
-  () => state.timeRange,
-  (newRange, oldRange) => {
-    // Skip the initial watch trigger since onMounted already calls reloadData
-    if (initialLoad) {
-      initialLoad = false;
-      return;
-    }
-    // Validate time range
-    if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
-      console.warn('[Probe] Watch: Invalid time range, skipping reload');
-      return;
-    }
-    console.log('[Probe] Watch: Time range changed, reloading data...');
-    console.log('[Probe] Old range:', oldRange?.[0]?.toISOString?.(), 'to', oldRange?.[1]?.toISOString?.());
-    console.log('[Probe] New range:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
-    reloadData();
-  },
-  { deep: true }
-);
 </script>
 
 <template>
@@ -1146,7 +1124,7 @@ watch(
                     <i class="bi bi-graph-down fs-1 mb-2 d-block"></i>
                     <p class="mb-0">No latency data available for this direction</p>
                   </div>
-                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" />
+                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                 </div>
               </div>
             </div>
@@ -1171,7 +1149,7 @@ watch(
                     <i class="bi bi-broadcast fs-1 mb-2 d-block"></i>
                     <p class="mb-0">No traffic simulation data available for this direction</p>
                   </div>
-                  <TrafficSimGraph v-else :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
+                  <TrafficSimGraph v-else :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                 </div>
               </div>
             </div>
@@ -1308,7 +1286,7 @@ watch(
               <p class="text-muted">No ping data found for the selected time range</p>
             </div>
             <div v-else>
-              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" />
+              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
             </div>
           </div>
         </div>
@@ -1333,7 +1311,7 @@ watch(
               <p class="text-muted">No traffic simulation data found for the selected time range</p>
             </div>
             <div v-else>
-              <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" />
+              <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
             </div>
           </div>
         </div>
