@@ -144,6 +144,16 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 				ctx.Application().Logger().Debugf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
 					probeType, probeID, len(rows))
 			}
+			// Post-filter by type if specified (for types like MTR that don't support aggregation)
+			if err == nil && probeType != "" {
+				filtered := make([]probe.ProbeData, 0, len(rows))
+				for _, r := range rows {
+					if string(r.Type) == probeType {
+						filtered = append(filtered, r)
+					}
+				}
+				rows = filtered
+			}
 		}
 
 		if err != nil {

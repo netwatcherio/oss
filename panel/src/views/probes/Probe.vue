@@ -948,14 +948,8 @@ watch(
     // Debounce reload by 500ms to avoid rapid-fire requests
     timeRangeDebounceTimer = window.setTimeout(() => {
       console.log('[Probe] Debounced reload triggered');
-      // Clear existing data before reload
-      state.pingData = [];
-      state.mtrData = [];
-      state.trafficSimData = [];
-      state.rperfData = [];
-      state.probeData = [];
-      state.agentPairData = [];
-      loadProbeData();
+      // Call full reloadData which handles data clearing and agentPairData rebuilding
+      reloadData();
       timeRangeDebounceTimer = null;
     }, 500);
   },
