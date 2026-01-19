@@ -45,6 +45,12 @@
           <option value="latency">Latency Only</option>
           <option value="packetLoss">Packet Loss Only</option>
         </select>
+        <select v-model="selectedLookback" class="control-select" @change="refreshData">
+          <option :value="60">Last Hour</option>
+          <option :value="360">Last 6 Hours</option>
+          <option :value="720">Last 12 Hours</option>
+          <option :value="1440">Last 24 Hours</option>
+        </select>
       </div>
     </div>
     
@@ -225,6 +231,7 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null);
 const colorMode = ref<'combined' | 'latency' | 'packetLoss'>('combined');
 const layoutMode = ref<'force' | 'hierarchical' | 'concentric'>('hierarchical');
+const selectedLookback = ref<number>(60);
 const loading = ref(false);
 const mapData = ref<NetworkMapData | null>(props.initialData || null);
 const selectedNode = ref<NetworkMapNode | null>(null);
@@ -248,7 +255,7 @@ const fetchMapData = async () => {
   loading.value = true;
   try {
     const response = await request.get<NetworkMapData>(
-      `/workspaces/${props.workspaceId}/network-map?lookback=60`
+      `/workspaces/${props.workspaceId}/network-map?lookback=${selectedLookback.value}`
     );
     mapData.value = response.data;
     // Wait for Vue to update the DOM before creating visualization
