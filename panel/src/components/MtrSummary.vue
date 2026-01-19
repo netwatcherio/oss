@@ -4,15 +4,15 @@
     <div class="summary-header">
       <div class="summary-stats">
         <div class="stat-item">
-          <span class="stat-value">{{ totalTraceCount }}</span>
+          <span class="stat-value">{{ totalTraces }}</span>
           <span class="stat-label">Traces</span>
         </div>
         <div class="stat-item">
           <span class="stat-value">{{ uniqueRoutes }}</span>
           <span class="stat-label">Unique Routes</span>
         </div>
-        <div class="stat-item" v-if="notableCount > 0" :class="{ warning: true }">
-          <span class="stat-value">{{ notableCount }}</span>
+        <div class="stat-item" v-if="issueCount > 0" :class="{ warning: true }">
+          <span class="stat-value">{{ issueCount }}</span>
           <span class="stat-label">Issues</span>
         </div>
         <div class="stat-item" v-if="routeChangeCount > 0" :class="{ info: true }">
@@ -20,304 +20,273 @@
           <span class="stat-label">Route Changes</span>
         </div>
       </div>
+      
+      <!-- View All Button -->
+      <button v-if="props.mtrData.length > 0" class="btn btn-sm btn-outline-primary" @click="emit('show-all-traces')">
+        <i class="bi bi-list-ul me-1"></i>View All Traces
+      </button>
     </div>
 
     <!-- No Data State -->
-    <div v-if="parsedData.length === 0 && !loading" class="no-data">
+    <div v-if="!props.mtrData || props.mtrData.length === 0" class="no-data">
       <i class="bi bi-diagram-3"></i>
       <p>No traceroute data available</p>
     </div>
 
-    <!-- Loading State -->
-    <div v-else-if="loading" class="no-data">
-      <div class="spinner-border spinner-border-sm text-primary me-2"></div>
-      <p>Loading traceroute data...</p>
-    </div>
-
-    <!-- Route Cards -->
-    <div v-else class="route-groups">
-      <!-- Notable Traces Section -->
-      <div v-if="notableTraces.length > 0" class="notable-section">
-        <h6 class="section-title">
-          <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
-          Notable Events
-        </h6>
+    <!-- Route Summary Cards - Grouped by Route -->
+    <div v-else class="route-list">
+      <div 
+        v-for="(group, index) in paginatedGroups" 
+        :key="group.signature"
+        class="route-row"
+        :class="{ 
+          'has-issues': group.hasIssues,
+          'is-primary': index === 0 && !group.hasIssues
+        }"
+      >
+        <div class="route-main" @click="toggleGroup(group.signature)">
+          <!-- Badge -->
+          <div class="route-badge" :class="getBadgeClass(group)">
+            <i :class="getBadgeIcon(group)"></i>
+            <span>{{ group.count }} trace{{ group.count !== 1 ? 's' : '' }}</span>
+          </div>
+          
+          <!-- Route Info -->
+          <div class="route-info">
+            <span class="hop-count">{{ group.hopCount }} hops</span>
+            <span class="route-path">
+              {{ group.sourceIp }} <i class="bi bi-arrow-right-short"></i> {{ group.destIp }}
+            </span>
+          </div>
+          
+          <!-- Metrics -->
+          <div class="route-metrics">
+            <div class="metric" :class="getLatencyClass(group.avgLatency)">
+              <span class="metric-value">{{ group.avgLatency.toFixed(1) }}ms</span>
+              <span class="metric-label">Avg Latency</span>
+            </div>
+            <div class="metric" :class="getLossClass(group.maxLoss)">
+              <span class="metric-value">{{ group.maxLoss.toFixed(1) }}%</span>
+              <span class="metric-label">Max Loss</span>
+            </div>
+            <div class="metric time">
+              <span class="metric-value">{{ formatTimeRange(group) }}</span>
+              <span class="metric-label">Time Range</span>
+            </div>
+          </div>
+          
+          <i :class="expandedGroups[group.signature] ? 'bi bi-chevron-up' : 'bi bi-chevron-down'" class="expand-icon"></i>
+        </div>
         
-        <div 
-          v-for="(item, index) in notableTraces" 
-          :key="`notable-${index}`"
-          class="route-card has-issues"
-        >
-          <div class="route-header" @click="toggleTrace(`notable-${index}`)">
-            <div class="route-info">
-              <div class="route-badge" :class="getReasonBadgeClass(item.notableReason)">
-                <i :class="getReasonIcon(item.notableReason)"></i>
-                <span>{{ formatReason(item.notableReason) }}</span>
-              </div>
-              <div class="route-path">
-                <span class="hop-count">{{ item.hops.length }} hops</span>
-                <span class="route-endpoints">
-                  {{ item.hops[0] || '?' }} 
-                  <i class="bi bi-arrow-right"></i> 
-                  {{ item.hops[item.hops.length - 1] || '?' }}
-                </span>
-              </div>
+        <!-- Expanded View - Show Recent Traces -->
+        <div v-if="expandedGroups[group.signature]" class="route-expanded">
+          <div class="trace-list">
+            <div 
+              v-for="(trace, traceIdx) in group.traces.slice(0, 5)" 
+              :key="traceIdx"
+              class="trace-row"
+            >
+              <MtrTable :probe-data="trace" :show-copy="true" />
             </div>
-            
-            <div class="route-metrics">
-              <div class="metric" :class="getLatencyClass(item.finalLatency)">
-                <span class="metric-value">{{ item.finalLatency.toFixed(1) }}ms</span>
-                <span class="metric-label">Latency</span>
-              </div>
-              <div class="metric" :class="getLossClass(item.maxLoss)">
-                <span class="metric-value">{{ item.maxLoss.toFixed(1) }}%</span>
-                <span class="metric-label">Max Loss</span>
-              </div>
-              <div class="metric time-range">
-                <span class="metric-value">{{ formatTimestamp(item.timestamp) }}</span>
-                <span class="metric-label">Time</span>
-              </div>
+            <div v-if="group.traces.length > 5" class="more-traces">
+              <span class="text-muted">+ {{ group.traces.length - 5 }} more traces</span>
             </div>
-            
-            <i :class="expandedTraces[`notable-${index}`] ? 'bi bi-chevron-up' : 'bi bi-chevron-down'" class="expand-icon"></i>
-          </div>
-
-          <!-- Route Change Diff -->
-          <div v-if="item.notableReason === 'route-change' && item.previousRoute" class="route-diff">
-            <div class="diff-header">
-              <i class="bi bi-arrow-repeat me-2"></i>Route Change Detected
-            </div>
-            <div class="diff-content">
-              <div class="diff-line removed">
-                <span class="diff-marker">-</span>
-                <span class="diff-text">{{ item.previousRoute }}</span>
-              </div>
-              <div class="diff-line added">
-                <span class="diff-marker">+</span>
-                <span class="diff-text">{{ item.routeSignature }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Expanded Trace Details -->
-          <div v-if="expandedTraces[`notable-${index}`]" class="route-traces">
-            <MtrTable :probe-data="item.originalTrace" :show-copy="true" />
           </div>
         </div>
       </div>
-
-      <!-- Aggregated Routes Section -->
-      <div v-if="aggregatedRoutes.length > 0" class="aggregated-section">
-        <h6 class="section-title">
-          <i class="bi bi-graph-up me-2"></i>
-          Aggregated Routes
-        </h6>
-        
-        <div 
-          v-for="(item, index) in aggregatedRoutes" 
-          :key="`agg-${index}`"
-          class="route-card"
-          :class="{ 'is-primary': index === 0 }"
-        >
-          <div class="route-header" @click="toggleTrace(`agg-${index}`)">
-            <div class="route-info">
-              <div class="route-badge aggregated">
-                <i class="bi bi-layers"></i>
-                <span>{{ item.traceCount }} traces</span>
-              </div>
-              <div class="route-path">
-                <span class="hop-count">{{ item.hops.length }} hops</span>
-                <span class="route-endpoints">
-                  {{ item.hops[0] || '?' }} 
-                  <i class="bi bi-arrow-right"></i> 
-                  {{ item.hops[item.hops.length - 1] || '?' }}
-                </span>
-              </div>
-            </div>
-            
-            <div class="route-metrics">
-              <div class="metric" :class="getLatencyClass(item.avgLatency)">
-                <span class="metric-value">{{ item.avgLatency.toFixed(1) }}ms</span>
-                <span class="metric-label">Avg Latency</span>
-              </div>
-              <div class="metric" :class="getLossClass(item.maxLoss)">
-                <span class="metric-value">{{ item.maxLoss.toFixed(1) }}%</span>
-                <span class="metric-label">Max Loss</span>
-              </div>
-              <div class="metric time-range">
-                <span class="metric-value">{{ formatTimestamp(item.timestamp) }}</span>
-                <span class="metric-label">Bucket Time</span>
-              </div>
-            </div>
-            
-            <i :class="expandedTraces[`agg-${index}`] ? 'bi bi-chevron-up' : 'bi bi-chevron-down'" class="expand-icon"></i>
-          </div>
-
-          <!-- Expanded Trace Details -->
-          <div v-if="expandedTraces[`agg-${index}`]" class="route-traces">
-            <MtrTable :probe-data="item.originalTrace" :show-copy="true" />
-          </div>
-        </div>
-      </div>
+      
+      <!-- Pagination -->
+      <nav v-if="totalPages > 1" class="pagination-nav">
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="currentPage = Math.max(1, currentPage - 1)">
+              <i class="bi bi-chevron-left"></i>
+            </button>
+          </li>
+          <li v-for="p in visiblePages" :key="p" class="page-item" :class="{ active: p === currentPage }">
+            <button class="page-link" @click="currentPage = p">{{ p }}</button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="currentPage = Math.min(totalPages, currentPage + 1)">
+              <i class="bi bi-chevron-right"></i>
+            </button>
+          </li>
+        </ul>
+        <span class="page-info">{{ paginatedGroups.length }} of {{ routeGroups.length }} routes</span>
+      </nav>
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive } from 'vue';
-import type { ProbeData, MtrResult } from '@/types';
+import { computed, ref, reactive } from 'vue';
+import type { ProbeData } from '@/types';
 import MtrTable from '@/components/MtrTable.vue';
 
-interface ParsedMtrData {
-  hops: string[];
-  routeSignature: string;
-  previousRoute: string;
-  traceCount: number;
-  isAggregated: boolean;
-  notableReason: string;
-  finalLatency: number;
+interface RouteGroup {
+  signature: string;
+  sourceIp: string;
+  destIp: string;
+  hopCount: number;
+  traces: ProbeData[];
+  count: number;
+  firstSeen: Date;
+  lastSeen: Date;
   avgLatency: number;
   maxLoss: number;
-  timestamp: Date;
-  originalTrace: ProbeData;
+  hasIssues: boolean;
+  isRouteChange: boolean;
 }
 
 const props = defineProps<{
   mtrData: ProbeData[];
-  loading?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'show-all-traces'): void;
 }>();
 
-// State
-const expandedTraces = reactive<Record<string, boolean>>({});
+// Pagination
+const currentPage = ref(1);
+const pageSize = 10;
 
-// Parse the MTR data (handles both old and new formats)
-const parsedData = computed<ParsedMtrData[]>(() => {
+// Expansion state
+const expandedGroups = reactive<Record<string, boolean>>({});
+
+// Group traces by route signature
+const routeGroups = computed<RouteGroup[]>(() => {
   if (!props.mtrData || props.mtrData.length === 0) return [];
   
-  const result: ParsedMtrData[] = [];
+  const groups = new Map<string, RouteGroup>();
+  let prevSignature = '';
   
-  for (const trace of props.mtrData) {
+  // Sort by time ascending for route change detection
+  const sortedData = [...props.mtrData].sort((a, b) => 
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+  
+  for (const trace of sortedData) {
     const payload = trace.payload as any;
     if (!payload?.report?.hops) continue;
     
-    // Check if this is an aggregated payload
-    const isAggregated = payload.is_aggregated === true;
-    const notableReason = payload.notable_reason || '';
-    const traceCount = payload.trace_count || 1;
-    const routeSignature = payload.route_signature || '';
-    const previousRoute = payload.previous_route_signature || '';
+    const hops = payload.report.hops;
     
-    // Extract hops
-    const hops = payload.report.hops.map((hop: any) => 
-      hop.hosts && hop.hosts.length > 0 ? hop.hosts[0].ip : '*'
-    );
+    // Build signature from responding hops only
+    const hopIps = hops.map((h: any) => h.hosts?.[0]?.ip || '*');
+    const signature = hopIps.join('->');
     
-    // Calculate metrics - ONLY from responding hops
-    // Empty hops (routers that don't respond to ICMP) are NOT packet loss
+    // Find first and last responding hops
+    let sourceIp = '*';
+    let destIp = '*';
+    for (const hop of hops) {
+      const ip = hop.hosts?.[0]?.ip;
+      if (ip && ip !== '*') {
+        if (sourceIp === '*') sourceIp = ip;
+        destIp = ip;
+      }
+    }
+    
+    // Calculate metrics (only from responding hops)
     let finalLatency = 0;
     let maxLoss = 0;
-    
-    for (const hop of payload.report.hops) {
-      // Skip empty hops - they're not real loss
-      const hopIp = hop.hosts?.[0]?.ip || '';
-      if (!hopIp || hopIp === '*') continue;
+    for (const hop of hops) {
+      const ip = hop.hosts?.[0]?.ip;
+      if (!ip || ip === '*') continue;
       
       const loss = parseFloat(String(hop.loss_pct || '0').replace('%', ''));
       if (!isNaN(loss)) maxLoss = Math.max(maxLoss, loss);
       
-      // Track the last responding hop's latency
       const latency = parseFloat(hop.avg || '0');
-      if (!isNaN(latency) && latency > 0) {
-        finalLatency = latency;
-      }
+      if (!isNaN(latency) && latency > 0) finalLatency = latency;
     }
     
     const timestamp = new Date(payload.stop_timestamp || trace.created_at);
+    const isRouteChange = prevSignature !== '' && signature !== prevSignature;
+    const hasIssues = trace.triggered || maxLoss > 20;
     
-    result.push({
-      hops,
-      routeSignature,
-      previousRoute,
-      traceCount,
-      isAggregated,
-      notableReason,
-      finalLatency,
-      avgLatency: finalLatency, // For aggregated, this is already the avg
-      maxLoss,
-      timestamp,
-      originalTrace: trace,
-    });
+    if (groups.has(signature)) {
+      const group = groups.get(signature)!;
+      group.traces.push(trace);
+      group.count++;
+      group.avgLatency = ((group.avgLatency * (group.count - 1)) + finalLatency) / group.count;
+      group.maxLoss = Math.max(group.maxLoss, maxLoss);
+      group.firstSeen = timestamp < group.firstSeen ? timestamp : group.firstSeen;
+      group.lastSeen = timestamp > group.lastSeen ? timestamp : group.lastSeen;
+      group.hasIssues = group.hasIssues || hasIssues;
+      group.isRouteChange = group.isRouteChange || isRouteChange;
+    } else {
+      groups.set(signature, {
+        signature,
+        sourceIp,
+        destIp,
+        hopCount: hops.length,
+        traces: [trace],
+        count: 1,
+        firstSeen: timestamp,
+        lastSeen: timestamp,
+        avgLatency: finalLatency,
+        maxLoss,
+        hasIssues,
+        isRouteChange,
+      });
+    }
+    
+    prevSignature = signature;
   }
   
-  // Sort: notable traces first (by time desc), then aggregated (by trace count desc)
-  return result.sort((a, b) => {
-    if (a.notableReason && !b.notableReason) return -1;
-    if (!a.notableReason && b.notableReason) return 1;
-    if (a.notableReason && b.notableReason) {
-      return b.timestamp.getTime() - a.timestamp.getTime();
-    }
-    return b.traceCount - a.traceCount;
+  // Sort: issues first, then by count descending
+  return Array.from(groups.values()).sort((a, b) => {
+    if (a.hasIssues && !b.hasIssues) return -1;
+    if (!a.hasIssues && b.hasIssues) return 1;
+    return b.count - a.count;
   });
 });
 
-// Separate notable and aggregated traces
-const notableTraces = computed(() => parsedData.value.filter(d => d.notableReason));
-const aggregatedRoutes = computed(() => parsedData.value.filter(d => d.isAggregated && !d.notableReason));
+// Pagination computed
+const totalPages = computed(() => Math.ceil(routeGroups.value.length / pageSize));
+const paginatedGroups = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return routeGroups.value.slice(start, start + pageSize);
+});
+const visiblePages = computed(() => {
+  const pages: number[] = [];
+  const start = Math.max(1, currentPage.value - 2);
+  const end = Math.min(totalPages.value, start + 4);
+  for (let i = start; i <= end; i++) pages.push(i);
+  return pages;
+});
 
 // Stats
-const totalTraceCount = computed(() => {
-  return parsedData.value.reduce((sum, d) => sum + d.traceCount, 0);
-});
-
-const uniqueRoutes = computed(() => {
-  const signatures = new Set(parsedData.value.map(d => d.routeSignature || d.hops.join('->')));
-  return signatures.size;
-});
-
-const notableCount = computed(() => notableTraces.value.length);
-const routeChangeCount = computed(() => notableTraces.value.filter(t => t.notableReason === 'route-change').length);
+const totalTraces = computed(() => routeGroups.value.reduce((sum, g) => sum + g.count, 0));
+const uniqueRoutes = computed(() => routeGroups.value.length);
+const issueCount = computed(() => routeGroups.value.filter(g => g.hasIssues).length);
+const routeChangeCount = computed(() => routeGroups.value.filter(g => g.isRouteChange).length);
 
 // Methods
-const toggleTrace = (key: string) => {
-  expandedTraces[key] = !expandedTraces[key];
+const toggleGroup = (signature: string) => {
+  expandedGroups[signature] = !expandedGroups[signature];
 };
 
-const formatTimestamp = (date: Date): string => {
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const formatTimeRange = (group: RouteGroup): string => {
+  const sameDay = group.firstSeen.toDateString() === group.lastSeen.toDateString();
+  const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  
+  if (group.count === 1) return formatTime(group.lastSeen);
+  if (sameDay) return `${formatTime(group.firstSeen)} - ${formatTime(group.lastSeen)}`;
+  return `${formatDate(group.firstSeen)} - ${formatDate(group.lastSeen)}`;
 };
 
-const formatReason = (reason: string): string => {
-  const map: Record<string, string> = {
-    'triggered': 'Alert Triggered',
-    'route-change': 'Route Change',
-    'high-loss': 'High Loss',
-    'high-latency': 'High Latency',
-  };
-  return map[reason] || reason;
+const getBadgeClass = (group: RouteGroup): string => {
+  if (group.hasIssues) return 'badge-issue';
+  if (group.isRouteChange) return 'badge-change';
+  return 'badge-normal';
 };
 
-const getReasonIcon = (reason: string): string => {
-  const map: Record<string, string> = {
-    'triggered': 'bi bi-bell-fill',
-    'route-change': 'bi bi-arrow-repeat',
-    'high-loss': 'bi bi-exclamation-triangle-fill',
-    'high-latency': 'bi bi-speedometer',
-  };
-  return map[reason] || 'bi bi-info-circle';
-};
-
-const getReasonBadgeClass = (reason: string): string => {
-  const map: Record<string, string> = {
-    'triggered': 'badge-triggered',
-    'route-change': 'badge-route-change',
-    'high-loss': 'badge-high-loss',
-    'high-latency': 'badge-high-latency',
-  };
-  return map[reason] || '';
+const getBadgeIcon = (group: RouteGroup): string => {
+  if (group.hasIssues) return 'bi bi-exclamation-triangle-fill';
+  if (group.isRouteChange) return 'bi bi-arrow-repeat';
+  return 'bi bi-check-circle';
 };
 
 const getLatencyClass = (latency: number): string => {
@@ -335,453 +304,228 @@ const getLossClass = (loss: number): string => {
 
 <style scoped>
 .mtr-summary {
-  padding: 1rem 0;
+  padding: 0.5rem 0;
 }
 
 .summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .summary-stats {
   display: flex;
-  gap: 1.5rem;
+  gap: 1rem;
   flex-wrap: wrap;
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 1.25rem;
-  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
-  border-radius: 10px;
-  border: 1px solid #2a2b3d;
+  padding: 0.5rem 1rem;
+  background: var(--bs-tertiary-bg);
+  border-radius: 8px;
+  border: 1px solid var(--bs-border-color);
 }
 
 .stat-item.warning {
-  border-color: rgba(255, 158, 100, 0.4);
-  background: linear-gradient(135deg, rgba(255, 158, 100, 0.1) 0%, rgba(255, 158, 100, 0.05) 100%);
+  border-color: var(--bs-warning);
+  background: rgba(var(--bs-warning-rgb), 0.1);
 }
 
 .stat-item.info {
-  border-color: rgba(125, 207, 255, 0.4);
-  background: linear-gradient(135deg, rgba(125, 207, 255, 0.1) 0%, rgba(125, 207, 255, 0.05) 100%);
+  border-color: var(--bs-info);
+  background: rgba(var(--bs-info-rgb), 0.1);
 }
 
 .stat-value {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 700;
-  color: #c0caf5;
+  color: var(--bs-body-color);
 }
 
-.stat-item.warning .stat-value {
-  color: #ff9e64;
-}
-
-.stat-item.info .stat-value {
-  color: #7dcfff;
-}
+.stat-item.warning .stat-value { color: var(--bs-warning); }
+.stat-item.info .stat-value { color: var(--bs-info); }
 
 .stat-label {
-  font-size: 0.75rem;
-  color: #565f89;
+  font-size: 0.7rem;
+  color: var(--bs-secondary-color);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.section-title {
-  margin: 1.5rem 0 0.75rem;
-  color: #a9b1d6;
-  font-size: 0.9rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
 }
 
 .no-data {
   text-align: center;
-  padding: 3rem;
-  color: #565f89;
+  padding: 2rem;
+  color: var(--bs-secondary-color);
 }
 
 .no-data i {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
   opacity: 0.5;
 }
 
-.route-groups {
+.route-list {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
 }
 
-.notable-section,
-.aggregated-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.route-card {
-  background: #1a1b26;
-  border: 1px solid #2a2b3d;
-  border-radius: 12px;
+.route-row {
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
   overflow: hidden;
-  transition: all 0.2s;
 }
 
-.route-card:hover {
-  border-color: #3d59a1;
+.route-row.has-issues {
+  border-color: var(--bs-warning);
 }
 
-.route-card.has-issues {
-  border-color: rgba(255, 158, 100, 0.4);
+.route-row.is-primary {
+  border-color: var(--bs-success);
 }
 
-.route-card.is-primary {
-  border-color: rgba(158, 206, 106, 0.4);
-}
-
-.route-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.25rem;
-  cursor: pointer;
-  background: linear-gradient(135deg, #1e1f2e 0%, #252636 100%);
-}
-
-.route-header:hover {
-  background: linear-gradient(135deg, #252636 0%, #2d2e40 100%);
-}
-
-.route-info {
+.route-main {
   display: flex;
   align-items: center;
   gap: 1rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.route-main:hover {
+  background: var(--bs-secondary-bg);
 }
 
 .route-badge {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.8rem;
-  background: #3d59a1;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
   border-radius: 6px;
-  color: #c0caf5;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
-.route-badge.aggregated {
-  background: rgba(61, 89, 161, 0.3);
+.badge-normal {
+  background: var(--bs-primary);
+  color: white;
 }
 
-.route-badge.badge-triggered {
-  background: rgba(247, 118, 142, 0.3);
-  color: #f7768e;
+.badge-issue {
+  background: rgba(var(--bs-warning-rgb), 0.2);
+  color: var(--bs-warning);
 }
 
-.route-badge.badge-route-change {
-  background: rgba(125, 207, 255, 0.2);
-  color: #7dcfff;
+.badge-change {
+  background: rgba(var(--bs-info-rgb), 0.2);
+  color: var(--bs-info);
 }
 
-.route-badge.badge-high-loss {
-  background: rgba(255, 158, 100, 0.3);
-  color: #ff9e64;
-}
-
-.route-badge.badge-high-latency {
-  background: rgba(224, 175, 104, 0.3);
-  color: #e0af68;
-}
-
-.route-path {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.route-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .hop-count {
   font-size: 0.75rem;
-  color: #565f89;
+  color: var(--bs-secondary-color);
+  display: block;
 }
 
-.route-endpoints {
-  color: #7dcfff;
-  font-family: 'SF Mono', Monaco, monospace;
+.route-path {
+  font-family: var(--bs-font-monospace);
   font-size: 0.85rem;
+  color: var(--bs-primary);
 }
 
-.route-endpoints i {
-  margin: 0 0.3rem;
-  color: #565f89;
+.route-path i {
+  color: var(--bs-secondary-color);
 }
 
 .route-metrics {
   display: flex;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .metric {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  min-width: 70px;
 }
 
 .metric-value {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  color: #c0caf5;
   font-variant-numeric: tabular-nums;
 }
 
 .metric-label {
-  font-size: 0.7rem;
-  color: #565f89;
+  font-size: 0.65rem;
+  color: var(--bs-secondary-color);
   text-transform: uppercase;
 }
 
-.metric.good .metric-value { color: #9ece6a; }
-.metric.warning .metric-value { color: #e0af68; }
-.metric.critical .metric-value { color: #f7768e; }
+.metric.good .metric-value { color: var(--bs-success); }
+.metric.warning .metric-value { color: var(--bs-warning); }
+.metric.critical .metric-value { color: var(--bs-danger); }
 
 .expand-icon {
-  color: #565f89;
-  margin-left: 1rem;
+  color: var(--bs-secondary-color);
 }
 
-/* Route Diff Styles */
-.route-diff {
-  border-top: 1px solid rgba(125, 207, 255, 0.2);
-  background: rgba(125, 207, 255, 0.05);
-  padding: 0.75rem 1.25rem;
-}
-
-.diff-header {
-  color: #7dcfff;
-  font-size: 0.8rem;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-}
-
-.diff-content {
-  font-family: 'SF Mono', Monaco, monospace;
-  font-size: 0.8rem;
-}
-
-.diff-line {
-  display: flex;
-  align-items: flex-start;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  margin-bottom: 0.25rem;
-}
-
-.diff-line.removed {
-  background: rgba(247, 118, 142, 0.15);
-}
-
-.diff-line.added {
-  background: rgba(158, 206, 106, 0.15);
-}
-
-.diff-marker {
-  font-weight: 700;
-  margin-right: 0.5rem;
-  width: 1rem;
-}
-
-.diff-line.removed .diff-marker {
-  color: #f7768e;
-}
-
-.diff-line.added .diff-marker {
-  color: #9ece6a;
-}
-
-.diff-text {
-  color: #a9b1d6;
-  word-break: break-all;
-}
-
-.route-traces {
-  border-top: 1px solid #2a2b3d;
+.route-expanded {
+  border-top: 1px solid var(--bs-border-color);
   padding: 1rem;
-  background: #16161e;
+  background: var(--bs-body-bg);
+}
+
+.trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.more-traces {
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.pagination-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.page-info {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
 }
 
 @media (max-width: 768px) {
-  .route-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+  .route-main {
+    flex-wrap: wrap;
   }
   
   .route-metrics {
     width: 100%;
     justify-content: space-between;
+    margin-top: 0.5rem;
   }
   
   .expand-icon {
     display: none;
   }
-}
-
-/* Light Mode Theme Support */
-:global([data-bs-theme="light"]) .stat-item {
-  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-  border-color: #dee2e6;
-}
-
-:global([data-bs-theme="light"]) .stat-value {
-  color: #495057;
-}
-
-:global([data-bs-theme="light"]) .stat-label {
-  color: #6c757d;
-}
-
-:global([data-bs-theme="light"]) .stat-item.warning {
-  background: linear-gradient(135deg, rgba(253, 126, 20, 0.1) 0%, rgba(253, 126, 20, 0.05) 100%);
-  border-color: rgba(253, 126, 20, 0.4);
-}
-
-:global([data-bs-theme="light"]) .stat-item.warning .stat-value {
-  color: #fd7e14;
-}
-
-:global([data-bs-theme="light"]) .stat-item.info {
-  background: linear-gradient(135deg, rgba(13, 110, 253, 0.1) 0%, rgba(13, 110, 253, 0.05) 100%);
-  border-color: rgba(13, 110, 253, 0.4);
-}
-
-:global([data-bs-theme="light"]) .stat-item.info .stat-value {
-  color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .section-title {
-  color: #495057;
-}
-
-:global([data-bs-theme="light"]) .no-data {
-  color: #6c757d;
-}
-
-:global([data-bs-theme="light"]) .route-card {
-  background: #ffffff;
-  border-color: #dee2e6;
-}
-
-:global([data-bs-theme="light"]) .route-card:hover {
-  border-color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .route-card.has-issues {
-  border-color: rgba(253, 126, 20, 0.4);
-}
-
-:global([data-bs-theme="light"]) .route-card.is-primary {
-  border-color: rgba(25, 135, 84, 0.4);
-}
-
-:global([data-bs-theme="light"]) .route-header {
-  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-}
-
-:global([data-bs-theme="light"]) .route-header:hover {
-  background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%);
-}
-
-:global([data-bs-theme="light"]) .route-badge {
-  background: #0d6efd;
-  color: #ffffff;
-}
-
-:global([data-bs-theme="light"]) .route-badge.aggregated {
-  background: rgba(13, 110, 253, 0.2);
-  color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .hop-count {
-  color: #6c757d;
-}
-
-:global([data-bs-theme="light"]) .route-endpoints {
-  color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .route-endpoints i {
-  color: #adb5bd;
-}
-
-:global([data-bs-theme="light"]) .metric-value {
-  color: #495057;
-}
-
-:global([data-bs-theme="light"]) .metric-label {
-  color: #6c757d;
-}
-
-:global([data-bs-theme="light"]) .metric.good .metric-value { color: #198754; }
-:global([data-bs-theme="light"]) .metric.warning .metric-value { color: #fd7e14; }
-:global([data-bs-theme="light"]) .metric.critical .metric-value { color: #dc3545; }
-
-:global([data-bs-theme="light"]) .expand-icon {
-  color: #6c757d;
-}
-
-:global([data-bs-theme="light"]) .route-diff {
-  border-top: 1px solid rgba(13, 110, 253, 0.2);
-  background: rgba(13, 110, 253, 0.05);
-}
-
-:global([data-bs-theme="light"]) .diff-header {
-  color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .diff-line.removed {
-  background: rgba(220, 53, 69, 0.1);
-}
-
-:global([data-bs-theme="light"]) .diff-line.added {
-  background: rgba(25, 135, 84, 0.1);
-}
-
-:global([data-bs-theme="light"]) .diff-line.removed .diff-marker {
-  color: #dc3545;
-}
-
-:global([data-bs-theme="light"]) .diff-line.added .diff-marker {
-  color: #198754;
-}
-
-:global([data-bs-theme="light"]) .diff-text {
-  color: #495057;
-}
-
-:global([data-bs-theme="light"]) .route-traces {
-  border-top: 1px solid #dee2e6;
-  background: #f8f9fa;
-}
-
-:global([data-bs-theme="light"]) .route-badge.badge-triggered {
-  background: rgba(220, 53, 69, 0.15);
-  color: #dc3545;
-}
-
-:global([data-bs-theme="light"]) .route-badge.badge-route-change {
-  background: rgba(13, 110, 253, 0.15);
-  color: #0d6efd;
-}
-
-:global([data-bs-theme="light"]) .route-badge.badge-high-loss {
-  background: rgba(253, 126, 20, 0.15);
-  color: #fd7e14;
-}
-
-:global([data-bs-theme="light"]) .route-badge.badge-high-latency {
-  background: rgba(255, 193, 7, 0.2);
-  color: #8a6d12;
 }
 </style>
