@@ -781,8 +781,7 @@ async function loadProbeData(): Promise<void> {
           console.warn(`[Probe ${p.id}] Failed to fetch PING data:`, err);
         }
         
-        // Fetch MTR data with aggregation for intelligent route grouping
-        const mtrAgg = aggregateSec > 0;
+        // Fetch MTR data - raw traces, frontend does intelligent grouping
         try {
           const mtrRows = await ProbeDataService.byProbe(
             workspaceID,
@@ -790,13 +789,12 @@ async function loadProbeData(): Promise<void> {
             {
               from,
               to,
-              limit: mtrAgg ? undefined : 300,
+              limit: 500,  // Get enough traces for good grouping
               asc: false,
-              aggregate: mtrAgg ? aggregateSec : undefined,
               type: 'MTR'
             }
           );
-          console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} ${mtrAgg ? 'aggregated' : 'raw'} rows`);
+          console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} raw rows`);
           for (const d of mtrRows) {
             addProbeDataUnique(state.probeData, d);
             addProbeDataUnique(state.mtrData, d);
@@ -833,8 +831,8 @@ async function loadProbeData(): Promise<void> {
       }
       
       // Non-AGENT probes: use original logic
-      // Enable aggregation for PING, TRAFFICSIM, and MTR
-      const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM' || probeType === 'MTR');
+      // Enable aggregation for PING and TRAFFICSIM only (MTR uses frontend grouping)
+      const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
       
       let rows;
       try {
