@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -487,8 +489,8 @@ func GetProbeDataAggregated(
 	case "TRAFFICSIM":
 		return aggregateTrafficSimData(filteredData, bucketDuration, limit), nil
 	case "MTR":
-		// For MTR, sample one trace per bucket (most recent)
-		return bucketProbeData(filteredData, bucketDuration, limit), nil
+		// For MTR, aggregate with intelligent route grouping + notable trace preservation
+		return aggregateMtrData(filteredData, bucketDuration, limit), nil
 	default:
 		// For other types, just bucket by time without payload aggregation
 		return bucketProbeData(filteredData, bucketDuration, limit), nil
@@ -533,6 +535,322 @@ type TrafficSimPayload struct {
 	LostPackets   uint64  `json:"lostPackets"`
 	OutOfSequence uint64  `json:"outOfSequence"`
 	Duplicates    uint64  `json:"duplicates"`
+}
+
+// MTR aggregation types
+type MtrHopHost struct {
+	IP string `json:"ip"`
+}
+
+type MtrHop struct {
+	TTL     int          `json:"ttl"`
+	Hosts   []MtrHopHost `json:"hosts"`
+	LossPct interface{}  `json:"loss_pct"` // Can be string or float
+	Sent    int          `json:"sent"`
+	Recv    int          `json:"recv"`
+	Avg     string       `json:"avg"`
+	Best    string       `json:"best"`
+	Worst   string       `json:"worst"`
+	Last    string       `json:"last"`
+	StdDev  string       `json:"stdev"`
+	Jitter  string       `json:"jitter"`
+	Javg    string       `json:"javg"`
+	Jmax    string       `json:"jmax"`
+	Jint    string       `json:"jint"`
+}
+
+type MtrReport struct {
+	Hops []MtrHop `json:"hops"`
+}
+
+type MtrPayload struct {
+	Report         MtrReport `json:"report"`
+	StopTimestamp  string    `json:"stop_timestamp"`
+	StartTimestamp string    `json:"start_timestamp"`
+}
+
+// AggregatedMtrPayload represents aggregated MTR data for a time bucket
+type AggregatedMtrPayload struct {
+	Report                 MtrReport `json:"report"` // Aggregated hop data
+	StopTimestamp          string    `json:"stop_timestamp"`
+	StartTimestamp         string    `json:"start_timestamp"`
+	RouteSignature         string    `json:"route_signature"`          // Route signature for grouping
+	PreviousRouteSignature string    `json:"previous_route_signature"` // Previous route (for route-change diff)
+	TraceCount             int       `json:"trace_count"`              // Number of traces in this bucket
+	IsAggregated           bool      `json:"is_aggregated"`            // True if this is aggregated data
+	NotableReason          string    `json:"notable_reason"`           // Why this trace is notable (triggered, route-change, high-loss, high-latency)
+}
+
+// getMtrRouteSignature generates a signature from hop IPs
+func getMtrRouteSignature(hops []MtrHop) string {
+	var parts []string
+	for _, hop := range hops {
+		if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" {
+			parts = append(parts, hop.Hosts[0].IP)
+		} else {
+			parts = append(parts, "*")
+		}
+	}
+	return strings.Join(parts, "->")
+}
+
+// isMtrTraceNotable checks if a trace should be preserved individually
+func isMtrTraceNotable(payload MtrPayload, prevSignature string, triggered bool) (bool, string) {
+	currentSignature := getMtrRouteSignature(payload.Report.Hops)
+
+	// Check for triggered alert
+	if triggered {
+		return true, "triggered"
+	}
+
+	// Check for route change
+	if prevSignature != "" && currentSignature != prevSignature {
+		return true, "route-change"
+	}
+
+	// Check for high packet loss (>10% on any hop)
+	for _, hop := range payload.Report.Hops {
+		loss := parseLossPct(hop.LossPct)
+		if loss > 10.0 {
+			return true, "high-loss"
+		}
+	}
+
+	// Check for high latency (>150ms on final hop)
+	if len(payload.Report.Hops) > 0 {
+		finalHop := payload.Report.Hops[len(payload.Report.Hops)-1]
+		if latency := parseLatency(finalHop.Avg); latency > 150.0 {
+			return true, "high-latency"
+		}
+	}
+
+	return false, ""
+}
+
+func parseLossPct(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case string:
+		val = strings.TrimSuffix(val, "%")
+		f, _ := strconv.ParseFloat(val, 64)
+		return f
+	}
+	return 0
+}
+
+func parseLatency(s string) float64 {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "ms")
+	s = strings.TrimSuffix(s, " ")
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
+}
+
+// aggregateMtrData aggregates MTR traces into time buckets, preserving notable traces
+func aggregateMtrData(rawData []ProbeData, bucketDuration time.Duration, limit int) []ProbeData {
+	if len(rawData) == 0 {
+		return []ProbeData{}
+	}
+
+	// Sort by time ascending for route change detection
+	sortedData := make([]ProbeData, len(rawData))
+	copy(sortedData, rawData)
+	sort.Slice(sortedData, func(i, j int) bool {
+		return sortedData[i].CreatedAt.Before(sortedData[j].CreatedAt)
+	})
+
+	type mtrBucket struct {
+		traces     []ProbeData
+		payloads   []MtrPayload
+		signatures map[string]int // signature -> count
+		lastData   ProbeData
+	}
+
+	buckets := make(map[time.Time]*mtrBucket)
+	notableTraces := []ProbeData{}
+	var prevSignature string
+
+	for _, d := range sortedData {
+		if d.Payload == nil || len(d.Payload) == 0 {
+			continue
+		}
+
+		var p MtrPayload
+		if err := json.Unmarshal(d.Payload, &p); err != nil || len(p.Report.Hops) == 0 {
+			continue
+		}
+
+		currentSignature := getMtrRouteSignature(p.Report.Hops)
+		isNotable, reason := isMtrTraceNotable(p, prevSignature, d.Triggered)
+
+		if isNotable {
+			// Wrap notable traces with extended metadata for frontend display
+			wrapped := AggregatedMtrPayload{
+				Report:                 p.Report,
+				StartTimestamp:         p.StartTimestamp,
+				StopTimestamp:          p.StopTimestamp,
+				RouteSignature:         currentSignature,
+				PreviousRouteSignature: prevSignature,
+				TraceCount:             1,
+				IsAggregated:           false,
+				NotableReason:          reason,
+			}
+			wrappedPayload, _ := json.Marshal(wrapped)
+			wrappedTrace := d
+			wrappedTrace.Payload = wrappedPayload
+			notableTraces = append(notableTraces, wrappedTrace)
+		}
+
+		// Also add to bucket for aggregation (if not notable, it will be aggregated)
+		key := getBucketKey(d.CreatedAt, bucketDuration)
+		b, ok := buckets[key]
+		if !ok {
+			b = &mtrBucket{signatures: make(map[string]int)}
+			buckets[key] = b
+		}
+
+		b.traces = append(b.traces, d)
+		b.payloads = append(b.payloads, p)
+		b.signatures[currentSignature]++
+		if d.CreatedAt.After(b.lastData.CreatedAt) {
+			b.lastData = d
+		}
+
+		prevSignature = currentSignature
+	}
+
+	result := []ProbeData{}
+
+	// First add all notable traces (these are preserved individually)
+	for _, d := range notableTraces {
+		result = append(result, d)
+	}
+
+	// Now create aggregated entries for each bucket
+	// Only include aggregated data if there are non-notable traces in the bucket
+	for bucketTime, b := range buckets {
+		if len(b.payloads) == 0 {
+			continue
+		}
+
+		// Find the most common route signature in this bucket
+		var primarySignature string
+		var maxCount int
+		for sig, count := range b.signatures {
+			if count > maxCount {
+				primarySignature = sig
+				maxCount = count
+			}
+		}
+
+		// Collect payloads matching the primary route for aggregation
+		var matchingPayloads []MtrPayload
+		for _, p := range b.payloads {
+			if getMtrRouteSignature(p.Report.Hops) == primarySignature {
+				matchingPayloads = append(matchingPayloads, p)
+			}
+		}
+
+		if len(matchingPayloads) == 0 {
+			continue
+		}
+
+		// Aggregate the matching payloads
+		aggPayload := aggregateMtrPayloads(matchingPayloads, bucketTime, primarySignature)
+
+		payload, _ := json.Marshal(aggPayload)
+		pd := b.lastData
+		pd.CreatedAt = bucketTime
+		pd.Payload = payload
+		result = append(result, pd)
+	}
+
+	// Sort by time descending
+	sortProbeDataDesc(result)
+
+	// Deduplicate: if a notable trace is already covered by an aggregated bucket, don't double-count
+	// (Notable traces are intentionally kept separate, so no dedup needed)
+
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result
+}
+
+// aggregateMtrPayloads creates an aggregated MTR payload from multiple traces
+func aggregateMtrPayloads(payloads []MtrPayload, bucketTime time.Time, signature string) AggregatedMtrPayload {
+	if len(payloads) == 0 {
+		return AggregatedMtrPayload{IsAggregated: true}
+	}
+
+	// Use the first payload as a template
+	template := payloads[0]
+	maxHops := len(template.Report.Hops)
+	for _, p := range payloads {
+		if len(p.Report.Hops) > maxHops {
+			maxHops = len(p.Report.Hops)
+		}
+	}
+
+	// Aggregate each hop's metrics
+	aggHops := make([]MtrHop, maxHops)
+	for hopIdx := 0; hopIdx < maxHops; hopIdx++ {
+		var avgLatencies, bestLatencies, worstLatencies []float64
+		var totalSent, totalRecv int
+		var hosts []MtrHopHost
+		var ttl int
+
+		for _, p := range payloads {
+			if hopIdx >= len(p.Report.Hops) {
+				continue
+			}
+			hop := p.Report.Hops[hopIdx]
+			ttl = hop.TTL
+			if len(hop.Hosts) > 0 {
+				hosts = hop.Hosts
+			}
+			totalSent += hop.Sent
+			totalRecv += hop.Recv
+			if lat := parseLatency(hop.Avg); lat > 0 {
+				avgLatencies = append(avgLatencies, lat)
+			}
+			if lat := parseLatency(hop.Best); lat > 0 {
+				bestLatencies = append(bestLatencies, lat)
+			}
+			if lat := parseLatency(hop.Worst); lat > 0 {
+				worstLatencies = append(worstLatencies, lat)
+			}
+		}
+
+		lossPct := 0.0
+		if totalSent > 0 {
+			lossPct = float64(totalSent-totalRecv) / float64(totalSent) * 100
+		}
+
+		aggHops[hopIdx] = MtrHop{
+			TTL:     ttl,
+			Hosts:   hosts,
+			LossPct: fmt.Sprintf("%.1f%%", lossPct),
+			Sent:    totalSent,
+			Recv:    totalRecv,
+			Avg:     fmt.Sprintf("%.2f", avg(avgLatencies)),
+			Best:    fmt.Sprintf("%.2f", minF(bestLatencies)),
+			Worst:   fmt.Sprintf("%.2f", maxF(worstLatencies)),
+		}
+	}
+
+	return AggregatedMtrPayload{
+		Report: MtrReport{
+			Hops: aggHops,
+		},
+		StartTimestamp: bucketTime.UTC().Format(time.RFC3339),
+		StopTimestamp:  bucketTime.Add(time.Minute).UTC().Format(time.RFC3339),
+		RouteSignature: signature,
+		TraceCount:     len(payloads),
+		IsAggregated:   true,
+	}
 }
 
 func getBucketKey(t time.Time, duration time.Duration) time.Time {

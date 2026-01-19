@@ -128,7 +128,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		var rows []probe.ProbeData
 		var err error
 
-		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM") {
+		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
 			// Use aggregated query for performance
 			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, probeType, from, to, aggregateSec, limit)
 			// Log aggregation for debugging
@@ -144,7 +144,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 				ctx.Application().Logger().Debugf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
 					probeType, probeID, len(rows))
 			}
-			// Post-filter by type if specified (for types like MTR that don't support aggregation)
+			// Post-filter by type if specified
 			if err == nil && probeType != "" {
 				filtered := make([]probe.ProbeData, 0, len(rows))
 				for _, r := range rows {

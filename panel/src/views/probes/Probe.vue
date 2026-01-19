@@ -8,6 +8,7 @@ import LatencyGraph from "@/components/PingGraph.vue";
 import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
 import NetworkMap from "@/components/NetworkMap.vue";
 import MtrTable from "@/components/MtrTable.vue";
+import MtrSummary from "@/components/MtrSummary.vue";
 import MtrDetailModal from "@/components/MtrDetailModal.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
@@ -1177,68 +1178,11 @@ const { connected: wsConnected } = useProbeSubscription(
                       <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
                     </div>
                     
-                    <!-- Notable Traces section for AGENT probes -->
-                    <div class="notable-traces mt-3">
-                      <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="mb-0">
-                          <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
-                          Notable Traces
-                          <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(pair.mtrData).length }}</span>
-                        </h6>
-                        <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true; state.selectedMtrData = pair.mtrData">
-                          <i class="bi bi-list-ul"></i> View All ({{ pair.mtrData.length }})
-                        </button>
-                      </div>
-                      
-                      <div v-if="getNotableMtrResults(pair.mtrData).length === 0" class="text-muted text-center py-3">
-                        <i class="bi bi-check-circle text-success me-2"></i>
-                        No issues detected in the selected time range
-                      </div>
-                      
-                      <div v-else :id="`agent-notableAccordion-${index}`" class="accordion">
-                        <div v-for="(item, notableIdx) in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).items" :key="`notable-${index}-${item.data.id}-${notableIdx}`">
-                          <div class="accordion-item">
-                            <h2 :id="`agent-notable-heading-${index}-${notableIdx}`" class="accordion-header">
-                              <button :aria-controls="`agent-notable-collapse-${index}-${notableIdx}`" :aria-expanded="false"
-                                      :data-bs-target="`#agent-notable-collapse-${index}-${notableIdx}`"
-                                      class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                                {{ formatMtrTimestamp(item.data) }}
-                                <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
-                                <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
-                                <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
-                                <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
-                              </button>
-                            </h2>
-                            <div :id="`agent-notable-collapse-${index}-${notableIdx}`" :aria-labelledby="`agent-notable-heading-${index}-${notableIdx}`"
-                                 class="accordion-collapse collapse"
-                                 :data-bs-parent="`#agent-notableAccordion-${index}`">
-                              <div class="accordion-body p-0">
-                                <MtrTable :probe-data="item.data" />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <!-- Pagination Controls per pair -->
-                        <nav v-if="getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages > 1" class="mt-3">
-                          <ul class="pagination pagination-sm justify-content-center mb-0">
-                            <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasPrev }">
-                              <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) - 1, index)">
-                                <i class="bi bi-chevron-left"></i>
-                              </button>
-                            </li>
-                            <li v-for="p in getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).totalPages" :key="p" 
-                                class="page-item" :class="{ active: p === (agentMtrPages[index] || 1) }">
-                              <button class="page-link" @click="goToMtrPage(p, index)">{{ p }}</button>
-                            </li>
-                            <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(pair.mtrData, agentMtrPages[index] || 1).hasNext }">
-                              <button class="page-link" @click="goToMtrPage((agentMtrPages[index] || 1) + 1, index)">
-                                <i class="bi bi-chevron-right"></i>
-                              </button>
-                            </li>
-                          </ul>
-                        </nav>
-                      </div>
-                    </div>
+                    <!-- MTR Summary with route aggregation for AGENT probes -->
+                    <MtrSummary 
+                      :mtr-data="pair.mtrData" 
+                      @show-all-traces="showMtrModal = true; state.selectedMtrData = pair.mtrData"
+                    />
                   </template>
                 </div>
               </div>
@@ -1335,68 +1279,11 @@ const { connected: wsConnected } = useProbeSubscription(
                 <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
               </div>
               
-              <!-- Notable traces section -->
-              <div class="notable-traces mt-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <h6 class="mb-0">
-                    <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
-                    Notable Traces
-                    <span class="badge bg-secondary ms-2">{{ getNotableMtrResults(state.mtrData).length }}</span>
-                  </h6>
-                  <button class="btn btn-sm btn-outline-primary" @click="showMtrModal = true">
-                    <i class="bi bi-list-ul"></i> View All ({{ state.mtrData.length }})
-                  </button>
-                </div>
-                
-                <div v-if="getNotableMtrResults(state.mtrData).length === 0" class="text-muted text-center py-3">
-                  <i class="bi bi-check-circle text-success me-2"></i>
-                  No issues detected in the selected time range
-                </div>
-                
-                <div v-else id="mtrAccordion" class="accordion">
-                  <div v-for="(item, index) in getPaginatedMtrResults(state.mtrData, mtrPage).items" :key="`${item.data.id}-${index}`">
-                    <div class="accordion-item">
-                      <h2 :id="'heading' + item.data.id" class="accordion-header">
-                        <button :aria-controls="'collapse' + item.data.id" :aria-expanded="false"
-                                :data-bs-target="'#collapse' + item.data.id"
-                                class="accordion-button collapsed" data-bs-toggle="collapse" type="button">
-                          {{ formatMtrTimestamp(item.data) }}
-                          <span v-if="item.reason.includes('triggered')" class="badge bg-warning text-dark ms-2">TRIGGERED</span>
-                          <span v-if="item.reason.includes('packet-loss')" class="badge bg-danger ms-2">PACKET LOSS</span>
-                          <span v-if="item.reason.includes('high-latency')" class="badge bg-orange ms-2">HIGH LATENCY</span>
-                          <span v-if="item.reason.includes('route-change')" class="badge bg-info ms-2">ROUTE CHANGE</span>
-                        </button>
-                      </h2>
-                      <div :id="'collapse' + item.data.id" :aria-labelledby="'heading' + item.data.id"
-                           class="accordion-collapse collapse"
-                           data-bs-parent="#mtrAccordion">
-                        <div class="accordion-body p-0">
-                          <MtrTable :probe-data="item.data" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <!-- Pagination Controls -->
-                  <nav v-if="getPaginatedMtrResults(state.mtrData, mtrPage).totalPages > 1" class="mt-3">
-                    <ul class="pagination pagination-sm justify-content-center mb-0">
-                      <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(state.mtrData, mtrPage).hasPrev }">
-                        <button class="page-link" @click="goToMtrPage(mtrPage - 1)">
-                          <i class="bi bi-chevron-left"></i>
-                        </button>
-                      </li>
-                      <li v-for="p in getPaginatedMtrResults(state.mtrData, mtrPage).totalPages" :key="p" 
-                          class="page-item" :class="{ active: p === mtrPage }">
-                        <button class="page-link" @click="goToMtrPage(p)">{{ p }}</button>
-                      </li>
-                      <li class="page-item" :class="{ disabled: !getPaginatedMtrResults(state.mtrData, mtrPage).hasNext }">
-                        <button class="page-link" @click="goToMtrPage(mtrPage + 1)">
-                          <i class="bi bi-chevron-right"></i>
-                        </button>
-                      </li>
-                    </ul>
-                  </nav>
-                </div>
-              </div>
+              <!-- MTR Summary with route aggregation -->
+              <MtrSummary 
+                :mtr-data="state.mtrData" 
+                @show-all-traces="showMtrModal = true"
+              />
             </div>
           </div>
         </div>

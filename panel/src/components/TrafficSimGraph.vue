@@ -330,6 +330,26 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   const bucketSize = getTrafficBucketSize(sortedData, timeRange);
   const processedData = bucketSize > 0 ? aggregateTrafficData(sortedData, bucketSize) : sortedData;
 
+  // Calculate the effective gap threshold based on aggregation or actual data spacing
+  // For aggregated data, use 3x the bucket size. Otherwise, derive from actual data gaps.
+  let effectiveMaxGap = maxAllowedGap;
+  if (bucketSize > 0) {
+    // Aggregated data: allow 3x the bucket size + some margin
+    effectiveMaxGap = Math.max(bucketSize * 3.5, maxAllowedGap);
+  } else if (processedData.length >= 2) {
+    // Non-aggregated: calculate median gap from actual data and use 3x that
+    const gaps: number[] = [];
+    for (let i = 1; i < Math.min(processedData.length, 100); i++) {
+      const gap = new Date(processedData[i].reportTime).getTime() - new Date(processedData[i - 1].reportTime).getTime();
+      if (gap > 0) gaps.push(gap);
+    }
+    if (gaps.length > 0) {
+      gaps.sort((a, b) => a - b);
+      const medianGap = gaps[Math.floor(gaps.length / 2)];
+      effectiveMaxGap = Math.max(medianGap * 3, maxAllowedGap);
+    }
+  }
+
   // Build series with gap detection - insert nulls to break lines at gaps
   const buildSeriesData = (getValue: (d: TrafficSimResult) => number) => {
     const result: { x: number; y: number | null }[] = [];
@@ -338,7 +358,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       if (i > 0) {
         const prevTime = new Date(processedData[i - 1].reportTime).getTime();
         const gap = currentTime - prevTime;
-        if (gap > maxAllowedGap) {
+        if (gap > effectiveMaxGap) {
           // Insert null to break the line
           result.push({ x: prevTime + 1, y: null });
         }
