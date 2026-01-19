@@ -136,6 +136,7 @@ function generateTable(probeData: ProbeData) {
   const mtrCalculate = (probeData as any).payload;
 
   if (!mtrCalculate?.report?.info?.target) return "No MTR payload";
+  if (!mtrCalculate?.report?.hops) return "No MTR hops data";
   const title =
       `${mtrCalculate.report.info.target.hostname} (${mtrCalculate.report.info.target.ip}) - ` +
       new Date(mtrCalculate.stopTimestamp || probeData.created_at || (probeData as any).createdAt).toISOString();
@@ -569,44 +570,98 @@ async function reloadData() {
           }
           
           const recipType = recipProbe.type as string;
-          // Only aggregate PING and TRAFFICSIM - MTR needs all hop data
-          const useRecipAgg = recipAggregateSec > 0 && (recipType === 'PING' || recipType === 'TRAFFICSIM');
           
-          const recipData = await ProbeDataService.byProbe(
-            workspaceID, 
-            recipProbe.id, 
-            { 
-              from: toRFC3339(fromTime), 
-              to: toRFC3339(toTime), 
-              // When aggregated, don't limit - bucket size controls volume
-              // For non-aggregated (including MTR), limit for pagination
-              limit: useRecipAgg ? undefined : 300,
-              aggregate: useRecipAgg ? recipAggregateSec : undefined,
-              type: useRecipAgg ? recipType : undefined
-            }
-          ) as ProbeData[];
-          
-          // Sort reciprocal data by type
-          const recipPing = recipData.filter(d => d.type === 'PING');
-          const recipMtr = recipData.filter(d => d.type === 'MTR');
-          const recipTraffic = recipData.filter(d => d.type === 'TRAFFICSIM');
-          const recipRperf = recipData.filter(d => d.type === 'RPERF');
-          
-          // Add reverse direction to agentPairData
-          state.agentPairData.push({
-            direction: 'reverse' as const,
-            probeId: recipProbe.id,
-            sourceAgentId: targetAgentId,
-            targetAgentId: sourceAgentId,
-            sourceAgentName: targetAgentName,
-            targetAgentName: sourceAgentName,
-            pingData: recipPing,
-            mtrData: recipMtr,
-            trafficSimData: recipTraffic,
-            rperfData: recipRperf
-          });
-          
-          console.log("Loaded reciprocal probe data:", recipPing.length, "ping,", recipMtr.length, "mtr,", recipTraffic.length, "trafficsim");
+          // For AGENT probes, fetch each sub-type separately (same as loadProbeData)
+          if (recipType === 'AGENT') {
+            let recipPing: ProbeData[] = [];
+            let recipMtr: ProbeData[] = [];
+            let recipTraffic: ProbeData[] = [];
+            
+            // Fetch PING with aggregation
+            const pingAgg = recipAggregateSec > 0;
+            try {
+              recipPing = await ProbeDataService.byProbe(
+                workspaceID, recipProbe.id,
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: pingAgg ? undefined : 300, aggregate: pingAgg ? recipAggregateSec : undefined, type: 'PING' }
+              ) as ProbeData[];
+              console.log(`[Reciprocal ${recipProbe.id}] AGENT->PING: Fetched ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+            } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch PING:`, err); }
+            
+            // Fetch MTR without aggregation
+            try {
+              recipMtr = await ProbeDataService.byProbe(
+                workspaceID, recipProbe.id,
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: 300, type: 'MTR' }
+              ) as ProbeData[];
+              console.log(`[Reciprocal ${recipProbe.id}] AGENT->MTR: Fetched ${recipMtr.length} raw rows`);
+            } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch MTR:`, err); }
+            
+            // Fetch TRAFFICSIM with aggregation
+            const trafficAgg = recipAggregateSec > 0;
+            try {
+              recipTraffic = await ProbeDataService.byProbe(
+                workspaceID, recipProbe.id,
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: trafficAgg ? undefined : 300, aggregate: trafficAgg ? recipAggregateSec : undefined, type: 'TRAFFICSIM' }
+              ) as ProbeData[];
+              console.log(`[Reciprocal ${recipProbe.id}] AGENT->TRAFFICSIM: Fetched ${recipTraffic.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
+            } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch TRAFFICSIM:`, err); }
+            
+            // Add reverse direction to agentPairData
+            state.agentPairData.push({
+              direction: 'reverse' as const,
+              probeId: recipProbe.id,
+              sourceAgentId: targetAgentId,
+              targetAgentId: sourceAgentId,
+              sourceAgentName: targetAgentName,
+              targetAgentName: sourceAgentName,
+              pingData: recipPing,
+              mtrData: recipMtr,
+              trafficSimData: recipTraffic,
+              rperfData: []
+            });
+            
+            console.log("Loaded reciprocal probe data:", recipPing.length, "ping,", recipMtr.length, "mtr,", recipTraffic.length, "trafficsim");
+          } else {
+            // Non-AGENT: use original logic
+            // Only aggregate PING and TRAFFICSIM - MTR needs all hop data
+            const useRecipAgg = recipAggregateSec > 0 && (recipType === 'PING' || recipType === 'TRAFFICSIM');
+            
+            const recipData = await ProbeDataService.byProbe(
+              workspaceID, 
+              recipProbe.id, 
+              { 
+                from: toRFC3339(fromTime), 
+                to: toRFC3339(toTime), 
+                // When aggregated, don't limit - bucket size controls volume
+                // For non-aggregated (including MTR), limit for pagination
+                limit: useRecipAgg ? undefined : 300,
+                aggregate: useRecipAgg ? recipAggregateSec : undefined,
+                type: useRecipAgg ? recipType : undefined
+              }
+            ) as ProbeData[];
+            
+            // Sort reciprocal data by type
+            const recipPing = recipData.filter(d => d.type === 'PING');
+            const recipMtr = recipData.filter(d => d.type === 'MTR');
+            const recipTraffic = recipData.filter(d => d.type === 'TRAFFICSIM');
+            const recipRperf = recipData.filter(d => d.type === 'RPERF');
+            
+            // Add reverse direction to agentPairData
+            state.agentPairData.push({
+              direction: 'reverse' as const,
+              probeId: recipProbe.id,
+              sourceAgentId: targetAgentId,
+              targetAgentId: sourceAgentId,
+              sourceAgentName: targetAgentName,
+              targetAgentName: sourceAgentName,
+              pingData: recipPing,
+              mtrData: recipMtr,
+              trafficSimData: recipTraffic,
+              rperfData: recipRperf
+            });
+            
+            console.log("Loaded reciprocal probe data:", recipPing.length, "ping,", recipMtr.length, "mtr,", recipTraffic.length, "trafficsim");
+          }
         } catch (e) {
           console.error("Failed to load reciprocal probe data:", e);
         }
@@ -697,6 +752,84 @@ async function loadProbeData(): Promise<void> {
   const tasks = state.probes.map(async (p) => {
     try {
       const probeType = p.type as string;
+      
+      // AGENT probes are meta-probes that expand to PING, MTR, and TRAFFICSIM
+      // Data is stored with the actual sub-type, not 'AGENT', so we need to fetch each separately
+      if (probeType === 'AGENT') {
+        // Fetch PING data with aggregation for large time ranges
+        const pingAgg = aggregateSec > 0;
+        try {
+          const pingRows = await ProbeDataService.byProbe(
+            workspaceID,
+            p.id,
+            {
+              from,
+              to,
+              limit: pingAgg ? undefined : 300,
+              asc: false,
+              aggregate: pingAgg ? aggregateSec : undefined,
+              type: 'PING'
+            }
+          );
+          console.log(`[Probe ${p.id}] AGENT->PING: Fetched ${pingRows.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+          for (const d of pingRows) {
+            addProbeDataUnique(state.probeData, d);
+            addProbeDataUnique(state.pingData, d);
+          }
+        } catch (err) {
+          console.warn(`[Probe ${p.id}] Failed to fetch PING data:`, err);
+        }
+        
+        // Fetch MTR data - no aggregation (needs full hop data), but paginate
+        try {
+          const mtrRows = await ProbeDataService.byProbe(
+            workspaceID,
+            p.id,
+            {
+              from,
+              to,
+              limit: 300,
+              asc: false,
+              type: 'MTR'
+            }
+          );
+          console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} raw rows`);
+          for (const d of mtrRows) {
+            addProbeDataUnique(state.probeData, d);
+            addProbeDataUnique(state.mtrData, d);
+          }
+        } catch (err) {
+          console.warn(`[Probe ${p.id}] Failed to fetch MTR data:`, err);
+        }
+        
+        // Fetch TRAFFICSIM data with aggregation for large time ranges
+        const trafficAgg = aggregateSec > 0;
+        try {
+          const trafficRows = await ProbeDataService.byProbe(
+            workspaceID,
+            p.id,
+            {
+              from,
+              to,
+              limit: trafficAgg ? undefined : 300,
+              asc: false,
+              aggregate: trafficAgg ? aggregateSec : undefined,
+              type: 'TRAFFICSIM'
+            }
+          );
+          console.log(`[Probe ${p.id}] AGENT->TRAFFICSIM: Fetched ${trafficRows.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
+          for (const d of trafficRows) {
+            addProbeDataUnique(state.probeData, d);
+            addProbeDataUnique(state.trafficSimData, d);
+          }
+        } catch (err) {
+          console.warn(`[Probe ${p.id}] Failed to fetch TRAFFICSIM data:`, err);
+        }
+        
+        return; // Done with AGENT probe
+      }
+      
+      // Non-AGENT probes: use original logic
       // Enable aggregation for PING and TRAFFICSIM only (MTR needs all hop data, just paginate it)
       const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
       

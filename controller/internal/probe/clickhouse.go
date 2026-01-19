@@ -465,20 +465,33 @@ func GetProbeDataAggregated(
 		return []ProbeData{}, nil
 	}
 
+	// Filter by type before aggregation - AGENT probes store data with actual types (PING, MTR, TRAFFICSIM)
+	// When aggregating, we need to ensure we only process data of the requested type
+	filteredData := make([]ProbeData, 0, len(rawData))
+	for _, d := range rawData {
+		if string(d.Type) == probeType {
+			filteredData = append(filteredData, d)
+		}
+	}
+
+	if len(filteredData) == 0 {
+		return []ProbeData{}, nil
+	}
+
 	// Aggregate in Go based on probe type
 	bucketDuration := time.Duration(aggregateSec) * time.Second
 
 	switch probeType {
 	case "PING":
-		return aggregatePingData(rawData, bucketDuration, limit), nil
+		return aggregatePingData(filteredData, bucketDuration, limit), nil
 	case "TRAFFICSIM":
-		return aggregateTrafficSimData(rawData, bucketDuration, limit), nil
+		return aggregateTrafficSimData(filteredData, bucketDuration, limit), nil
 	case "MTR":
 		// For MTR, sample one trace per bucket (most recent)
-		return bucketProbeData(rawData, bucketDuration, limit), nil
+		return bucketProbeData(filteredData, bucketDuration, limit), nil
 	default:
 		// For other types, just bucket by time without payload aggregation
-		return bucketProbeData(rawData, bucketDuration, limit), nil
+		return bucketProbeData(filteredData, bucketDuration, limit), nil
 	}
 }
 
