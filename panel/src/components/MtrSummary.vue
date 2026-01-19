@@ -216,14 +216,24 @@ const parsedData = computed<ParsedMtrData[]>(() => {
       hop.hosts && hop.hosts.length > 0 ? hop.hosts[0].ip : '*'
     );
     
-    // Calculate metrics
-    const finalHop = payload.report.hops[payload.report.hops.length - 1];
-    const finalLatency = parseFloat(finalHop?.avg || '0');
-    
+    // Calculate metrics - ONLY from responding hops
+    // Empty hops (routers that don't respond to ICMP) are NOT packet loss
+    let finalLatency = 0;
     let maxLoss = 0;
+    
     for (const hop of payload.report.hops) {
+      // Skip empty hops - they're not real loss
+      const hopIp = hop.hosts?.[0]?.ip || '';
+      if (!hopIp || hopIp === '*') continue;
+      
       const loss = parseFloat(String(hop.loss_pct || '0').replace('%', ''));
       if (!isNaN(loss)) maxLoss = Math.max(maxLoss, loss);
+      
+      // Track the last responding hop's latency
+      const latency = parseFloat(hop.avg || '0');
+      if (!isNaN(latency) && latency > 0) {
+        finalLatency = latency;
+      }
     }
     
     const timestamp = new Date(payload.stop_timestamp || trace.created_at);
@@ -616,5 +626,162 @@ const getLossClass = (loss: number): string => {
   .expand-icon {
     display: none;
   }
+}
+
+/* Light Mode Theme Support */
+:global([data-bs-theme="light"]) .stat-item {
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+  border-color: #dee2e6;
+}
+
+:global([data-bs-theme="light"]) .stat-value {
+  color: #495057;
+}
+
+:global([data-bs-theme="light"]) .stat-label {
+  color: #6c757d;
+}
+
+:global([data-bs-theme="light"]) .stat-item.warning {
+  background: linear-gradient(135deg, rgba(253, 126, 20, 0.1) 0%, rgba(253, 126, 20, 0.05) 100%);
+  border-color: rgba(253, 126, 20, 0.4);
+}
+
+:global([data-bs-theme="light"]) .stat-item.warning .stat-value {
+  color: #fd7e14;
+}
+
+:global([data-bs-theme="light"]) .stat-item.info {
+  background: linear-gradient(135deg, rgba(13, 110, 253, 0.1) 0%, rgba(13, 110, 253, 0.05) 100%);
+  border-color: rgba(13, 110, 253, 0.4);
+}
+
+:global([data-bs-theme="light"]) .stat-item.info .stat-value {
+  color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .section-title {
+  color: #495057;
+}
+
+:global([data-bs-theme="light"]) .no-data {
+  color: #6c757d;
+}
+
+:global([data-bs-theme="light"]) .route-card {
+  background: #ffffff;
+  border-color: #dee2e6;
+}
+
+:global([data-bs-theme="light"]) .route-card:hover {
+  border-color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .route-card.has-issues {
+  border-color: rgba(253, 126, 20, 0.4);
+}
+
+:global([data-bs-theme="light"]) .route-card.is-primary {
+  border-color: rgba(25, 135, 84, 0.4);
+}
+
+:global([data-bs-theme="light"]) .route-header {
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+}
+
+:global([data-bs-theme="light"]) .route-header:hover {
+  background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%);
+}
+
+:global([data-bs-theme="light"]) .route-badge {
+  background: #0d6efd;
+  color: #ffffff;
+}
+
+:global([data-bs-theme="light"]) .route-badge.aggregated {
+  background: rgba(13, 110, 253, 0.2);
+  color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .hop-count {
+  color: #6c757d;
+}
+
+:global([data-bs-theme="light"]) .route-endpoints {
+  color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .route-endpoints i {
+  color: #adb5bd;
+}
+
+:global([data-bs-theme="light"]) .metric-value {
+  color: #495057;
+}
+
+:global([data-bs-theme="light"]) .metric-label {
+  color: #6c757d;
+}
+
+:global([data-bs-theme="light"]) .metric.good .metric-value { color: #198754; }
+:global([data-bs-theme="light"]) .metric.warning .metric-value { color: #fd7e14; }
+:global([data-bs-theme="light"]) .metric.critical .metric-value { color: #dc3545; }
+
+:global([data-bs-theme="light"]) .expand-icon {
+  color: #6c757d;
+}
+
+:global([data-bs-theme="light"]) .route-diff {
+  border-top: 1px solid rgba(13, 110, 253, 0.2);
+  background: rgba(13, 110, 253, 0.05);
+}
+
+:global([data-bs-theme="light"]) .diff-header {
+  color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .diff-line.removed {
+  background: rgba(220, 53, 69, 0.1);
+}
+
+:global([data-bs-theme="light"]) .diff-line.added {
+  background: rgba(25, 135, 84, 0.1);
+}
+
+:global([data-bs-theme="light"]) .diff-line.removed .diff-marker {
+  color: #dc3545;
+}
+
+:global([data-bs-theme="light"]) .diff-line.added .diff-marker {
+  color: #198754;
+}
+
+:global([data-bs-theme="light"]) .diff-text {
+  color: #495057;
+}
+
+:global([data-bs-theme="light"]) .route-traces {
+  border-top: 1px solid #dee2e6;
+  background: #f8f9fa;
+}
+
+:global([data-bs-theme="light"]) .route-badge.badge-triggered {
+  background: rgba(220, 53, 69, 0.15);
+  color: #dc3545;
+}
+
+:global([data-bs-theme="light"]) .route-badge.badge-route-change {
+  background: rgba(13, 110, 253, 0.15);
+  color: #0d6efd;
+}
+
+:global([data-bs-theme="light"]) .route-badge.badge-high-loss {
+  background: rgba(253, 126, 20, 0.15);
+  color: #fd7e14;
+}
+
+:global([data-bs-theme="light"]) .route-badge.badge-high-latency {
+  background: rgba(255, 193, 7, 0.2);
+  color: #8a6d12;
 }
 </style>

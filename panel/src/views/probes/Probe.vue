@@ -781,7 +781,8 @@ async function loadProbeData(): Promise<void> {
           console.warn(`[Probe ${p.id}] Failed to fetch PING data:`, err);
         }
         
-        // Fetch MTR data - no aggregation (needs full hop data), but paginate
+        // Fetch MTR data with aggregation for intelligent route grouping
+        const mtrAgg = aggregateSec > 0;
         try {
           const mtrRows = await ProbeDataService.byProbe(
             workspaceID,
@@ -789,12 +790,13 @@ async function loadProbeData(): Promise<void> {
             {
               from,
               to,
-              limit: 300,
+              limit: mtrAgg ? undefined : 300,
               asc: false,
+              aggregate: mtrAgg ? aggregateSec : undefined,
               type: 'MTR'
             }
           );
-          console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} raw rows`);
+          console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} ${mtrAgg ? 'aggregated' : 'raw'} rows`);
           for (const d of mtrRows) {
             addProbeDataUnique(state.probeData, d);
             addProbeDataUnique(state.mtrData, d);
@@ -831,8 +833,8 @@ async function loadProbeData(): Promise<void> {
       }
       
       // Non-AGENT probes: use original logic
-      // Enable aggregation for PING and TRAFFICSIM only (MTR needs all hop data, just paginate it)
-      const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
+      // Enable aggregation for PING, TRAFFICSIM, and MTR
+      const useAggregation = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM' || probeType === 'MTR');
       
       let rows;
       try {

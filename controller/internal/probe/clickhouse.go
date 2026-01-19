@@ -608,19 +608,28 @@ func isMtrTraceNotable(payload MtrPayload, prevSignature string, triggered bool)
 		return true, "route-change"
 	}
 
-	// Check for high packet loss (>10% on any hop)
+	// Check for high packet loss (>10% on responding hops only)
+	// Empty hops (no host IP) are NOT packet loss - they're just routers that don't respond to ICMP
 	for _, hop := range payload.Report.Hops {
+		// Skip empty hops - these are NOT real packet loss
+		if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
+			continue
+		}
 		loss := parseLossPct(hop.LossPct)
 		if loss > 10.0 {
 			return true, "high-loss"
 		}
 	}
 
-	// Check for high latency (>150ms on final hop)
-	if len(payload.Report.Hops) > 0 {
-		finalHop := payload.Report.Hops[len(payload.Report.Hops)-1]
-		if latency := parseLatency(finalHop.Avg); latency > 150.0 {
-			return true, "high-latency"
+	// Check for high latency (>150ms on final RESPONDING hop)
+	// Find the last hop that actually has a response
+	for i := len(payload.Report.Hops) - 1; i >= 0; i-- {
+		hop := payload.Report.Hops[i]
+		if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" && hop.Hosts[0].IP != "*" {
+			if latency := parseLatency(hop.Avg); latency > 150.0 {
+				return true, "high-latency"
+			}
+			break // Only check the last responding hop
 		}
 	}
 
