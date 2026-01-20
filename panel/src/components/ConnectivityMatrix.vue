@@ -55,9 +55,20 @@ function handleTargetClick(target: TargetLabel, event: MouseEvent) {
   selectedTarget.value = { target, rect }
 }
 
+// Handle source row header click
+const selectedSource = ref<{ source: AgentSummary; rect: DOMRect } | null>(null)
+
+function handleSourceClick(source: AgentSummary, event: MouseEvent) {
+  selectedCell.value = null
+  selectedTarget.value = null
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  selectedSource.value = { source, rect }
+}
+
 function closePopover() {
   selectedCell.value = null
   selectedTarget.value = null
+  selectedSource.value = null
 }
 
 // Get all entries for a specific target (for target popup)
@@ -65,6 +76,13 @@ const targetEntries = computed(() => {
   if (!selectedTarget.value || !matrixData.value) return []
   const targetId = selectedTarget.value.target.id
   return matrixData.value.entries.filter(e => e.target_id === targetId)
+})
+
+// Get all entries for a specific source agent (for source popup)
+const sourceEntries = computed(() => {
+  if (!selectedSource.value || !matrixData.value) return []
+  const sourceId = selectedSource.value.source.id
+  return matrixData.value.entries.filter(e => e.source_agent_id === sourceId)
 })
 
 // Get agent ID from target if it's an agent type
@@ -82,6 +100,21 @@ function findAgentByIp(ip: string): AgentSummary | null {
   return matrixData.value.source_agents.find(agent => 
     agent.name.includes(ip) || ip.includes(agent.name.split('.')[0] || '')
   ) || null
+}
+
+// Check if this is an agent-to-agent connection
+function isAgentToAgent(targetId: string): boolean {
+  return targetId.startsWith('agent:')
+}
+
+// Get reverse path entry (Agent B -> Agent A) for bidirectional display
+function getReversePath(sourceAgentId: number, targetId: string): ConnectivityMatrixEntry | undefined {
+  if (!matrixData.value || !targetId.startsWith('agent:')) return undefined
+  const targetAgentId = parseInt(targetId.substring(6), 10)
+  // Find entry where source is the target agent and target is the source agent
+  return matrixData.value.entries.find(
+    e => e.source_agent_id === targetAgentId && e.target_id === `agent:${sourceAgentId}`
+  )
 }
 
 // Smart popup positioning to stay within viewport
@@ -110,6 +143,36 @@ const targetPopoverStyle = computed(() => {
       // Just pin to bottom of viewport
       top = globalThis.innerHeight - popupMaxHeight - padding
     }
+  }
+  
+  return {
+    top: `${top}px`,
+    left: `${left}px`
+  }
+})
+
+// Source popover positioning
+const sourcePopoverStyle = computed(() => {
+  if (!selectedSource.value) return {}
+  const rect = selectedSource.value.rect
+  const popupWidth = 360
+  const popupMaxHeight = 400
+  const padding = 16
+  
+  let left = rect.right + 8
+  if (left + popupWidth > globalThis.innerWidth - padding) {
+    left = rect.left - popupWidth - 8
+  }
+  if (left < padding) {
+    left = padding
+  }
+  
+  let top = rect.top
+  if (top + popupMaxHeight > globalThis.innerHeight - padding) {
+    top = globalThis.innerHeight - popupMaxHeight - padding
+  }
+  if (top < padding) {
+    top = padding
   }
   
   return {
@@ -224,7 +287,11 @@ onUnmounted(() => {
 
         <!-- Data Rows: Source agent + cells -->
         <template v-for="source in matrixData.source_agents" :key="source.id">
-          <div class="matrix-row-header" :class="{ 'offline': !source.is_online }">
+          <div 
+            class="matrix-row-header" 
+            :class="{ 'offline': !source.is_online, 'selected': selectedSource?.source.id === source.id }"
+            @click="handleSourceClick(source, $event)"
+          >
             <i class="bi bi-server"></i>
             <span>{{ source.name }}</span>
             <span v-if="!source.is_online" class="offline-badge">offline</span>
@@ -233,7 +300,11 @@ onUnmounted(() => {
             v-for="target in sortedTargets" 
             :key="`${source.id}-${target.id}`"
             class="matrix-data-cell"
-            :class="{ 'self-cell': `agent:${source.id}` === target.id }"
+            :class="{ 
+              'self-cell': `agent:${source.id}` === target.id,
+              'agent-to-agent': isAgentToAgent(target.id) && `agent:${source.id}` !== target.id,
+              'has-return-path': getReversePath(source.id, target.id) !== undefined
+            }"
             @click="handleCellClick(getEntry(source.id, target.id), $event)"
           >
             <MatrixCell 
@@ -241,6 +312,14 @@ onUnmounted(() => {
               :entry="getEntry(source.id, target.id)"
             />
             <span v-else class="self-indicator">—</span>
+            <!-- Bidirectional indicator for agent-to-agent connections with return data -->
+            <span 
+              v-if="isAgentToAgent(target.id) && `agent:${source.id}` !== target.id && getReversePath(source.id, target.id)"
+              class="bidirectional-indicator"
+              title="Bidirectional: return path data available"
+            >
+              <i class="bi bi-arrow-left-right"></i>
+            </span>
           </div>
         </template>
       </div>
@@ -305,7 +384,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Click overlay to close popover -->
-      <div v-if="selectedCell || selectedTarget" class="popover-overlay" @click="closePopover"></div>
+      <div v-if="selectedCell || selectedTarget || selectedSource" class="popover-overlay" @click="closePopover"></div>
 
       <!-- Target Detail Popup -->
       <div 
@@ -368,6 +447,80 @@ onUnmounted(() => {
           </router-link>
         </div>
       </div>
+
+      <!-- Source Detail Popup -->
+      <div 
+        v-if="selectedSource" 
+        class="target-popover source-popover"
+        :style="sourcePopoverStyle"
+      >
+        <div class="popover-header">
+          <div class="target-info">
+            <i class="bi bi-server"></i>
+            <div class="target-details">
+              <span class="target-name">{{ selectedSource.source.name }}</span>
+              <span class="target-type-label">Source Agent</span>
+            </div>
+          </div>
+          <button class="close-btn" @click="closePopover">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+        <div class="popover-body">
+          <div class="target-summary">
+            <span class="summary-label">Testing {{ sourceEntries.length }} target(s)</span>
+          </div>
+          <div class="target-entries">
+            <div 
+              v-for="entry in sourceEntries" 
+              :key="entry.target_id"
+              class="target-entry"
+              :class="{ 'bidirectional-entry': entry.target_type === 'agent' && getReversePath(selectedSource.source.id, entry.target_id) }"
+            >
+              <div class="entry-source">
+                <i :class="entry.target_type === 'agent' ? 'bi bi-server' : 'bi bi-geo-alt'"></i>
+                <span>{{ entry.target_name }}</span>
+                <span v-if="entry.target_type === 'agent'" class="agent-badge">Agent</span>
+              </div>
+              <div class="entry-probes">
+                <span 
+                  v-for="probe in entry.probe_status" 
+                  :key="probe.type"
+                  class="mini-bubble"
+                  :class="'status-' + probe.status"
+                  :title="`${probe.type}: ${probe.avg_latency?.toFixed(1)}ms, ${probe.packet_loss?.toFixed(1)}% loss`"
+                >
+                  {{ probe.type.charAt(0) }}
+                </span>
+              </div>
+              <!-- Show return path stats for agent-to-agent -->
+              <div v-if="entry.target_type === 'agent' && getReversePath(selectedSource.source.id, entry.target_id)" class="return-path">
+                <span class="return-label"><i class="bi bi-arrow-return-left"></i> Return:</span>
+                <span 
+                  v-for="probe in getReversePath(selectedSource.source.id, entry.target_id)?.probe_status" 
+                  :key="probe.type"
+                  class="mini-bubble"
+                  :class="'status-' + probe.status"
+                  :title="`Return ${probe.type}: ${probe.avg_latency?.toFixed(1)}ms, ${probe.packet_loss?.toFixed(1)}% loss`"
+                >
+                  {{ probe.type.charAt(0) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="sourceEntries.length === 0" class="no-entries">
+              No active probes from this agent
+            </div>
+          </div>
+        </div>
+        <div class="popover-footer">
+          <router-link 
+            :to="`/workspaces/${workspaceId}/agents/${selectedSource.source.id}`"
+            class="btn btn-sm btn-primary"
+          >
+            <i class="bi bi-arrow-right"></i> View Agent
+          </router-link>
+        </div>
+      </div>
     </div>
 
     <!-- Legend -->
@@ -387,6 +540,10 @@ onUnmounted(() => {
       <div class="legend-item">
         <span class="legend-bubble status-unknown"></span>
         <span>No Data</span>
+      </div>
+      <div class="legend-item">
+        <i class="bi bi-arrow-left-right legend-icon"></i>
+        <span>Bidirectional (return path)</span>
       </div>
     </div>
   </div>
@@ -950,5 +1107,102 @@ onUnmounted(() => {
   padding: 1rem;
   color: var(--bs-secondary-color, #6c757d);
   font-size: 0.85rem;
+}
+
+/* Row header selection and clickability */
+.matrix-row-header {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.matrix-row-header:hover {
+  background: var(--bs-secondary-bg, #e9ecef);
+}
+
+.matrix-row-header.selected {
+  background: var(--bs-primary-bg-subtle, #cfe2ff);
+  box-shadow: inset 0 0 0 2px var(--bs-primary, #0d6efd);
+}
+
+/* Agent-to-agent cell highlighting */
+.matrix-data-cell.agent-to-agent {
+  background: rgba(13, 110, 253, 0.03);
+}
+
+.matrix-data-cell.agent-to-agent:hover {
+  background: rgba(13, 110, 253, 0.08);
+}
+
+.matrix-data-cell.has-return-path {
+  position: relative;
+}
+
+/* Bidirectional indicator */
+.bidirectional-indicator {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.55rem;
+  color: var(--bs-primary, #0d6efd);
+  opacity: 0.7;
+}
+
+.bidirectional-indicator i {
+  font-size: 0.6rem;
+}
+
+/* Return path display in source popup */
+.return-path {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+  padding-top: 0.375rem;
+  border-top: 1px dashed var(--bs-border-color, #dee2e6);
+}
+
+.return-label {
+  font-size: 0.65rem;
+  color: var(--bs-secondary-color, #6c757d);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.return-label i {
+  font-size: 0.7rem;
+}
+
+/* Bidirectional entry styling */
+.bidirectional-entry {
+  border-left: 3px solid var(--bs-primary, #0d6efd);
+}
+
+/* Agent badge */
+.agent-badge {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  background: rgba(13, 110, 253, 0.1);
+  color: var(--bs-primary, #0d6efd);
+  font-weight: 600;
+  margin-left: 0.25rem;
+}
+
+/* Legend icon */
+.legend-icon {
+  font-size: 0.85rem;
+  color: var(--bs-primary, #0d6efd);
+}
+
+/* Source popover adjustments */
+.source-popover .target-entry {
+  flex-wrap: wrap;
+}
+
+.source-popover .entry-source {
+  flex: 1;
+  min-width: 140px;
 }
 </style>
