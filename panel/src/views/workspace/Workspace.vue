@@ -6,6 +6,7 @@ import Loader from "@/components/Loader.vue";
 import Code from "@/components/Code.vue";
 import AgentCard from "@/components/AgentCard.vue";
 import WorkspaceNetworkMap from "@/components/WorkspaceNetworkMap.vue";
+import ConnectivityMatrix from "@/components/ConnectivityMatrix.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
 import {usePermissions} from "@/composables/usePermissions";
@@ -25,7 +26,7 @@ const state = reactive({
   loadingNetInfo: false,
   searchQuery: '',
   sortBy: 'status' as 'status' | 'name' | 'description' | 'updated',
-  showNetworkMap: false
+  currentView: 'grid' as 'grid' | 'network' | 'matrix'
 })
 
 // Permissions based on user's role in this workspace
@@ -252,27 +253,39 @@ onUnmounted(() => {
     <!-- View Toggle -->
     <div class="view-toggle mb-3" v-if="!state.loading && state.agents.length > 0">
       <button 
-        @click="state.showNetworkMap = false" 
+        @click="state.currentView = 'grid'" 
         class="btn" 
-        :class="state.showNetworkMap ? 'btn-outline-secondary' : 'btn-primary'"
+        :class="state.currentView === 'grid' ? 'btn-primary' : 'btn-outline-secondary'"
       >
         <i class="bi bi-grid-3x3-gap"></i> Agents Grid
       </button>
       <button 
-        @click="state.showNetworkMap = true" 
+        @click="state.currentView = 'network'" 
         class="btn" 
-        :class="state.showNetworkMap ? 'btn-primary' : 'btn-outline-secondary'"
+        :class="state.currentView === 'network' ? 'btn-primary' : 'btn-outline-secondary'"
       >
         <i class="bi bi-diagram-3"></i> Network Map
+      </button>
+      <button 
+        @click="state.currentView = 'matrix'" 
+        class="btn" 
+        :class="state.currentView === 'matrix' ? 'btn-primary' : 'btn-outline-secondary'"
+      >
+        <i class="bi bi-grid"></i> Connectivity Matrix
       </button>
     </div>
 
     <!-- Network Map View -->
-    <div v-if="state.showNetworkMap && !state.loading && state.workspace.id" class="mb-4">
+    <div v-if="state.currentView === 'network' && !state.loading && state.workspace.id" class="mb-4">
       <WorkspaceNetworkMap 
         :workspace-id="state.workspace.id"
         @node-select="(node) => console.log('Selected node:', node)"
       />
+    </div>
+
+    <!-- Connectivity Matrix View -->
+    <div v-if="state.currentView === 'matrix' && !state.loading && state.workspace.id" class="mb-4">
+      <ConnectivityMatrix :workspace-id="state.workspace.id" />
     </div>
 
     <!-- Loading State -->
@@ -306,7 +319,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Agents Grid -->
-    <div class="agents-grid" v-else-if="!state.showNetworkMap">
+    <div class="agents-grid" v-else-if="state.currentView === 'grid'">
       <div v-for="agent in filteredAgents" :key="agent.id" class="agent-card-wrapper">
         <AgentCard
           :title="agent.name"

@@ -390,6 +390,45 @@ export interface NetworkMapData {
     workspace_id: number;
 }
 
+// Connectivity Matrix types for grid-based probe status visualization
+export interface ProbeStatusSummary {
+    type: 'MTR' | 'PING' | 'TRAFFICSIM';
+    status: 'healthy' | 'degraded' | 'critical' | 'unknown';
+    avg_latency: number;
+    packet_loss: number;
+    jitter?: number;
+    last_updated: string;
+}
+
+export interface ConnectivityMatrixEntry {
+    source_agent_id: number;
+    source_agent_name: string;
+    target_id: string;
+    target_name: string;
+    target_type: 'agent' | 'destination';
+    probe_status: ProbeStatusSummary[];
+}
+
+export interface AgentSummary {
+    id: number;
+    name: string;
+    is_online: boolean;
+}
+
+export interface TargetLabel {
+    id: string;
+    name: string;
+    type: 'agent' | 'destination';
+}
+
+export interface ConnectivityMatrix {
+    source_agents: AgentSummary[];
+    target_labels: TargetLabel[];
+    entries: ConnectivityMatrixEntry[];
+    generated_at: string;
+    workspace_id: number;
+}
+
 export interface ProbeDataRequest {
     limit: number;
     startTimestamp: Date;

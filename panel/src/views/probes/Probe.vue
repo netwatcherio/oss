@@ -10,6 +10,7 @@ import NetworkMap from "@/components/NetworkMap.vue";
 import MtrTable from "@/components/MtrTable.vue";
 import MtrSummary from "@/components/MtrSummary.vue";
 import MtrDetailModal from "@/components/MtrDetailModal.vue";
+import { MtrAnalysisDemo } from "@/components/mtr-analysis-prototype";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService } from '@/services/themeService';
@@ -28,6 +29,7 @@ const activeTabIndex = ref(0);
 const isDark = ref(themeService.getTheme() === 'dark');
 
 // Modal state for MTR detail view
+const showMtrAnalysisPrototype = ref(false);
 const showMtrModal = ref(false);
 const selectedNode = ref<{ id: string; hostname?: string; ip?: string; hopNumber: number } | null>(null);
 
@@ -1259,8 +1261,34 @@ const { connected: wsConnected } = useProbeSubscription(
       <div class="col-sm-12" v-if="containsProbeType('MTR')">
         <div class="card mb-3">
           <div class="card-body">
-            <h5 class="card-title">Traceroutes</h5>
-            <p class="card-text">view the recent trace routes for the selected period of time</p>
+            <div class="d-flex justify-content-between align-items-start mb-3">
+              <div>
+                <h5 class="card-title mb-0">Traceroutes</h5>
+                <p class="card-text text-muted mb-0">view the recent trace routes for the selected period of time</p>
+              </div>
+              <button 
+                class="btn btn-sm"
+                :class="showMtrAnalysisPrototype ? 'btn-primary' : 'btn-outline-primary'"
+                @click="showMtrAnalysisPrototype = !showMtrAnalysisPrototype"
+                title="Toggle AI-enhanced path analysis (prototype)"
+              >
+                <i class="bi bi-stars me-1"></i>
+                {{ showMtrAnalysisPrototype ? 'Standard View' : 'AI Analysis' }}
+                <span class="badge bg-warning text-dark ms-1">Beta</span>
+              </button>
+            </div>
+            
+            <!-- AI Analysis Prototype View -->
+            <div v-if="showMtrAnalysisPrototype" class="mtr-analysis-prototype-container">
+              <div class="prototype-banner mb-3">
+                <i class="bi bi-info-circle me-2"></i>
+                <span><strong>Prototype:</strong> This is a sample visualization with mock enriched analysis data. In production, this would be generated from actual MTR traces.</span>
+              </div>
+              <MtrAnalysisDemo />
+            </div>
+            
+            <!-- Standard MTR View -->
+            <template v-else>
             <div v-if="state.loading && state.mtrData.length === 0" class="text-center py-5">
               <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -1285,12 +1313,14 @@ const { connected: wsConnected } = useProbeSubscription(
                 @show-all-traces="showMtrModal = true"
               />
             </div>
+            </template>
           </div>
         </div>
       </div>
       </template>
     </div>
   </div>
+
   <!-- Loading state for entire page -->
   <div v-else-if="state.loading" class="container-fluid">
     <div class="d-flex justify-content-center align-items-center" style="min-height: 80vh;">
@@ -1555,5 +1585,27 @@ const { connected: wsConnected } = useProbeSubscription(
 
 :global(.dp__range_between) {
   background: rgba(59, 130, 246, 0.15) !important;
+}
+
+/* MTR Analysis Prototype */
+.mtr-analysis-prototype-container {
+  margin-top: 1rem;
+}
+
+.prototype-banner {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 8px;
+  color: #856404;
+  font-size: 0.85rem;
+}
+
+[data-theme="dark"] .prototype-banner {
+  background: rgba(255, 193, 7, 0.15);
+  border-color: rgba(255, 193, 7, 0.4);
+  color: #ffc107;
 }
 </style>

@@ -66,6 +66,44 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	})
 
 	// ------------------------------------------
+	// GET /workspaces/{id}/connectivity-matrix
+	// Aggregated connectivity matrix for the workspace
+	// Query: lookback=<minutes, default 15>
+	// ------------------------------------------
+	api.Get("/workspaces/{id:uint}/connectivity-matrix", func(ctx iris.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[connectivity-matrix] PANIC: %v", r)
+				ctx.StatusCode(http.StatusInternalServerError)
+				_ = ctx.JSON(iris.Map{"error": "internal error"})
+			}
+		}()
+
+		wID := uintParam(ctx, "id")
+		lookback := intOrDefault(ctx.URLParam("lookback"), 15)
+
+		matrix, err := probe.GetWorkspaceConnectivityMatrix(ctx.Request().Context(), ch, pg, wID, lookback)
+		if err != nil {
+			log.Printf("[connectivity-matrix] workspace=%d error: %v", wID, err)
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// Explicitly marshal to check for JSON errors
+		jsonBytes, err := json.Marshal(matrix)
+		if err != nil {
+			log.Printf("[connectivity-matrix] JSON marshal error: %v", err)
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "json serialization failed"})
+			return
+		}
+
+		ctx.ContentType("application/json")
+		_, _ = ctx.Write(jsonBytes)
+	})
+
+	// ------------------------------------------
 	// GET /workspaces/{id}/probe-data/find
 	// Flexible finder across ClickHouse with query params mirroring pd.FindParams
 	// ------------------------------------------
