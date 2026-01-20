@@ -1,0 +1,49 @@
+# Caddyfile for NetWatcher OSS Landing Page
+# Supports environment variable substitution for domain configuration
+
+# Use environment variable for domain, default to localhost for development
+{$DOMAIN:localhost} {
+    # Enable compression
+    encode gzip zstd
+
+    # Serve static files from /srv
+    root * /srv
+    file_server
+
+    # Security headers
+    header {
+        # Enable HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Remove server header
+        -Server
+    }
+
+    # Cache static assets
+    @static {
+        path *.css *.js *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2
+    }
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # Don't cache HTML (for updates)
+    @html {
+        path *.html /
+    }
+    header @html Cache-Control "no-cache, must-revalidate"
+
+    # Handle SPA-style routing (redirect 404s to index)
+    try_files {path} {path}/ /index.html
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

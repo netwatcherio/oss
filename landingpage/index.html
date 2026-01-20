@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetWatcher OSS - Open Source Network Monitoring</title>
+    <meta name="description"
+        content="NetWatcher is a free, open-source network monitoring platform. The affordable alternative to Obkio and Kentik. MTR traceroutes, distributed agents, real-time dashboards.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="#" class="logo">
+                <i class="bi bi-activity"></i>
+                <span>NetWatcher</span>
+                <span class="badge">OSS</span>
+            </a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#comparison">Compare</a>
+                <a href="#roadmap">Roadmap</a>
+                <a href="demo.html">Demo</a>
+                <a href="https://github.com/netwatcherio/netwatcher-oss" class="btn btn-outline" target="_blank">
+                    <i class="bi bi-github"></i> GitHub
+                </a>
+                <a href="#get-started" class="btn btn-primary">Get Started</a>
+            </div>
+            <button class="mobile-menu-btn" aria-label="Menu">
+                <i class="bi bi-list"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="container">
+            <div class="hero-badge">
+                <i class="bi bi-unlock"></i>
+                100% Open Source • AGPL-3.0
+            </div>
+            <h1>Network Monitoring<br><span class="gradient-text">Without the Price Tag</span></h1>
+            <p class="hero-subtitle">
+                The open-source alternative to Obkio (~$300 CAD/mo) and Kentik (~$2,000+/mo).<br>
+                MTR traceroutes, distributed agents, real-time dashboards. Forever free.
+            </p>
+            <div class="hero-actions">
+                <a href="#get-started" class="btn btn-primary btn-lg">
+                    <i class="bi bi-rocket-takeoff"></i> Deploy Now
+                </a>
+                <a href="demo.html" class="btn btn-outline btn-lg">
+                    <i class="bi bi-play-circle"></i> See Demo
+                </a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat">
+                    <span class="stat-value">$0</span>
+                    <span class="stat-label">Forever</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">∞</span>
+                    <span class="stat-label">Agents</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">100%</span>
+                    <span class="stat-label">Your Data</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section id="features" class="section">
+        <div class="container">
+            <h2 class="section-title">Everything You Need</h2>
+            <p class="section-subtitle">Production-ready network monitoring without the enterprise pricing</p>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-diagram-3"></i></div>
+                    <h3>MTR Traceroutes</h3>
+                    <p>Native Go implementation with path analysis, route change detection, and hop-by-hop metrics.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-hdd-network"></i></div>
+                    <h3>Distributed Agents</h3>
+                    <p>Cross-platform agents for Windows, Linux, and macOS. Deploy anywhere in minutes.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-speedometer2"></i></div>
+                    <h3>TrafficSim</h3>
+                    <p>Synthetic UDP traffic with bidirectional analysis. Latency, jitter, packet loss, reordering.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-grid-3x3"></i></div>
+                    <h3>Connectivity Matrix</h3>
+                    <p>High-density mesh health view. See all agent-to-target relationships at a glance.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-bezier2"></i></div>
+                    <h3>Network Topology</h3>
+                    <p>Interactive D3 network maps with path highlighting and shared hop detection.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-bell"></i></div>
+                    <h3>Alerting</h3>
+                    <p>Threshold-based alerts with webhook notifications. Integrate with Slack, PagerDuty, or any HTTP
+                        endpoint.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-building"></i></div>
+                    <h3>Multi-Tenant</h3>
+                    <p>Workspace isolation with member management. Perfect for MSPs and enterprises.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-database"></i></div>
+                    <h3>ClickHouse Backend</h3>
+                    <p>Horizontally scalable time-series storage. Handle millions of data points efficiently.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison Section -->
+    <section id="comparison" class="section section-dark">
+        <div class="container">
+            <h2 class="section-title">Feature Comparison</h2>
+            <p class="section-subtitle">See how NetWatcher stacks up against the competition</p>
+
+            <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th class="highlight">NetWatcher OSS</th>
+                            <th>Obkio</th>
+                            <th>Kentik</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="category-row">
+                            <td colspan="4">Pricing</td>
+                        </tr>
+                        <tr>
+                            <td>Monthly Cost</td>
+                            <td class="highlight"><strong>$0</strong></td>
+                            <td>~$300 CAD (5 agents)</td>
+                            <td>~$2,000+</td>
+                        </tr>
+                        <tr>
+                            <td>Per-Agent Cost</td>
+                            <td class="highlight"><strong>$0</strong></td>
+                            <td>~$60 CAD/agent</td>
+                            <td>Enterprise pricing</td>
+                        </tr>
+                        <tr>
+                            <td>Self-Hosted</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Open Source</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                        </tr>
+
+                        <tr class="category-row">
+                            <td colspan="4">Monitoring</td>
+                        </tr>
+                        <tr>
+                            <td>Distributed Agents</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>MTR / Traceroute</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Latency / Jitter / Loss</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Bidirectional Analysis</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>SNMP Polling</td>
+                            <td class="highlight"><span class="badge-roadmap">Roadmap</span></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>MOS Score (VoIP)</td>
+                            <td class="highlight"><span class="badge-roadmap">Roadmap</span></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+
+                        <tr class="category-row">
+                            <td colspan="4">Visualization</td>
+                        </tr>
+                        <tr>
+                            <td>Network Topology Map</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Connectivity Matrix</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Real-time Updates</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+
+                        <tr class="category-row">
+                            <td colspan="4">Alerting</td>
+                        </tr>
+                        <tr>
+                            <td>Threshold Alerts</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Webhook Notifications</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Dynamic Thresholds</td>
+                            <td class="highlight"><span class="badge-roadmap">Roadmap</span></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Roadmap Section -->
+    <section id="roadmap" class="section">
+        <div class="container">
+            <h2 class="section-title">Roadmap</h2>
+            <p class="section-subtitle">What's coming next for NetWatcher OSS</p>
+
+            <div class="roadmap-timeline">
+                <div class="roadmap-phase">
+                    <div class="phase-header">
+                        <span class="phase-label">Phase 1</span>
+                        <span class="phase-date">Q1 2026</span>
+                    </div>
+                    <h3>Core Polish</h3>
+                    <ul class="roadmap-items">
+                        <li><i class="bi bi-ethernet"></i> Network Interface Selection</li>
+                        <li><i class="bi bi-phone"></i> MOS Score (VoIP Quality)</li>
+                        <li><i class="bi bi-graph-up"></i> Dynamic Thresholds</li>
+                        <li><i class="bi bi-globe"></i> Controller API Services (GeoIP, Public IP)</li>
+                        <li><i class="bi bi-envelope"></i> Email Notifications</li>
+                    </ul>
+                </div>
+
+                <div class="roadmap-phase">
+                    <div class="phase-header">
+                        <span class="phase-label">Phase 2</span>
+                        <span class="phase-date">Q2 2026</span>
+                    </div>
+                    <h3>Probe Expansion</h3>
+                    <ul class="roadmap-items">
+                        <li class="highlight-item"><i class="bi bi-router"></i> SNMP Polling (Critical)</li>
+                        <li><i class="bi bi-globe2"></i> DNS Probe Type</li>
+                        <li><i class="bi bi-link-45deg"></i> HTTP/HTTPS Probe Type</li>
+                        <li><i class="bi bi-signpost-2"></i> AS Path Resolution</li>
+                    </ul>
+                </div>
+
+                <div class="roadmap-phase">
+                    <div class="phase-header">
+                        <span class="phase-label">Phase 3</span>
+                        <span class="phase-date">Q3-Q4 2026</span>
+                    </div>
+                    <h3>Enterprise Features</h3>
+                    <ul class="roadmap-items">
+                        <li><i class="bi bi-layout-wtf"></i> Custom Dashboards</li>
+                        <li><i class="bi bi-file-earmark-pdf"></i> Scheduled Reports</li>
+                        <li><i class="bi bi-shield-lock"></i> RBAC Enhancements</li>
+                        <li><i class="bi bi-key"></i> SSO Integration (SAML/OIDC)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="roadmap-cta">
+                <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/docs/ROADMAP.md"
+                    class="btn btn-outline" target="_blank">
+                    <i class="bi bi-file-text"></i> View Full Roadmap
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="section section-dark">
+        <div class="container">
+            <h2 class="section-title">Simple Pricing</h2>
+            <p class="section-subtitle">Self-host for free, or let us handle it</p>
+
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <div class="pricing-header">
+                        <h3>Self-Hosted</h3>
+                        <div class="pricing-price">
+                            <span class="price-amount">$0</span>
+                            <span class="price-period">forever</span>
+                        </div>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="bi bi-check-circle-fill"></i> Full feature access</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited agents</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited users</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Your infrastructure</li>
+                        <li><i class="bi bi-check-circle-fill"></i> 100% data ownership</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Community support</li>
+                    </ul>
+                    <a href="#get-started" class="btn btn-primary btn-block">Deploy Now</a>
+                </div>
+
+                <div class="pricing-card pricing-featured">
+                    <div class="pricing-badge">Managed</div>
+                    <div class="pricing-header">
+                        <h3>Private Instance</h3>
+                        <div class="pricing-price">
+                            <span class="price-amount">~$200</span>
+                            <span class="price-period">/month</span>
+                        </div>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="bi bi-check-circle-fill"></i> We host it for you</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Private dedicated instance</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Our owned hardware</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Automatic updates</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Backups included</li>
+                        <li><i class="bi bi-dash"></i> No SLA (best effort)</li>
+                    </ul>
+                    <a href="mailto:hello@netwatcher.io?subject=Managed%20Instance%20Inquiry"
+                        class="btn btn-outline btn-block">Contact Us</a>
+                </div>
+            </div>
+
+            <p class="pricing-note">
+                <i class="bi bi-info-circle"></i>
+                Still much cheaper than Obkio (~$300 CAD/mo) or Kentik (~$2,000+/mo) — and you own your data.
+            </p>
+        </div>
+    </section>
+
+    <!-- Get Started Section -->
+    <section id="get-started" class="section section-dark">
+        <div class="container">
+            <h2 class="section-title">Get Started in Minutes</h2>
+            <p class="section-subtitle">Deploy NetWatcher with Docker Compose</p>
+
+            <div class="code-block">
+                <div class="code-header">
+                    <span>Terminal</span>
+                    <button class="copy-btn" onclick="copyCode()">
+                        <i class="bi bi-clipboard"></i> Copy
+                    </button>
+                </div>
+                <pre><code><span class="comment"># Clone the repository</span>
+git clone https://github.com/netwatcherio/netwatcher-oss.git
+cd netwatcher-oss
+
+<span class="comment"># Start the stack</span>
+docker-compose up -d
+
+<span class="comment"># Access the panel at http://localhost:8080</span></code></pre>
+            </div>
+
+            <div class="get-started-links">
+                <a href="https://github.com/netwatcherio/netwatcher-oss" class="btn btn-primary btn-lg" target="_blank">
+                    <i class="bi bi-github"></i> View on GitHub
+                </a>
+                <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/docs/README.md"
+                    class="btn btn-outline btn-lg" target="_blank">
+                    <i class="bi bi-book"></i> Documentation
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <a href="#" class="logo">
+                        <i class="bi bi-activity"></i>
+                        <span>NetWatcher OSS</span>
+                    </a>
+                    <p>Open source network monitoring.<br>Forever free. Forever yours.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Product</h4>
+                        <a href="#features">Features</a>
+                        <a href="#comparison">Compare</a>
+                        <a href="#roadmap">Roadmap</a>
+                        <a href="demo.html">Demo</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Resources</h4>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/docs/README.md"
+                            target="_blank">Documentation</a>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/docs/api-reference.md"
+                            target="_blank">API Reference</a>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss/issues" target="_blank">Report Issue</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Community</h4>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss" target="_blank">GitHub</a>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/CONTRIBUTING.md"
+                            target="_blank">Contributing</a>
+                        <a href="https://github.com/netwatcherio/netwatcher-oss/blob/main/LICENSE"
+                            target="_blank">License (AGPL-3.0)</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 NetWatcher OSS. Open source under AGPL-3.0.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

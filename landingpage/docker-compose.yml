@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  landing:
+    build: .
+    container_name: netwatcher-landing
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Domain for automatic HTTPS (Let's Encrypt)
+      # Set to your domain for production, or localhost for development
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      # Persist Caddy data (certificates, etc.)
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - landing-network
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+
+networks:
+  landing-network:
+    driver: bridge
