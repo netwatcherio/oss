@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import type { ConnectivityMatrix, ConnectivityMatrixEntry, ProbeStatusSummary, TargetLabel, AgentSummary } from '@/types'
 import MatrixCell from './MatrixCell.vue'
+import request from '@/services/request'
 
 const props = defineProps<{
   workspaceId: number
@@ -12,6 +13,7 @@ const error = ref<string | null>(null)
 const matrixData = ref<ConnectivityMatrix | null>(null)
 const selectedLookback = ref(15)
 const selectedCell = ref<{ entry: ConnectivityMatrixEntry; rect: DOMRect } | null>(null)
+const selectedTarget = ref<{ target: TargetLabel; rect: DOMRect } | null>(null)
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Fetch matrix data from backend
@@ -19,9 +21,10 @@ async function fetchMatrix() {
   try {
     loading.value = true
     error.value = null
-    const response = await fetch(`/api/workspaces/${props.workspaceId}/connectivity-matrix?lookback=${selectedLookback.value}`)
-    if (!response.ok) throw new Error('Failed to fetch connectivity matrix')
-    matrixData.value = await response.json()
+    const response = await request.get<ConnectivityMatrix>(
+      `/workspaces/${props.workspaceId}/connectivity-matrix?lookback=${selectedLookback.value}`
+    )
+    matrixData.value = response.data
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Unknown error'
     console.error('Failed to fetch matrix:', e)
@@ -40,13 +43,100 @@ function getEntry(sourceId: number, targetId: string): ConnectivityMatrixEntry |
 // Handle cell click for popover
 function handleCellClick(entry: ConnectivityMatrixEntry | undefined, event: MouseEvent) {
   if (!entry || entry.probe_status.length === 0) return
+  selectedTarget.value = null // Close target popup if open
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   selectedCell.value = { entry, rect }
 }
 
+// Handle column header click
+function handleTargetClick(target: TargetLabel, event: MouseEvent) {
+  selectedCell.value = null // Close cell popup if open
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  selectedTarget.value = { target, rect }
+}
+
 function closePopover() {
   selectedCell.value = null
+  selectedTarget.value = null
 }
+
+// Get all entries for a specific target (for target popup)
+const targetEntries = computed(() => {
+  if (!selectedTarget.value || !matrixData.value) return []
+  const targetId = selectedTarget.value.target.id
+  return matrixData.value.entries.filter(e => e.target_id === targetId)
+})
+
+// Get agent ID from target if it's an agent type
+function getAgentIdFromTarget(target: TargetLabel): number | null {
+  if (target.type === 'agent' && target.id.startsWith('agent:')) {
+    return parseInt(target.id.substring(6), 10)
+  }
+  return null
+}
+
+// Find agent by IP address (for reverse probe detection)
+function findAgentByIp(ip: string): AgentSummary | null {
+  if (!matrixData.value) return null
+  // Check if any source agent has this IP in their name or if target matches an agent
+  return matrixData.value.source_agents.find(agent => 
+    agent.name.includes(ip) || ip.includes(agent.name.split('.')[0] || '')
+  ) || null
+}
+
+// Smart popup positioning to stay within viewport
+const targetPopoverStyle = computed(() => {
+  if (!selectedTarget.value) return {}
+  const rect = selectedTarget.value.rect
+  const popupWidth = 360
+  const popupMaxHeight = 400
+  const padding = 16
+  
+  // Calculate left position, keeping popup within viewport
+  let left = rect.left
+  if (left + popupWidth > globalThis.innerWidth - padding) {
+    left = globalThis.innerWidth - popupWidth - padding
+  }
+  if (left < padding) {
+    left = padding
+  }
+  
+  // Calculate top position - prefer below, but flip if no room
+  let top = rect.bottom + 8
+  if (top + popupMaxHeight > globalThis.innerHeight - padding) {
+    // Try above
+    top = rect.top - popupMaxHeight - 8
+    if (top < padding) {
+      // Just pin to bottom of viewport
+      top = globalThis.innerHeight - popupMaxHeight - padding
+    }
+  }
+  
+  return {
+    top: `${top}px`,
+    left: `${left}px`
+  }
+})
+
+// Check if target IP matches an agent (for external destinations that are actually agents)
+const targetAgentMatch = computed(() => {
+  if (!selectedTarget.value || !matrixData.value) return null
+  const target = selectedTarget.value.target
+  
+  // If already marked as agent, skip
+  if (target.type === 'agent') return null
+  
+  // Check if the target name/id matches any agent's hostname pattern
+  const targetName = target.name.toLowerCase()
+  for (const agent of matrixData.value.source_agents) {
+    // Check if agent name appears in target or vice versa
+    const agentName = agent.name.toLowerCase()
+    if (targetName.includes(agentName) || agentName.includes(targetName)) {
+      return agent
+    }
+  }
+  return null
+})
 
 // Sort targets: agents first, then destinations
 const sortedTargets = computed(() => {
@@ -114,17 +204,22 @@ onUnmounted(() => {
     <div v-else class="matrix-wrapper">
       <div class="matrix-grid" :style="{ '--num-cols': sortedTargets.length + 1 }">
         <!-- Header Row: Empty corner + Target headers -->
-        <div class="matrix-corner"></div>
+        <div class="matrix-corner">
+          <span class="corner-label">Source → Target</span>
+        </div>
         <div 
           v-for="target in sortedTargets" 
           :key="target.id" 
           class="matrix-header-cell"
-          :class="{ 'agent-target': target.type === 'agent' }"
+          :class="{ 'agent-target': target.type === 'agent', 'selected': selectedTarget?.target.id === target.id }"
+          :title="target.name"
+          @click="handleTargetClick(target, $event)"
         >
           <div class="header-content">
             <i :class="target.type === 'agent' ? 'bi bi-server' : 'bi bi-geo-alt'"></i>
             <span class="header-label">{{ target.name }}</span>
           </div>
+          <div class="header-type-badge">{{ target.type === 'agent' ? 'Agent' : 'Dest' }}</div>
         </div>
 
         <!-- Data Rows: Source agent + cells -->
@@ -210,7 +305,69 @@ onUnmounted(() => {
       </div>
 
       <!-- Click overlay to close popover -->
-      <div v-if="selectedCell" class="popover-overlay" @click="closePopover"></div>
+      <div v-if="selectedCell || selectedTarget" class="popover-overlay" @click="closePopover"></div>
+
+      <!-- Target Detail Popup -->
+      <div 
+        v-if="selectedTarget" 
+        class="target-popover"
+        :style="targetPopoverStyle"
+      >
+        <div class="popover-header">
+          <div class="target-info">
+            <i :class="selectedTarget.target.type === 'agent' || targetAgentMatch ? 'bi bi-server' : 'bi bi-geo-alt'"></i>
+            <div class="target-details">
+              <span class="target-name">{{ selectedTarget.target.name }}</span>
+              <span v-if="targetAgentMatch" class="target-type-label agent-match">
+                <i class="bi bi-link-45deg"></i> Agent: {{ targetAgentMatch.name }}
+              </span>
+              <span v-else class="target-type-label">{{ selectedTarget.target.type === 'agent' ? 'Agent Target' : 'External Destination' }}</span>
+            </div>
+          </div>
+          <button class="close-btn" @click="closePopover">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+        <div class="popover-body">
+          <div class="target-summary">
+            <span class="summary-label">Tested by {{ targetEntries.length }} agent(s)</span>
+          </div>
+          <div class="target-entries">
+            <div 
+              v-for="entry in targetEntries" 
+              :key="entry.source_agent_id"
+              class="target-entry"
+            >
+              <div class="entry-source">
+                <i class="bi bi-server"></i>
+                <span>{{ entry.source_agent_name }}</span>
+              </div>
+              <div class="entry-probes">
+                <span 
+                  v-for="probe in entry.probe_status" 
+                  :key="probe.type"
+                  class="mini-bubble"
+                  :class="'status-' + probe.status"
+                  :title="`${probe.type}: ${probe.avg_latency?.toFixed(1)}ms, ${probe.packet_loss?.toFixed(1)}% loss`"
+                >
+                  {{ probe.type.charAt(0) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="targetEntries.length === 0" class="no-entries">
+              No active probes for this target
+            </div>
+          </div>
+        </div>
+        <div class="popover-footer" v-if="getAgentIdFromTarget(selectedTarget.target)">
+          <router-link 
+            :to="`/workspaces/${workspaceId}/agents/${getAgentIdFromTarget(selectedTarget.target)}`"
+            class="btn btn-sm btn-primary"
+          >
+            <i class="bi bi-arrow-right"></i> View Agent
+          </router-link>
+        </div>
+      </div>
     </div>
 
     <!-- Legend -->
@@ -341,12 +498,14 @@ onUnmounted(() => {
 
 .matrix-grid {
   display: grid;
-  grid-template-columns: 180px repeat(var(--num-cols, 1) - 1, minmax(80px, 1fr));
-  gap: 1px;
-  background: var(--bs-border-color, #dee2e6);
+  /* Use explicit repeat value - --num-cols includes the row header column */
+  grid-template-columns: 180px repeat(calc(var(--num-cols) - 1), minmax(60px, 100px));
+  gap: 0;
+  background: var(--bs-body-bg, #fff);
+  border: 1px solid var(--bs-border-color, #dee2e6);
   border-radius: 8px;
   overflow: hidden;
-  min-width: fit-content;
+  min-width: max-content;
 }
 
 .matrix-corner {
@@ -355,30 +514,63 @@ onUnmounted(() => {
   position: sticky;
   left: 0;
   z-index: 2;
+  border-bottom: 2px solid var(--bs-border-color, #dee2e6);
+  border-right: 2px solid var(--bs-border-color, #dee2e6);
+  min-height: 100px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.corner-label {
+  font-size: 0.65rem;
+  color: var(--bs-secondary-color, #6c757d);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .matrix-header-cell {
   background: var(--bs-tertiary-bg, #f8f9fa);
-  padding: 0.5rem;
+  padding: 0.5rem 0.25rem;
   text-align: center;
   font-weight: 500;
-  font-size: 0.75rem;
-  min-height: 80px;
+  font-size: 0.7rem;
+  min-height: 100px;
+  min-width: 70px;
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--bs-border-color, #dee2e6);
+  border-right: 1px solid var(--bs-border-color, #dee2e6);
+  cursor: default;
+  transition: background-color 0.15s;
+}
+
+.matrix-header-cell:hover {
+  background: var(--bs-secondary-bg, #e9ecef);
 }
 
 .header-content {
-  transform: rotate(-45deg);
-  transform-origin: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  max-width: 120px;
+  max-height: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.75rem;
+  color: var(--bs-body-color, #212529);
+}
+
+.header-content i {
+  font-size: 0.8rem;
+  opacity: 0.7;
 }
 
 .header-label {
@@ -386,21 +578,40 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.header-type-badge {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  background: var(--bs-secondary-bg, #e9ecef);
+  color: var(--bs-secondary-color, #6c757d);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
 .agent-target .header-content {
+  color: var(--bs-primary, #0d6efd);
+}
+
+.agent-target .header-type-badge {
+  background: rgba(13, 110, 253, 0.1);
   color: var(--bs-primary, #0d6efd);
 }
 
 .matrix-row-header {
   background: var(--bs-tertiary-bg, #f8f9fa);
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem;
   font-weight: 500;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   position: sticky;
   left: 0;
   z-index: 1;
+  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-right: 1px solid var(--bs-border-color, #dee2e6);
+  min-height: 50px;
 }
 
 .matrix-row-header.offline {
@@ -408,7 +619,7 @@ onUnmounted(() => {
 }
 
 .offline-badge {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   background: var(--bs-danger, #dc3545);
   color: white;
   padding: 0.125rem 0.375rem;
@@ -418,13 +629,15 @@ onUnmounted(() => {
 
 .matrix-data-cell {
   background: var(--bs-body-bg, #fff);
-  padding: 0.5rem;
+  padding: 0.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: background-color 0.2s;
   min-height: 50px;
+  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-right: 1px solid var(--bs-border-color, #dee2e6);
 }
 
 .matrix-data-cell:hover {
@@ -604,5 +817,138 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 0.5rem;
   }
+}
+
+/* Selected header state */
+.matrix-header-cell.selected {
+  background: var(--bs-primary-bg-subtle, #cfe2ff);
+  box-shadow: inset 0 0 0 2px var(--bs-primary, #0d6efd);
+}
+
+.matrix-header-cell {
+  cursor: pointer;
+}
+
+/* Target Popover */
+.target-popover {
+  position: fixed;
+  z-index: 1001;
+  background: var(--bs-body-bg, #fff);
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  min-width: 320px;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+.target-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.target-info > i {
+  font-size: 1.5rem;
+  color: var(--bs-primary, #0d6efd);
+}
+
+.target-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.target-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.target-type-label {
+  font-size: 0.7rem;
+  color: var(--bs-secondary-color, #6c757d);
+  text-transform: uppercase;
+}
+
+.target-type-label.agent-match {
+  color: var(--bs-primary, #0d6efd);
+  background: rgba(13, 110, 253, 0.1);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.target-summary {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  margin-bottom: 0.5rem;
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color, #6c757d);
+}
+
+.target-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.target-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--bs-secondary-bg, #e9ecef);
+  border-radius: 6px;
+}
+
+.entry-source {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.entry-source i {
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.entry-probes {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.mini-bubble {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: white;
+  cursor: default;
+}
+
+.mini-bubble.status-healthy { background: linear-gradient(135deg, #10b981, #059669); }
+.mini-bubble.status-degraded { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.mini-bubble.status-critical { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.mini-bubble.status-unknown { background: linear-gradient(135deg, #9ca3af, #6b7280); }
+
+.no-entries {
+  text-align: center;
+  padding: 1rem;
+  color: var(--bs-secondary-color, #6c757d);
+  font-size: 0.85rem;
 }
 </style>

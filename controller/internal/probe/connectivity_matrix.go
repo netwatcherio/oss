@@ -124,21 +124,21 @@ func GetWorkspaceConnectivityMatrix(ctx context.Context, ch *sql.DB, pg *gorm.DB
 	entriesMap := make(map[string]*ConnectivityMatrixEntry) // key: "sourceID:targetID"
 
 	// Process PING data
-	processProbeMetrics(pingMetrics, "PING", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time) {
+	processProbeMetrics(pingMetrics, "PING", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time, uint) {
 		s := pingMetrics[key]
-		return s.AvgLatency, s.PacketLoss, 0, time.Now() // No jitter for PING
+		return s.AvgLatency, s.PacketLoss, 0, time.Now(), s.TargetAgent
 	})
 
 	// Process TrafficSim data (no jitter available in current struct)
-	processProbeMetrics(trafficMetrics, "TRAFFICSIM", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time) {
+	processProbeMetrics(trafficMetrics, "TRAFFICSIM", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time, uint) {
 		s := trafficMetrics[key]
-		return s.AvgRTT, s.PacketLoss, 0, time.Now() // Jitter not available in trafficStats
+		return s.AvgRTT, s.PacketLoss, 0, time.Now(), s.TargetAgent
 	})
 
 	// Process MTR data
-	processProbeMetrics(mtrMetrics, "MTR", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time) {
+	processProbeMetrics(mtrMetrics, "MTR", agentByID, targetSet, entriesMap, func(key string) (float64, float64, float64, time.Time, uint) {
 		s := mtrMetrics[key]
-		return s.AvgLatency, s.PacketLoss, s.Jitter, s.LastUpdated
+		return s.AvgLatency, s.PacketLoss, s.Jitter, s.LastUpdated, s.TargetAgent
 	})
 
 	// Convert maps to slices
@@ -295,7 +295,7 @@ func processProbeMetrics[T any](
 	agentByID map[uint]agentInfo,
 	targetSet map[string]TargetLabel,
 	entriesMap map[string]*ConnectivityMatrixEntry,
-	getMetrics func(key string) (latency, loss, jitter float64, lastUpdated time.Time),
+	getMetrics func(key string) (latency, loss, jitter float64, lastUpdated time.Time, targetAgent uint),
 ) {
 	for key := range metrics {
 		parts := strings.SplitN(key, ":", 2)
@@ -316,18 +316,32 @@ func processProbeMetrics[T any](
 			continue
 		}
 
+		// Get metrics including target agent info
+		latency, loss, jitter, lastUpdated, targetAgentID := getMetrics(key)
+
 		// Determine if target is another agent
 		targetID := target
 		targetName := target
 		targetType := "destination"
 
-		// Check if target matches any agent's public IP
-		for _, agent := range agentByID {
-			if agent.PublicIPOverride == target {
-				targetID = fmt.Sprintf("agent:%d", agent.ID)
+		// First check if probe has explicit target_agent
+		if targetAgentID > 0 {
+			if agent, exists := agentByID[targetAgentID]; exists {
+				targetID = fmt.Sprintf("agent:%d", targetAgentID)
 				targetName = agent.Name
 				targetType = "agent"
-				break
+			}
+		}
+
+		// Fallback: check if target matches any agent's public IP
+		if targetType == "destination" {
+			for _, agent := range agentByID {
+				if agent.PublicIPOverride == target {
+					targetID = fmt.Sprintf("agent:%d", agent.ID)
+					targetName = agent.Name
+					targetType = "agent"
+					break
+				}
 			}
 		}
 
@@ -339,9 +353,6 @@ func processProbeMetrics[T any](
 				Type: targetType,
 			}
 		}
-
-		// Get metrics
-		latency, loss, jitter, lastUpdated := getMetrics(key)
 
 		// Determine status
 		status := calculateProbeStatus(latency, loss)

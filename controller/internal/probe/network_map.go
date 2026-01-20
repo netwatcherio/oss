@@ -370,9 +370,10 @@ LIMIT 1000
 }
 
 type pingStats struct {
-	AvgLatency float64
-	PacketLoss float64
-	Count      int
+	AvgLatency  float64
+	PacketLoss  float64
+	Count       int
+	TargetAgent uint // Agent ID if target is an agent, 0 otherwise
 }
 
 func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]pingStats, error) {
@@ -392,6 +393,7 @@ func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, f
 SELECT 
     agent_id,
     target,
+    target_agent,
     payload_raw
 FROM probe_data
 WHERE type = 'PING'
@@ -412,15 +414,17 @@ LIMIT 5000
 		totalLatency float64
 		totalLoss    float64
 		count        int
+		targetAgent  uint
 	}
 	accum := make(map[string]*pingAccum)
 
 	for rows.Next() {
 		var agentID uint64
 		var target string
+		var targetAgent uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
 			continue
 		}
 
@@ -439,7 +443,7 @@ LIMIT 5000
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
 		if accum[key] == nil {
-			accum[key] = &pingAccum{}
+			accum[key] = &pingAccum{targetAgent: uint(targetAgent)}
 		}
 		accum[key].totalLatency += float64(payload.AvgRTT) / 1000000.0 // ns to ms
 		accum[key].totalLoss += payload.PacketLoss
@@ -450,9 +454,10 @@ LIMIT 5000
 	for key, a := range accum {
 		if a.count > 0 {
 			results[key] = pingStats{
-				AvgLatency: a.totalLatency / float64(a.count),
-				PacketLoss: a.totalLoss / float64(a.count),
-				Count:      a.count,
+				AvgLatency:  a.totalLatency / float64(a.count),
+				PacketLoss:  a.totalLoss / float64(a.count),
+				Count:       a.count,
+				TargetAgent: a.targetAgent,
 			}
 		}
 	}
