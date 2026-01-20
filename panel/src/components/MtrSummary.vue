@@ -19,6 +19,10 @@
           <span class="stat-value">{{ routeChangeCount }}</span>
           <span class="stat-label">Route Changes</span>
         </div>
+        <div class="stat-item" :class="getStabilityClass(routeStability)">
+          <span class="stat-value">{{ routeStability }}%</span>
+          <span class="stat-label">Stability</span>
+        </div>
       </div>
       
       <!-- View All Button -->
@@ -227,9 +231,13 @@ const routeGroups = computed<RouteGroup[]>(() => {
     
     const hops = payload.report.hops;
     
-    // Build signature from responding hops only
+    // Build signature from responding hops only (position:IP pairs)
+    // This ignores intermittent timeouts (*) to avoid false route changes
     const hopIps = hops.map((h: any) => h.hosts?.[0]?.ip || '*');
-    const signature = hopIps.join('->');
+    const respondingHops = hopIps
+      .map((ip: string, idx: number) => ip !== '*' ? `${idx}:${ip}` : null)
+      .filter((h: string | null) => h !== null);
+    const signature = respondingHops.join('|');
     
     // Find first and last responding hops
     let sourceIp = '*';
@@ -301,14 +309,14 @@ const routeGroups = computed<RouteGroup[]>(() => {
     prevHopIps = hopIps;
   }
   
-  // Sort: route changes first, then issues, then by count descending
+  // Sort: most recently active first, then issues, then by count
+  // This helps network operators see the current state first
   return Array.from(groups.values()).sort((a, b) => {
-    // Route changes that are also issues go first
-    if (a.isRouteChange && !b.isRouteChange) return -1;
-    if (!a.isRouteChange && b.isRouteChange) return 1;
+    // Issues that are also recent get priority
     if (a.hasIssues && !b.hasIssues) return -1;
     if (!a.hasIssues && b.hasIssues) return 1;
-    return b.count - a.count;
+    // Then by most recent activity
+    return b.lastSeen.getTime() - a.lastSeen.getTime();
   });
 });
 
@@ -331,6 +339,18 @@ const totalTraces = computed(() => routeGroups.value.reduce((sum, g) => sum + g.
 const uniqueRoutes = computed(() => routeGroups.value.length);
 const issueCount = computed(() => routeGroups.value.filter(g => g.hasIssues).length);
 const routeChangeCount = computed(() => routeGroups.value.filter(g => g.isRouteChange).length);
+
+// Primary route = route with most traces (the dominant/stable route)
+const primaryRoute = computed(() => {
+  if (routeGroups.value.length === 0) return null;
+  return [...routeGroups.value].sort((a, b) => b.count - a.count)[0];
+});
+
+// Route stability = percentage of traces on the primary route
+const routeStability = computed(() => {
+  if (!primaryRoute.value || totalTraces.value === 0) return 100;
+  return Math.round((primaryRoute.value.count / totalTraces.value) * 100);
+});
 
 // Methods
 const toggleGroup = (signature: string) => {
@@ -430,6 +450,12 @@ const getLossClass = (loss: number): string => {
   if (loss <= 5) return 'warning';
   return 'critical';
 };
+
+const getStabilityClass = (stability: number): string => {
+  if (stability >= 90) return 'success';
+  if (stability >= 70) return 'warning';
+  return 'danger';
+};
 </script>
 
 <style scoped>
@@ -471,6 +497,16 @@ const getLossClass = (loss: number): string => {
   background: rgba(var(--bs-info-rgb), 0.1);
 }
 
+.stat-item.success {
+  border-color: var(--bs-success);
+  background: rgba(var(--bs-success-rgb), 0.1);
+}
+
+.stat-item.danger {
+  border-color: var(--bs-danger);
+  background: rgba(var(--bs-danger-rgb), 0.1);
+}
+
 .stat-value {
   font-size: 1.25rem;
   font-weight: 700;
@@ -479,6 +515,8 @@ const getLossClass = (loss: number): string => {
 
 .stat-item.warning .stat-value { color: var(--bs-warning); }
 .stat-item.info .stat-value { color: var(--bs-info); }
+.stat-item.success .stat-value { color: var(--bs-success); }
+.stat-item.danger .stat-value { color: var(--bs-danger); }
 
 .stat-label {
   font-size: 0.7rem;
