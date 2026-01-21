@@ -77,25 +77,34 @@ graph TB
 controller/
 ├── main.go              # Entrypoint, DB init, route setup
 ├── internal/
+│   ├── admin/           # Site admin bootstrap, system stats
 │   ├── agent/           # Agent CRUD, auth, PSK management
+│   ├── alert/           # Alert rules and incident management
 │   ├── database/        # Database connection helpers
 │   ├── email/           # Email queue, SMTP client, background worker
 │   ├── geoip/           # MaxMind GeoIP2 database lookups
 │   ├── probe/           # Probe CRUD, ClickHouse handlers
+│   ├── scheduler/       # Data retention and cleanup scheduler
 │   ├── speedtest/       # Speedtest Queue & Server Cache
 │   ├── users/           # User registration, JWT auth
 │   ├── whois/           # WHOIS lookups via system command
 │   └── workspace/       # Workspace + member management
 └── web/
     ├── router.go        # Route registration
+    ├── admin.go         # Site admin API endpoints
+    ├── admin_middleware.go # Admin role enforcement
+    ├── alerts.go        # Alert CRUD endpoints
     ├── auth.go          # User auth endpoints
     ├── agent.go         # Agent login endpoint
     ├── agents.go        # Agent CRUD endpoints
+    ├── broadcast.go     # Real-time broadcast helpers
     ├── geoip.go         # GeoIP & WHOIS endpoints
+    ├── invite.go        # Workspace invitation endpoints
     ├── workspaces.go    # Workspace CRUD endpoints
     ├── probes.go        # Probe CRUD endpoints
     ├── data.go          # Probe data query endpoints
-    └── ws.go            # WebSocket server
+    ├── ws.go            # WebSocket server (agents)
+    └── ws_raw_panel.go  # WebSocket server (panel clients)
 ```
 
 ---
@@ -243,6 +252,12 @@ flowchart LR
 | `GEOIP_CITY_PATH` | Path to GeoLite2-City.mmdb |
 | `GEOIP_COUNTRY_PATH` | Path to GeoLite2-Country.mmdb |
 | `GEOIP_ASN_PATH` | Path to GeoLite2-ASN.mmdb |
+| `DEFAULT_ADMIN_EMAIL` | Email for default admin (default: `admin@netwatcher.local`) |
+| `DEFAULT_ADMIN_PASSWORD` | Password for default admin (if set, creates admin on first run) |
+| `DATA_RETENTION_DAYS` | Days to keep probe data in ClickHouse (default: `90`) |
+| `SOFT_DELETE_GRACE_DAYS` | Days before hard-deleting soft-deleted entities (default: `30`) |
+| `CLEANUP_INTERVAL_HOURS` | Hours between cleanup runs (default: `24`) |
+
 
 ### Agent
 

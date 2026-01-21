@@ -9,13 +9,18 @@ Welcome to the NetWatcher documentation. This folder contains comprehensive tech
 | [Architecture](./architecture.md) | System components, data flow, and high-level design |
 | [API Reference](./api-reference.md) | Complete REST API and WebSocket documentation |
 | [Permissions](./permissions.md) | Role-based access control and permission matrix |
+| [Site Administration](./site-admin.md) | Site-wide admin panel and user management |
 | [Agent Probes](./agent-probes.md) | Probe system, types, and implementation guide |
+| [Agent Installation](./agent-installation.md) | Agent deployment and configuration |
 | [TrafficSim Architecture](./trafficsim-architecture.md) | Agent-to-agent traffic simulation (disabled) |
 | [Panel Architecture](./panel-architecture.md) | Vue 3 panel structure, views, and data flow |
 | [Data Models](./data-models.md) | Database schemas and TypeScript interfaces |
 | [Deployment](./deployment.md) | Production and development deployment guides |
 | [Development Guide](./development.md) | Setup, building, debugging, and contributing |
 | [Alerting](./alerting.md) | Alert rules, notifications, and webhook configuration |
+| [GeoIP & WHOIS](./geoip-whois.md) | IP geolocation and WHOIS lookup services |
+| [Speedtest](./speedtest.md) | Speedtest probe configuration and server selection |
+| [Network Map](./network-map.md) | Network topology visualization |
 | [Simplifications](./simplifications.md) | Recommendations for code cleanup and improvements |
 
 ---

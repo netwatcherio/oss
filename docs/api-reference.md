@@ -676,10 +676,84 @@ X-Agent-PSK: <psk_token>
   "payload": { /* type-specific data */ },
   "target": "8.8.8.8",
   "target_agent": 0
-}
 ```
 
 ---
+
+## Panel WebSocket API
+
+Real-time updates for panel clients.
+
+### Connection
+
+```
+ws://api.netwatcher.io/ws/panel
+```
+
+**Required Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+### Message Types
+
+#### Subscribe
+
+Subscribe to probe data updates for a workspace:
+
+```json
+{
+  "type": "subscribe",
+  "workspace_id": 1,
+  "probe_id": 0
+}
+```
+
+Set `probe_id` to `0` to receive all probe updates for the workspace.
+
+#### probe_data (Server → Client)
+
+Real-time probe data broadcast:
+
+```json
+{
+  "type": "probe_data",
+  "workspace_id": 1,
+  "probe_id": 123,
+  "agent_id": 10,
+  "probe_type": "PING",
+  "data": { /* probe result */ }
+}
+```
+
+#### speedtest_update (Server → Client)
+
+Speedtest queue status changes:
+
+```json
+{
+  "type": "speedtest_update",
+  "workspace_id": 1,
+  "agent_id": 10,
+  "queue_id": 456,
+  "status": "running"
+}
+```
+
+#### network_map_update (Server → Client)
+
+Network topology changes:
+
+```json
+{
+  "type": "network_map_update",
+  "workspace_id": 1,
+  "nodes": [...],
+  "edges": [...],
+  "generated_at": "2024-01-01T12:00:00Z"
+}
+```
+
 
 ## GeoIP Endpoints
 
@@ -806,6 +880,53 @@ Perform a WHOIS query for an IP address or domain name.
 | `created` | Creation date |
 | `updated` | Last update date |
 | `abuse_email` | Abuse contact email |
+
+---
+
+## Lookup Endpoints
+
+Combined IP lookup service providing both GeoIP and WHOIS data in a single request.
+
+### `GET /lookup/combined`
+
+Combined GeoIP and WHOIS lookup. Accepts both IP addresses and hostnames.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ip` | string | Yes | IP address or hostname to look up |
+
+**Response:**
+```json
+{
+  "ip": "8.8.8.8",
+  "hostname": "dns.google",
+  "geoip": {
+    "ip": "8.8.8.8",
+    "city": { "name": "Mountain View", "subdivision": "CA" },
+    "country": { "code": "US", "name": "United States" },
+    "asn": { "number": 15169, "organization": "GOOGLE" },
+    "coordinates": { "latitude": 37.4056, "longitude": -122.0775 },
+    "cached": true,
+    "cache_time": "2024-01-01T12:00:00Z"
+  },
+  "whois": {
+    "query": "8.8.8.8",
+    "raw_output": "...",
+    "parsed": { "netname": "LVLT-GOGL-8-8-8", "organization": "Google LLC" },
+    "cached": true,
+    "cache_time": "2024-01-01T12:00:00Z"
+  },
+  "cached": true,
+  "cache_time": "2024-01-01T12:00:00Z"
+}
+```
+
+**Notes:**
+- If the input is a hostname, it is resolved to an IP address first
+- The `hostname` field is included only when a hostname was provided
+- Both GeoIP and WHOIS lookups are cached in ClickHouse
+- Errors for individual lookups are returned in an `errors` object
 
 ---
 

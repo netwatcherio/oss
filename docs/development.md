@@ -105,17 +105,28 @@ netwatcher-oss/
 ├── controller/           # Backend API
 │   ├── main.go          # Entrypoint
 │   ├── internal/        # Business logic
+│   │   ├── admin/       # Site admin bootstrap, stats
 │   │   ├── agent/       # Agent management
+│   │   ├── alert/       # Alert rules and incidents
 │   │   ├── database/    # PostgreSQL connection
+│   │   ├── email/       # Email queue and SMTP
 │   │   ├── errors/      # Centralized error types
+│   │   ├── geoip/       # MaxMind GeoIP lookups
 │   │   ├── probe/       # Probes + ClickHouse
+│   │   ├── scheduler/   # Data retention cleanup
+│   │   ├── speedtest/   # Speedtest queue
 │   │   ├── users/       # User authentication
+│   │   ├── whois/       # WHOIS lookups
 │   │   └── workspace/   # Workspace management
-│   └── web/             # HTTP handlers + helpers
+│   └── web/             # HTTP handlers + WebSocket
 ├── panel/               # Vue.js frontend
 │   ├── src/
-│   │   ├── components/  # Reusable components
+│   │   ├── components/  # Reusable UI components
+│   │   ├── composables/ # Vue composables (hooks)
+│   │   ├── lib/         # Utility libraries
+│   │   ├── router/      # Vue Router configuration
 │   │   ├── services/    # API service layer
+│   │   ├── utils/       # Helper utilities
 │   │   ├── views/       # Page components
 │   │   └── types.ts     # TypeScript definitions
 │   └── vite.config.ts
@@ -123,7 +134,7 @@ netwatcher-oss/
 ├── docker-compose.yml   # Production deployment
 ├── docker-compose.dev.yml # Development (databases only)
 ├── Caddyfile           # Reverse proxy config
-└── sample.env          # Environment template
+└── .env.example        # Environment template
 ```
 
 ---

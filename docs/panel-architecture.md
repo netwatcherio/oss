@@ -100,7 +100,9 @@ function canonicalTargetKey(probe: Probe): string | null {
 
 ## API Services
 
-`panel/src/services/apiService.ts` wraps all controller endpoints:
+### Core API (`panel/src/services/apiService.ts`)
+
+Wraps all controller REST endpoints:
 
 | Service | Key Methods |
 |---------|-------------|
@@ -109,9 +111,46 @@ function canonicalTargetKey(probe: Probe): string | null {
 | `AgentService` | `get()`, `list()`, `create()`, `update()`, `remove()`, `heartbeat()`, `issuePin()` |
 | `ProbeService` | `get()`, `list()`, `create()`, `update()`, `remove()`, `netInfo()`, `sysInfo()` |
 | `ProbeDataService` | `find()`, `byProbe()`, `byAgent()`, `latest()`, `similar()` |
+| `AlertService` | `list()`, `count()`, `update()`, `listRules()`, `createRule()`, `updateRule()`, `deleteRule()` |
 | `AgentBootstrap` | `authenticate()` (PSK/PIN auth for agent binary) |
 
 All list endpoints return `{ data: [...] }` wrapper.
+
+### Admin API (`panel/src/services/adminService.ts`)
+
+Wraps site administration endpoints (requires SITE_ADMIN role):
+
+| Function | Description |
+|----------|-------------|
+| `getStats()` | System-wide statistics |
+| `getWorkspaceStats()` | Per-workspace breakdown |
+| `listUsers()` | Paginated user list |
+| `getUser()`, `updateUser()`, `deleteUser()` | User CRUD |
+| `setUserRole()` | Promote/demote site admin |
+| `listWorkspaces()`, `getWorkspace()` | Workspace management |
+
+### WebSocket Service (`panel/src/services/websocketService.ts`)
+
+Real-time data streaming for panel updates:
+
+| Method | Description |
+|--------|-------------|
+| `connect()`, `disconnect()` | WebSocket lifecycle |
+| `subscribe(workspaceId, probeId, handler)` | Subscribe to probe data updates |
+| `onConnect()`, `onDisconnect()`, `onError()` | Connection event handlers |
+| `isConnected()` | Check connection status |
+
+### Lookup Service (`panel/src/services/lookupService.ts`)
+
+IP geolocation and WHOIS lookups:
+
+| Function | Description |
+|----------|-------------|
+| `geoipLookup()` | Single IP geolocation |
+| `bulkGeoipLookup()` | Bulk IP lookup (up to 100) |
+| `whoisLookup()` | WHOIS query for IP/domain |
+| `combinedLookup()` | GeoIP + WHOIS in one call |
+
 
 ---
 
@@ -139,12 +178,29 @@ Each tab shows data from one agent's perspective to the target.
 
 ## Components
 
+All components in `panel/src/components/`:
+
+### Data Visualization
 | Component | File | Purpose |
 |-----------|------|---------|
 | `LatencyGraph` | `PingGraph.vue` | Ping RTT visualization with P95 stats |
 | `TrafficSimGraph` | `TrafficSimGraph.vue` | Traffic simulation metrics |
+| `RperfGraph` | `RperfGraph.vue` | Rperf network performance charts |
 | `NetworkMap` | `NetworkMap.vue` | MTR hop visualization |
+| `WorkspaceNetworkMap` | `WorkspaceNetworkMap.vue` | Full workspace topology map |
+| `ConnectivityMatrix` | `ConnectivityMatrix.vue` | Agent-to-agent connectivity grid |
+| `MtrSummary` | `MtrSummary.vue` | MTR data summary display |
+| `MtrTable` | `MtrTable.vue` | MTR hop-by-hop table |
+| `MtrDetailModal` | `MtrDetailModal.vue` | Detailed MTR analysis modal |
+
+### UI Components
+| Component | File | Purpose |
+|-----------|------|---------|
 | `AgentCard` | `AgentCard.vue` | Agent status card |
+| `NavHeader` | `NavHeader.vue` | Top navigation bar |
+| `NavSidebar` | `NavSidebar.vue` | Side navigation |
+| `AlertRulesConfig` | `AlertRulesConfig.vue` | Alert rule configuration form |
+| `IpLookupPanel` | `IpLookupPanel.vue` | IP lookup interface |
 
 ### Graph Component Props
 
@@ -158,6 +214,44 @@ Both `PingGraph.vue` and `TrafficSimGraph.vue` accept:
 **Gap Detection:** Graphs calculate gap threshold as `1.5 × intervalSec + 30s` to avoid false "Data Gap" annotations when probe interval is longer than the default 90s threshold.
 
 ---
+
+## Composables
+
+Vue composables in `panel/src/composables/`:
+
+| Composable | File | Purpose |
+|------------|------|---------|
+| `useWebSocket` | `useWebSocket.ts` | Real-time probe data subscription |
+| `useProbeSubscription` | `useWebSocket.ts` | Simplified probe-specific subscription |
+| `usePermissions` | `usePermissions.ts` | Role-based permission flags |
+| `useChart` | `chart.ts` | Chart.js configuration utilities |
+| `useFillChart` | `fillChart.ts` | Area chart configuration |
+
+### useWebSocket
+
+Manages WebSocket connections and subscriptions for real-time updates:
+
+```typescript
+const { connected, lastProbeData, subscribe, disconnect } = useWebSocket({
+    autoConnect: true,
+    workspaceId: ref(1),
+    probeId: ref(42)
+});
+```
+
+### usePermissions
+
+Provides reactive permission flags based on workspace role:
+
+```typescript
+const permissions = usePermissions(workspace.my_role);
+
+permissions.canView   // Any member
+permissions.canEdit   // USER+
+permissions.canManage // ADMIN+
+permissions.canOwn    // OWNER only
+```
+
 
 ## State Management
 
@@ -218,6 +312,7 @@ All views in `panel/src/views/`:
 | `Login.vue` | User authentication with session management |
 | `Register.vue` | New user registration with validation |
 | `Reset.vue` | Password reset flow |
+| `InviteComplete.vue` | Complete workspace invitation acceptance |
 
 ### Workspace Views
 | View | Purpose |
@@ -233,7 +328,7 @@ All views in `panel/src/views/`:
 ### Agent Views
 | View | Purpose |
 |------|---------|
-| `Agent.vue` | Comprehensive agent dashboard (1588 lines) |
+| `Agent.vue` | Comprehensive agent dashboard |
 | `NewAgent.vue` | Create new agent with setup modal showing PIN and installation commands |
 | `EditAgent.vue` | Update agent name/location/IP override |
 | `DeleteAgent.vue` | Delete agent with confirmation |
@@ -245,17 +340,34 @@ All views in `panel/src/views/`:
 ### Probe Views
 | View | Purpose |
 |------|---------|
-| `Probe.vue` | Probe data visualization (733 lines) |
-| `NewProbe.vue` | Create new probe (1349 lines) |
+| `Probe.vue` | Probe data visualization |
+| `NewProbe.vue` | Create new probe |
 | `DeleteProbe.vue` | Delete probe with confirmation |
 
-### Root Views
+### Admin Views
+| View | Purpose |
+|------|---------|
+| `AdminDashboard.vue` | System statistics and workspace overview |
+| `AdminUsers.vue` | User management (list, edit, delete, promote) |
+| `AdminWorkspaces.vue` | Workspace management (list, delete) |
+| `AdminWorkspaceDetail.vue` | Workspace detail with members and agents |
+| `AdminAgents.vue` | All agents across workspaces |
+
+### Profile Views
+| View | Purpose |
+|------|---------|
+| `Profile.vue` | User profile and settings |
+
+### Utility Views
 | View | Purpose |
 |------|---------|
 | `Root.vue` | Layout wrapper with navigation |
 | `HomeView.vue` | Landing/dashboard |
 | `Workspaces.vue` | Workspace list |
+| `Alerts.vue` | Alert management and history |
+| `IpLookup.vue` | IP geolocation and WHOIS lookup |
 | `BasicView.vue` | Minimal template |
+
 
 ---
 
