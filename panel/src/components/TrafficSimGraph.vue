@@ -30,6 +30,39 @@
         <div class="stat-label">Duplicates</div>
         <div class="stat-value">{{ statistics.totalDuplicates }}</div>
       </div>
+      <div class="stat-card" :class="'status-' + statistics.mosQuality">
+        <div class="stat-label">Voice Quality (MOS)</div>
+        <div class="stat-value" :class="'mos-' + statistics.mosQuality">
+          {{ statistics.mos.toFixed(2) }}
+          <span class="quality-badge" :class="'badge-' + statistics.mosQuality">{{ statistics.mosQualityLabel }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Last Hour Summary -->
+    <div class="last-hour-summary" v-if="lastHourStats">
+      <div class="summary-header">
+        <span class="summary-icon">📊</span>
+        <span class="summary-title">Last Hour Summary</span>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <span class="summary-label">Avg Latency</span>
+          <span class="summary-value">{{ lastHourStats.avgLatency.toFixed(1) }} ms</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Avg Jitter</span>
+          <span class="summary-value">{{ lastHourStats.avgJitter.toFixed(1) }} ms</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Packet Loss</span>
+          <span class="summary-value" :class="getPacketLossClass(lastHourStats.avgLoss)">{{ lastHourStats.avgLoss.toFixed(2) }}%</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Avg MOS</span>
+          <span class="summary-value" :class="'mos-' + lastHourStats.mosQuality">{{ lastHourStats.avgMos.toFixed(2) }} ({{ lastHourStats.mosQualityLabel }})</span>
+        </div>
+      </div>
     </div>
 
     <!-- Chart Container -->
@@ -70,6 +103,7 @@ import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
 import ApexCharts from 'apexcharts'
 import type { TrafficSimResult } from '@/types';
 import { themeService } from '@/services/themeService';
+import { calculateMOS, getMosQualityLabel } from '@/utils/mos';
 
 export default {
   name: 'TrafficGraph',
@@ -120,14 +154,58 @@ export default {
       const outOfSequence = props.trafficResults.map(d => d.outOfSequence);
       const duplicates = props.trafficResults.map(d => d.duplicates ?? 0);
       
+      const currentRtt = avgRtts[avgRtts.length - 1] || 0;
+      const avgRtt = avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length;
+      const avgPacketLoss = packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length;
+      
+      // Calculate jitter as standard deviation of RTT (approximation from min/max spread)
+      const jitter = (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
+      
+      // Calculate MOS using ITU-T G.107 E-Model
+      const mosResult = calculateMOS(avgRtt, jitter, avgPacketLoss);
+      
       return {
-        currentRtt: avgRtts[avgRtts.length - 1] || 0,
-        avgRtt: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
+        currentRtt,
+        avgRtt,
         minRtt: Math.min(...minRtts),
         maxRtt: Math.max(...maxRtts),
-        avgPacketLoss: packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length,
+        avgPacketLoss,
         totalOutOfSequence: outOfSequence.reduce((a, b) => a + b, 0),
-        totalDuplicates: duplicates.reduce((a, b) => a + b, 0)
+        totalDuplicates: duplicates.reduce((a, b) => a + b, 0),
+        jitter,
+        mos: mosResult.mos,
+        mosQuality: mosResult.quality,
+        mosQualityLabel: getMosQualityLabel(mosResult.quality)
+      };
+    });
+
+    // Calculate last hour statistics
+    const lastHourStats = computed(() => {
+      if (!props.trafficResults || props.trafficResults.length === 0) return null;
+      
+      const oneHourAgo = Date.now() - (60 * 60 * 1000);
+      const lastHourData = props.trafficResults.filter(d => 
+        new Date(d.reportTime).getTime() > oneHourAgo
+      );
+      
+      if (lastHourData.length === 0) return null;
+      
+      const avgLatency = lastHourData.reduce((sum, d) => sum + d.averageRTT, 0) / lastHourData.length;
+      const avgLoss = lastHourData.reduce((sum, d) => sum + (d.lostPackets / d.totalPackets) * 100, 0) / lastHourData.length;
+      const minRtts = lastHourData.map(d => d.minRTT);
+      const maxRtts = lastHourData.map(d => d.maxRTT);
+      const avgJitter = (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
+      
+      const mosResult = calculateMOS(avgLatency, avgJitter, avgLoss);
+      
+      return {
+        avgLatency,
+        avgJitter,
+        avgLoss,
+        avgMos: mosResult.mos,
+        mosQuality: mosResult.quality,
+        mosQualityLabel: getMosQualityLabel(mosResult.quality),
+        sampleCount: lastHourData.length
       };
     });
 
@@ -219,6 +297,7 @@ export default {
     return { 
       trafficGraph, 
       statistics, 
+      lastHourStats,
       getLatencyClass, 
       getPacketLossClass,
       timeRanges,
@@ -821,6 +900,142 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 
 .stat-value.critical {
   color: #ef4444;
+}
+
+/* MOS Quality Colors */
+.stat-value.mos-excellent {
+  color: #10b981;
+}
+
+.stat-value.mos-good {
+  color: #3b82f6;
+}
+
+.stat-value.mos-fair {
+  color: #eab308;
+}
+
+.stat-value.mos-poor {
+  color: #f97316;
+}
+
+.stat-value.mos-bad {
+  color: #ef4444;
+}
+
+/* Status-based card backgrounds */
+.stat-card.status-excellent {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #a7f3d0;
+}
+
+.stat-card.status-good {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #bfdbfe;
+}
+
+.stat-card.status-fair {
+  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+  border-color: #fde047;
+}
+
+.stat-card.status-poor {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: #fed7aa;
+}
+
+.stat-card.status-bad {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fecaca;
+}
+
+/* Quality Badge */
+.quality-badge {
+  font-size: 0.625rem;
+  font-weight: 500;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.badge-excellent {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badge-good {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.badge-fair {
+  background-color: #fef9c3;
+  color: #854d0e;
+}
+
+.badge-poor {
+  background-color: #ffedd5;
+  color: #9a3412;
+}
+
+.badge-bad {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+/* Last Hour Summary */
+.last-hour-summary {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.summary-icon {
+  font-size: 1.25rem;
+}
+
+.summary-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #0369a1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.summary-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
 }
 
 .controls-row {

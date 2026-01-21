@@ -50,6 +50,42 @@
           <div class="stat-value">{{ statistics.jitter.toFixed(1) }} ms</div>
         </div>
       </div>
+      <div class="stat-card" :class="'status-' + statistics.mosQuality">
+        <div class="stat-icon">🎙️</div>
+        <div class="stat-content">
+          <div class="stat-label">Voice Quality (MOS)</div>
+          <div class="stat-value" :class="'mos-' + statistics.mosQuality">
+            {{ statistics.mos.toFixed(2) }}
+            <span class="quality-badge" :class="'badge-' + statistics.mosQuality">{{ statistics.mosQualityLabel }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Last Hour Summary -->
+    <div class="last-hour-summary" v-if="lastHourStats">
+      <div class="summary-header">
+        <span class="summary-icon">📊</span>
+        <span class="summary-title">Last Hour Summary</span>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <span class="summary-label">Avg Latency</span>
+          <span class="summary-value">{{ lastHourStats.avgLatency.toFixed(1) }} ms</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Avg Jitter</span>
+          <span class="summary-value">{{ lastHourStats.avgJitter.toFixed(1) }} ms</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Packet Loss</span>
+          <span class="summary-value" :class="getPacketLossClass(lastHourStats.avgLoss)">{{ lastHourStats.avgLoss.toFixed(2) }}%</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Avg MOS</span>
+          <span class="summary-value" :class="'mos-' + lastHourStats.mosQuality">{{ lastHourStats.avgMos.toFixed(2) }} ({{ lastHourStats.mosQualityLabel }})</span>
+        </div>
+      </div>
     </div>
 
     <!-- Chart Container -->
@@ -91,6 +127,7 @@ import ApexCharts from 'apexcharts'
 import type { PropType } from 'vue';
 import type { PingResult } from '@/types';
 import { themeService } from '@/services/themeService';
+import { calculateMOS, getMosQualityLabel } from '@/utils/mos';
 
 const NS_TO_MS = 1e-6;
 
@@ -182,20 +219,59 @@ export default defineComponent({
       // Total packets for context
       const totalSent = rows.reduce((sum, d) => sum + (d.packets_sent || 0), 0);
       const totalRecv = rows.reduce((sum, d) => sum + (d.packets_recv || 0), 0);
+      
+      // Calculate average latency and packet loss for MOS
+      const avgLatency = avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length;
+      const avgPacketLoss = packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length;
+      
+      // Calculate MOS using ITU-T G.107 E-Model
+      const mosResult = calculateMOS(avgLatency, jitter, avgPacketLoss);
 
       return {
         current: currentLatency,
-        average: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
+        average: avgLatency,
         min: Math.min(...minRtts),
         max: Math.max(...maxRtts),
         p50: avgRtts[p50Idx] || 0,
         p95: avgRtts[p95Idx] || 0,
         p99: avgRtts[p99Idx] || 0,
-        avgPacketLoss: packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length,
+        avgPacketLoss,
         jitter,
         totalSent,
         totalRecv,
-        samples: rows.length
+        samples: rows.length,
+        mos: mosResult.mos,
+        mosQuality: mosResult.quality,
+        mosQualityLabel: getMosQualityLabel(mosResult.quality)
+      };
+    });
+
+    // Calculate last hour statistics
+    const lastHourStats = computed(() => {
+      const rows = props.pingResults ?? [];
+      if (rows.length === 0) return null;
+      
+      const oneHourAgo = Date.now() - (60 * 60 * 1000);
+      const lastHourData = rows.filter(d => 
+        new Date(d.stop_timestamp).getTime() > oneHourAgo
+      );
+      
+      if (lastHourData.length === 0) return null;
+      
+      const avgLatency = lastHourData.reduce((sum, d) => sum + toMs(d.avg_rtt), 0) / lastHourData.length;
+      const avgJitter = lastHourData.reduce((sum, d) => sum + toMs(d.std_dev_rtt), 0) / lastHourData.length;
+      const avgLoss = lastHourData.reduce((sum, d) => sum + (Number(d.packet_loss) || 0), 0) / lastHourData.length;
+      
+      const mosResult = calculateMOS(avgLatency, avgJitter, avgLoss);
+      
+      return {
+        avgLatency,
+        avgJitter,
+        avgLoss,
+        avgMos: mosResult.mos,
+        mosQuality: mosResult.quality,
+        mosQualityLabel: getMosQualityLabel(mosResult.quality),
+        sampleCount: lastHourData.length
       };
     });
 
@@ -562,6 +638,7 @@ export default defineComponent({
     return {
       latencyGraph,
       statistics,
+      lastHourStats,
       getLatencyClass,
       getPacketLossClass,
       timeRanges,
@@ -667,6 +744,142 @@ export default defineComponent({
 
 .stat-value.critical {
   color: #dc2626;
+}
+
+/* MOS Quality Colors */
+.stat-value.mos-excellent {
+  color: #10b981;
+}
+
+.stat-value.mos-good {
+  color: #3b82f6;
+}
+
+.stat-value.mos-fair {
+  color: #eab308;
+}
+
+.stat-value.mos-poor {
+  color: #f97316;
+}
+
+.stat-value.mos-bad {
+  color: #ef4444;
+}
+
+/* Status-based card backgrounds for MOS */
+.stat-card.status-excellent {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #a7f3d0;
+}
+
+.stat-card.status-good {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #bfdbfe;
+}
+
+.stat-card.status-fair {
+  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+  border-color: #fde047;
+}
+
+.stat-card.status-poor {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: #fed7aa;
+}
+
+.stat-card.status-bad {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fecaca;
+}
+
+/* Quality Badge */
+.quality-badge {
+  font-size: 0.6rem;
+  font-weight: 500;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  margin-left: 0.375rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.badge-excellent {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badge-good {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.badge-fair {
+  background-color: #fef9c3;
+  color: #854d0e;
+}
+
+.badge-poor {
+  background-color: #ffedd5;
+  color: #9a3412;
+}
+
+.badge-bad {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+/* Last Hour Summary */
+.last-hour-summary {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.summary-icon {
+  font-size: 1.125rem;
+}
+
+.summary-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #0369a1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.summary-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.summary-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
 }
 
 .controls-row {

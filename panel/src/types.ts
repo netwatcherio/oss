@@ -509,21 +509,16 @@ export interface HostMemoryInfo {
     raw?: Record<string, number>;
 }
 
+/**
+ * MOS (Mean Opinion Score) result interface.
+ * @see utils/mos.ts for the actual calculation implementation
+ * @deprecated Use MosResult from utils/mos.ts instead
+ */
 export interface MeanOpinionScore {
     mosValue: number;
     jitter: number;
     latency: number;
     packetLoss: number;
-}
-
-function calculateMOS(
-    jitter: number,
-    latency: number,
-    packetLoss: number
-): MeanOpinionScore {
-    let mosValue = 5;
-    mosValue = Math.max(1, Math.min(mosValue, 5));
-    return { mosValue, jitter, latency, packetLoss };
 }
 
 export interface Preferences {
