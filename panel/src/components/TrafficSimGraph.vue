@@ -786,6 +786,10 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
           const value = series[idx][dataPointIndex];
           const color = w.config.colors[idx];
           const name = s.name;
+          
+          // Skip null values (inserted by gap detection)
+          if (value == null) return;
+          
           let formattedValue;
           
           if (idx <= 2) {
