@@ -762,7 +762,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       },
       y: {
         formatter: function (y, { seriesIndex }) {
-          if (typeof y !== "undefined") {
+          if (y != null) {
             if (seriesIndex <= 2) {
               return y.toFixed(1) + " ms";
             } else if (seriesIndex === 3) {
