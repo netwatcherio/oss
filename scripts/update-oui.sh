@@ -4,12 +4,14 @@
 # Run this script via cron on the host machine to keep database updated
 #
 # Example cron entry (monthly update, 1st of month at 4 AM):
-#   0 4 1 * * /path/to/scripts/update-oui.sh >> /var/log/oui-update.log 2>&1
+#   0 4 1 * * /opt/oss/scripts/update-oui.sh >> /var/log/oui-update.log 2>&1
 #
 # The database file is mounted into the Docker container via volume mount.
 
-# Configuration
-OUI_DIR="${OUI_DIR:-/opt/oss/oui}"
+# Configuration - defaults to ./oui relative to the oss directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OSS_DIR="$(dirname "$SCRIPT_DIR")"
+OUI_DIR="${OUI_DIR:-${OSS_DIR}/oui}"
 IEEE_URL="https://standards-oui.ieee.org/oui/oui.txt"
 
 # Colors for output

@@ -77,8 +77,11 @@ services:
     networks: [ netwatcher ]
     env_file:
       - .env
+    environment:
+      OUI_PATH: /data/oui/oui.txt
     volumes:
       - ./geoip:/data/geoip:ro
+      - ./oui:/data/oui:ro
     depends_on:
       postgres:
         condition: service_healthy
