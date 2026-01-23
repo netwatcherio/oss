@@ -6,11 +6,30 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
+
+// -------------------- Configuration --------------------
+
+// DefaultTimeout is the default timeout for WHOIS lookups.
+// Can be overridden via WHOIS_TIMEOUT_SECONDS environment variable.
+var DefaultTimeout = 5 * time.Second
+
+func init() {
+	if envTimeout := os.Getenv("WHOIS_TIMEOUT_SECONDS"); envTimeout != "" {
+		if secs, err := strconv.Atoi(envTimeout); err == nil && secs > 0 {
+			DefaultTimeout = time.Duration(secs) * time.Second
+			log.Infof("WHOIS timeout set to %v from environment", DefaultTimeout)
+		}
+	}
+}
 
 // -------------------- Errors --------------------
 
@@ -19,6 +38,7 @@ var (
 	ErrInvalidDomain  = errors.New("invalid domain name")
 	ErrLookupFailed   = errors.New("whois lookup failed")
 	ErrCommandTimeout = errors.New("whois command timed out")
+	ErrWhoisNotFound  = errors.New("whois command not found")
 )
 
 // -------------------- Result Types --------------------
@@ -30,6 +50,7 @@ type Result struct {
 	Parsed     map[string]string `json:"parsed,omitempty"`
 	LookupTime time.Duration     `json:"lookup_time_ms"`
 	Error      string            `json:"error,omitempty"`
+	Server     string            `json:"server,omitempty"` // WHOIS server used
 }
 
 // -------------------- Validation --------------------
@@ -76,6 +97,26 @@ func ValidateQuery(input string) (string, error) {
 	return "", errors.New("invalid IP or domain")
 }
 
+// -------------------- WHOIS Servers --------------------
+
+// whoisServers maps RIR regions to their WHOIS servers for IP lookups.
+// This can help when the default server selection is slow.
+var whoisServers = map[string]string{
+	"arin":    "whois.arin.net",
+	"ripe":    "whois.ripe.net",
+	"apnic":   "whois.apnic.net",
+	"lacnic":  "whois.lacnic.net",
+	"afrinic": "whois.afrinic.net",
+}
+
+// getWhoisServer returns an appropriate WHOIS server for the query type.
+// Returns empty string to use system default.
+func getWhoisServer(query string) string {
+	// For now, let the whois command determine the server
+	// Could be enhanced to detect IP ranges and route to specific RIRs
+	return ""
+}
+
 // -------------------- Lookup --------------------
 
 // Lookup performs a WHOIS query using the system whois command.
@@ -88,8 +129,22 @@ func Lookup(ctx context.Context, query string) (*Result, error) {
 		return nil, err
 	}
 
+	// Check if whois command exists
+	whoisPath, err := exec.LookPath("whois")
+	if err != nil {
+		return nil, ErrWhoisNotFound
+	}
+
+	// Build command args
+	args := []string{sanitized}
+
+	// Optionally specify a server for faster lookups
+	if server := getWhoisServer(sanitized); server != "" {
+		args = append([]string{"-h", server}, args...)
+	}
+
 	// Create command with context for timeout
-	cmd := exec.CommandContext(ctx, "whois", sanitized)
+	cmd := exec.CommandContext(ctx, whoisPath, args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -98,8 +153,14 @@ func Lookup(ctx context.Context, query string) (*Result, error) {
 	err = cmd.Run()
 	duration := time.Since(startTime)
 
+	// Check for timeout first
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, ErrCommandTimeout
+		return &Result{
+			Query:      sanitized,
+			LookupTime: duration / time.Millisecond,
+			Error:      "lookup timed out",
+			Parsed:     make(map[string]string),
+		}, ErrCommandTimeout
 	}
 
 	result := &Result{
@@ -110,14 +171,19 @@ func Lookup(ctx context.Context, query string) (*Result, error) {
 	}
 
 	if err != nil {
-		result.Error = stderr.String()
-		if result.Error == "" {
-			result.Error = err.Error()
+		errMsg := stderr.String()
+		if errMsg == "" {
+			errMsg = err.Error()
 		}
+		result.Error = errMsg
+		// Don't return error - we still have partial result
+		log.WithField("query", sanitized).WithField("error", errMsg).Debug("WHOIS lookup error")
 	}
 
-	// Parse common fields
-	result.Parsed = parseWhoisOutput(stdout.String())
+	// Only parse if we got output
+	if stdout.Len() > 0 {
+		result.Parsed = parseWhoisOutput(stdout.String())
+	}
 
 	return result, nil
 }
@@ -127,6 +193,11 @@ func LookupWithTimeout(query string, timeout time.Duration) (*Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return Lookup(ctx, query)
+}
+
+// QuickLookup performs a WHOIS lookup with the default (shorter) timeout.
+func QuickLookup(query string) (*Result, error) {
+	return LookupWithTimeout(query, DefaultTimeout)
 }
 
 // -------------------- Parsing --------------------

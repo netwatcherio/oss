@@ -25,6 +25,9 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	// Invite routes (public, no auth required)
 	RegisterInviteRoutes(app, db, emailStore)
 
+	// Agent API routes (PSK auth via headers)
+	RegisterAgentAPI(app, db, ch, geoStore)
+
 	err := addWebSocketServer(app, db, ch)
 	if err != nil {
 		log.Error(err)

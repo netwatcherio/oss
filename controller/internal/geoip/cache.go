@@ -6,9 +6,27 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
+
+// CacheTTL is the time-to-live for cached GeoIP entries.
+// Entries older than this are treated as expired and refreshed on next access.
+// Can be overridden via GEOIP_CACHE_TTL_DAYS environment variable.
+var CacheTTL = 30 * 24 * time.Hour // 30 days default
+
+func init() {
+	if envTTL := os.Getenv("GEOIP_CACHE_TTL_DAYS"); envTTL != "" {
+		if days, err := strconv.Atoi(envTTL); err == nil && days > 0 {
+			CacheTTL = time.Duration(days) * 24 * time.Hour
+			log.Infof("GeoIP cache TTL set to %d days from environment", days)
+		}
+	}
+}
 
 // CachedResult extends LookupResult with cache metadata.
 type CachedResult struct {
@@ -117,20 +135,33 @@ VALUES (?, now('UTC'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
 // LookupWithCache performs a GeoIP lookup with caching.
 // It checks the cache first, then falls back to live lookup and caches the result.
+// Cached entries older than CacheTTL (default 30 days) are treated as expired.
 func LookupWithCache(ctx context.Context, db *sql.DB, store *Store, ip string) (*CachedResult, error) {
 	// Check cache first
 	cached, err := GetCached(ctx, db, ip)
 	if err != nil {
 		// Log but continue with live lookup
-		fmt.Printf("GeoIP cache read error: %v\n", err)
-	}
-	if cached != nil {
-		return cached, nil
+		log.WithError(err).Debug("GeoIP cache read error")
 	}
 
-	// Live lookup
+	// Check if cache entry exists and is still valid (not expired)
+	if cached != nil {
+		age := time.Since(cached.CacheTime)
+		if age < CacheTTL {
+			return cached, nil
+		}
+		// Cache entry expired, will refresh below
+		log.WithField("ip", ip).WithField("age_days", int(age.Hours()/24)).Debug("GeoIP cache entry expired, refreshing")
+	}
+
+	// Live lookup (either no cache or expired)
 	result, err := store.LookupAll(ip)
 	if err != nil {
+		// If we have an expired cache entry and live lookup fails, return stale data
+		if cached != nil {
+			log.WithError(err).WithField("ip", ip).Warn("GeoIP live lookup failed, returning stale cache")
+			return cached, nil
+		}
 		return nil, err
 	}
 
@@ -139,7 +170,7 @@ func LookupWithCache(ctx context.Context, db *sql.DB, store *Store, ip string) (
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if saveErr := SaveToCache(cacheCtx, db, result); saveErr != nil {
-			fmt.Printf("GeoIP cache write error: %v\n", saveErr)
+			log.WithError(saveErr).Debug("GeoIP cache write error")
 		}
 	}()
 

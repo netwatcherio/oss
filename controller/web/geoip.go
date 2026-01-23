@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"netwatcher-controller/internal/geoip"
+	"netwatcher-controller/internal/lookup"
 	"netwatcher-controller/internal/whois"
 
 	"github.com/kataras/iris/v12"
@@ -179,7 +180,7 @@ func panelWhois(api iris.Party, ch *sql.DB) {
 
 		// Use cache if available
 		if ch != nil {
-			result, err := whois.LookupWithCache(ctx.Request().Context(), ch, query, 15*time.Second)
+			result, err := whois.LookupWithCache(ctx.Request().Context(), ch, query, whois.DefaultTimeout)
 			if err != nil {
 				ctx.StatusCode(http.StatusBadRequest)
 				_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -197,7 +198,7 @@ func panelWhois(api iris.Party, ch *sql.DB) {
 			return
 		}
 
-		result, err := whois.LookupWithTimeout(sanitized, 15*time.Second)
+		result, err := whois.LookupWithTimeout(sanitized, whois.DefaultTimeout)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
@@ -238,12 +239,33 @@ func panelWhois(api iris.Party, ch *sql.DB) {
 // panelLookup registers combined lookup endpoints.
 // Routes: /lookup/*
 func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
-	lookup := api.Party("/lookup")
+	lookupParty := api.Party("/lookup")
+
+	// GET /lookup/ip/{ip}
+	// Unified IP lookup: GeoIP + ASN + Reverse DNS
+	// Uses shared lookup package for consistency with agent API
+	lookupParty.Get("/ip/{ip:string}", func(ctx iris.Context) {
+		ip := ctx.Params().Get("ip")
+		if ip == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "ip parameter required"})
+			return
+		}
+
+		result, err := lookup.UnifiedLookup(ctx.Request().Context(), ch, geoStore, ip)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(result)
+	})
 
 	// GET /lookup/combined?ip={ip}
 	// Combined GeoIP + WHOIS lookup in one request
 	// Accepts both IP addresses and hostnames
-	lookup.Get("/combined", func(ctx iris.Context) {
+	lookupParty.Get("/combined", func(ctx iris.Context) {
 		query := ctx.URLParam("ip")
 		if query == "" {
 			ctx.StatusCode(http.StatusBadRequest)
@@ -320,7 +342,7 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 		// WHOIS lookup - use original query for domains, resolved IP for IPs
 		whoisQuery := query
 		if ch != nil {
-			whoisResult, err := whois.LookupWithCache(ctx.Request().Context(), ch, whoisQuery, 15*time.Second)
+			whoisResult, err := whois.LookupWithCache(ctx.Request().Context(), ch, whoisQuery, whois.DefaultTimeout)
 			if err != nil {
 				whoisErr = err.Error()
 			} else if whoisResult != nil {
@@ -336,7 +358,7 @@ func panelLookup(api iris.Party, geoStore *geoip.Store, ch *sql.DB) {
 			if err != nil {
 				whoisErr = "invalid query: " + err.Error()
 			} else {
-				whoisResult, err := whois.LookupWithTimeout(sanitized, 15*time.Second)
+				whoisResult, err := whois.LookupWithTimeout(sanitized, whois.DefaultTimeout)
 				if err != nil {
 					whoisErr = err.Error()
 				} else if whoisResult != nil {

@@ -30,12 +30,15 @@ Focus: Production-readiness and UX improvements
 
 Enhanced network interface detection and probe-level binding:
 
-- [ ] **Agent Interface Discovery** - Enumerate all available network interfaces with metadata (name, IP, gateway, type)
+- [ ] **Agent Interface Discovery** - Enumerate all available network interfaces with metadata:
+  - Name, IP addresses (v4/v6), MAC address, gateway, type (ethernet, wifi, loopback)
+  - Routing table entries per interface
 - [ ] **Probe Interface Binding** - New `interface` field on probes allowing explicit interface selection
 - [ ] **Default Behavior** - If not specified, use system default route (current behavior)
 - [ ] **Multi-WAN Support** - Enable monitoring over specific ISP links
 - [ ] **UI Controls** - Interface selector dropdown in probe creation/edit forms
 - [ ] **Validation** - Verify interface exists on agent before probe execution
+- [ ] **Backward Compatibility** - Use `NormalizeFromLegacy()` pattern (see P1.6) to convert old agent data
 
 **Use Cases:**
 - Servers with multiple NICs (management vs production)
@@ -84,32 +87,32 @@ Reduce alert fatigue:
 - [ ] Escalation: Warning → Critical after N minutes
 - [ ] Recovery notifications
 
-### P1.6 Controller API Services
-**Priority: High** | **Effort: Medium**
+### P1.6 Controller API Services ✅
+**Priority: High** | **Effort: Medium** | **Status: Complete**
 
 Centralized APIs to eliminate external service dependencies:
 
 **Public IP Discovery:**
-- [ ] Controller endpoint: `GET /api/agent/whoami` returns agent's public IP as seen by controller
-- [ ] Agents call controller on startup instead of external APIs (ifconfig.me, speedtest, etc.)
-- [ ] Removes dependency on third-party services
-- [ ] Works in air-gapped/restricted networks
+- [x] Controller endpoint: `GET /agent/api/whoami` returns agent's public IP as seen by controller
+- [x] Agents call controller on startup instead of external APIs (ifconfig.me, speedtest, etc.)
+- [x] Removes dependency on third-party services
+- [x] Works in air-gapped/restricted networks
 
 **GeoIP & Location Services:**
-- [ ] Controller-hosted MaxMind GeoLite2 database
-- [ ] Endpoint: `GET /api/lookup/geoip/{ip}` returns city, region, country, coordinates
-- [ ] Used by agents for self-location and by panel for hop enrichment
-- [ ] ASN lookup endpoint: `GET /api/lookup/asn/{ip}` returns AS number and name
-- [ ] Periodic database updates (monthly refresh)
+- [x] Controller-hosted MaxMind GeoLite2 database (existing)
+- [x] Endpoint: `GET /geoip/lookup?ip={ip}` returns city, region, country, coordinates
+- [x] Used by agents for self-location and by panel for hop enrichment
+- [x] ASN lookup included in GeoIP responses
+- [x] Lazy cache refresh (entries >30 days refreshed on access, stale fallback if refresh fails)
 
 **IP Intelligence API:**
-- [ ] Unified endpoint: `GET /api/lookup/ip/{ip}` returns combined data:
+- [x] Unified endpoint: `GET /lookup/ip/{ip}` returns combined data:
   - GeoIP (city, region, country, lat/lon)
   - ASN (number, name, organization)
   - Reverse DNS (PTR record)
   - Optional: threat score integration
-- [ ] Caching layer for frequently queried IPs
-- [ ] Bulk lookup support for MTR hop enrichment
+- [x] Caching layer for frequently queried IPs (ClickHouse cache)
+- [x] Bulk lookup support for MTR hop enrichment (`POST /geoip/lookup`)
 
 **Benefits:**
 - No external API rate limits or costs
@@ -169,6 +172,28 @@ Enhanced path intelligence:
 - [ ] Display ASN in MTR hop table
 - [ ] Alert on AS path changes
 - [ ] AS-level grouping in Network Map
+
+### P2.5 RIR REST API Integration
+**Priority: Medium** | **Effort: Medium**
+
+Replace/augment command-line WHOIS with RIR REST APIs for faster, structured data:
+
+**ARIN (North America):**
+- [ ] REST API: `https://whois.arin.net/rest/ip/{ip}`
+- [ ] Extract: Network name, handle, CIDR, organization, customer ref
+- [ ] Faster than whois command with structured XML/JSON response
+
+**Other RIRs:**
+- [ ] RIPE (Europe/Middle East): `https://rest.db.ripe.net/search`
+- [ ] APNIC (Asia-Pacific): `https://wq.apnic.net/query`
+- [ ] LACNIC (Latin America): RDAP API
+- [ ] AFRINIC (Africa): RDAP API
+
+**Features:**
+- [ ] Auto-detect RIR based on IP range
+- [ ] Fallback chain: RIR REST API → command-line whois
+- [ ] Cache responses in ClickHouse
+- [ ] Display logical network name in hop tables and agent info
 
 ---
 
