@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { reactive } from "vue";
+import { reactive, onMounted } from "vue";
 import core from "@/core";
 import Loader from "@/components/Loader.vue";
 import FormElement from "@/components/FormElement.vue";
@@ -12,10 +12,22 @@ const state = reactive({
   user: {} as User,
   began: 0 as number,
   waiting: false,
-  error: false
+  error: false,
+  registrationEnabled: true, // Default to true until we know
 });
 
 const router = core.router();
+
+// Check if registration is enabled
+onMounted(async () => {
+  try {
+    const config = await AuthService.getConfig();
+    state.registrationEnabled = config.registration_enabled;
+  } catch {
+    // If config fetch fails, default to showing registration
+    state.registrationEnabled = true;
+  }
+});
 
 // Minimal user type for this form
 interface User {
@@ -87,7 +99,7 @@ async function submit(e: MouseEvent) {
     <div class="form-entry w-100">
       <FormElement title="Login">
         <template #alternate>
-          <span class="label-subtext mb-1">
+          <span v-if="state.registrationEnabled" class="label-subtext mb-1">
             Need an account?
             <router-link id="to-register" to="/auth/register">register</router-link>
           </span>

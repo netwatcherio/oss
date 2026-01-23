@@ -15,6 +15,10 @@ export const AuthService = {
         const { data } = await request.get("/healthz");
         return data;
     },
+    async getConfig() {
+        const { data } = await request.get<{ registration_enabled: boolean }>("/auth/config");
+        return data;
+    },
 };
 
 function qs(params?: Record<string, string | number | undefined>) {

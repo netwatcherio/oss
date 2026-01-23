@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { useRouter } from "vue-router";
-import { reactive } from "vue";
+import { reactive, onMounted } from "vue";
 import Loader from "@/components/Loader.vue";
 
 // NEW: use the new auth service
@@ -21,6 +21,21 @@ const state = reactive({
   waiting: false,
   began: 0,
   error: false,
+  registrationDisabled: false, // Will be set on mount if registration is disabled
+});
+
+// Check if registration is enabled on mount
+onMounted(async () => {
+  try {
+    const config = await AuthService.getConfig();
+    if (!config.registration_enabled) {
+      state.registrationDisabled = true;
+      state.error = true;
+      state.errorMessage = "Registration is currently disabled. Please contact your administrator.";
+    }
+  } catch {
+    // If config fetch fails, allow registration attempt (server will still block if disabled)
+  }
 });
 
 function begin() {
@@ -40,7 +55,7 @@ function done() {
 
 function onRegister(_: unknown) {
   done();
-  // Optional: show a toast/snackbar “Registered! Please log in.”
+  // Optional: show a toast/snackbar "Registered! Please log in."
   router.push("/auth/login");
 }
 
@@ -56,6 +71,10 @@ function onFailure(error: any) {
       "";
 
   switch (server) {
+    case "registration is disabled":
+      state.errorMessage = "Registration is currently disabled. Please contact your administrator.";
+      state.registrationDisabled = true;
+      break;
     case "user exists":
     case "User already exists":
       state.errorMessage = "The email provided has already been registered for an account.";
@@ -73,6 +92,13 @@ function onFailure(error: any) {
 
 async function submit(e: MouseEvent) {
   e.preventDefault();
+
+  // Block submission if registration is disabled
+  if (state.registrationDisabled) {
+    state.error = true;
+    state.errorMessage = "Registration is currently disabled. Please contact your administrator.";
+    return;
+  }
 
   // client-side confirm password check
   if (!state.user.password || state.user.password !== state.confirmPassword) {
@@ -176,7 +202,7 @@ async function submit(e: MouseEvent) {
                 <div class="d-flex align-items-center justify-content-center">
                   <Loader v-if="state.waiting" inverse large></Loader>
                 </div>
-                <button class="btn btn-primary btn-lg px-4" type="submit" @click="submit" :disabled="state.waiting">
+                <button class="btn btn-primary btn-lg px-4" type="submit" @click="submit" :disabled="state.waiting || state.registrationDisabled">
                   register
                 </button>
                 </div>

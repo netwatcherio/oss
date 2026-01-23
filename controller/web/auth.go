@@ -16,8 +16,22 @@ import (
 func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.QueueStore) {
 	auth := app.Party("/auth")
 
+	// GET /auth/config - public endpoint for panel to check registration settings
+	auth.Get("/config", func(ctx iris.Context) {
+		_ = ctx.JSON(iris.Map{
+			"registration_enabled": isRegistrationEnabled(),
+		})
+	})
+
 	// POST /auth/register
 	auth.Post("/register", func(ctx iris.Context) {
+		// Check if registration is enabled
+		if !isRegistrationEnabled() {
+			ctx.StatusCode(http.StatusForbidden)
+			_ = ctx.JSON(iris.Map{"error": "registration is disabled"})
+			return
+		}
+
 		var body struct {
 			Email    string         `json:"email"`
 			Password string         `json:"password"`
@@ -102,4 +116,14 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 func shouldSendRegistrationConfirmation() bool {
 	v := strings.ToLower(os.Getenv("EMAIL_SEND_REGISTRATION_CONFIRMATION"))
 	return v == "true" || v == "1" || v == "yes"
+}
+
+// isRegistrationEnabled checks if user registration is enabled (default: true)
+func isRegistrationEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("REGISTRATION_ENABLED")))
+	// Default to enabled if not set or explicitly set to true
+	if v == "" || v == "true" || v == "1" || v == "yes" {
+		return true
+	}
+	return false
 }
