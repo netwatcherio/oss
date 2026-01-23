@@ -469,7 +469,15 @@ body {
 }
 
 .pricing-grid-3 {
-    max-width: 1000px;
+    max-width: 1100px;
+    grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 900px) {
+    .pricing-grid-3 {
+        grid-template-columns: 1fr;
+        max-width: 400px;
+    }
 }
 
 .pricing-card {

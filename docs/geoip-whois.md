@@ -6,7 +6,9 @@ NetWatcher includes GeoIP and WHOIS lookup functionality to provide geolocation 
 
 - **GeoIP Lookups**: City, country, ASN (Autonomous System Number), and coordinates
 - **WHOIS Lookups**: Network name, organization, registrar, and abuse contacts
-- **ClickHouse Caching**: Lookup results are cached with automatic TTL expiration
+- **Reverse DNS**: PTR record lookups for IP addresses
+- **Agent Public IP Discovery**: Agents can discover their public IP via controller (no external dependencies)
+- **ClickHouse Caching**: Lookup results are cached with automatic TTL expiration (30 days)
 - **Combined Lookup**: Single API call returns both GeoIP and WHOIS data
 - **Lookup History**: View past lookups from the cache
 
@@ -41,9 +43,17 @@ crontab -e
 The following environment variables configure GeoIP paths (already set in `.env.example`):
 
 ```env
+# GeoIP Database Paths
 GEOIP_CITY_PATH=/data/geoip/GeoLite2-City.mmdb
 GEOIP_COUNTRY_PATH=/data/geoip/GeoLite2-Country.mmdb
 GEOIP_ASN_PATH=/data/geoip/GeoLite2-ASN.mmdb
+
+# Cache TTL (optional, defaults to 30 days)
+GEOIP_CACHE_TTL_DAYS=30
+WHOIS_CACHE_TTL_DAYS=30
+
+# WHOIS Timeout (optional, defaults to 5 seconds)
+WHOIS_TIMEOUT_SECONDS=5
 ```
 
 ### 4. Docker Volume Mount
@@ -58,7 +68,7 @@ controller:
 
 ## API Endpoints
 
-### GeoIP
+### GeoIP (Panel - JWT Auth)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -67,18 +77,29 @@ controller:
 | `/geoip/history?ip={ip}` | GET | Past lookups for an IP |
 | `/geoip/status` | GET | Check database availability |
 
-### WHOIS
+### WHOIS (Panel - JWT Auth)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/whois/lookup?query={ip}` | GET | WHOIS lookup |
 | `/whois/history?query={ip}` | GET | Past lookups |
 
-### Combined
+### Combined (Panel - JWT Auth)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/lookup/combined?ip={ip}` | GET | GeoIP + WHOIS in one call |
+| `/lookup/ip/{ip}` | GET | Unified lookup: GeoIP + ASN + Reverse DNS |
+
+### Agent API (PSK Auth)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/agent/api/whoami` | GET | Returns agent's public IP as seen by controller |
+| `/agent/api/whoami?quick=true` | GET | Quick response (IP only, no enrichment) |
+| `/agent/api/lookup/ip/{ip}` | GET | IP lookup for agents |
+
+Agent endpoints require headers: `X-Workspace-ID`, `X-Agent-ID`, `X-Agent-PSK`
 
 ## Frontend Usage
 
@@ -105,8 +126,9 @@ const data = await response.json();
 
 ## Cache Behavior
 
-- **GeoIP Cache TTL**: 30 days
-- **WHOIS Cache TTL**: 7 days
+- **Default Cache TTL**: 30 days (configurable via `GEOIP_CACHE_TTL_DAYS` / `WHOIS_CACHE_TTL_DAYS`)
+- **Lazy Refresh**: Expired entries are refreshed on next access, not proactively
+- **Stale Fallback**: If refresh fails, stale cached data is returned
 - Results are cached automatically after lookup
 - Cached results include `cached: true` and `cache_time` fields
 
@@ -121,3 +143,5 @@ apt-get install whois
 # Alpine (Docker)
 apk add whois
 ```
+
+The Dockerfile already includes this dependency.

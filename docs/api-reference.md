@@ -163,6 +163,70 @@ Agent login/bootstrap endpoint. Supports both PIN bootstrap and PSK authenticati
 
 ---
 
+## Agent API Endpoints
+
+Agent-specific API endpoints authenticated via PSK headers. These allow agents to access controller services without JWT.
+
+**Required Headers:**
+```
+X-Workspace-ID: <workspace_id>
+X-Agent-ID: <agent_id>
+X-Agent-PSK: <psk_token>
+```
+
+### `GET /agent/api/whoami`
+
+Returns the agent's public IP as seen by the controller. Useful for agents to discover their public IP without external services.
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `quick` | bool | false | If true, returns only IP without GeoIP enrichment |
+
+**Response (Full):**
+```json
+{
+  "ip": "203.0.113.45",
+  "geoip": {
+    "city": { "name": "Vancouver", "subdivision": "BC" },
+    "country": { "code": "CA", "name": "Canada" },
+    "asn": { "number": 852, "organization": "TELUS Communications" },
+    "coordinates": { "latitude": 49.2827, "longitude": -123.1207 }
+  },
+  "reverse_dns": "host-203-0-113-45.example.com",
+  "timestamp": "2026-01-23T17:30:00Z"
+}
+```
+
+**Response (Quick):**
+```json
+{
+  "ip": "203.0.113.45",
+  "timestamp": "2026-01-23T17:30:00Z"
+}
+```
+
+---
+
+### `GET /agent/api/lookup/ip/{ip}`
+
+IP intelligence lookup for agents. Returns GeoIP + ASN + reverse DNS for any IP.
+
+**Response:**
+```json
+{
+  "ip": "8.8.8.8",
+  "geoip": {
+    "country": { "code": "US", "name": "United States" },
+    "asn": { "number": 15169, "organization": "GOOGLE" }
+  },
+  "reverse_dns": "dns.google",
+  "timestamp": "2026-01-23T17:30:00Z"
+}
+```
+
+---
+
 ## Workspace Endpoints
 
 ### `GET /workspaces`
