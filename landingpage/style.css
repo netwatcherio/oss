@@ -462,10 +462,14 @@ body {
 /* Pricing */
 .pricing-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 32px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
     max-width: 700px;
     margin: 0 auto 40px;
+}
+
+.pricing-grid-3 {
+    max-width: 1000px;
 }
 
 .pricing-card {
@@ -499,6 +503,11 @@ body {
     font-weight: 600;
     padding: 4px 16px;
     border-radius: 12px;
+}
+
+.pricing-badge-alt {
+    background: rgba(139, 156, 179, 0.3);
+    color: var(--text-secondary);
 }
 
 .pricing-header h3 {
