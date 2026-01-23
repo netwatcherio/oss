@@ -81,13 +81,11 @@ func main() {
 	}
 
 	// ---- OUI Store ----
-	ouiCachePath := getenv("OUI_CACHE_PATH", "/tmp/oui.txt")
-	ouiStore := oui.NewStore(ouiCachePath)
-	go func() {
-		if err := ouiStore.Load(); err != nil {
-			log.WithError(err).Warn("OUI database load failed, vendor lookups disabled")
-		}
-	}()
+	ouiConfig := oui.LoadConfigFromEnv()
+	ouiStore := oui.NewStore(ouiConfig)
+	if err := ouiStore.Load(); err != nil {
+		log.WithError(err).Warn("OUI database load failed, vendor lookups disabled")
+	}
 
 	// ---- Cleanup Scheduler ----
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())

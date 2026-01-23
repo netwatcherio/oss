@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -14,13 +13,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	// IEEE OUI database URL
-	IEEEOUIURL = "https://standards-oui.ieee.org/oui/oui.txt"
+// Config holds OUI store configuration.
+type Config struct {
+	Path string // Path to oui.txt file
+}
 
-	// Default cache file path
-	DefaultCachePath = "/tmp/oui.txt"
-)
+// LoadConfigFromEnv loads OUI configuration from environment variables.
+func LoadConfigFromEnv() Config {
+	return Config{
+		Path: os.Getenv("OUI_PATH"),
+	}
+}
 
 // Entry represents a single OUI entry.
 type Entry struct {
@@ -32,100 +35,56 @@ type Entry struct {
 
 // Store provides OUI lookup functionality.
 type Store struct {
-	mu        sync.RWMutex
-	entries   map[string]Entry // Key: normalized OUI (uppercase, no separators)
-	cachePath string
-	loaded    bool
-	loadedAt  time.Time
+	mu       sync.RWMutex
+	entries  map[string]Entry // Key: normalized OUI (uppercase, no separators)
+	path     string
+	loaded   bool
+	loadedAt time.Time
 }
 
-// NewStore creates a new OUI store.
-func NewStore(cachePath string) *Store {
-	if cachePath == "" {
-		cachePath = DefaultCachePath
-	}
+// NewStore creates a new OUI store from config.
+func NewStore(cfg Config) *Store {
 	return &Store{
-		entries:   make(map[string]Entry),
-		cachePath: cachePath,
+		entries: make(map[string]Entry),
+		path:    cfg.Path,
 	}
 }
 
-// Load loads OUI data from cache or downloads from IEEE.
+// Load loads OUI data from the configured file path.
+// Returns nil if path is not configured (OUI lookup will be disabled).
 func (s *Store) Load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Try cache first
-	if s.loadFromCache() {
+	if s.path == "" {
+		log.Info("OUI_PATH not configured, MAC vendor lookup disabled")
 		return nil
 	}
 
-	// Download from IEEE
-	return s.downloadAndParse()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.loadFromFile()
 }
 
-// loadFromCache attempts to load from local cache file.
-func (s *Store) loadFromCache() bool {
-	info, err := os.Stat(s.cachePath)
+// loadFromFile loads OUI data from the configured file path.
+func (s *Store) loadFromFile() error {
+	info, err := os.Stat(s.path)
 	if err != nil {
-		return false
+		return fmt.Errorf("OUI file not found at %s: %w", s.path, err)
 	}
 
-	// Cache expires after 30 days
-	if time.Since(info.ModTime()) > 30*24*time.Hour {
-		log.Info("OUI cache expired, will re-download")
-		return false
-	}
-
-	file, err := os.Open(s.cachePath)
+	file, err := os.Open(s.path)
 	if err != nil {
-		return false
+		return fmt.Errorf("could not open OUI file: %w", err)
 	}
 	defer file.Close()
 
 	count := s.parseOUIData(file)
-	if count > 0 {
-		s.loaded = true
-		s.loadedAt = info.ModTime()
-		log.Infof("Loaded %d OUI entries from cache", count)
-		return true
-	}
-	return false
-}
-
-// downloadAndParse downloads OUI data from IEEE and parses it.
-func (s *Store) downloadAndParse() error {
-	log.Info("Downloading OUI database from IEEE...")
-
-	resp, err := http.Get(IEEEOUIURL)
-	if err != nil {
-		return fmt.Errorf("download OUI data: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download OUI data: status %d", resp.StatusCode)
+	if count == 0 {
+		return fmt.Errorf("no OUI entries found in %s", s.path)
 	}
 
-	// Save to cache file while parsing
-	cacheFile, err := os.Create(s.cachePath)
-	if err != nil {
-		log.Warnf("Could not create cache file: %v", err)
-		// Parse from response body directly
-		count := s.parseOUIData(resp.Body)
-		s.loaded = true
-		s.loadedAt = time.Now()
-		log.Infof("Loaded %d OUI entries (no cache)", count)
-		return nil
-	}
-	defer cacheFile.Close()
-
-	// Tee to both cache and parser
-	reader := io.TeeReader(resp.Body, cacheFile)
-	count := s.parseOUIData(reader)
 	s.loaded = true
-	s.loadedAt = time.Now()
-	log.Infof("Loaded %d OUI entries from IEEE (cached)", count)
+	s.loadedAt = info.ModTime()
+	log.Infof("Loaded %d OUI entries from %s", count, s.path)
 	return nil
 }
 
