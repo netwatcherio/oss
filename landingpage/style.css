@@ -71,8 +71,24 @@ body {
 }
 
 .logo i {
-    font-size: 24px;
-    color: var(--accent-primary);
+    font-size: 28px;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.logo span:not(.badge) {
+    background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-primary) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.logo .logo-icon {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
 }
 
 .logo .badge {
@@ -536,6 +552,25 @@ body {
 
 .pricing-features li .bi-dash {
     color: var(--text-muted);
+}
+
+.pricing-features li.pricing-support-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.pricing-features li.pricing-support-note i {
+    color: var(--accent-primary);
+}
+
+.pricing-features li.pricing-highlight {
+    color: var(--accent-secondary);
+    font-weight: 500;
+}
+
+.pricing-features li.pricing-highlight i {
+    color: var(--accent-secondary);
 }
 
 .btn-block {

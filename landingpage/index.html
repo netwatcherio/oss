@@ -14,6 +14,7 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 </head>
 
 <body>
@@ -21,8 +22,8 @@
     <nav class="navbar">
         <div class="container">
             <a href="#" class="logo">
-                <i class="bi bi-activity"></i>
-                <span>NetWatcher</span>
+                <i class="bi bi-eye"></i>
+                <span>netwatcher</span>
                 <span class="badge">OSS</span>
             </a>
             <div class="nav-links">
@@ -332,53 +333,57 @@
     <section id="pricing" class="section section-dark">
         <div class="container">
             <h2 class="section-title">Simple Pricing</h2>
-            <p class="section-subtitle">Self-host for free, or let us handle it</p>
+            <p class="section-subtitle">Start free forever, or go unlimited with a private instance</p>
 
             <div class="pricing-grid">
                 <div class="pricing-card">
                     <div class="pricing-header">
-                        <h3>Self-Hosted</h3>
+                        <h3>Free Forever</h3>
                         <div class="pricing-price">
                             <span class="price-amount">$0</span>
                             <span class="price-period">forever</span>
                         </div>
                     </div>
                     <ul class="pricing-features">
+                        <li><i class="bi bi-check-circle-fill"></i> Up to 20 agents</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Up to 10 users</li>
+                        <li><i class="bi bi-check-circle-fill"></i> 200 probes per agent</li>
                         <li><i class="bi bi-check-circle-fill"></i> Full feature access</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Unlimited agents</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Unlimited users</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Your infrastructure</li>
-                        <li><i class="bi bi-check-circle-fill"></i> 100% data ownership</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Community support</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Self-hosted on your infra</li>
+                        <li><i class="bi bi-dash"></i> Community support only</li>
+                        <li class="pricing-support-note"><i class="bi bi-info-circle"></i> Paid support available hourly
+                        </li>
                     </ul>
                     <a href="#get-started" class="btn btn-primary btn-block">Deploy Now</a>
                 </div>
 
                 <div class="pricing-card pricing-featured">
-                    <div class="pricing-badge">Managed</div>
+                    <div class="pricing-badge">Unlimited</div>
                     <div class="pricing-header">
                         <h3>Private Instance</h3>
                         <div class="pricing-price">
-                            <span class="price-amount">~$200</span>
-                            <span class="price-period">/month</span>
+                            <span class="price-amount">Custom</span>
+                            <span class="price-period">pricing</span>
                         </div>
                     </div>
                     <ul class="pricing-features">
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited agents</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited users</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited probes</li>
                         <li><i class="bi bi-check-circle-fill"></i> We host it for you</li>
                         <li><i class="bi bi-check-circle-fill"></i> Private dedicated instance</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Our owned hardware</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Automatic updates</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Backups included</li>
-                        <li><i class="bi bi-dash"></i> No SLA (best effort)</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Automatic updates & backups</li>
+                        <li class="pricing-highlight"><i class="bi bi-arrow-right-circle"></i> Based on storage &
+                            traffic</li>
                     </ul>
-                    <a href="mailto:hello@netwatcher.io?subject=Managed%20Instance%20Inquiry"
+                    <a href="mailto:hello@netwatcher.io?subject=Private%20Instance%20Inquiry"
                         class="btn btn-outline btn-block">Contact Us</a>
                 </div>
             </div>
 
             <p class="pricing-note">
                 <i class="bi bi-info-circle"></i>
-                Still much cheaper than Obkio (~$300 CAD/mo) or Kentik (~$2,000+/mo) — and you own your data.
+                Still much cheaper than Obkio (~$300 CAD/mo) or Kentik (~$2,000+/mo) — and you always own your data.
             </p>
         </div>
     </section>
@@ -410,13 +415,15 @@ docker-compose up -d
 <span class="comment"># Access the panel at http://localhost:8080</span></code></pre>
             </div>
 
-            <p class="setup-note">
+            <div class="setup-note">
                 <i class="bi bi-info-circle"></i>
-                <strong>Important:</strong> Before deploying, read the
-                <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
-                    target="_blank">documentation</a>
-                and configure your <code>.env</code> file with your SMTP, domain, and other settings.
-            </p>
+                <span>
+                    <strong>Important:</strong> Before deploying, read the
+                    <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
+                        target="_blank">documentation</a>
+                    and configure your <code>.env</code> file with your SMTP, domain, and other settings.
+                </span>
+            </div>
 
             <div class="get-started-links">
                 <a href="https://github.com/netwatcherio/oss" class="btn btn-primary btn-lg" target="_blank">
@@ -436,8 +443,9 @@ docker-compose up -d
             <div class="footer-content">
                 <div class="footer-brand">
                     <a href="#" class="logo">
-                        <i class="bi bi-activity"></i>
-                        <span>NetWatcher OSS</span>
+                        <i class="bi bi-eye"></i>
+                        <span>netwatcher</span>
+                        <span class="badge">OSS</span>
                     </a>
                     <p>Open source network monitoring.<br>Forever free. Forever yours.</p>
                 </div>
