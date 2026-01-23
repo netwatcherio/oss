@@ -1,0 +1,109 @@
+package web
+
+import (
+	"encoding/json"
+	"sync"
+
+	"github.com/kataras/iris/v12/websocket"
+	log "github.com/sirupsen/logrus"
+)
+
+// AgentHub manages WebSocket connections for agents.
+// Tracks connected agents by ID for targeted deactivation broadcasts.
+type AgentHub struct {
+	mu sync.RWMutex
+
+	// Connections indexed by agent ID (one connection per agent)
+	connections map[uint]*websocket.NSConn
+}
+
+// AgentDeactivateMessage is sent to agents when they are deleted
+type AgentDeactivateMessage struct {
+	Reason string `json:"reason"`
+}
+
+// Global agent hub instance
+var agentHub = NewAgentHub()
+
+// GetAgentHub returns the global agent hub instance
+func GetAgentHub() *AgentHub {
+	return agentHub
+}
+
+// NewAgentHub creates a new AgentHub instance
+func NewAgentHub() *AgentHub {
+	return &AgentHub{
+		connections: make(map[uint]*websocket.NSConn),
+	}
+}
+
+// RegisterAgent registers an agent connection
+func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// If there's an existing connection for this agent, it will be replaced
+	// This handles the case where an agent reconnects before the old connection times out
+	if old, exists := h.connections[agentID]; exists {
+		log.Warnf("[AgentHub] Agent %d already connected, replacing connection", agentID)
+		// Don't close the old connection here - let it timeout naturally
+		_ = old
+	}
+
+	h.connections[agentID] = conn
+	log.Infof("[AgentHub] Agent %d registered (total: %d)", agentID, len(h.connections))
+}
+
+// UnregisterAgent removes an agent connection
+func (h *AgentHub) UnregisterAgent(agentID uint) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, exists := h.connections[agentID]; exists {
+		delete(h.connections, agentID)
+		log.Infof("[AgentHub] Agent %d unregistered (total: %d)", agentID, len(h.connections))
+	}
+}
+
+// DeactivateAgent sends a deactivation message to a connected agent
+// This is called when an agent is deleted from the panel
+func (h *AgentHub) DeactivateAgent(agentID uint, reason string) bool {
+	h.mu.RLock()
+	conn, exists := h.connections[agentID]
+	h.mu.RUnlock()
+
+	if !exists {
+		log.Debugf("[AgentHub] Agent %d not connected, cannot send deactivate", agentID)
+		return false
+	}
+
+	msg := AgentDeactivateMessage{Reason: reason}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		log.Errorf("[AgentHub] Failed to marshal deactivate message: %v", err)
+		return false
+	}
+
+	if !conn.Emit("deactivate", payload) {
+		log.Warnf("[AgentHub] Failed to emit deactivate to agent %d", agentID)
+		return false
+	}
+
+	log.Infof("[AgentHub] Sent deactivate to agent %d (reason: %s)", agentID, reason)
+	return true
+}
+
+// IsAgentConnected checks if an agent is currently connected
+func (h *AgentHub) IsAgentConnected(agentID uint) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, exists := h.connections[agentID]
+	return exists
+}
+
+// GetConnectedAgentCount returns the number of connected agents
+func (h *AgentHub) GetConnectedAgentCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.connections)
+}
