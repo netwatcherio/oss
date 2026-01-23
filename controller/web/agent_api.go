@@ -110,6 +110,21 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 			return
 		}
 
+		// Debug: log what we're returning
+		hasGeoIP := result.GeoIP != nil
+		var hasCity, hasASN bool
+		if hasGeoIP {
+			hasCity = result.GeoIP.City != nil
+			hasASN = result.GeoIP.ASN != nil
+		}
+		log.WithFields(log.Fields{
+			"ip":          clientIP,
+			"has_geoip":   hasGeoIP,
+			"has_city":    hasCity,
+			"has_asn":     hasASN,
+			"reverse_dns": result.ReverseDNS,
+		}).Debug("whoami response")
+
 		_ = ctx.JSON(result)
 	})
 
