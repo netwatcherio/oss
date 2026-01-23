@@ -10,10 +10,12 @@ import ConnectivityMatrix from "@/components/ConnectivityMatrix.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
 import {usePermissions} from "@/composables/usePermissions";
+import {useAgentStatus, type AgentStatusTier} from "@/composables/useAgentStatus";
 
-// Reactive now timestamp for live status updates (updates every 30 seconds)
-const now = ref(new Date());
-let nowInterval: ReturnType<typeof setInterval> | null = null;
+// Agent status composable for consistent status logic
+const { now, getAgentStatus, getLastSeenText, getStatusIcon, getStatusLabel, isOnline } = useAgentStatus();
+
+// Polling interval for refreshing agent data from server
 let agentPollInterval: ReturnType<typeof setInterval> | null = null;
 
 // --- STATE: add stores for net-info by agent ---
@@ -70,11 +72,20 @@ const filteredAgents = computed(() => {
     );
   }
 
+  // Status priority for sorting (online first, then stale, then offline)
+  const statusPriority = (status: AgentStatusTier): number => {
+    switch (status) {
+      case 'online': return 2;
+      case 'stale': return 1;
+      case 'offline': return 0;
+    }
+  };
+
   // Apply sorting
   return filtered.sort((a, b) => {
     switch (state.sortBy) {
       case 'status':
-        return getOnlineStatus(b) - getOnlineStatus(a);
+        return statusPriority(getAgentStatus(b)) - statusPriority(getAgentStatus(a));
       case 'name':
         return a.name.localeCompare(b.name);
       case 'description':
@@ -88,32 +99,16 @@ const filteredAgents = computed(() => {
 });
 
 const onlineAgentsCount = computed(() =>
-    state.agents.filter(agent => getOnlineStatus(agent)).length
+    state.agents.filter(agent => getAgentStatus(agent) === 'online').length
+);
+
+const staleAgentsCount = computed(() =>
+    state.agents.filter(agent => getAgentStatus(agent) === 'stale').length
 );
 
 const offlineAgentsCount = computed(() =>
-    state.agents.filter(agent => !getOnlineStatus(agent)).length
+    state.agents.filter(agent => getAgentStatus(agent) === 'offline').length
 );
-
-function getOnlineStatus(agent: Agent) {
-  const currentTime = now.value;
-  const agentTime = new Date(agent.updated_at)
-  const timeDifference = (currentTime.getTime() - agentTime.getTime()) / 60000;
-  return timeDifference <= 1;
-}
-
-function getLastSeenText(agent: Agent) {
-  const currentNow = now.value;
-  const lastSeen = new Date(agent.updated_at?.toString());
-  const diffMs = currentNow.getTime() - lastSeen.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${diffDays}d ago`;
-}
 
 // Refresh agent list for live status updates
 async function refreshAgents() {
@@ -150,20 +145,11 @@ onMounted(async () => {
     state.loading = false
   }
 
-  // Set up interval to update "now" every 30 seconds for live status display
-  nowInterval = setInterval(() => {
-    now.value = new Date();
-  }, 30000);
-
   // Poll agents every 30 seconds to get updated_at from server
   agentPollInterval = setInterval(refreshAgents, 30000);
 })
 
 onUnmounted(() => {
-  if (nowInterval) {
-    clearInterval(nowInterval);
-    nowInterval = null;
-  }
   if (agentPollInterval) {
     clearInterval(agentPollInterval);
     agentPollInterval = null;
@@ -215,6 +201,15 @@ onUnmounted(() => {
         <div class="stat-content">
           <div class="stat-value">{{ onlineAgentsCount }}</div>
           <div class="stat-label">Online</div>
+        </div>
+      </div>
+      <div class="stat-card warning" v-if="staleAgentsCount > 0">
+        <div class="stat-icon">
+          <i class="bi bi-exclamation-circle-fill"></i>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ staleAgentsCount }}</div>
+          <div class="stat-label">Stale</div>
         </div>
       </div>
       <div class="stat-card danger">
@@ -324,8 +319,9 @@ onUnmounted(() => {
         <AgentCard
           :title="agent.name"
           :subtitle="(agent.version?' ':'') + agent.location"
-          :icon="getOnlineStatus(agent)?'bi bi-check-circle-fill text-success':'bi bi-x-circle-fill text-danger'"
+          :icon="getStatusIcon(getAgentStatus(agent))"
           class="h-100"
+          :class="{ 'agent-online-pulse': getAgentStatus(agent) === 'online' }"
         >
 
           <template #secondary>
@@ -433,6 +429,15 @@ onUnmounted(() => {
 
 .stat-card.success .stat-icon {
   color: #10b981;
+}
+
+.stat-card.warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.stat-card.warning .stat-icon {
+  color: #f59e0b;
 }
 
 .stat-card.danger {
@@ -663,5 +668,19 @@ onUnmounted(() => {
 
 .loading {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Online agent pulse animation */
+@keyframes online-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+  }
+}
+
+.agent-online-pulse :deep(.card) {
+  animation: online-pulse 2s ease-in-out infinite;
 }
 </style>

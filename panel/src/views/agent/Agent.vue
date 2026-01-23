@@ -19,6 +19,7 @@ import type {
 } from "@/types";
 import {usePermissions} from "@/composables/usePermissions";
 import {useWebSocket, type ProbeDataEvent} from "@/composables/useWebSocket";
+import {useAgentStatus} from "@/composables/useAgentStatus";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Chart from "@/components/Chart.vue"
@@ -116,13 +117,21 @@ const errors = reactive({
   networkInfo: null as string | null
 })
 
-// Computed properties for better organization
+// Agent status composable for consistent status logic
+const agentStatus = useAgentStatus();
+
+// Computed properties for agent status using shared composable
+const currentAgentStatus = computed(() => {
+  if (!state.agent.updated_at || loadingState.agent) return 'offline';
+  return agentStatus.getAgentStatus(state.agent);
+});
+
 const isOnline = computed(() => {
-  if (!state.agent.updated_at || loadingState.agent) return false;
-  const lastSeen = new Date(state.agent.updated_at);
-  const now = new Date();
-  const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
-  return diffMinutes <= 5; // Consider online if seen in last 5 minutes
+  return currentAgentStatus.value === 'online';
+});
+
+const isStale = computed(() => {
+  return currentAgentStatus.value === 'stale';
 });
 
 const cpuUsagePercent = computed(() => {
@@ -751,9 +760,9 @@ onMounted(async () => {
         :title="state.agent.name || 'Loading...'"
         :subtitle="state.agent.location || 'Agent Information'">
       <div class="d-flex flex-wrap gap-2">
-        <div class="status-badge" :class="isInitializing ? 'loading' : (isOnline ? 'online' : 'offline')">
-          <i :class="isInitializing ? 'bi bi-arrow-repeat spin-animation' : 'bi bi-circle-fill'"></i>
-          {{ isInitializing ? 'Loading...' : (isOnline ? 'Online' : 'Offline') }}
+        <div class="status-badge" :class="isInitializing ? 'loading' : currentAgentStatus">
+          <i :class="isInitializing ? 'bi bi-arrow-repeat spin-animation' : agentStatus.getStatusIcon(currentAgentStatus)"></i>
+          {{ isInitializing ? 'Loading...' : agentStatus.getStatusLabel(currentAgentStatus) }}
         </div>
         <!-- Live Data Indicator -->
         <div v-if="wsConnected" class="status-badge live" :class="{ 'pulse': liveUpdating }">
@@ -1477,6 +1486,11 @@ onMounted(async () => {
 .status-badge.online {
   background: #f0fdf4;
   color: #16a34a;
+}
+
+.status-badge.stale {
+  background: #fffbeb;
+  color: #d97706;
 }
 
 .status-badge.offline {
