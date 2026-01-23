@@ -181,8 +181,9 @@ async function changePassword() {
 </script>
 
 <template>
-  <Title title="Profile"></Title>
   <div class="container-fluid profile-page">
+    <Title title="Profile"></Title>
+    
     <div class="row justify-content-center">
       <div class="col-lg-8 col-xl-6">
         
