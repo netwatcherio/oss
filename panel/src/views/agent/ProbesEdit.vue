@@ -23,6 +23,7 @@ const state = reactive({
   copyDestAgents: [] as number[],
   copyMatchTargets: false,
   copySkipDuplicates: true,
+  copyBidirectional: false, // For agent probes: create reverse probes too
   copyLoading: false,
   copyResults: null as {
     created: number;
@@ -63,13 +64,22 @@ function formatDate(dateStr: string): string {
 
 // Copy modal functions
 function openCopyModal() {
-  // Pre-select general probes (non-built-in, non-server)
-  state.copySelectedProbes = generalProbes.value.map(p => p.id);
+  // Start with no probes selected - user must explicitly choose
+  state.copySelectedProbes = [];
   state.copyDestAgents = [];
   state.copyMatchTargets = false;
   state.copySkipDuplicates = true;
+  state.copyBidirectional = false;
   state.copyResults = null;
   state.showCopyModal = true;
+}
+
+function selectAllProbes() {
+  state.copySelectedProbes = generalProbes.value.map(p => p.id);
+}
+
+function deselectAllProbes() {
+  state.copySelectedProbes = [];
 }
 
 function closeCopyModal() {
@@ -359,6 +369,14 @@ const generalProbes = computed(() => {
     return true;
   });
 });
+
+// Check if any selected probes are AGENT type (for bidirectional option)
+const hasSelectedAgentProbes = computed(() => {
+  return state.copySelectedProbes.some(probeId => {
+    const probe = state.probes.find(p => p.id === probeId);
+    return probe?.type === 'AGENT';
+  });
+});
 </script>
 
 <template>
@@ -607,14 +625,13 @@ const generalProbes = computed(() => {
                   >
                     <i class="bi bi-info-circle"></i>
                   </button>
-                  <router-link
-                      :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${probe.id}/delete`"
+                  <button 
                       class="probe-action delete"
-                      title="Remove probe"
-                      @click.stop
+                      title="View & delete probe"
+                      @click.stop="openProbeDetails(probe)"
                   >
                     <i class="bi bi-trash"></i>
-                  </router-link>
+                  </button>
                 </div>
               </div>
             </div>
@@ -643,13 +660,6 @@ const generalProbes = computed(() => {
           </div>
           
           <div class="modal-body">
-            <!-- Status Badge -->
-            <div class="detail-section">
-              <div class="status-badge" :class="state.selectedProbe.enabled ? 'enabled' : 'disabled'">
-                <i :class="state.selectedProbe.enabled ? 'bi bi-check-circle-fill' : 'bi bi-pause-circle-fill'"></i>
-                {{ state.selectedProbe.enabled ? 'Enabled' : 'Disabled' }}
-              </div>
-            </div>
 
             <!-- Configuration Details -->
             <div class="detail-section">
@@ -838,11 +848,20 @@ const generalProbes = computed(() => {
               </div>
 
               <!-- Options -->
-              <div class="copy-options">
-                <label class="option-item">
-                  <input type="checkbox" v-model="state.copySkipDuplicates">
-                  <span>Skip probes that already exist on destination</span>
-                </label>
+              <div class="copy-options-wrapper">
+                <div v-if="hasSelectedAgentProbes" class="copy-options">
+                  <label class="option-item bidirectional-option">
+                    <input type="checkbox" v-model="state.copyBidirectional">
+                    <span>Create bidirectional probes (reverse probes from destination agents back to source)</span>
+                    <small class="option-hint">Only applies to Agent-to-Agent probes</small>
+                  </label>
+                </div>
+                <div class="copy-options">
+                  <label class="option-item">
+                    <input type="checkbox" v-model="state.copySkipDuplicates">
+                    <span>Skip probes that already exist on destination</span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -1864,6 +1883,12 @@ const generalProbes = computed(() => {
   font-size: 0.875rem;
 }
 
+.copy-options-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .copy-options {
   padding: 0.75rem;
   background: #f3f4f6;
@@ -1883,6 +1908,18 @@ const generalProbes = computed(() => {
   width: 16px;
   height: 16px;
   accent-color: #3b82f6;
+}
+
+.bidirectional-option {
+  flex-wrap: wrap;
+}
+
+.option-hint {
+  width: 100%;
+  margin-left: 24px;
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 0.125rem;
 }
 
 /* Copy Results */
@@ -1945,5 +1982,218 @@ const generalProbes = computed(() => {
 .spin {
   display: inline-block;
   animation: spin-animation 1s linear infinite;
+}
+
+/* Dark Mode Overrides */
+[data-theme="dark"] .modal-dialog {
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .modal-header {
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .modal-title {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .modal-subtitle {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .modal-body {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .modal-footer {
+  background: #0f172a !important;
+  border-top-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .selection-section {
+  background: #0f172a !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .section-label {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .selection-item {
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .selection-item:hover {
+  background: #334155 !important;
+}
+
+[data-theme="dark"] .selection-item.selected {
+  background: rgba(59, 130, 246, 0.2) !important;
+  border-color: rgba(59, 130, 246, 0.5) !important;
+}
+
+[data-theme="dark"] .item-type {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .item-target {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .item-info-secondary {
+  color: #64748b !important;
+}
+
+[data-theme="dark"] .option-row {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .option-description {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .probe-card {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="dark"] .probe-card:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .probe-card > div:first-child,
+[data-theme="dark"] .probe-header {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .probe-type {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .probe-description {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .section-title {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .target-pill {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .filters-section {
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+
+[data-theme="dark"] .stat-chip {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #e2e8f0 !important;
+}
+
+/* Dark Mode - Selection List Items */
+[data-theme="dark"] .selection-list {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .item-check i {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .selection-item.selected .item-check i {
+  color: #3b82f6 !important;
+}
+
+/* Dark Mode - Probe Details Modal */
+[data-theme="dark"] .detail-section {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .detail-label {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .detail-grid {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="dark"] .detail-key {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .detail-value {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .detail-value.mono {
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .targets-list {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .target-row {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .target-label-modal {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .target-value-modal {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .status-badge.enabled {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #34d399 !important;
+}
+
+[data-theme="dark"] .status-badge.disabled {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #f87171 !important;
+}
+
+[data-theme="dark"] .modal-hint {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .option-row label {
+  color: #e2e8f0 !important;
+}
+
+/* Dark Mode - Agent Names in Destination List */
+[data-theme="dark"] .item-name {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .item-secondary {
+  color: #94a3b8 !important;
+}
+
+/* Dark Mode - Copy Options (Bidirectional/Skip) */
+[data-theme="dark"] .copy-options {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme="dark"] .option-item {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .option-hint {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .empty-selection {
+  color: #64748b !important;
 }
 </style>

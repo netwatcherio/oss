@@ -108,6 +108,15 @@ const hasNetworkData = computed(() => {
   return state.networkInfo && state.networkInfo.public_address && !loadingState.networkInfo
 })
 
+// Interface/route data checks (with nil safety)
+const hasP11Interfaces = computed(() => {
+  return state.networkInfo?.interfaces && state.networkInfo.interfaces.length > 0
+})
+
+const hasP11Routes = computed(() => {
+  return state.networkInfo?.routes && state.networkInfo.routes.length > 0
+})
+
 // Error states
 const errors = reactive({
   agent: null as string | null,
@@ -678,7 +687,7 @@ onMounted(async () => {
       .then(res => {
         let pD = res as ProbeData
         state.networkInfo = pD.payload as NetInfoPayload
-        // P1.1: Trigger OUI lookups for interface MACs
+        // Trigger OUI lookups for interface MACs
         if (state.networkInfo?.interfaces) {
           state.networkInfo.interfaces.forEach(iface => {
             if (iface.mac) getVendorFromMac(iface.mac);
@@ -911,20 +920,19 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Active Probes -->
+      <!-- Probes -->
       <div class="stat-item glass" :class="{'loading': loadingState.probes}">
         <div class="stat-icon-large probes">
           <i class="bi bi-diagram-3"></i>
-          <span v-if="!loadingState.probes && totalProbesCount > 0" class="stat-badge">{{ probeStats.percentage }}%</span>
         </div>
         <div class="stat-content">
           <div class="stat-value">
             <span v-if="loadingState.probes" class="skeleton-text">-</span>
-            <span v-else>{{ activeProbesCount }}<small v-if="totalProbesCount">/{{ totalProbesCount }}</small></span>
+            <span v-else>{{ totalProbesCount }}</span>
           </div>
-          <div class="stat-label">Active Probes</div>
-          <div class="stat-breakdown" v-if="!loadingState.probes && probeStats.targets > 0">
-            <span>{{ probeStats.targets }} targets</span>
+          <div class="stat-label">Probes</div>
+          <div class="stat-breakdown" v-if="!loadingState.probes && state.targetGroups.length > 0">
+            <span>{{ state.targetGroups.length }} targets</span>
           </div>
         </div>
       </div>
@@ -970,7 +978,7 @@ onMounted(async () => {
             Monitoring Probes
           </h5>
           <span class="badge bg-primary" v-if="!loadingState.probes">
-            {{ activeProbesCount }}/{{ totalProbesCount }} Active ({{ probeStats.percentage }}%)
+            {{ totalProbesCount }} Probes
           </span>
           <span class="badge bg-secondary" v-else>
             <i class="bi bi-arrow-repeat spin-animation"></i> Loading
@@ -1022,9 +1030,6 @@ onMounted(async () => {
                 <div class="probe-types">
                   <span v-for="t in g.types" :key="t" class="probe-type-badge">
                     {{ t }} ({{ g.perType[t].count }})
-                  </span>
-                  <span class="probe-type-badge" :class="{'inactive': g.countEnabled === 0}">
-                    {{ g.countEnabled }}/{{ g.countProbes }} enabled
                   </span>
                 </div>
 
@@ -1366,19 +1371,23 @@ onMounted(async () => {
         </div>
 
 
-        <!-- Network Interfaces - Enhanced -->
-        <div class="info-card enhanced" :class="{'loading': loadingState.systemInfo}">
+        <!-- Network Interfaces - Consolidated (rich data preferred, fallback to SYSINFO) -->
+        <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo && loadingState.systemInfo}">
           <div class="card-header">
             <h5 class="card-title">
               <i class="bi bi-ethernet"></i>
               Network Interfaces
             </h5>
-            <span v-if="!loadingState.systemInfo && hasSystemData && state.systemInfo.hostInfo?.mac" class="badge bg-primary">
+            <span v-if="hasP11Interfaces" class="badge bg-success">
+              {{ state.networkInfo.interfaces.length }} interfaces
+            </span>
+            <span v-else-if="!loadingState.systemInfo && hasSystemData && state.systemInfo?.hostInfo?.mac" class="badge bg-primary">
               {{ Object.keys(state.systemInfo.hostInfo.mac).length }} detected
             </span>
           </div>
           <div class="card-content interfaces-content">
-            <div v-if="loadingState.systemInfo" class="interfaces-loading">
+            <!-- Loading State -->
+            <div v-if="loadingState.networkInfo && loadingState.systemInfo" class="interfaces-loading">
               <div v-for="i in 2" :key="`iface-skeleton-${i}`" class="interface-item skeleton">
                 <div class="interface-icon skeleton-box"></div>
                 <div class="interface-info">
@@ -1387,7 +1396,41 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
-            <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.mac" class="interfaces-list">
+            
+            <!-- Rich Interface Data (from NETINFO) -->
+            <div v-else-if="hasP11Interfaces" class="interfaces-list p11-interfaces">
+              <div 
+                v-for="iface in state.networkInfo.interfaces" 
+                :key="iface.name" 
+                class="interface-item p11"
+                :class="{ 'is-default': iface.is_default }"
+              >
+                <div class="interface-icon" :class="iface.type || 'unknown'">
+                  <i :class="getInterfaceIcon(iface.name)"></i>
+                </div>
+                <div class="interface-details">
+                  <div class="interface-header">
+                    <span class="interface-name">{{ iface.name }}</span>
+                    <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
+                    <span v-if="iface.type" class="badge bg-secondary ms-1">{{ iface.type }}</span>
+                  </div>
+                  <div v-if="iface.mac" class="interface-mac">
+                    <code>{{ iface.mac }}</code>
+                    <span class="vendor-name">{{ getVendorSync(iface.mac) }}</span>
+                  </div>
+                  <div v-if="iface.ipv4?.length" class="interface-ips">
+                    <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
+                  </div>
+                  <div v-if="iface.gateway" class="interface-gateway">
+                    <i class="bi bi-signpost-2"></i>
+                    Gateway: {{ iface.gateway }}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Legacy Fallback (from SYSINFO) -->
+            <div v-else-if="hasSystemData && state.systemInfo?.hostInfo?.mac" class="interfaces-list">
               <div 
                 v-for="(mac, iface) in state.systemInfo.hostInfo.mac" 
                 :key="iface" 
@@ -1411,6 +1454,8 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
+            
+            <!-- Empty State -->
             <div v-else class="empty-interfaces">
               <i class="bi bi-ethernet"></i>
               <span>No network interfaces detected</span>
@@ -1418,52 +1463,8 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- P1.1: Rich Network Interfaces (when available) -->
-        <div v-if="state.networkInfo?.interfaces && state.networkInfo.interfaces.length > 0" class="card glass">
-          <div class="card-header">
-            <h5>
-              <i class="bi bi-diagram-3"></i>
-              Network Interfaces (P1.1)
-            </h5>
-            <span class="badge bg-success">{{ state.networkInfo.interfaces.length }} interfaces</span>
-          </div>
-          <div class="card-content">
-            <div class="interfaces-list p11-interfaces">
-              <div 
-                v-for="iface in state.networkInfo.interfaces" 
-                :key="iface.name" 
-                class="interface-item p11"
-                :class="{ 'is-default': iface.is_default }"
-              >
-                <div class="interface-icon" :class="iface.type">
-                  <i :class="getInterfaceIcon(iface.name)"></i>
-                </div>
-                <div class="interface-details">
-                  <div class="interface-header">
-                    <span class="interface-name">{{ iface.name }}</span>
-                    <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
-                    <span class="badge bg-secondary ms-1">{{ iface.type }}</span>
-                  </div>
-                  <div v-if="iface.mac" class="interface-mac">
-                    <code>{{ iface.mac }}</code>
-                    <span class="vendor-name">{{ getVendorSync(iface.mac) }}</span>
-                  </div>
-                  <div v-if="iface.ipv4?.length" class="interface-ips">
-                    <i class="bi bi-hdd-network"></i>
-                    <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
-                  </div>
-                  <div v-if="iface.gateway" class="interface-gateway">
-                    <i class="bi bi-signpost-2"></i>
-                    Gateway: {{ iface.gateway }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- P1.1: Routing Table (when available) -->
-        <div v-if="state.networkInfo?.routes && state.networkInfo.routes.length > 0" class="card glass">
+        <!-- Routing Table -->
+        <div v-if="hasP11Routes" class="card glass">
           <div class="card-header">
             <h5>
               <i class="bi bi-signpost-split"></i>
@@ -2279,7 +2280,8 @@ onMounted(async () => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.625rem;
-  background: #f3f4f6;
+  background: var(--ip-chip-bg, #f3f4f6);
+  color: var(--ip-chip-color, #374151);
   border-radius: 999px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
@@ -2634,7 +2636,7 @@ onMounted(async () => {
   font-size: 1.5rem;
 }
 
-/* P1.1 Enhanced Interface Display */
+/* Enhanced Interface Display */
 .p11-interfaces .interface-item.p11 {
   padding: 0.875rem;
   border-radius: 0.5rem;
@@ -2688,10 +2690,12 @@ onMounted(async () => {
 /* Routing Table Styles */
 .routes-content {
   padding: 0;
+  overflow-x: auto;
 }
 
 .routes-table {
   width: 100%;
+  min-width: 400px;
   font-size: 0.8125rem;
   border-collapse: collapse;
 }
@@ -2729,6 +2733,63 @@ onMounted(async () => {
   color: #9ca3af;
   font-size: 0.75rem;
   background: rgba(0, 0, 0, 0.02);
+}
+
+/* Light Mode Improvements for Interface Display */
+.p11-interfaces .interface-item.p11 {
+  padding: 0.875rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.interface-item.p11.is-default {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(139, 92, 246, 0.06));
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.interface-name {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.interface-mac code {
+  color: #374151;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.vendor-name {
+  color: #6b7280;
+}
+
+.ip-badge {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.interface-gateway {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.routes-table th {
+  background: rgba(0, 0, 0, 0.03);
+  color: #4b5563;
+}
+
+.routes-table td {
+  color: #374151;
+}
+
+.routes-table code {
+  background: rgba(0, 0, 0, 0.04);
+  color: #1d4ed8;
 }
 
 /* Enhanced card styling */
@@ -3005,17 +3066,19 @@ onMounted(async () => {
 }
 
 :global([data-theme="dark"]) .ip-chip {
-  background: #374151;
-  color: #e5e7eb;
+  --ip-chip-bg: #374151;
+  --ip-chip-color: #e5e7eb;
+  background: #374151 !important;
+  color: #e5e7eb !important;
 }
 
 :global([data-theme="dark"]) .ip-chip:hover {
-  background: #4b5563;
+  background: #4b5563 !important;
 }
 
 :global([data-theme="dark"]) .ip-chip.copied {
-  background: #064e3b;
-  color: #34d399;
+  background: #064e3b !important;
+  color: #34d399 !important;
 }
 
 :global([data-theme="dark"]) .resource-meter.enhanced {
@@ -3196,5 +3259,67 @@ onMounted(async () => {
 
 [data-theme="dark"] .os-value small {
   color: #9ca3af !important;
+}
+
+/* Dark Mode Overrides for Interface Display */
+[data-theme="dark"] .p11-interfaces .interface-item.p11 {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .interface-item.p11.is-default {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.15)) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+}
+
+[data-theme="dark"] .interface-name {
+  color: #f3f4f6 !important;
+}
+
+[data-theme="dark"] .interface-mac code {
+  color: #d1d5db !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .vendor-name {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .interface-ips {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .ip-badge {
+  background: rgba(59, 130, 246, 0.25) !important;
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .interface-gateway {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .routes-table th {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #9ca3af !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .routes-table td {
+  color: #e5e7eb !important;
+  border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme="dark"] .routes-table tr.default-route {
+  background: rgba(59, 130, 246, 0.15) !important;
+}
+
+[data-theme="dark"] .routes-table code {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .routes-more {
+  color: #6b7280 !important;
+  background: rgba(255, 255, 255, 0.02) !important;
 }
 </style>
