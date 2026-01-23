@@ -16,6 +16,7 @@ import (
 	"netwatcher-controller/internal/database"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
+	"netwatcher-controller/internal/oui"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/scheduler"
 	"netwatcher-controller/web"
@@ -79,6 +80,15 @@ func main() {
 		log.Info("GeoIP not configured, lookups disabled")
 	}
 
+	// ---- OUI Store ----
+	ouiCachePath := getenv("OUI_CACHE_PATH", "/tmp/oui.txt")
+	ouiStore := oui.NewStore(ouiCachePath)
+	go func() {
+		if err := ouiStore.Load(); err != nil {
+			log.WithError(err).Warn("OUI database load failed, vendor lookups disabled")
+		}
+	}()
+
 	// ---- Cleanup Scheduler ----
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 	cleanupScheduler := scheduler.NewCleanupScheduler(db, ch, retentionConfig)
@@ -116,7 +126,7 @@ func main() {
 	probe.InitWorkers(ch, db)
 
 	// Routes (public + protected)
-	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore)
+	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore, ouiStore)
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })

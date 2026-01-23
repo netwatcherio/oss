@@ -682,3 +682,26 @@ export const AlertRuleService = {
         return data;
     },
 };
+
+/** ===== OUI (MAC Vendor) Lookup ===== */
+import type { OUIEntry } from "@/types";
+
+export const OUIService = {
+    /** Look up vendor for a single MAC address */
+    async lookup(mac: string): Promise<OUIEntry> {
+        const { data } = await request.get<OUIEntry>(`/lookup/oui/${encodeURIComponent(mac)}`);
+        return data;
+    },
+
+    /** Bulk lookup for multiple MAC addresses */
+    async lookupBulk(macs: string[]): Promise<{ results: OUIEntry[]; count: number }> {
+        const { data } = await request.post<{ results: OUIEntry[]; count: number }>('/lookup/oui', { macs });
+        return data;
+    },
+
+    /** Check if OUI database is loaded */
+    async status(): Promise<{ loaded: boolean; entry_count: number }> {
+        const { data } = await request.get<{ loaded: boolean; entry_count: number }>('/lookup/oui/status');
+        return data;
+    },
+};

@@ -30,7 +30,7 @@ import {since} from "@/time";
 import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
-import {AgentService, ProbeService, WorkspaceService, ProbeDataService} from "@/services/apiService";
+import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService} from "@/services/apiService";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 
 interface OrganizedProbe {
@@ -280,11 +280,37 @@ function updateSystemData(info: SysInfoPayload): SystemData {
   } as SystemData
 }
 
-function getVendorFromMac(macAddress: string) {
+// OUI vendor cache: MAC -> vendor name
+const ouiCache = reactive<Record<string, string>>({});
+
+async function getVendorFromMac(macAddress: string): Promise<string> {
+  if (!macAddress) return 'Unknown';
+  
   const normalizedMac = macAddress.replace(/[:-]/g, '').toUpperCase();
-  const oui = normalizedMac.substring(0, 6);
-  const entry = state.ouiList.find(item => item.Assignment == oui);
-  return entry ? (entry as OUIEntry)["Organization Name"] : "Unknown Vendor";
+  
+  // Check cache first
+  if (ouiCache[normalizedMac]) {
+    return ouiCache[normalizedMac];
+  }
+  
+  // Mark as loading
+  ouiCache[normalizedMac] = 'Looking up...';
+  
+  try {
+    const result = await OUIService.lookup(macAddress);
+    ouiCache[normalizedMac] = result.found ? result.vendor : 'Unknown Vendor';
+  } catch (err) {
+    ouiCache[normalizedMac] = 'Unknown Vendor';
+  }
+  
+  return ouiCache[normalizedMac];
+}
+
+// Computed for synchronous template access (uses cache)
+function getVendorSync(macAddress: string): string {
+  if (!macAddress) return 'Unknown';
+  const normalizedMac = macAddress.replace(/[:-]/g, '').toUpperCase();
+  return ouiCache[normalizedMac] || 'Loading...';
 }
 
 function bytesToString(bytes: number, si: boolean = true, dp: number = 2): string {
@@ -508,7 +534,6 @@ let state = reactive({
   systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
   hasData: false,
-  ouiList: [] as OUIEntry[]
 })
 
 // Permissions based on user's role in this workspace
@@ -605,11 +630,10 @@ onMounted(async () => {
   let workspaceID = router.currentRoute.value.params["wID"] as string
   if (!agentID || !workspaceID) return
 
-  // Load OUI list early (non-blocking)
-  fetch('/ouiList.json')
-      .then(response => response.json())
-      .then(data => state.ouiList = data as OUIEntry[])
-      .catch(err => console.error('Failed to load OUI list:', err));
+  // Load OUI vendor info for system MACs (non-blocking)
+  if (state.systemInfo?.hostInfo?.mac) {
+    state.systemInfo.hostInfo.mac.forEach(mac => getVendorFromMac(mac));
+  }
 
   // Load workspace and agent info first (required for page title)
   try {
@@ -637,6 +661,10 @@ onMounted(async () => {
         state.systemInfo = pD.payload as SysInfoPayload
         state.systemData = updateSystemData(state.systemInfo)
         state.hasData = true
+        // Trigger OUI lookups for MACs
+        if (state.systemInfo?.hostInfo?.mac) {
+          state.systemInfo.hostInfo.mac.forEach(mac => getVendorFromMac(mac));
+        }
       })
       .catch(err => {
         console.error('Failed to load system info:', err);
@@ -650,6 +678,12 @@ onMounted(async () => {
       .then(res => {
         let pD = res as ProbeData
         state.networkInfo = pD.payload as NetInfoPayload
+        // P1.1: Trigger OUI lookups for interface MACs
+        if (state.networkInfo?.interfaces) {
+          state.networkInfo.interfaces.forEach(iface => {
+            if (iface.mac) getVendorFromMac(iface.mac);
+          });
+        }
       })
       .catch(err => {
         console.error('Failed to load network info:', err);
@@ -1369,7 +1403,7 @@ onMounted(async () => {
                   <div class="interface-name">{{ iface }}</div>
                   <div class="interface-mac">
                     <code>{{ mac }}</code>
-                    <span class="vendor-name">{{ getVendorFromMac(mac) }}</span>
+                    <span class="vendor-name">{{ getVendorSync(mac) }}</span>
                   </div>
                 </div>
                 <div class="copy-indicator">
@@ -1380,6 +1414,84 @@ onMounted(async () => {
             <div v-else class="empty-interfaces">
               <i class="bi bi-ethernet"></i>
               <span>No network interfaces detected</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- P1.1: Rich Network Interfaces (when available) -->
+        <div v-if="state.networkInfo?.interfaces && state.networkInfo.interfaces.length > 0" class="card glass">
+          <div class="card-header">
+            <h5>
+              <i class="bi bi-diagram-3"></i>
+              Network Interfaces (P1.1)
+            </h5>
+            <span class="badge bg-success">{{ state.networkInfo.interfaces.length }} interfaces</span>
+          </div>
+          <div class="card-content">
+            <div class="interfaces-list p11-interfaces">
+              <div 
+                v-for="iface in state.networkInfo.interfaces" 
+                :key="iface.name" 
+                class="interface-item p11"
+                :class="{ 'is-default': iface.is_default }"
+              >
+                <div class="interface-icon" :class="iface.type">
+                  <i :class="getInterfaceIcon(iface.name)"></i>
+                </div>
+                <div class="interface-details">
+                  <div class="interface-header">
+                    <span class="interface-name">{{ iface.name }}</span>
+                    <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
+                    <span class="badge bg-secondary ms-1">{{ iface.type }}</span>
+                  </div>
+                  <div v-if="iface.mac" class="interface-mac">
+                    <code>{{ iface.mac }}</code>
+                    <span class="vendor-name">{{ getVendorSync(iface.mac) }}</span>
+                  </div>
+                  <div v-if="iface.ipv4?.length" class="interface-ips">
+                    <i class="bi bi-hdd-network"></i>
+                    <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
+                  </div>
+                  <div v-if="iface.gateway" class="interface-gateway">
+                    <i class="bi bi-signpost-2"></i>
+                    Gateway: {{ iface.gateway }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- P1.1: Routing Table (when available) -->
+        <div v-if="state.networkInfo?.routes && state.networkInfo.routes.length > 0" class="card glass">
+          <div class="card-header">
+            <h5>
+              <i class="bi bi-signpost-split"></i>
+              Routing Table
+            </h5>
+            <span class="badge bg-info">{{ state.networkInfo.routes.length }} routes</span>
+          </div>
+          <div class="card-content routes-content">
+            <table class="routes-table">
+              <thead>
+                <tr>
+                  <th>Destination</th>
+                  <th>Gateway</th>
+                  <th>Interface</th>
+                  <th>Metric</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(route, idx) in state.networkInfo.routes.slice(0, 10)" :key="idx" :class="{ 'default-route': route.destination === '0.0.0.0/0' }">
+                  <td><code>{{ route.destination }}</code></td>
+                  <td>{{ route.gateway || 'on-link' }}</td>
+                  <td>{{ route.interface }}</td>
+                  <td>{{ route.metric }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="state.networkInfo.routes.length > 10" class="routes-more">
+              +{{ state.networkInfo.routes.length - 10 }} more routes
             </div>
           </div>
         </div>
@@ -2520,6 +2632,103 @@ onMounted(async () => {
 
 .empty-interfaces i {
   font-size: 1.5rem;
+}
+
+/* P1.1 Enhanced Interface Display */
+.p11-interfaces .interface-item.p11 {
+  padding: 0.875rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.interface-item.p11.is-default {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.interface-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.interface-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.interface-ips {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.ip-badge {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-family: monospace;
+}
+
+.interface-gateway {
+  font-size: 0.75rem;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Routing Table Styles */
+.routes-content {
+  padding: 0;
+}
+
+.routes-table {
+  width: 100%;
+  font-size: 0.8125rem;
+  border-collapse: collapse;
+}
+
+.routes-table th,
+.routes-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.routes-table th {
+  background: rgba(0, 0, 0, 0.02);
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.routes-table tr.default-route {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.routes-table code {
+  background: rgba(0, 0, 0, 0.03);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.routes-more {
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 /* Enhanced card styling */

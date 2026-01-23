@@ -26,19 +26,20 @@ This document outlines the planned features, improvements, and priorities for Ne
 Focus: Production-readiness and UX improvements
 
 ### P1.1 Network Interface Selection
-**Priority: High** | **Effort: Medium**
+**Priority: High** | **Effort: Medium** | **Status: Complete** ✅
 
 Enhanced network interface detection and probe-level binding:
 
-- [ ] **Agent Interface Discovery** - Enumerate all available network interfaces with metadata:
+- [x] **Agent Interface Discovery** - Enumerate all available network interfaces with metadata:
   - Name, IP addresses (v4/v6), MAC address, gateway, type (ethernet, wifi, loopback)
   - Routing table entries per interface
+- [x] **Cross-Platform Route Discovery** - Windows (PowerShell/netsh), Linux (/proc/net/route, ip route), macOS (netstat)
+- [x] **Backward Compatibility** - `NormalizeFromLegacy()` converts old agent data to new format
+- [x] **OUI Lookup** - Backend API for MAC vendor identification using IEEE database
+- [x] **UI Display** - Panel shows interfaces, routes, and vendor names on agent detail page
 - [ ] **Probe Interface Binding** - New `interface` field on probes allowing explicit interface selection
-- [ ] **Default Behavior** - If not specified, use system default route (current behavior)
 - [ ] **Multi-WAN Support** - Enable monitoring over specific ISP links
-- [ ] **UI Controls** - Interface selector dropdown in probe creation/edit forms
 - [ ] **Validation** - Verify interface exists on agent before probe execution
-- [ ] **Backward Compatibility** - Use `NormalizeFromLegacy()` pattern (see P1.6) to convert old agent data
 
 **Use Cases:**
 - Servers with multiple NICs (management vs production)

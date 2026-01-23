@@ -25,6 +25,7 @@ var (
 	ErrNonceRequired   = errors.New("signature and nonce required")
 	ErrSignatureFailed = errors.New("signature verification failed")
 	ErrInvalidPSK      = errors.New("invalid psk")
+	ErrAgentDeleted    = errors.New("agent deleted") // Agent was soft-deleted from panel
 )
 
 // -------------------- Agent (updated to your new struct) --------------------
@@ -366,7 +367,13 @@ func ConsumePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pin
 // -------------------- PSK operations --------------------
 
 // AuthenticateWithPSK verifies the provided plaintext PSK against the stored bcrypt hash.
+// Returns ErrAgentDeleted if the agent was soft-deleted (should trigger 410 Gone response).
 func AuthenticateWithPSK(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, psk string) (*Agent, error) {
+	// First check if agent exists but is soft-deleted
+	if deleted, err := IsAgentSoftDeleted(ctx, db, workspaceID, agentID); err == nil && deleted {
+		return nil, ErrAgentDeleted
+	}
+
 	a, err := GetAgentByWorkspaceAndID(ctx, db, workspaceID, agentID)
 	if err != nil {
 		return nil, err
@@ -378,6 +385,23 @@ func AuthenticateWithPSK(ctx context.Context, db *gorm.DB, workspaceID, agentID 
 		return nil, ErrInvalidPSK
 	}
 	return a, nil
+}
+
+// IsAgentSoftDeleted checks if an agent exists but has been soft-deleted.
+// Uses Unscoped to find agents that would normally be hidden by GORM's soft-delete filter.
+func IsAgentSoftDeleted(ctx context.Context, db *gorm.DB, workspaceID, agentID uint) (bool, error) {
+	var a Agent
+	err := db.WithContext(ctx).
+		Unscoped().
+		Where("workspace_id = ? AND id = ? AND deleted_at IS NOT NULL", workspaceID, agentID).
+		First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil // Not soft-deleted (or doesn't exist at all)
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil // Found a soft-deleted record
 }
 
 // RotatePSK creates a new PSK for an agent (admin/server action). Returns plaintext once.

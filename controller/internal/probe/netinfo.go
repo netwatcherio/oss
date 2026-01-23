@@ -44,15 +44,42 @@ type GeoInfo struct {
 	ReverseDNS  string  `json:"reverse_dns,omitempty" bson:"reverse_dns,omitempty"`
 }
 
+// InterfaceInfo contains detailed information about a network interface (P1.1).
+type InterfaceInfo struct {
+	Name      string   `json:"name" bson:"name"`
+	Index     int      `json:"index" bson:"index"`
+	Type      string   `json:"type" bson:"type"` // ethernet, wifi, loopback, vpn, etc.
+	MAC       string   `json:"mac,omitempty" bson:"mac,omitempty"`
+	MTU       int      `json:"mtu" bson:"mtu"`
+	Flags     []string `json:"flags,omitempty" bson:"flags,omitempty"`
+	IPv4      []string `json:"ipv4,omitempty" bson:"ipv4,omitempty"`
+	IPv6      []string `json:"ipv6,omitempty" bson:"ipv6,omitempty"`
+	Gateway   string   `json:"gateway,omitempty" bson:"gateway,omitempty"`
+	IsDefault bool     `json:"is_default" bson:"is_default"`
+}
+
+// RouteEntry represents a single routing table entry (P1.1).
+type RouteEntry struct {
+	Destination string `json:"destination" bson:"destination"`
+	Gateway     string `json:"gateway" bson:"gateway"`
+	Interface   string `json:"interface" bson:"interface"`
+	Metric      int    `json:"metric" bson:"metric"`
+	Flags       string `json:"flags,omitempty" bson:"flags,omitempty"`
+}
+
 // netInfoPayload handles both old and new agent formats.
 // Old agents send: LocalAddress, DefaultGateway, PublicAddress, InternetProvider, Lat, Long
-// New agents send: same + Geo (rich location data) + Source
+// New agents send: same + Geo + Source + Interfaces + Routes (P1.1)
 // The struct uses omitempty so both formats unmarshal correctly.
 type netInfoPayload struct {
 	// Core network info (always present)
 	LocalAddress   string `json:"local_address" bson:"local_address"`
 	DefaultGateway string `json:"default_gateway" bson:"default_gateway"`
 	PublicAddress  string `json:"public_address" bson:"public_address"`
+
+	// P1.1: Rich interface and route data (optional, new agents only)
+	Interfaces []InterfaceInfo `json:"interfaces,omitempty" bson:"interfaces,omitempty"`
+	Routes     []RouteEntry    `json:"routes,omitempty" bson:"routes,omitempty"`
 
 	// New: Rich geographic info (optional, new agents only)
 	Geo *GeoInfo `json:"geo,omitempty" bson:"geo,omitempty"`
@@ -104,30 +131,39 @@ func (p *netInfoPayload) HasRichGeoData() bool {
 	return p.Geo != nil
 }
 
-// NormalizeFromLegacy populates the Geo field from legacy fields if not already set.
+// NormalizeFromLegacy populates the Geo and Interfaces fields from legacy fields if not already set.
 // This allows old format data to be converted to the new format when reading from DB.
 func (p *netInfoPayload) NormalizeFromLegacy() {
-	if p.Geo != nil {
-		return // Already has rich data
-	}
+	// Populate Geo if missing
+	if p.Geo == nil {
+		p.Geo = &GeoInfo{
+			ISP: p.InternetProvider,
+		}
 
-	// Create Geo from legacy fields
-	p.Geo = &GeoInfo{
-		ISP: p.InternetProvider,
-	}
-
-	// Parse lat/long from legacy string format
-	if p.Lat != "" {
-		var lat float64
-		if _, err := fmt.Sscanf(p.Lat, "%f", &lat); err == nil {
-			p.Geo.Latitude = lat
+		// Parse lat/long from legacy string format
+		if p.Lat != "" {
+			var lat float64
+			if _, err := fmt.Sscanf(p.Lat, "%f", &lat); err == nil {
+				p.Geo.Latitude = lat
+			}
+		}
+		if p.Long != "" {
+			var lon float64
+			if _, err := fmt.Sscanf(p.Long, "%f", &lon); err == nil {
+				p.Geo.Longitude = lon
+			}
 		}
 	}
-	if p.Long != "" {
-		var lon float64
-		if _, err := fmt.Sscanf(p.Long, "%f", &lon); err == nil {
-			p.Geo.Longitude = lon
-		}
+
+	// Populate Interfaces if missing (P1.1 backward compat)
+	if len(p.Interfaces) == 0 && p.LocalAddress != "" {
+		p.Interfaces = []InterfaceInfo{{
+			Name:      "default",
+			IPv4:      []string{p.LocalAddress},
+			Gateway:   p.DefaultGateway,
+			IsDefault: true,
+			Type:      "unknown",
+		}}
 	}
 
 	// Mark as converted

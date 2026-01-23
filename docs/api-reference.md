@@ -899,6 +899,74 @@ Check which GeoIP databases are loaded.
 
 ---
 
+## OUI Lookup Endpoints
+
+MAC address vendor (OUI) lookup using the IEEE database.
+
+### `GET /lookup/oui/{mac}`
+
+Look up the vendor for a MAC address.
+
+**Path Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mac` | string | Yes | MAC address (any format) |
+
+**Supported MAC Formats:**
+- `00:1C:42:XX:XX:XX`
+- `00-1C-42-XX-XX-XX`
+- `001C42XXXXXX`
+
+**Response:**
+```json
+{
+  "mac": "00:1C:42:AB:CD:EF",
+  "oui": "00-1C-42",
+  "vendor": "Parallels, Inc.",
+  "found": true
+}
+```
+
+---
+
+### `POST /lookup/oui`
+
+Bulk MAC vendor lookup (maximum 100 per request).
+
+**Request Body:**
+```json
+{
+  "macs": ["00:1C:42:AB:CD:EF", "00:00:5E:00:01:01"]
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    { "mac": "00:1C:42:AB:CD:EF", "oui": "00-1C-42", "vendor": "Parallels, Inc.", "found": true },
+    { "mac": "00:00:5E:00:01:01", "oui": "00-00-5E", "vendor": "ICANN, IANA Department", "found": true }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### `GET /lookup/oui/status`
+
+Check if the OUI database is loaded.
+
+**Response:**
+```json
+{
+  "loaded": true,
+  "entry_count": 35000
+}
+```
+
+---
+
 ## WHOIS Endpoints
 
 WHOIS lookup for IP addresses and domain names.

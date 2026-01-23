@@ -7,6 +7,7 @@ import (
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/limits"
+	"netwatcher-controller/internal/oui"
 
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
@@ -14,7 +15,7 @@ import (
 )
 
 // RegisterRoutes mounts all Iris routes using your internal/* packages.
-func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store) {
+func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store) {
 	// Load limits configuration from environment
 	limitsConfig := limits.LoadFromEnv()
 
@@ -48,6 +49,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelGeoIP(api, geoStore, ch)  // /geoip/*
 	panelWhois(api, ch)            // /whois/*
 	panelLookup(api, geoStore, ch) // /lookup/*
+	panelOUI(api, ouiStore)        // /lookup/oui/*
 	panelAlerts(api, db)           // /alerts/* and /workspaces/{id}/alert-rules/*
 
 	// Admin panel routes (requires SITE_ADMIN role)

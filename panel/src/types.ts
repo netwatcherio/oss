@@ -436,21 +436,72 @@ export interface ProbeDataRequest {
     recent: boolean;
 }
 
+// P1.1: Network Interface Info
+export interface InterfaceInfo {
+    name: string;
+    index: number;
+    type: string;  // ethernet, wifi, loopback, vpn, tunnel, etc.
+    mac?: string;
+    mtu: number;
+    flags?: string[];
+    ipv4?: string[];  // CIDRs like "10.0.0.2/24"
+    ipv6?: string[];
+    gateway?: string;
+    is_default: boolean;
+}
+
+// P1.1: Routing Table Entry
+export interface RouteEntry {
+    destination: string;  // CIDR like "0.0.0.0/0"
+    gateway: string;
+    interface: string;
+    metric: number;
+    flags?: string;
+}
+
+// P1.1: Geographic and network info
+export interface GeoInfo {
+    city?: string;
+    region?: string;
+    country?: string;
+    country_code?: string;
+    latitude?: number;
+    longitude?: number;
+    asn?: number;
+    asn_org?: string;
+    isp?: string;
+    reverse_dns?: string;
+}
+
 export interface NetInfoPayload {
+    // Core network info (always present)
     local_address: string;
     default_gateway: string;
     public_address: string;
-    internet_provider: string;
-    lat: string;
-    long: string;
+
+    // P1.1: Rich interface and route data
+    interfaces?: InterfaceInfo[];
+    routes?: RouteEntry[];
+
+    // P1.1: Rich geographic info
+    geo?: GeoInfo;
+
+    // Legacy fields (for backward compatibility)
+    internet_provider?: string;
+    lat?: string;
+    long?: string;
+
+    // Metadata
+    source?: string;  // "controller" or "speedtest"
     timestamp: string; // ISO 8601 timestamp
 }
 
+// OUI lookup result from backend API
 export interface OUIEntry {
-    Registry: string;
-    Assignment: string;
-    "Organization Name": string;
-    "Organization Address": string;
+    mac: string;
+    oui: string;
+    vendor: string;
+    found: boolean;
 }
 
 export interface SysInfoPayload {

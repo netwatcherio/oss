@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"netwatcher-controller/internal/agent"
 	"time"
@@ -21,7 +22,7 @@ type agentLoginRequest struct {
 }
 
 type agentLoginResponse struct {
-	Status string       `json:"status"`          // "ok" | "bootstrapped"
+	Status string       `json:"status"`          // "ok" | "bootstrapped" | "deleted"
 	PSK    string       `json:"psk,omitempty"`   // only on bootstrap
 	Agent  *agent.Agent `json:"agent,omitempty"` // convenience
 	Error  string       `json:"error,omitempty"` // on failure
@@ -54,6 +55,13 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 		if req.PSK != "" {
 			a, err := agent.AuthenticateWithPSK(ctx, db, req.WorkspaceID, req.AgentID, req.PSK)
 			if err != nil {
+				// Check if agent was deleted - return 410 Gone to signal permanent removal
+				if errors.Is(err, agent.ErrAgentDeleted) {
+					log.Infof("Agent %d/%d attempted login after deletion - returning 410", req.WorkspaceID, req.AgentID)
+					ctx.StatusCode(http.StatusGone) // 410 Gone
+					_ = ctx.JSON(agentLoginResponse{Status: "deleted", Error: "agent_deleted"})
+					return
+				}
 				ctx.StatusCode(http.StatusUnauthorized)
 				_ = ctx.JSON(agentLoginResponse{Error: "invalid_psk"})
 				return

@@ -60,6 +60,12 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 
 		a, err := agent.AuthenticateWithPSK(ctx, db, uint(wsID64), uint(agID64), psk)
 		if err != nil {
+			// Check if agent was deleted - return proper error to signal deactivation
+			if errors.Is(err, agent.ErrAgentDeleted) {
+				log.Infof("WS: Agent %d/%d attempted connect after deletion", wsID64, agID64)
+				ctx.StatusCode(http.StatusGone) // 410 Gone
+				return errors.New("agent_deleted: agent has been removed from workspace")
+			}
 			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid psk")
 		}
@@ -129,10 +135,29 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				aid, _ := ctx.Values().GetUint("agent_id")
 				wsid, _ := ctx.Values().GetUint("workspace_id")
 				log.Infof("[%s] connected to namespace [%s] (agent=%d ws=%d)", nsConn, msg.Namespace, aid, wsid)
+
+				// Register with AgentHub for targeted broadcasts (e.g., deactivation)
+				GetAgentHub().RegisterAgent(aid, nsConn)
+
 				return nil
 			},
 			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				log.Infof("[%s] disconnected from namespace [%s]", nsConn, msg.Namespace)
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, _ := ctx.Values().GetUint("agent_id")
+
+				// Unregister from AgentHub
+				GetAgentHub().UnregisterAgent(aid)
+
+				log.Infof("[%s] disconnected from namespace [%s] (agent=%d)", nsConn, msg.Namespace, aid)
+				return nil
+			},
+
+			// Deactivate handler - sent when agent is deleted from panel
+			// Agent receives this and should clean up and exit
+			"deactivate": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				// This is sent TO the agent, not FROM the agent
+				// No action needed on controller side for incoming deactivate messages
+				log.Debugf("[%s] received deactivate ack", nsConn)
 				return nil
 			},
 

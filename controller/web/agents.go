@@ -14,6 +14,7 @@ import (
 	"netwatcher-controller/internal/agent"
 
 	"github.com/kataras/iris/v12"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -184,6 +185,13 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 	// DELETE /workspaces/{id}/agents/{agentID} - requires CanManage (ADMIN+)
 	aid.Delete("/", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")
+
+		// Send deactivation message to connected agent BEFORE deletion
+		// This ensures the agent receives the message while still authenticated
+		if GetAgentHub().DeactivateAgent(aID, "deleted") {
+			log.Infof("Sent deactivation to connected agent %d before deletion", aID)
+		}
+
 		if err := agent.DeleteAgent(ctx.Request().Context(), db, aID); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
