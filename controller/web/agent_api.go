@@ -75,7 +75,21 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 	// GET /agent/api/whoami - Returns the agent's public IP as seen by the controller
 	// This allows agents to discover their public IP without external services.
 	agentAPI.Get("/whoami", func(ctx iris.Context) {
+		// Debug logging for header diagnosis
+		remoteAddr := ctx.RemoteAddr()
+		xForwardedFor := ctx.GetHeader("X-Forwarded-For")
+		xRealIP := ctx.GetHeader("X-Real-IP")
+		cfConnectingIP := ctx.GetHeader("CF-Connecting-IP")
+
+		log.WithFields(log.Fields{
+			"remote_addr":      remoteAddr,
+			"x_forwarded_for":  xForwardedFor,
+			"x_real_ip":        xRealIP,
+			"cf_connecting_ip": cfConnectingIP,
+		}).Debug("whoami request headers")
+
 		clientIP := lookup.GetClientIP(ctx)
+		log.WithField("resolved_ip", clientIP).Debug("resolved client IP")
 
 		// Quick response with just IP (minimal latency)
 		if ctx.URLParamExists("quick") {

@@ -91,6 +91,56 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 		})
 	})
 
+	// PUT /auth/me/password - change current user's password
+	auth.Put("/me/password", JWTMiddleware(db), func(ctx iris.Context) {
+		userVal := ctx.Values().Get("user")
+		if userVal == nil {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		user, ok := userVal.(*users.User)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
+			return
+		}
+
+		var body struct {
+			OldPassword string `json:"old_password"`
+			NewPassword string `json:"new_password"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
+			return
+		}
+
+		if body.OldPassword == "" || body.NewPassword == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "old_password and new_password are required"})
+			return
+		}
+
+		err := users.ChangePassword(ctx.Request().Context(), db, user.ID, users.ChangePasswordInput{
+			OldPassword: body.OldPassword,
+			NewPassword: body.NewPassword,
+		})
+		if err != nil {
+			if err == users.ErrBadPassword {
+				ctx.StatusCode(http.StatusUnauthorized)
+				_ = ctx.JSON(iris.Map{"error": "incorrect current password"})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{"success": true})
+	})
+
 	// POST /auth/login
 	auth.Post("/login", func(ctx iris.Context) {
 		var body struct {

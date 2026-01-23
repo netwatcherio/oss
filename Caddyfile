@@ -1,6 +1,14 @@
-# You can keep a shared snippet for the proxy headers
-(common_cf_headers) {
-	# Trust Cloudflare-provided client IP if you’re truly behind CF
+# Standard headers - Caddy automatically handles X-Forwarded-For, X-Forwarded-Proto, etc.
+# We just add X-Real-IP for compatibility with some applications
+(standard_headers) {
+	# Caddy automatically handles X-Forwarded-For correctly
+	# Just set X-Real-IP for apps that prefer that header
+	header_up X-Real-IP {http.request.remote.host}
+}
+
+# Cloudflare-specific headers - use when behind Cloudflare
+# This overrides the automatic forwarding with Cloudflare's trusted headers
+(cloudflare_headers) {
 	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
 	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
 }
@@ -14,14 +22,14 @@
 	
 	# Handle WebSocket connections with proper header forwarding
 	reverse_proxy @ws {$CONTROLLER_UPSTREAM} {
-		import common_cf_headers
+		import standard_headers
 		header_up Connection {http.request.header.Connection}
 		header_up Upgrade {http.request.header.Upgrade}
 	}
 	
 	# Handle regular HTTP requests
 	reverse_proxy {$CONTROLLER_UPSTREAM} {
-		import common_cf_headers
+		import standard_headers
 	}
 }
 
@@ -32,6 +40,6 @@
 		header Upgrade websocket
 	}
 	reverse_proxy {$PANEL_UPSTREAM} {
-		import common_cf_headers
+		import standard_headers
 	}
 }
