@@ -2,10 +2,12 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
 
@@ -13,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelProbes(api iris.Party, db *gorm.DB) {
+func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 	base := api.Party("/workspaces/{id:uint}/agents/{agentID:uint}/probes")
 	wsStore := workspace.NewStore(db)
 
@@ -34,12 +36,26 @@ func panelProbes(api iris.Party, db *gorm.DB) {
 
 	// POST /workspaces/{id}/agents/{agentID}/probes - requires CanEdit (USER+)
 	base.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
+		aID := uintParam(ctx, "agentID")
 		var input probe.CreateInput
 
 		if err := ctx.ReadJSON(&input); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
 			return
 		}
+
+		// Check agent probe limit
+		if err := limits.CanAddProbe(ctx.Request().Context(), db, limitsConfig, aID); err != nil {
+			if errors.Is(err, limits.ErrProbeLimitReached) {
+				ctx.StatusCode(http.StatusForbidden)
+				_ = ctx.JSON(iris.Map{"error": err.Error()})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
 		p, err := probe.Create(ctx.Request().Context(), db, input)
 		if err != nil {
 			ctx.StatusCode(http.StatusBadRequest)

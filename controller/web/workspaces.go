@@ -2,6 +2,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -9,13 +10,14 @@ import (
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/email"
+	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/workspace"
 
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
 )
 
-func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore) {
+func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, limitsConfig *limits.Config) {
 	wsParty := api.Party("/workspaces")
 	store := workspace.NewStore(db)
 
@@ -213,6 +215,32 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore) 
 			ctx.StatusCode(http.StatusBadRequest)
 			_ = ctx.JSON(iris.Map{"error": "invalid json"})
 			return
+		}
+
+		// Check workspace member limit
+		if err := limits.CanAddMember(ctx.Request().Context(), db, limitsConfig, wsIDv); err != nil {
+			if errors.Is(err, limits.ErrMemberLimitReached) {
+				ctx.StatusCode(http.StatusForbidden)
+				_ = ctx.JSON(iris.Map{"error": err.Error()})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// Check if the user being added has reached their workspace membership limit
+		if body.UserID != 0 {
+			if err := limits.CanJoinWorkspace(ctx.Request().Context(), db, limitsConfig, body.UserID); err != nil {
+				if errors.Is(err, limits.ErrWorkspaceLimitReached) {
+					ctx.StatusCode(http.StatusForbidden)
+					_ = ctx.JSON(iris.Map{"error": err.Error()})
+					return
+				}
+				ctx.StatusCode(http.StatusInternalServerError)
+				_ = ctx.JSON(iris.Map{"error": err.Error()})
+				return
+			}
 		}
 
 		// If only email provided (no userId), use invite flow

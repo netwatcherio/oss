@@ -4,7 +4,9 @@ package web
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
+	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
 	"time"
@@ -15,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
+func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.Config) {
 	ws := api.Party("/workspaces/{id:uint}")
 	wsStore := workspace.NewStore(db)
 
@@ -60,6 +62,19 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB) {
 			d := time.Duration(body.PinTTLSeconds) * time.Second
 			ttl = &d
 		}
+
+		// Check workspace agent limit
+		if err := limits.CanAddAgent(ctx.Request().Context(), db, limitsConfig, wsID); err != nil {
+			if errors.Is(err, limits.ErrAgentLimitReached) {
+				ctx.StatusCode(http.StatusForbidden)
+				_ = ctx.JSON(iris.Map{"error": err.Error()})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
 		out, err := agent.CreateAgent(ctx.Request().Context(), db, agent.CreateInput{
 			WorkspaceID:      wsID,
 			Name:             body.Name,

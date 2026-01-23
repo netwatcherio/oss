@@ -6,6 +6,7 @@ import (
 
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
+	"netwatcher-controller/internal/limits"
 
 	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
@@ -14,6 +15,9 @@ import (
 
 // RegisterRoutes mounts all Iris routes using your internal/* packages.
 func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store) {
+	// Load limits configuration from environment
+	limitsConfig := limits.LoadFromEnv()
+
 	// ----- Public (no auth) -----
 	registerAuthRoutes(app, db, emailStore) // /auth/*
 	agentAuth(app, db)                      // /agent
@@ -33,9 +37,9 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	api := app.Party("/")
 	api.Use(JWTMiddleware(db))
 
-	panelWorkspaces(api, db, emailStore) // /workspaces/*
-	panelProbes(api, db)                 // /workspaces/{id}/agents/{agentID}/probes/*
-	panelAgents(api, db, ch)
+	panelWorkspaces(api, db, emailStore, limitsConfig) // /workspaces/*
+	panelProbes(api, db, limitsConfig)                 // /workspaces/{id}/agents/{agentID}/probes/*
+	panelAgents(api, db, ch, limitsConfig)
 	panelProbeData(api, db, ch)
 	panelSpeedtest(api, db, ch)    // /workspaces/{id}/agents/{agentID}/speedtest-*
 	panelGeoIP(api, geoStore, ch)  // /geoip/*

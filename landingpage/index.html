@@ -57,8 +57,11 @@
                 <a href="#get-started" class="btn btn-primary btn-lg">
                     <i class="bi bi-rocket-takeoff"></i> Deploy Now
                 </a>
+                <a href="https://app.netwatcher.io" class="btn btn-outline btn-lg" target="_blank">
+                    <i class="bi bi-box-arrow-up-right"></i> Try Live Demo
+                </a>
                 <a href="demo.html" class="btn btn-outline btn-lg">
-                    <i class="bi bi-play-circle"></i> See Demo
+                    <i class="bi bi-play-circle"></i> See Screenshots
                 </a>
             </div>
             <div class="hero-stats">
@@ -279,7 +282,8 @@
                     <h3>Core Polish</h3>
                     <ul class="roadmap-items">
                         <li><i class="bi bi-ethernet"></i> Network Interface Selection</li>
-                        <li class="completed-item"><i class="bi bi-check-circle-fill"></i> MOS Score (VoIP Quality) ✓</li>
+                        <li class="completed-item"><i class="bi bi-check-circle-fill"></i> MOS Score (VoIP Quality) ✓
+                        </li>
                         <li><i class="bi bi-graph-up"></i> Dynamic Thresholds</li>
                         <li><i class="bi bi-globe"></i> Controller API Services (GeoIP, Public IP)</li>
                         <li><i class="bi bi-envelope"></i> Email Notifications</li>
@@ -316,8 +320,8 @@
             </div>
 
             <div class="roadmap-cta">
-                <a href="https://github.com/netwatcherio/oss/blob/master/docs/ROADMAP.md"
-                    class="btn btn-outline" target="_blank">
+                <a href="https://github.com/netwatcherio/oss/blob/master/docs/ROADMAP.md" class="btn btn-outline"
+                    target="_blank">
                     <i class="bi bi-file-text"></i> View Full Roadmap
                 </a>
             </div>
@@ -396,18 +400,30 @@
 git clone https://github.com/netwatcherio/oss.git
 cd oss
 
-<span class="comment"># Start the stack</span>
+<span class="comment"># Read the docs and configure your environment</span>
+cp .env.example .env
+<span class="comment"># Edit .env with your settings (SMTP, domain, etc.)</span>
+
+<span class="comment"># Deploy with Docker</span>
 docker-compose up -d
 
 <span class="comment"># Access the panel at http://localhost:8080</span></code></pre>
             </div>
 
+            <p class="setup-note">
+                <i class="bi bi-info-circle"></i>
+                <strong>Important:</strong> Before deploying, read the
+                <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
+                    target="_blank">documentation</a>
+                and configure your <code>.env</code> file with your SMTP, domain, and other settings.
+            </p>
+
             <div class="get-started-links">
                 <a href="https://github.com/netwatcherio/oss" class="btn btn-primary btn-lg" target="_blank">
                     <i class="bi bi-github"></i> View on GitHub
                 </a>
-                <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
-                    class="btn btn-outline btn-lg" target="_blank">
+                <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md" class="btn btn-outline btn-lg"
+                    target="_blank">
                     <i class="bi bi-book"></i> Documentation
                 </a>
             </div>
@@ -446,8 +462,8 @@ docker-compose up -d
                         <a href="https://github.com/netwatcherio/oss" target="_blank">GitHub</a>
                         <a href="https://github.com/netwatcherio/oss/blob/master/CONTRIBUTING.md"
                             target="_blank">Contributing</a>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE"
-                            target="_blank">License (AGPL-3.0)</a>
+                        <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE" target="_blank">License
+                            (AGPL-3.0)</a>
                     </div>
                 </div>
             </div>
