@@ -6,6 +6,7 @@ import Title from "@/components/Title.vue";
 import {AsciiTable3} from "@/lib/ascii-table3/ascii-table3";
 import LatencyGraph from "@/components/PingGraph.vue";
 import TrafficSimGraph from "@/components/TrafficSimGraph.vue";
+import MosGraph from "@/components/MosGraph.vue";
 import NetworkMap from "@/components/NetworkMap.vue";
 import MtrTable from "@/components/MtrTable.vue";
 import MtrSummary from "@/components/MtrSummary.vue";
@@ -1151,6 +1152,25 @@ const { connected: wsConnected } = useProbeSubscription(
               </div>
             </div>
             
+            <!-- Combined MOS Score Graph -->
+            <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0 || pair.trafficSimData.length > 0">
+              <div class="card h-100">
+                <div class="card-header">
+                  <h6 class="mb-0">
+                    <i class="bi bi-reception-4 me-2"></i>
+                    Voice Quality Score ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                  </h6>
+                </div>
+                <div class="card-body">
+                  <MosGraph 
+                    :ping-results="transformPingDataMulti(pair.pingData)" 
+                    :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
+                    :intervalSec="state.probe?.interval_sec || 60" 
+                  />
+                </div>
+              </div>
+            </div>
+            
             <!-- MTR Data -->
             <div class="col-12 mb-3">
               <div class="card">
@@ -1252,6 +1272,35 @@ const { connected: wsConnected } = useProbeSubscription(
             </div>
             <div v-else>
               <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Combined MOS Score Graph (for non-agent probes) -->
+      <div class="col-sm-12" v-if="containsProbeType('PING') || containsProbeType('TRAFFICSIM')">
+        <div class="card mb-3">
+          <div class="card-body">
+            <h5 class="card-title">Voice Quality Score (MOS)</h5>
+            <p class="card-text">aggregated voice quality scoring from available data sources</p>
+            <div v-if="state.loading && state.pingData.length === 0 && state.trafficSimData.length === 0" class="text-center py-5">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <h3 class="mt-3 text-muted">Loading MOS data...</h3>
+              <p class="text-muted">Please wait while we fetch the data</p>
+            </div>
+            <div v-else-if="!state.loading && state.pingData.length === 0 && state.trafficSimData.length === 0" class="text-center py-5">
+              <i class="bi bi-reception-4 fs-1 text-muted mb-3"></i>
+              <h5 class="text-muted">No MOS Data Available</h5>
+              <p class="text-muted">No latency or traffic simulation data found for the selected time range</p>
+            </div>
+            <div v-else>
+              <MosGraph 
+                :ping-results="transformPingDataMulti(state.pingData)" 
+                :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
+                :intervalSec="state.probe?.interval_sec || 60" 
+              />
             </div>
           </div>
         </div>

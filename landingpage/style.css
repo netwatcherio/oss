@@ -430,6 +430,15 @@ body {
     font-weight: 500;
 }
 
+.roadmap-items li.completed-item {
+    color: var(--success);
+    font-weight: 500;
+}
+
+.roadmap-items li.completed-item i {
+    color: var(--success);
+}
+
 .roadmap-cta {
     text-align: center;
 }

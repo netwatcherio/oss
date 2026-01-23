@@ -62,32 +62,6 @@
       </div>
     </div>
 
-    <!-- Last Hour Summary -->
-    <div class="last-hour-summary" v-if="lastHourStats">
-      <div class="summary-header">
-        <span class="summary-icon">📊</span>
-        <span class="summary-title">Last Hour Summary</span>
-      </div>
-      <div class="summary-grid">
-        <div class="summary-item">
-          <span class="summary-label">Avg Latency</span>
-          <span class="summary-value">{{ lastHourStats.avgLatency.toFixed(1) }} ms</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Avg Jitter</span>
-          <span class="summary-value">{{ lastHourStats.avgJitter.toFixed(1) }} ms</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Packet Loss</span>
-          <span class="summary-value" :class="getPacketLossClass(lastHourStats.avgLoss)">{{ lastHourStats.avgLoss.toFixed(2) }}%</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Avg MOS</span>
-          <span class="summary-value" :class="'mos-' + lastHourStats.mosQuality">{{ lastHourStats.avgMos.toFixed(2) }} ({{ lastHourStats.mosQualityLabel }})</span>
-        </div>
-      </div>
-    </div>
-
     <!-- Chart Container -->
     <div id="latencyGraph" ref="latencyGraph"></div>
 
@@ -495,7 +469,7 @@ export default defineComponent({
           type: ['solid', 'solid', 'solid', 'gradient'],
           gradient: { shadeIntensity: 0.8, opacityFrom: 0.35, opacityTo: 0.05, stops: [0, 95, 100] }
         },
-        markers: { size: [0, 4, 0, 0], strokeWidth: 2, strokeColors: '#fff', hover: { sizeOffset: 3 } },
+        markers: { size: [0, 0, 0, 0], strokeWidth: 0, hover: { sizeOffset: 3 } },
         xaxis: {
           type: 'datetime',
           labels: { style: { colors: colors.labelColor, fontSize: '12px' }, datetimeUTC: false },
@@ -536,15 +510,10 @@ export default defineComponent({
           }
         ],
         tooltip: {
+          enabled: true,
           shared: true,
           intersect: false,
           theme: colors.tooltipTheme,
-          fixed: {
-            enabled: true,
-            position: 'topLeft',
-            offsetX: 10,
-            offsetY: 10
-          },
           x: { format: 'dd MMM HH:mm:ss' },
           y: {
             formatter: (y: number, { seriesIndex }: { seriesIndex: number }) =>

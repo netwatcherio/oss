@@ -39,32 +39,6 @@
       </div>
     </div>
 
-    <!-- Last Hour Summary -->
-    <div class="last-hour-summary" v-if="lastHourStats">
-      <div class="summary-header">
-        <span class="summary-icon">📊</span>
-        <span class="summary-title">Last Hour Summary</span>
-      </div>
-      <div class="summary-grid">
-        <div class="summary-item">
-          <span class="summary-label">Avg Latency</span>
-          <span class="summary-value">{{ lastHourStats.avgLatency.toFixed(1) }} ms</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Avg Jitter</span>
-          <span class="summary-value">{{ lastHourStats.avgJitter.toFixed(1) }} ms</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Packet Loss</span>
-          <span class="summary-value" :class="getPacketLossClass(lastHourStats.avgLoss)">{{ lastHourStats.avgLoss.toFixed(2) }}%</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">Avg MOS</span>
-          <span class="summary-value" :class="'mos-' + lastHourStats.mosQuality">{{ lastHourStats.avgMos.toFixed(2) }} ({{ lastHourStats.mosQualityLabel }})</span>
-        </div>
-      </div>
-    </div>
-
     <!-- Chart Container -->
     <div id="trafficGraph" ref="trafficGraph"></div>
 
@@ -662,9 +636,8 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     markers: {
-      size: isLargeDataset ? [0, 0, 0, 0, 0] : [0, 4, 0, 0, 5],
-      strokeWidth: 2,
-      strokeColors: '#fff',
+      size: [0, 0, 0, 0, 0],  // No markers - clean line graphs
+      strokeWidth: 0,
       hover: {
         size: 6,
         sizeOffset: 3

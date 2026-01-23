@@ -106,7 +106,7 @@ export function calculateMOS(
   } else if (R >= 100) {
     mos = 4.5;
   } else {
-    mos = 1 + 0.035 * R + R * (R - 60) * (100 - R) * 7e-6;
+    mos = 1 + 0.035 * R + R * (R - 60) * (100 - R) * 1e-6;
   }
 
   // Clamp MOS to valid range

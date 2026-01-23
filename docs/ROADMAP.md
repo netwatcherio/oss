@@ -43,14 +43,15 @@ Enhanced network interface detection and probe-level binding:
 - VPN vs direct internet path comparison
 - Dual-stack (IPv4/IPv6) interface selection
 
-### P1.2 MOS Score Calculation
-**Priority: High** | **Effort: Low**
+### P1.2 MOS Score Calculation ✅
+**Priority: High** | **Effort: Low** | **Status: Complete**
 
 VoIP quality metric from existing telemetry:
 
-- [ ] Calculate MOS from latency/jitter/loss using ITU-T G.107 E-Model
-- [ ] Add MOS field to PING and TrafficSim payloads
-- [ ] Display MOS in probe dashboards with quality color coding
+- [x] Calculate MOS from latency/jitter/loss using ITU-T G.107 E-Model
+- [x] Add MOS field to PING and TrafficSim payloads
+- [x] Display MOS in probe dashboards with quality color coding
+- [x] Aggregated MOS graph combining ICMP and TrafficSim data sources
 - [ ] Add MOS threshold support in alerting
 
 ### P1.3 Dynamic Thresholds
