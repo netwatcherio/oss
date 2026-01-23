@@ -211,6 +211,8 @@ The PIN is valid for 24 hours. After successful bootstrap, the agent receives a 
 | `GEOIP_CITY_PATH` | - | Path to GeoLite2-City.mmdb |
 | `GEOIP_COUNTRY_PATH` | - | Path to GeoLite2-Country.mmdb |
 | `GEOIP_ASN_PATH` | - | Path to GeoLite2-ASN.mmdb |
+| **OUI** |||
+| `OUI_PATH` | - | Path to oui.txt (IEEE MAC vendor database) |
 | **Panel** |||
 | `CONTROLLER_ENDPOINT` | - | Public API URL |
 | **Debug** |||

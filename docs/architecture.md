@@ -252,6 +252,7 @@ flowchart LR
 | `GEOIP_CITY_PATH` | Path to GeoLite2-City.mmdb |
 | `GEOIP_COUNTRY_PATH` | Path to GeoLite2-Country.mmdb |
 | `GEOIP_ASN_PATH` | Path to GeoLite2-ASN.mmdb |
+| `OUI_PATH` | Path to oui.txt (IEEE MAC vendor database) |
 | `DEFAULT_ADMIN_EMAIL` | Email for default admin (default: `admin@netwatcher.local`) |
 | `DEFAULT_ADMIN_PASSWORD` | Password for default admin (if set, creates admin on first run) |
 | `DATA_RETENTION_DAYS` | Days to keep probe data in ClickHouse (default: `90`) |
