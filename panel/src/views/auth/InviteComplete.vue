@@ -2,7 +2,7 @@
 import { reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Loader from '@/components/Loader.vue'
-import FormElement from '@/components/FormElement.vue'
+import AuthLayout from '@/components/AuthLayout.vue'
 import { getSession, setSession } from '@/session'
 
 const route = useRoute()
@@ -138,139 +138,198 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="d-flex justify-content-center align-items-center" style="min-height: 80vh">
-    <div class="form-entry w-100">
-      <!-- Loading state -->
-      <div v-if="state.loading" class="text-center py-5">
-        <Loader large />
-        <p class="mt-3 text-muted">Validating invite...</p>
-      </div>
+  <AuthLayout>
+    <!-- Loading state -->
+    <div v-if="state.loading" class="text-center py-5">
+      <Loader large />
+      <p class="mt-3 text-muted">Validating invite...</p>
+    </div>
 
-      <!-- Error: Not found -->
-      <div v-else-if="state.notFound" class="text-center py-5">
-        <i class="bi bi-x-circle text-danger" style="font-size: 4rem"></i>
+    <!-- Error: Not found -->
+    <div v-else-if="state.notFound" class="card">
+      <div class="card-body text-center py-5">
+        <div class="status-icon status-error">
+          <i class="bi bi-x-circle"></i>
+        </div>
         <h3 class="mt-3">Invalid Invite Link</h3>
         <p class="text-muted">This invite link is not valid or has been revoked.</p>
         <router-link to="/auth/login" class="btn btn-primary mt-3">Go to Login</router-link>
       </div>
+    </div>
 
-      <!-- Error: Expired -->
-      <div v-else-if="state.expired" class="text-center py-5">
-        <i class="bi bi-clock-history text-warning" style="font-size: 4rem"></i>
+    <!-- Error: Expired -->
+    <div v-else-if="state.expired" class="card">
+      <div class="card-body text-center py-5">
+        <div class="status-icon status-warning">
+          <i class="bi bi-clock-history"></i>
+        </div>
         <h3 class="mt-3">Invite Expired</h3>
         <p class="text-muted">This invite link has expired. Please ask for a new invitation.</p>
         <router-link to="/auth/login" class="btn btn-primary mt-3">Go to Login</router-link>
       </div>
+    </div>
 
-      <!-- Error: Already used -->
-      <div v-else-if="state.alreadyUsed" class="text-center py-5">
-        <i class="bi bi-check-circle text-success" style="font-size: 4rem"></i>
+    <!-- Error: Already used -->
+    <div v-else-if="state.alreadyUsed" class="card">
+      <div class="card-body text-center py-5">
+        <div class="status-icon status-success">
+          <i class="bi bi-check-circle"></i>
+        </div>
         <h3 class="mt-3">Already Registered</h3>
         <p class="text-muted">This invite has already been used. Please log in with your account.</p>
         <router-link to="/auth/login" class="btn btn-primary mt-3">Go to Login</router-link>
       </div>
+    </div>
 
-      <!-- Success: Show form -->
-      <FormElement v-else-if="state.info" :title="`Join ${state.info.workspace_name}`">
-        <template #alternate>
-          <span class="label-subtext mb-1">
+    <!-- Success: Show form -->
+    <div v-else-if="state.info" class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-end justify-content-between gap-2 mb-3">
+          <h2 class="auth-title mb-0">Join {{ state.info.workspace_name }}</h2>
+          <span class="auth-subtext">
             Invited as <strong>{{ state.info.email }}</strong>
           </span>
-        </template>
+        </div>
 
-        <template #body>
-          <p class="text-muted small mb-3">
-            Complete your registration to join this workspace.
-          </p>
+        <p class="text-muted small mb-3">
+          Complete your registration to join this workspace.
+        </p>
 
-          <form @submit="submit" class="needs-validation">
-            <div class="form-floating mb-3">
-              <input
-                id="name"
-                v-model="state.form.name"
-                type="text"
-                class="form-control form-input-bg"
-                placeholder="Your Name"
-                required
-                autocomplete="name"
-              />
-              <label for="name">Display Name</label>
+        <form @submit="submit">
+          <div class="form-floating mb-3">
+            <input
+              id="name"
+              v-model="state.form.name"
+              type="text"
+              class="form-control"
+              placeholder="Your Name"
+              required
+              autocomplete="name"
+            />
+            <label for="name">Display Name</label>
+          </div>
+
+          <div class="form-floating mb-3">
+            <input
+              id="password"
+              v-model="state.form.password"
+              type="password"
+              class="form-control"
+              :class="{ 'is-invalid': state.form.password && state.form.password.length < 8 }"
+              placeholder="Password"
+              required
+              minlength="8"
+              autocomplete="new-password"
+            />
+            <label for="password">Password</label>
+            <div class="form-text" v-if="!state.form.password">
+              Must be at least 8 characters
             </div>
-
-            <div class="form-floating mb-3">
-              <input
-                id="password"
-                v-model="state.form.password"
-                type="password"
-                class="form-control form-input-bg"
-                :class="{ 'is-invalid': state.form.password && state.form.password.length < 8 }"
-                placeholder="Password"
-                required
-                minlength="8"
-                autocomplete="new-password"
-              />
-              <label for="password">Password</label>
-              <div class="form-text" v-if="!state.form.password">
-                Must be at least 8 characters
-              </div>
-              <div class="invalid-feedback" v-if="state.form.password && state.form.password.length < 8">
-                Password must be at least 8 characters
-              </div>
+            <div class="invalid-feedback" v-if="state.form.password && state.form.password.length < 8">
+              Password must be at least 8 characters
             </div>
+          </div>
 
-            <div class="form-floating mb-3">
-              <input
-                id="confirmPassword"
-                v-model="state.form.confirmPassword"
-                type="password"
-                class="form-control form-input-bg"
-                :class="{ 'is-invalid': state.form.confirmPassword && !passwordsMatch }"
-                placeholder="Confirm Password"
-                required
-                autocomplete="new-password"
-              />
-              <label for="confirmPassword">Confirm Password</label>
-              <div class="invalid-feedback" v-if="state.form.confirmPassword && !passwordsMatch">
-                Passwords do not match
-              </div>
+          <div class="form-floating mb-3">
+            <input
+              id="confirmPassword"
+              v-model="state.form.confirmPassword"
+              type="password"
+              class="form-control"
+              :class="{ 'is-invalid': state.form.confirmPassword && !passwordsMatch }"
+              placeholder="Confirm Password"
+              required
+              autocomplete="new-password"
+            />
+            <label for="confirmPassword">Confirm Password</label>
+            <div class="invalid-feedback" v-if="state.form.confirmPassword && !passwordsMatch">
+              Passwords do not match
             </div>
+          </div>
 
-            <!-- Error message -->
-            <div v-if="state.error" class="alert alert-danger py-2 mb-3">
-              {{ state.error }}
+          <!-- Error message -->
+          <div v-if="state.error" class="error-message mb-3">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            {{ state.error }}
+          </div>
+
+          <div class="d-flex align-items-center justify-content-between">
+            <router-link to="/auth/login" class="auth-link">
+              Already have an account?
+            </router-link>
+
+            <div class="d-flex align-items-center gap-3">
+              <Loader v-if="state.submitting" inverse />
+              <button
+                type="submit"
+                class="btn btn-primary btn-lg px-4"
+                :disabled="!canSubmit"
+              >
+                Complete Registration
+              </button>
             </div>
-
-            <div class="d-flex align-items-center justify-content-between">
-              <router-link to="/auth/login" class="btn btn-link px-0">
-                Already have an account?
-              </router-link>
-
-              <div class="d-flex align-items-center gap-3">
-                <Loader v-if="state.submitting" />
-                <button
-                  type="submit"
-                  class="btn btn-primary btn-lg px-4"
-                  :disabled="!canSubmit"
-                >
-                  Complete Registration
-                </button>
-              </div>
-            </div>
-          </form>
-        </template>
-      </FormElement>
-
-      <!-- Generic error -->
-      <div v-else-if="state.error" class="alert alert-danger">
-        {{ state.error }}
+          </div>
+        </form>
       </div>
     </div>
-  </div>
+
+    <!-- Generic error -->
+    <div v-else-if="state.error" class="card">
+      <div class="card-body">
+        <div class="error-message">
+          <i class="bi bi-exclamation-triangle me-2"></i>
+          {{ state.error }}
+        </div>
+      </div>
+    </div>
+  </AuthLayout>
 </template>
 
 <style scoped>
-.form-entry {
-  max-width: 28rem;
-  width: 100%;
+.auth-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.auth-subtext {
+  font-size: 0.875rem;
+  color: var(--bs-secondary-color);
+}
+
+.auth-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.auth-link:hover {
+  opacity: 1;
+}
+
+.status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  font-size: 2rem;
+}
+
+.status-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.status-warning {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.status-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
 }
 </style>

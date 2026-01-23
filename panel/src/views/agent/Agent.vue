@@ -906,9 +906,6 @@ onMounted(async () => {
             <span v-else class="uptime-value">{{ hasSystemData ? since(state.systemInfo.hostInfo?.boot_time + "", false) : 'N/A' }}</span>
           </div>
           <div class="stat-label">Uptime</div>
-          <div class="stat-breakdown" v-if="!loadingState.systemInfo && hasSystemData && state.systemInfo.hostInfo?.boot_time">
-            <span>Since {{ new Date(state.systemInfo.hostInfo.boot_time * 1000).toLocaleDateString() }}</span>
-          </div>
         </div>
       </div>
     </div>
@@ -2908,5 +2905,87 @@ onMounted(async () => {
 
 :global([data-theme="dark"]) .status-dot.online {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+}
+</style>
+
+<!-- Unscoped dark mode overrides for agent view cards -->
+<style>
+[data-theme="dark"] .resource-meter.enhanced {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .resource-label {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .progress.gradient {
+  background: #374151 !important;
+}
+
+[data-theme="dark"] .resource-breakdown {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .breakdown-label {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .breakdown-value {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .resource-value {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .memory-details {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .memory-details .detail-row {
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .interface-item {
+  background: #1e293b !important;
+}
+
+[data-theme="dark"] .interface-item:hover {
+  background: #334155 !important;
+}
+
+/* Architecture and Environment badges */
+[data-theme="dark"] .arch-badge {
+  background: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .env-badge {
+  background: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .env-badge.physical {
+  background: #064e3b !important;
+  color: #34d399 !important;
+}
+
+[data-theme="dark"] .env-badge.virtual {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
+
+/* OS icon and value */
+[data-theme="dark"] .os-icon {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .os-value {
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .os-value small {
+  color: #9ca3af !important;
 }
 </style>

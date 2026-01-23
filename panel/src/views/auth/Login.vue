@@ -2,7 +2,7 @@
 import { reactive, onMounted } from "vue";
 import core from "@/core";
 import Loader from "@/components/Loader.vue";
-import FormElement from "@/components/FormElement.vue";
+import AuthLayout from "@/components/AuthLayout.vue";
 
 // NEW imports: use AuthService + token helpers from the new stack
 import { AuthService } from "@/services/apiService";
@@ -95,115 +95,102 @@ async function submit(e: MouseEvent) {
 </script>
 
 <template>
-  <div class="d-flex justify-content-center align-items-center" style="height: 75vh">
-    <div class="form-entry w-100">
-      <FormElement title="Login">
-        <template #alternate>
-          <span v-if="state.registrationEnabled" class="label-subtext mb-1">
+  <AuthLayout>
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-end justify-content-between gap-2 mb-3">
+          <h2 class="auth-title mb-0">Login</h2>
+          <span v-if="state.registrationEnabled" class="auth-subtext">
             Need an account?
-            <router-link id="to-register" to="/auth/register">register</router-link>
+            <router-link id="to-register" to="/auth/register">Register</router-link>
           </span>
-        </template>
+        </div>
 
-        <template #body>
-          <div class="form-horizontal needs-validation mt-2">
-            <div class="form-floating mb-2">
-              <input
-                  id="tb-email"
-                  v-model="state.user.email"
-                  class="form-control form-input-bg"
-                  name="email"
-                  placeholder="name@example.com"
-                  required
-                  type="email"
-              />
-              <label for="tb-email">Email</label>
-              <div class="invalid-feedback">email is required</div>
-            </div>
+        <form class="auth-form" @submit.prevent="submit">
+          <div class="form-floating mb-3">
+            <input
+              id="tb-email"
+              v-model="state.user.email"
+              class="form-control"
+              name="email"
+              placeholder="name@example.com"
+              required
+              type="email"
+              autocomplete="email"
+            />
+            <label for="tb-email">Email</label>
+          </div>
 
-            <div class="form-floating mb-2">
-              <input
-                  id="current-password"
-                  v-model="state.user.password"
-                  class="form-control form-input-bg"
-                  name="password"
-                  placeholder="*****"
-                  required
-                  type="password"
-              />
-              <label for="current-password">Password</label>
-              <div class="invalid-feedback">password is required</div>
-            </div>
+          <div class="form-floating mb-3">
+            <input
+              id="current-password"
+              v-model="state.user.password"
+              class="form-control"
+              name="password"
+              placeholder="*****"
+              required
+              type="password"
+              autocomplete="current-password"
+            />
+            <label for="current-password">Password</label>
+          </div>
 
-            <div class="d-flex align-items-center justify-content-between">
-              <div>
-                <router-link
-                    id="to-recover"
-                    class="label-c4 label-w600 label-underlined px-1"
-                    to="/auth/reset"
-                >
-                  forgot password?
-                </router-link>
-              </div>
+          <div class="d-flex align-items-center justify-content-between">
+            <router-link
+              id="to-recover"
+              class="auth-link"
+              to="/auth/reset"
+            >
+              Forgot password?
+            </router-link>
 
-              <div class="d-flex align-items-center gap-3">
-                <div class="d-flex align-items-center justify-content-center">
-                  <Loader v-if="state.waiting" inverse large />
-                </div>
-
-                <button
-                    class="btn btn-primary btn-lg px-4 d-flex align-items-center gap-1"
-                    @click="submit"
-                    :disabled="state.waiting"
-                >
-                  login
-                </button>
-              </div>
+            <div class="d-flex align-items-center gap-3">
+              <Loader v-if="state.waiting" inverse />
+              <button
+                type="submit"
+                class="btn btn-primary btn-lg px-4"
+                :disabled="state.waiting"
+              >
+                Login
+              </button>
             </div>
           </div>
-        </template>
-      </FormElement>
+        </form>
 
-      <div class="" style="height: 4rem">
-        <div
-            class="mt-2"
-            v-if="state.error"
-            :class="`${state.waiting ? 'error-message-pending' : 'error-message-animation message-body'}`"
-        >
-          <div class="text-danger" v-if="!state.waiting">
-            Incorrect Email/Password combination. Please try again.
-          </div>
+        <!-- Error message -->
+        <div v-if="state.error && !state.waiting" class="error-message">
+          <i class="bi bi-exclamation-triangle me-2"></i>
+          Incorrect Email/Password combination. Please try again.
         </div>
       </div>
     </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <style scoped>
-.form-entry { max-width: 26rem; width: 100%; }
-.card { border-radius: 0.8rem; }
-.card-body { padding: 0.8rem; }
-
-.error-message-pending { animation: animate-pending 100ms forwards ease-out; }
-@keyframes animate-pending {
-  0% { filter: saturate(90%) blur(1px); height: 100%; }
-  100% { filter: saturate(50%) blur(8px); opacity: 0; height: 0%; }
+.auth-title {
+  font-size: 1.5rem;
+  font-weight: 600;
 }
 
-.message-body {
-  margin-bottom: 0.375rem;
-  background-color: rgba(255, 64, 64, 0.3);
-  border: 1px solid rgba(255, 64, 64, 1);
-  width: 100%;
-  padding: 0.5rem 1rem;
-  display: flex;
-  align-items: center;
-  border-radius: 0.8rem;
+.auth-subtext {
+  font-size: 0.875rem;
+  color: var(--bs-secondary-color);
 }
-.error-message-animation { animation: animate-expand-vertical 250ms forwards ease-out; }
-@keyframes animate-expand-vertical {
-  0% { scale: 0.95; opacity: 0.8; filter: blur(2px); }
-  100% { scale: 1; opacity: 1; filter: blur(0px); }
+
+.auth-subtext a {
+  font-weight: 500;
 }
-.btn-primary.btn-lg { border-radius: 0.375rem !important; }
+
+.auth-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.auth-link:hover {
+  opacity: 1;
+}
 </style>

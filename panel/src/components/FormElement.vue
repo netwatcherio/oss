@@ -12,7 +12,7 @@ const props = defineProps<{
     <div class="card-body d-flex flex-column gap-1">
       <div class="d-flex align-items-end justify-content-between gap-1">
         <div class="d-flex gap-2">
-          <div class="label-title">Login</div>
+          <div class="label-title">{{ title || 'Form' }}</div>
         </div>
         <slot name="alternate">
           Alt

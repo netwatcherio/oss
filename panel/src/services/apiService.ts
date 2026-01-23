@@ -19,6 +19,10 @@ export const AuthService = {
         const { data } = await request.get<{ registration_enabled: boolean }>("/auth/config");
         return data;
     },
+    async requestPasswordReset(email: string) {
+        const { data } = await request.post<{ ok: boolean }>("/auth/reset-password", { email });
+        return data;
+    },
 };
 
 function qs(params?: Record<string, string | number | undefined>) {

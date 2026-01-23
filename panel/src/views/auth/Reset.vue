@@ -1,121 +1,180 @@
 <script lang="ts" setup>
-import {reactive} from "vue";
-import type {User} from "@/types"
-import core from "@/core";
+import { reactive } from "vue";
+import { useRouter } from "vue-router";
 import Loader from "@/components/Loader.vue";
+import AuthLayout from "@/components/AuthLayout.vue";
+import { AuthService } from "@/services/apiService";
+
+const router = useRouter();
 
 const state = reactive({
-  user: {} as User,
+  email: "",
   waiting: false,
-  error: false
-})
+  error: false,
+  errorMessage: "",
+  success: false,
+});
 
-interface Response {
-  token: string
+function begin() {
+  state.waiting = true;
+  state.error = false;
+  state.success = false;
 }
 
-let session = core.session()
-let router = core.router()
-
-function onLogin(response: any) {
-  state.waiting = false
-  let data = response.data as Response
-  session.token = data.token
-  profileService.getProfile().then((res) => {
-    session.user = res.data as User
-  }).catch((err) => {
-    console.log(err)
-  })
-  router.push("/")
+function done() {
+  state.waiting = false;
 }
 
-function onFailure(error: any) {
-  state.waiting = false
-  state.error = true
-  console.log(error)
+async function submit(e: Event) {
+  e.preventDefault();
+  
+  if (!state.email) {
+    state.error = true;
+    state.errorMessage = "Please enter your email address.";
+    return;
+  }
+  
+  begin();
+  
+  try {
+    await AuthService.requestPasswordReset(state.email);
+    done();
+    state.success = true;
+  } catch (err: any) {
+    done();
+    state.error = true;
+    
+    const serverError = err?.response?.data?.error ?? err?.message ?? "";
+    
+    if (serverError === "user not found" || serverError === "User not found") {
+      // Don't reveal if user exists - show generic message
+      state.success = true;
+    } else {
+      state.errorMessage = "Unable to process request. Please try again later.";
+    }
+  }
 }
-
-function submit(_: MouseEvent) {
-  state.waiting = true
-  // Attempt to log in with the provided credentials
-  authService.login(state.user).then(onLogin).catch(onFailure)
-}
-
 </script>
 
 <template>
-  <div class="row auth-wrapper gx-0">
-    <div class="col-lg-4 col-xl-3 bg-primary auth-box-2 on-sidebar">
-      <div class="h-100 d-flex align-items-center justify-content-center">
-        <div class="row justify-content-center text-center">
-          <div class="col-md-7 col-lg-12 col-xl-9">
-            <div>
-              <span class="db"><img alt="logo" src="/assets/images/logo-light-icon.png"></span>
-              <span class="db"><img alt="logo" src="/assets/images/logo-light-text.png"></span>
-            </div>
-            <h2 class="text-white mt-4 fw-light">
-              <span class="font-weight-medium">Network Monitoring</span> made easy
-            </h2>
-            <p class="op-5 text-white fs-4 mt-4">
-              A simple network performance monitoring platform designed for MSPs
-            </p>
-          </div>
+  <AuthLayout>
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-end justify-content-between gap-2 mb-3">
+          <h2 class="auth-title mb-0">Reset Password</h2>
+          <span class="auth-subtext">
+            Remember your password?
+            <router-link to="/auth/login">Login</router-link>
+          </span>
         </div>
-      </div>
-    </div>
-    <div class="
-            col-lg-8 col-xl-9
-            d-flex
-            align-items-center
-            justify-content-center
-          ">
-      <div class="row justify-content-center w-100 mt-4 mt-lg-0">
-        <div class="col-lg-6 col-xl-3 col-md-7">
-          <div class="card">
-            <div class="card-body">
-              <h1>login</h1>
-              <p class="text-muted fs-4 mb-2">
-                new here?
-                <router-link id="to-register" to="/auth/register">create an account</router-link>
-              </p>
-              <div class="text-danger" v-if="state.error">Incorrect Email/Password combination. Please try again.</div>
-              <div v-else>&nbsp;</div>
-              <div class="form-horizontal needs-validation mt-2">
-                <div class="form-floating mb-3">
-                  <input id="tb-email" v-model="state.user.email" class="form-control form-input-bg" name="email"
-                         placeholder="name@example.com" required="" type="email">
-                  <label for="tb-email">email</label>
-                  <div class="invalid-feedback">email is required</div>
-                </div>
 
-                <div class="form-floating mb-3">
-                  <input id="current-password" v-model="state.user.password" class="form-control form-input-bg"
-                         name="password"
-                         placeholder="*****" required="" type="password">
-                  <label for="current-password">password</label>
-                  <div class="invalid-feedback">password is required</div>
-                </div>
+        <!-- Success State -->
+        <div v-if="state.success" class="success-content">
+          <div class="success-icon">
+            <i class="bi bi-envelope-check"></i>
+          </div>
+          <h4 class="mt-3">Check Your Email</h4>
+          <p class="text-muted mb-4">
+            If an account exists for <strong>{{ state.email }}</strong>, 
+            we've sent a password reset link. Please check your inbox and spam folder.
+          </p>
+          <router-link to="/auth/login" class="btn btn-primary">
+            Back to Login
+          </router-link>
+        </div>
 
-                <div class="d-flex align-items-center mb-3">
-                  <div class="ms-auto">
-                    <router-link id="to-recover" class="fw-bold" to="/auth/reset">forgot password?</router-link>
-                  </div>
-                </div>
-                <div class="d-flex align-items-stretch button-group mt-4 pt-2">
-                  <button class="btn btn-primary btn-lg px-4" @click="submit" :disabled="state.waiting">
-                    login
-                    <Loader v-if="state.waiting"></Loader>
-                  </button>
-                </div>
+        <!-- Form State -->
+        <template v-else>
+          <p class="text-muted small mb-3">
+            Enter your email address and we'll send you a link to reset your password.
+          </p>
+
+          <form class="auth-form" @submit="submit">
+            <div class="form-floating mb-3">
+              <input
+                id="reset-email"
+                v-model="state.email"
+                class="form-control"
+                name="email"
+                placeholder="name@example.com"
+                required
+                type="email"
+                autocomplete="email"
+              />
+              <label for="reset-email">Email</label>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between">
+              <router-link to="/auth/login" class="auth-link">
+                <i class="bi bi-arrow-left me-1"></i>
+                Back to Login
+              </router-link>
+
+              <div class="d-flex align-items-center gap-3">
+                <Loader v-if="state.waiting" inverse />
+                <button
+                  type="submit"
+                  class="btn btn-primary btn-lg px-4"
+                  :disabled="state.waiting"
+                >
+                  Send Reset Link
+                </button>
               </div>
             </div>
+          </form>
+
+          <!-- Error message -->
+          <div v-if="state.error && !state.waiting" class="error-message">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            {{ state.errorMessage }}
           </div>
-        </div>
+        </template>
       </div>
     </div>
-  </div>
+  </AuthLayout>
 </template>
 
-<style>
+<style scoped>
+.auth-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
 
+.auth-subtext {
+  font-size: 0.875rem;
+  color: var(--bs-secondary-color);
+}
+
+.auth-subtext a {
+  font-weight: 500;
+}
+
+.auth-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.auth-link:hover {
+  opacity: 1;
+}
+
+.success-content {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.success-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  font-size: 2rem;
+}
 </style>

@@ -976,6 +976,7 @@ onUnmounted(() => {
   }
 }
 
+
 /* Selected header state */
 .matrix-header-cell.selected {
   background: var(--bs-primary-bg-subtle, #cfe2ff);
@@ -1126,11 +1127,11 @@ onUnmounted(() => {
 
 /* Agent-to-agent cell highlighting */
 .matrix-data-cell.agent-to-agent {
-  background: rgba(13, 110, 253, 0.03);
+  background: color-mix(in srgb, var(--bs-primary, #0d6efd) 5%, var(--bs-body-bg, #fff));
 }
 
 .matrix-data-cell.agent-to-agent:hover {
-  background: rgba(13, 110, 253, 0.08);
+  background: color-mix(in srgb, var(--bs-primary, #0d6efd) 12%, var(--bs-body-bg, #fff));
 }
 
 .matrix-data-cell.has-return-path {
@@ -1204,5 +1205,135 @@ onUnmounted(() => {
 .source-popover .entry-source {
   flex: 1;
   min-width: 140px;
+}
+</style>
+
+<!-- Separate unscoped style block for dark mode overrides -->
+<style>
+/* Dark Mode Overrides - Unscoped with !important for proper specificity */
+[data-theme="dark"] .connectivity-matrix-container {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .matrix-grid {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .matrix-corner,
+[data-theme="dark"] .matrix-header-cell,
+[data-theme="dark"] .matrix-row-header {
+  background: var(--bs-tertiary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .matrix-header-cell:hover,
+[data-theme="dark"] .matrix-row-header:hover {
+  background: var(--bs-secondary-bg) !important;
+}
+
+[data-theme="dark"] .matrix-data-cell {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .matrix-data-cell:hover {
+  background: var(--bs-secondary-bg) !important;
+}
+
+[data-theme="dark"] .self-cell,
+[data-theme="dark"] .self-cell:hover {
+  background: var(--bs-tertiary-bg) !important;
+}
+
+[data-theme="dark"] .matrix-data-cell.agent-to-agent {
+  background: color-mix(in srgb, var(--bs-primary) 8%, var(--bs-body-bg)) !important;
+}
+
+[data-theme="dark"] .matrix-data-cell.agent-to-agent:hover {
+  background: color-mix(in srgb, var(--bs-primary) 15%, var(--bs-body-bg)) !important;
+}
+
+[data-theme="dark"] .header-type-badge {
+  background: var(--bs-secondary-bg) !important;
+  color: var(--bs-secondary-color) !important;
+}
+
+[data-theme="dark"] .agent-target .header-type-badge {
+  background: rgba(59, 130, 246, 0.2) !important;
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .control-btn {
+  background: var(--bs-secondary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-theme="dark"] .control-btn:hover:not(:disabled) {
+  background: var(--bs-tertiary-bg) !important;
+}
+
+[data-theme="dark"] .control-select {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-theme="dark"] .matrix-popover,
+[data-theme="dark"] .target-popover {
+  background: var(--bs-body-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .popover-header {
+  background: var(--bs-tertiary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+}
+
+[data-theme="dark"] .probe-stats,
+[data-theme="dark"] .target-entry {
+  background: var(--bs-secondary-bg) !important;
+}
+
+[data-theme="dark"] .probe-type.type-mtr {
+  background: rgba(99, 102, 241, 0.2) !important;
+  color: #a5b4fc !important;
+}
+
+[data-theme="dark"] .probe-type.type-ping {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+[data-theme="dark"] .probe-type.type-trafficsim {
+  background: rgba(245, 158, 11, 0.2) !important;
+  color: #fcd34d !important;
+}
+
+[data-theme="dark"] .probe-status.status-healthy {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+[data-theme="dark"] .probe-status.status-degraded {
+  background: rgba(245, 158, 11, 0.2) !important;
+  color: #fcd34d !important;
+}
+
+[data-theme="dark"] .probe-status.status-critical {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .probe-status.status-unknown {
+  background: rgba(107, 114, 128, 0.3) !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .matrix-header-cell.selected,
+[data-theme="dark"] .matrix-row-header.selected {
+  background: color-mix(in srgb, var(--bs-primary) 20%, var(--bs-body-bg)) !important;
 }
 </style>
