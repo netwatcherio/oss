@@ -137,29 +137,30 @@ func (s *CleanupScheduler) runCleanup(ctx context.Context) {
 }
 
 // UpdateClickHouseTTL modifies table TTL to match configured retention
-func UpdateClickHouseTTL(ctx context.Context, ch *sql.DB, table string, days int) error {
+func UpdateClickHouseTTL(ctx context.Context, ch *sql.DB, table string, ttlColumn string, days int) error {
 	query := fmt.Sprintf(
-		"ALTER TABLE %s MODIFY TTL created_at + INTERVAL %d DAY DELETE",
-		table, days,
+		"ALTER TABLE %s MODIFY TTL %s + INTERVAL %d DAY DELETE",
+		table, ttlColumn, days,
 	)
 	_, err := ch.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to update TTL for %s: %w", table, err)
 	}
-	log.Infof("Updated %s TTL to %d days", table, days)
+	log.Infof("Updated %s TTL to %d days (column: %s)", table, days, ttlColumn)
 	return nil
 }
 
 // EnsureClickHouseTTL ensures all relevant tables have correct TTL settings
 func EnsureClickHouseTTL(ctx context.Context, ch *sql.DB, days int) error {
-	tables := []string{
-		"probe_data",
-		"ip_geo_cache",
-		"ip_whois_cache",
+	// Table name -> TTL column name
+	tables := map[string]string{
+		"probe_data":     "created_at",
+		"ip_geo_cache":   "lookup_time",
+		"ip_whois_cache": "lookup_time",
 	}
 
-	for _, table := range tables {
-		if err := UpdateClickHouseTTL(ctx, ch, table, days); err != nil {
+	for table, ttlCol := range tables {
+		if err := UpdateClickHouseTTL(ctx, ch, table, ttlCol, days); err != nil {
 			// Log but don't fail - table might not exist yet
 			log.Warnf("Could not update TTL for %s: %v", table, err)
 		}

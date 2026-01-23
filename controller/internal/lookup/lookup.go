@@ -11,6 +11,7 @@ import (
 	"netwatcher-controller/internal/geoip"
 
 	"github.com/kataras/iris/v12"
+	log "github.com/sirupsen/logrus"
 )
 
 // WhoAmIResult contains the full result of a public IP lookup.
@@ -127,16 +128,24 @@ func UnifiedLookup(ctx context.Context, ch *sql.DB, geoStore *geoip.Store, ip st
 		if ch != nil {
 			// Use cached lookup
 			geoResult, err := geoip.LookupWithCache(ctx, ch, geoStore, ip)
-			if err == nil && geoResult != nil {
+			if err != nil {
+				log.WithError(err).WithField("ip", ip).Debug("GeoIP cached lookup failed")
+			} else if geoResult != nil {
 				result.GeoIP = geoResult
+				log.WithField("ip", ip).WithField("cached", geoResult.Cached).Debug("GeoIP lookup successful")
 			}
 		} else {
 			// Direct lookup without cache
 			directResult, err := geoStore.LookupAll(ip)
-			if err == nil && directResult != nil {
+			if err != nil {
+				log.WithError(err).WithField("ip", ip).Debug("GeoIP direct lookup failed")
+			} else if directResult != nil {
 				result.GeoIP = &geoip.CachedResult{LookupResult: directResult, Cached: false}
+				log.WithField("ip", ip).Debug("GeoIP direct lookup successful")
 			}
 		}
+	} else {
+		log.WithField("ip", ip).Debug("GeoIP lookup skipped: geoStore is nil")
 	}
 
 	// Reverse DNS lookup (quick, no caching)
