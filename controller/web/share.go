@@ -3,6 +3,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -200,6 +201,21 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 			return
 		}
 
+		// Determine public IP - prefer actual NETINFO public_address over override
+		publicIP := ag.PublicIPOverride
+		if ch != nil {
+			netInfoData, err := probe.GetLatestNetInfoForAgent(ctx.Request().Context(), ch, uint64(link.AgentID), nil)
+			if err == nil && netInfoData != nil && netInfoData.Payload != nil {
+				// Parse the netinfo payload to extract public_address
+				var netPayload struct {
+					PublicAddress string `json:"public_address"`
+				}
+				if json.Unmarshal(netInfoData.Payload, &netPayload) == nil && netPayload.PublicAddress != "" {
+					publicIP = netPayload.PublicAddress
+				}
+			}
+		}
+
 		// Get owned probes AND reverse probes (from other agents targeting this one)
 		owned, reverse, err := probe.ListByAgentWithReverse(ctx.Request().Context(), db, link.AgentID)
 		if err != nil {
@@ -229,7 +245,7 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 				"description":  ag.Description,
 				"location":     ag.Location,
 				"version":      ag.Version,
-				"public_ip":    ag.PublicIPOverride,
+				"public_ip":    publicIP,
 				"initialized":  ag.Initialized,
 				"updated_at":   ag.UpdatedAt,
 				"last_seen_at": ag.LastSeenAt,

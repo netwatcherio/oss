@@ -5,8 +5,11 @@ import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
 import LatencyGraph from '@/components/PingGraph.vue';
 import TrafficSimGraph from '@/components/TrafficSimGraph.vue';
+import MosGraph from '@/components/MosGraph.vue';
+import NetworkMap from '@/components/NetworkMap.vue';
 import MtrTable from '@/components/MtrTable.vue';
 import MtrSummary from '@/components/MtrSummary.vue';
+import MtrDetailModal from '@/components/MtrDetailModal.vue';
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService } from '@/services/themeService';
@@ -89,6 +92,55 @@ const activeTrafficSimData = computed(() => {
     }
     return state.trafficSimData;
 });
+
+// MTR Modal state (matching Probe.vue)
+const showMtrModal = ref(false);
+const selectedNode = ref<{ id: string; hostname?: string; ip?: string; hopNumber: number } | null>(null);
+
+const onNodeSelect = (node: any) => {
+    selectedNode.value = node;
+    showMtrModal.value = true;
+};
+
+const closeMtrModal = () => {
+    showMtrModal.value = false;
+    selectedNode.value = null;
+};
+
+// MTR Pagination state (matching Probe.vue)
+const mtrPage = ref(1);
+const mtrPageSize = 10;
+
+// Filter for notable MTR results (triggered, route changes, high loss)
+const getNotableMtrResults = (mtrData: ProbeData[]): ProbeData[] => {
+    // Return all for now - could filter to only notable traces
+    return [...mtrData].sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+};
+
+const getPaginatedMtrResults = (mtrData: ProbeData[], page: number) => {
+    const notable = getNotableMtrResults(mtrData);
+    const start = (page - 1) * mtrPageSize;
+    const end = page * mtrPageSize;
+    return {
+        items: notable.slice(start, end),
+        total: notable.length,
+        currentPage: page,
+        totalPages: Math.ceil(notable.length / mtrPageSize),
+        hasNext: end < notable.length,
+        hasPrev: page > 1
+    };
+};
+
+const goToMtrPage = (page: number) => {
+    mtrPage.value = page;
+};
+
+// Transform MTR data for NetworkMap component
+function transformMtrDataMulti(rows: ProbeData[]): MtrResult[] {
+    return rows.map((r) => r.payload as MtrResult).filter(Boolean);
+}
 
 // Helper: format date to RFC3339
 function toRFC3339(v?: Date | string | number): string {
@@ -724,6 +776,15 @@ watch(
                             />
                         </div>
                         
+                        <!-- MOS Graph (Voice Quality) -->
+                        <h3 class="subsection-title"><i class="bi bi-telephone"></i> Voice Quality (MOS)</h3>
+                        <div class="graph-container">
+                            <MosGraph 
+                                :pingResults="transformPingDataMulti(activePingData)"
+                                :aggregationBucketSec="state.aggregationBucketSec"
+                            />
+                        </div>
+                        
                         <!-- PING Stats Summary -->
                         <div v-if="activePingData.length > 0" class="stats-summary">
                             <div class="stat-card">
@@ -737,22 +798,57 @@ watch(
                     <div v-if="containsProbeType('MTR')" class="data-section">
                         <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
                         
+                        <!-- Network Map Visualization -->
+                        <div v-if="activeMtrData.length > 0" class="network-map-container">
+                            <h3 class="subsection-title"><i class="bi bi-bezier2"></i> Network Path</h3>
+                            <NetworkMap 
+                                :mtrResults="transformMtrDataMulti(activeMtrData)" 
+                                @node-select="onNodeSelect"
+                            />
+                        </div>
+                        
                         <!-- MTR Summary -->
                         <MtrSummary 
                             v-if="activeMtrData.length > 0" 
                             :mtrData="activeMtrData" 
                         />
                         
-                        <!-- Recent MTR Results -->
+                        <!-- Paginated MTR Results -->
                         <div class="mtr-results">
-                            <h3>Recent Traces</h3>
-                            <div v-for="(mtr, idx) in activeMtrData.slice(0, 5)" :key="idx" class="mtr-item">
+                            <div class="mtr-results-header">
+                                <h3>Recent Traces</h3>
+                                <span class="mtr-count">{{ getPaginatedMtrResults(activeMtrData, mtrPage).total }} total</span>
+                            </div>
+                            
+                            <div v-for="(mtr, idx) in getPaginatedMtrResults(activeMtrData, mtrPage).items" :key="idx" class="mtr-item">
                                 <div class="mtr-header">
                                     <span class="mtr-time">
                                         {{ new Date(mtr.created_at).toLocaleString() }}
                                     </span>
                                 </div>
                                 <MtrTable :probeData="mtr" />
+                            </div>
+                            
+                            <!-- Pagination Controls -->
+                            <div v-if="getPaginatedMtrResults(activeMtrData, mtrPage).totalPages > 1" class="mtr-pagination">
+                                <button 
+                                    class="pagination-btn"
+                                    :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasPrev"
+                                    @click="goToMtrPage(mtrPage - 1)"
+                                >
+                                    <i class="bi bi-chevron-left"></i> Previous
+                                </button>
+                                <span class="pagination-info">
+                                    Page {{ getPaginatedMtrResults(activeMtrData, mtrPage).currentPage }} 
+                                    of {{ getPaginatedMtrResults(activeMtrData, mtrPage).totalPages }}
+                                </span>
+                                <button 
+                                    class="pagination-btn"
+                                    :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasNext"
+                                    @click="goToMtrPage(mtrPage + 1)"
+                                >
+                                    Next <i class="bi bi-chevron-right"></i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -785,6 +881,14 @@ watch(
                 Shared via NetWatcher • Read-only view
             </p>
         </footer>
+        
+        <!-- MTR Detail Modal -->
+        <MtrDetailModal
+            :visible="showMtrModal"
+            :node="selectedNode"
+            :mtrResults="activeMtrData"
+            @close="closeMtrModal"
+        />
     </div>
 </template>
 
@@ -1278,5 +1382,91 @@ watch(
 .direction-btn .direction-arrow {
     color: #6b7280;
     font-weight: 600;
+}
+
+/* Subsection titles */
+.subsection-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #94a3b8;
+    margin: 1.5rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.subsection-title i {
+    color: #6366f1;
+}
+
+/* Network Map Container */
+.network-map-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* MTR Results Header */
+.mtr-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.mtr-results-header h3 {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 0;
+}
+
+.mtr-count {
+    font-size: 0.8rem;
+    color: #6b7280;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+}
+
+/* MTR Pagination */
+.mtr-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pagination-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #94a3b8;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+}
+
+.pagination-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination-info {
+    font-size: 0.85rem;
+    color: #6b7280;
 }
 </style>
