@@ -583,10 +583,16 @@ export interface AlertRule {
     agent_id?: number;
     name: string;
     description?: string;
-    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline';
+    // Primary condition
+    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline' | 'end_hop_loss' | 'end_hop_latency' | 'worst_hop_loss' | 'route_change' | 'cpu_usage' | 'memory_usage';
     operator: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
     threshold: number;
     severity: 'warning' | 'critical';
+    // Optional secondary condition (compound alerts)
+    metric2?: 'packet_loss' | 'latency' | 'jitter' | 'offline' | 'end_hop_loss' | 'end_hop_latency' | 'worst_hop_loss' | 'route_change' | 'cpu_usage' | 'memory_usage';
+    operator2?: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
+    threshold2?: number;
+    logical_op?: 'AND' | 'OR';
     enabled: boolean;
     notify_panel: boolean;
     notify_email: boolean;
@@ -600,10 +606,16 @@ export interface AlertRuleInput {
     description?: string;
     probe_id?: number;
     agent_id?: number;
-    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline';
+    // Primary condition
+    metric: 'packet_loss' | 'latency' | 'jitter' | 'offline' | 'end_hop_loss' | 'end_hop_latency' | 'worst_hop_loss' | 'route_change' | 'cpu_usage' | 'memory_usage';
     operator: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
     threshold: number;
     severity?: 'warning' | 'critical';
+    // Optional secondary condition (compound alerts)
+    metric2?: 'packet_loss' | 'latency' | 'jitter' | 'offline' | 'end_hop_loss' | 'end_hop_latency' | 'worst_hop_loss' | 'route_change' | 'cpu_usage' | 'memory_usage';
+    operator2?: 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
+    threshold2?: number;
+    logical_op?: 'AND' | 'OR';
     enabled?: boolean;
     notify_panel?: boolean;
     notify_email?: boolean;
@@ -756,9 +768,17 @@ export const ShareLinkService = {
 
 /** ===== Public Share Access (no auth) ===== */
 export const PublicShareService = {
+    /** Get the base URL for API calls */
+    getBaseUrl(): string {
+        return (window as any).CONTROLLER_ENDPOINT
+            || import.meta.env.VITE_CONTROLLER_ENDPOINT
+            || import.meta.env.CONTROLLER_ENDPOINT
+            || 'http://localhost:8080';
+    },
+
     /** Get share link info (to check if password required) */
     async getInfo(token: string): Promise<{ has_password: boolean; expired: boolean; expires_at: string; allow_speedtest: boolean }> {
-        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const baseUrl = this.getBaseUrl();
         const response = await fetch(`${baseUrl}/share/${token}/info`);
         if (!response.ok) {
             throw new Error(response.status === 404 ? 'Share link not found' : 'Failed to get share info');
@@ -772,7 +792,7 @@ export const PublicShareService = {
         expires_at: string;
         allow_speedtest: boolean;
     }> {
-        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const baseUrl = this.getBaseUrl();
         const url = password
             ? `${baseUrl}/share/${token}?password=${encodeURIComponent(password)}`
             : `${baseUrl}/share/${token}`;
@@ -802,7 +822,7 @@ export const PublicShareService = {
         probeId: number | string,
         params?: { from?: string; to?: string; limit?: number; password?: string }
     ): Promise<{ items: any[]; total: number }> {
-        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const baseUrl = this.getBaseUrl();
         const qs = new URLSearchParams();
         if (params?.from) qs.set('from', params.from);
         if (params?.to) qs.set('to', params.to);
@@ -812,6 +832,23 @@ export const PublicShareService = {
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error('Failed to get probe data');
+        }
+        return response.json();
+    },
+
+    /** Get sanitized agent name for shared context */
+    async getAgentName(
+        token: string,
+        agentId: number | string,
+        password?: string
+    ): Promise<{ id: number; name: string; location: string }> {
+        const baseUrl = this.getBaseUrl();
+        const qs = new URLSearchParams();
+        if (password) qs.set('password', password);
+        const url = `${baseUrl}/share/${token}/agent/${agentId}${qs.toString() ? `?${qs}` : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error('Agent not found');
         }
         return response.json();
     },

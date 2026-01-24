@@ -116,9 +116,9 @@
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon"><i class="bi bi-bell"></i></div>
-                    <h3>Alerting</h3>
-                    <p>Threshold-based alerts with webhook notifications. Integrate with Slack, PagerDuty, or any HTTP
-                        endpoint.</p>
+                    <h3>Advanced Alerting</h3>
+                    <p>Compound conditions (AND/OR), MTR path monitoring, CPU/memory alerts, agent offline detection,
+                        and webhook integrations.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon"><i class="bi bi-building"></i></div>
@@ -135,6 +135,12 @@
                     <h3>Network Insights</h3>
                     <p>Interface discovery, routing tables, and MAC vendor lookup. Full visibility into your network
                         stack.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="bi bi-share"></i></div>
+                    <h3>Sharable Pages</h3>
+                    <p>Time-limited public links to share agent dashboards with vendors, ISPs, or clients. Password
+                        protection included.</p>
                 </div>
             </div>
         </div>
@@ -246,6 +252,12 @@
                             <td><i class="bi bi-check-circle-fill text-success"></i></td>
                             <td><i class="bi bi-check-circle-fill text-success"></i></td>
                         </tr>
+                        <tr>
+                            <td>Sharable Pages</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                        </tr>
 
                         <tr class="category-row">
                             <td colspan="4">Alerting</td>
@@ -254,6 +266,30 @@
                             <td>Threshold Alerts</td>
                             <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
                             <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Compound Alerts (AND/OR)</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Route Change Detection</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>Agent Offline Alerts</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                        </tr>
+                        <tr>
+                            <td>CPU/Memory Alerts</td>
+                            <td class="highlight"><i class="bi bi-check-circle-fill text-success"></i></td>
+                            <td><i class="bi bi-x-circle-fill text-danger"></i></td>
                             <td><i class="bi bi-check-circle-fill text-success"></i></td>
                         </tr>
                         <tr>
@@ -292,6 +328,9 @@
                         </li>
                         <li class="completed-item"><i class="bi bi-check-circle-fill"></i> MOS Score (VoIP Quality) ✓
                         </li>
+                        <li class="completed-item"><i class="bi bi-check-circle-fill"></i> Enhanced Alerting (Compound,
+                            MTR, CPU/Mem, Offline) ✓
+                        </li>
                         <li><i class="bi bi-graph-up"></i> Dynamic Thresholds</li>
                         <li class="completed-item"><i class="bi bi-check-circle-fill"></i> Controller API Services
                             (GeoIP, Public IP) ✓</li>
@@ -326,7 +365,7 @@
                         <li><i class="bi bi-file-earmark-pdf"></i> Scheduled Reports</li>
                         <li><i class="bi bi-shield-lock"></i> RBAC Enhancements</li>
                         <li><i class="bi bi-key"></i> SSO Integration (SAML/OIDC)</li>
-                        <li><i class="bi bi-link-45deg"></i> Sharable Agent Pages</li>
+                        <li class="completed-item"><i class="bi bi-check-circle-fill"></i> Sharable Agent Pages ✓</li>
                     </ul>
                 </div>
             </div>

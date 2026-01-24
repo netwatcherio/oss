@@ -268,6 +268,80 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		})
 	})
 
+	// Get agent name for shared context (sanitized - only returns name)
+	// Only works for agents that are part of probes visible to this share link
+	shareAPI.Get("/{token:string}/agent/{agentID:uint64}", func(ctx iris.Context) {
+		token := ctx.Params().Get("token")
+		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+		password := ctx.URLParam("password")
+
+		// Validate share link
+		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+			Token:    token,
+			Password: password,
+		})
+		if err != nil {
+			handleShareError(ctx, err)
+			return
+		}
+
+		// Check if this agent is accessible from the shared agent's probes
+		// Either: the agent IS the shared agent, OR is targeted by/targets the shared agent
+		isAccessible := false
+
+		// Check 1: Is this the shared agent itself?
+		if agentID == link.AgentID {
+			isAccessible = true
+		}
+
+		// Check 2: Is this agent targeted by a probe owned by the shared agent?
+		if !isAccessible {
+			var count int64
+			db.WithContext(ctx.Request().Context()).
+				Table("probe_targets").
+				Joins("JOIN probes ON probes.id = probe_targets.probe_id").
+				Where("probes.agent_id = ? AND probe_targets.agent_id = ?", link.AgentID, agentID).
+				Count(&count)
+			if count > 0 {
+				isAccessible = true
+			}
+		}
+
+		// Check 3: Does this agent have a probe that targets the shared agent?
+		if !isAccessible {
+			var count int64
+			db.WithContext(ctx.Request().Context()).
+				Table("probe_targets").
+				Joins("JOIN probes ON probes.id = probe_targets.probe_id").
+				Where("probes.agent_id = ? AND probe_targets.agent_id = ?", agentID, link.AgentID).
+				Count(&count)
+			if count > 0 {
+				isAccessible = true
+			}
+		}
+
+		if !isAccessible {
+			ctx.StatusCode(http.StatusNotFound)
+			_ = ctx.JSON(iris.Map{"error": "agent not found"})
+			return
+		}
+
+		// Get agent and return only safe fields
+		ag, err := agent.GetAgentByID(ctx.Request().Context(), db, agentID)
+		if err != nil {
+			ctx.StatusCode(http.StatusNotFound)
+			_ = ctx.JSON(iris.Map{"error": "agent not found"})
+			return
+		}
+
+		// Return only name (and optionally location for context)
+		_ = ctx.JSON(iris.Map{
+			"id":       ag.ID,
+			"name":     ag.Name,
+			"location": ag.Location,
+		})
+	})
+
 	// Get probe data for shared agent
 	shareAPI.Get("/{token:string}/probe-data/{probeID:uint64}", func(ctx iris.Context) {
 		token := ctx.Params().Get("token")
@@ -284,14 +358,42 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 			return
 		}
 
-		// Verify probe belongs to the shared agent
+		// Verify probe belongs to the shared agent OR targets the shared agent
+		// This allows viewing both owned probes AND reverse probes
 		var p probe.Probe
-		if err := db.WithContext(ctx.Request().Context()).
+
+		// First try: probe is owned by the shared agent
+		err = db.WithContext(ctx.Request().Context()).
 			Where("id = ? AND agent_id = ?", probeID, link.AgentID).
-			First(&p).Error; err != nil {
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": "probe not found"})
-			return
+			First(&p).Error
+
+		if err != nil {
+			// Second try: probe targets the shared agent (reverse probe)
+			// Check if any target in the probe has agent_id = shared agent
+			err = db.WithContext(ctx.Request().Context()).
+				Preload("Targets").
+				Where("id = ?", probeID).
+				First(&p).Error
+
+			if err != nil {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "probe not found"})
+				return
+			}
+
+			// Verify the probe targets the shared agent
+			isReverseProbe := false
+			for _, t := range p.Targets {
+				if t.AgentID != nil && *t.AgentID == link.AgentID {
+					isReverseProbe = true
+					break
+				}
+			}
+			if !isReverseProbe {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "probe not found"})
+				return
+			}
 		}
 
 		// Record access

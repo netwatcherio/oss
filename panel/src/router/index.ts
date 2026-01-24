@@ -105,6 +105,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/SharedAgent.vue'),
     },
 
+    // Public shared probe view (no auth required)
+    {
+        path: '/shared/:token/probe/:probeId',
+        name: 'sharedProbe',
+        component: () => import('@/views/SharedProbe.vue'),
+    },
+
     // App shell
     {
         path: '/',

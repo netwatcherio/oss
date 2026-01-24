@@ -3,9 +3,13 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
+import { groupProbesByTarget, type ProbeGroupByTarget } from '@/utils/probeGrouping';
 
 const route = useRoute();
 const token = computed(() => route.params.token as string);
+
+// Session storage key for password
+const getSessionKey = () => `share_password_${token.value}`;
 
 // State
 const loading = ref(true);
@@ -16,10 +20,37 @@ const passwordError = ref<string | null>(null);
 const expired = ref(false);
 const expiresAt = ref<string | null>(null);
 const allowSpeedtest = ref(false);
+const authenticatedPassword = ref<string | null>(null); // Store password after successful auth
 
 // Agent data
 const agent = ref<any>(null);
 const probes = ref<any[]>([]);
+const agentNames = ref<Record<string | number, string>>({});  // Cache for agent names
+
+// Computed: grouped probes by target (like Agent.vue)
+const targetGroups = computed<ProbeGroupByTarget[]>(() => {
+    if (!probes.value || probes.value.length === 0) return [];
+    const result = groupProbesByTarget(probes.value, { excludeDefaults: true, excludeServers: true });
+    return result.groups;
+});
+
+// Format expiry as human-readable relative time
+function formatExpiry(dateStr: string): string {
+    const expires = new Date(dateStr);
+    const now = new Date();
+    const diffMs = expires.getTime() - now.getTime();
+    
+    if (diffMs <= 0) return 'expired';
+    
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays > 0) return `in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
+    if (diffHours > 0) return `in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
+    if (diffMinutes > 0) return `in ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
+    return 'in less than a minute';
+}
 
 // Password submission
 async function submitPassword() {
@@ -27,10 +58,17 @@ async function submitPassword() {
     try {
         const result = await PublicShareService.getAgent(token.value, passwordInput.value);
         agent.value = result.agent;
-        probes.value = result.probes;
+        probes.value = result.probes || [];
         expiresAt.value = result.expires_at;
         allowSpeedtest.value = result.allow_speedtest;
+        authenticatedPassword.value = passwordInput.value; // Store for subsequent requests
         requiresPassword.value = false;
+        
+        // Cache password in sessionStorage for this session
+        sessionStorage.setItem(getSessionKey(), passwordInput.value);
+        
+        // Fetch agent names for AGENT-type probe groups
+        await fetchAgentNames();
     } catch (err: any) {
         if (err.message === 'INVALID_PASSWORD') {
             passwordError.value = 'Incorrect password. Please try again.';
@@ -45,12 +83,12 @@ function formatDate(dateStr: string): string {
     return new Date(dateStr).toLocaleString();
 }
 
-// Get status based on last update
+// Get status based on last_seen_at (not updated_at)
 function getAgentStatus(agent: any): 'online' | 'stale' | 'offline' {
-    if (!agent?.updated_at) return 'offline';
-    const updated = new Date(agent.updated_at);
+    if (!agent?.last_seen_at) return 'offline';
+    const lastSeen = new Date(agent.last_seen_at);
     const now = new Date();
-    const diffMinutes = (now.getTime() - updated.getTime()) / (1000 * 60);
+    const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
     if (diffMinutes < 5) return 'online';
     if (diffMinutes < 30) return 'stale';
     return 'offline';
@@ -91,6 +129,27 @@ async function loadAgent() {
         }
         
         if (info.has_password) {
+            // Check if we have a cached password in sessionStorage
+            const cachedPassword = sessionStorage.getItem(getSessionKey());
+            if (cachedPassword) {
+                // Try to use cached password
+                try {
+                    const result = await PublicShareService.getAgent(token.value, cachedPassword);
+                    agent.value = result.agent;
+                    probes.value = result.probes || [];
+                    expiresAt.value = result.expires_at;
+                    allowSpeedtest.value = result.allow_speedtest;
+                    authenticatedPassword.value = cachedPassword;
+                    
+                    // Fetch agent names for AGENT-type probe groups
+                    await fetchAgentNames();
+                    loading.value = false;
+                    return;
+                } catch {
+                    // Cached password invalid, clear it
+                    sessionStorage.removeItem(getSessionKey());
+                }
+            }
             requiresPassword.value = true;
             expiresAt.value = info.expires_at;
             loading.value = false;
@@ -100,9 +159,12 @@ async function loadAgent() {
         // No password required, load directly
         const result = await PublicShareService.getAgent(token.value);
         agent.value = result.agent;
-        probes.value = result.probes;
+        probes.value = result.probes || [];
         expiresAt.value = result.expires_at;
         allowSpeedtest.value = result.allow_speedtest;
+        
+        // Fetch agent names for AGENT-type probe groups
+        await fetchAgentNames();
     } catch (err: any) {
         if (err.message === 'PASSWORD_REQUIRED') {
             requiresPassword.value = true;
@@ -115,6 +177,40 @@ async function loadAgent() {
         }
     } finally {
         loading.value = false;
+    }
+}
+
+// Fetch agent names for AGENT-type probe groups
+async function fetchAgentNames() {
+    // Collect unique agent IDs from AGENT-type probes
+    const agentIds = new Set<number>();
+    
+    for (const p of probes.value) {
+        if (p.type === 'AGENT' && p.targets) {
+            for (const t of p.targets) {
+                if (t.agent_id) agentIds.add(t.agent_id);
+            }
+        }
+        // Also check if this probe belongs to another agent (reverse probe)
+        if (p.agent_id && p.agent_id !== agent.value?.id) {
+            agentIds.add(p.agent_id);
+        }
+    }
+    
+    // Fetch names for each agent
+    for (const agentId of agentIds) {
+        if (agentNames.value[agentId]) continue;  // Already cached
+        try {
+            const result = await PublicShareService.getAgentName(
+                token.value, 
+                agentId, 
+                authenticatedPassword.value || undefined
+            );
+            agentNames.value[agentId] = result.name;
+        } catch {
+            // Fallback to generic name if not accessible
+            agentNames.value[agentId] = `Agent #${agentId}`;
+        }
     }
 }
 
@@ -190,7 +286,7 @@ onMounted(() => {
                 <!-- Expiry Warning -->
                 <div v-if="expiresAt" class="expiry-notice">
                     <i class="bi bi-clock"></i>
-                    This link expires {{ since(expiresAt, true) }}
+                    This link expires {{ formatExpiry(expiresAt) }}
                 </div>
                 
                 <!-- Speedtest Capability Notice -->
@@ -235,7 +331,7 @@ onMounted(() => {
                     </div>
                 </div>
                 
-                <!-- Probes Section -->
+                <!-- Probes Section - Grouped like Agent.vue -->
                 <div class="probes-section">
                     <h2>
                         <i class="bi bi-diagram-3"></i>
@@ -243,32 +339,76 @@ onMounted(() => {
                         <span class="probe-count">{{ probes.length }}</span>
                     </h2>
                     
-                    <div v-if="probes.length === 0" class="no-probes">
+                    <div v-if="targetGroups.length === 0 && probes.length === 0" class="no-probes">
                         <i class="bi bi-inbox"></i>
                         <p>No probes configured for this agent.</p>
                     </div>
                     
+                    <!-- Grouped Probes Display (static cards like Agent.vue) -->
+                    <div v-else-if="targetGroups.length > 0" class="probes-grid">
+                        <router-link 
+                            v-for="g in targetGroups" 
+                            :key="g.key" 
+                            :to="{ name: 'sharedProbe', params: { token, probeId: g.probes[0]?.id } }"
+                            class="probe-card"
+                        >
+                            <div class="probe-link">
+                                <div class="probe-header">
+                                    <div class="probe-icon">
+                                        <i :class="g.kind === 'agent' ? 'bi bi-robot' 
+                                            : g.kind === 'host' ? 'bi bi-diagram-2' 
+                                            : 'bi bi-cpu'"></i>
+                                    </div>
+                                </div>
+                                
+                                <div class="probe-content">
+                                    <h6 class="probe-title">
+                                        <span v-if="g.kind==='host'">{{ g.label }}</span>
+                                        <span v-else-if="g.kind==='agent'">{{ agentNames[g.id] || `Agent #${g.id}` }}</span>
+                                        <span v-else>Local Probes</span>
+                                    </h6>
+                                    
+                                    <div class="probe-types">
+                                        <span v-for="t in g.types" :key="t" class="probe-type-badge" :class="t.toLowerCase()">
+                                            {{ t }} ({{ g.perType[t]?.count || 0 }})
+                                        </span>
+                                    </div>
+                                    
+                                    <div class="probe-stats">
+                                        <div class="probe-stat">
+                                            <i class="bi bi-collection"></i>
+                                            <span>{{ g.countProbes }} probe{{ g.countProbes !== 1 ? 's' : '' }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <i class="bi bi-chevron-right probe-arrow"></i>
+                            </div>
+                        </router-link>
+                    </div>
+                    
+                    <!-- Fallback: Individual probes if grouping returns empty -->
                     <div v-else class="probes-grid">
                         <div v-for="probe in probes" :key="probe.id" class="probe-card">
                             <div class="probe-header">
-                                <span class="probe-type" :class="probe.type.toLowerCase()">
+                                <span class="probe-type" :class="probe.type?.toLowerCase()">
                                     {{ probe.type }}
                                 </span>
                                 <span v-if="!probe.enabled" class="probe-disabled">
                                     Disabled
                                 </span>
                             </div>
-                            <div class="probe-name">{{ probe.name || `Probe #${probe.id}` }}</div>
+                            <div class="probe-name">Probe #{{ probe.id }}</div>
                             <div v-if="probe.targets && probe.targets.length > 0" class="probe-targets">
                                 <span v-for="(target, idx) in probe.targets.slice(0, 3)" :key="idx" class="target-badge">
-                                    {{ target.target || target.agent_id ? `Agent #${target.agent_id}` : 'N/A' }}
+                                    {{ target.target || (target.agent_id ? `Agent #${target.agent_id}` : 'N/A') }}
                                 </span>
                                 <span v-if="probe.targets.length > 3" class="more-targets">
                                     +{{ probe.targets.length - 3 }} more
                                 </span>
                             </div>
                             <div class="probe-meta">
-                                <span><i class="bi bi-clock"></i> {{ probe.interval }}s interval</span>
+                                <span><i class="bi bi-clock"></i> {{ probe.interval_sec || probe.interval || '?' }}s interval</span>
                             </div>
                         </div>
                     </div>
@@ -602,44 +742,129 @@ onMounted(() => {
 
 .probes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 1rem;
 }
 
 .probe-card {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    padding: 1rem 1.25rem;
+    border-radius: 8px;
     transition: all 0.2s;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    cursor: pointer;
 }
 
 .probe-card:hover {
-    border-color: rgba(99, 102, 241, 0.3);
-    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    transform: translateY(-2px);
+}
+
+.probe-link {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    min-height: 100px;
 }
 
 .probe-header {
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
 }
 
-.probe-type {
-    padding: 0.25rem 0.625rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
+.probe-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.125rem;
+}
+
+.probe-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.probe-title {
+    margin: 0;
+    font-size: 1rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    color: #f3f4f6;
+    line-height: 1.4;
 }
 
-.probe-type.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
-.probe-type.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-.probe-type.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+.probe-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.probe-type-badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    background: rgba(243, 244, 246, 0.15);
+    color: #9ca3af;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.probe-type-badge.inactive {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.probe-type-badge.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+.probe-type-badge.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+.probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+.probe-type-badge.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+
+.probe-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.probe-stat {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.813rem;
+    color: #9ca3af;
+}
+
+.probe-stat i {
+    font-size: 0.75rem;
+    width: 1rem;
+}
+
+.probe-status {
+    font-size: 0.875rem;
+}
+
+.probe-arrow {
+    color: #6b7280;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.text-warning {
+    color: #f59e0b;
+}
 
 .probe-disabled {
     background: rgba(239, 68, 68, 0.15);
@@ -681,7 +906,7 @@ onMounted(() => {
     color: #666;
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.5rem;
 }
 
 /* Footer */

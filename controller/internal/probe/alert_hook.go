@@ -28,7 +28,7 @@ func SaveRecordWithAlertEval(
 	}
 
 	// Only evaluate alerts for types that have metrics we can check
-	if kind != string(TypePing) && kind != string(TypeTrafficSim) {
+	if kind != string(TypePing) && kind != string(TypeTrafficSim) && kind != string(TypeMTR) && kind != string(TypeSysInfo) {
 		return nil
 	}
 

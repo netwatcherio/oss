@@ -126,9 +126,29 @@ const goToMtrPage = (page: number, pairIndex?: number) => {
 
 const router = core.router();
 
+// Helper to read initial time range from URL query params (e.g., from alert navigation)
+const getInitialTimeRange = (): [Date, Date] => {
+  const query = router.currentRoute.value.query;
+  const fromParam = query.from as string;
+  const toParam = query.to as string;
+  
+  if (fromParam && toParam) {
+    const from = new Date(fromParam);
+    const to = new Date(toParam);
+    // Validate parsed dates
+    if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
+      console.log('[Probe] Using time range from URL:', from.toISOString(), 'to', to.toISOString());
+      return [from, to];
+    }
+  }
+  // Default: last 3 hours
+  return [new Date(Date.now() - 3 * 60 * 60 * 1000), new Date()];
+};
+
 // ---------- Small utils ----------
 const toRFC3339 = (v?: Date | string | number) =>
     v instanceof Date ? v.toISOString() : typeof v === "number" ? new Date(v).toISOString() : v;
+
 
 function onTabChange(index: number) {
   activeTabIndex.value = index;
@@ -915,6 +935,10 @@ const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
 };
 
 onMounted(() => {
+  // Apply URL time range if provided (e.g., from alert navigation)
+  const urlTimeRange = getInitialTimeRange();
+  state.timeRange = urlTimeRange;
+  
   console.log('[Probe] Mounted with initial timeRange:', state.timeRange[0]?.toISOString(), 'to', state.timeRange[1]?.toISOString());
   
   // Subscribe to theme changes for date picker

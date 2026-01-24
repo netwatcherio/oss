@@ -177,8 +177,9 @@ func CreateIndexes(db *gorm.DB) error {
 		&speedtest.QueueItem{},    // TableName(): "speedtest_queue"
 		&speedtest.CachedServer{}, // TableName(): "agent_speedtest_servers"
 
-		&alert.AlertRule{}, // TableName(): "alert_rules"
-		&alert.Alert{},     // TableName(): "alerts"
+		&alert.AlertRule{},     // TableName(): "alert_rules"
+		&alert.Alert{},         // TableName(): "alerts"
+		&alert.RouteBaseline{}, // TableName(): "route_baselines"
 
 		&share.ShareLink{}, // TableName(): "share_links"
 	); err != nil {

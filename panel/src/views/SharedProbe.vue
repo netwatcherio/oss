@@ -1,0 +1,852 @@
+<script lang="ts" setup>
+import { ref, onMounted, computed, reactive, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { PublicShareService } from '@/services/apiService';
+import { since } from '@/time';
+import LatencyGraph from '@/components/PingGraph.vue';
+import TrafficSimGraph from '@/components/TrafficSimGraph.vue';
+import MtrTable from '@/components/MtrTable.vue';
+import MtrSummary from '@/components/MtrSummary.vue';
+import type { PingResult, MtrResult, TrafficSimResult, ProbeData } from '@/types';
+
+const route = useRoute();
+const router = useRouter();
+
+const token = computed(() => route.params.token as string);
+const probeId = computed(() => Number(route.params.probeId));
+
+// Session storage key for password
+const getSessionKey = () => `share_password_${token.value}`;
+
+// State
+const loading = ref(true);
+const error = ref<string | null>(null);
+const requiresPassword = ref(false);
+const passwordInput = ref('');
+const passwordError = ref<string | null>(null);
+const authenticatedPassword = ref<string | null>(null);
+
+// Agent/Probe data
+const agent = ref<any>(null);
+const probe = ref<any>(null);
+const probeAgent = ref<any>(null);  // Target agent for AGENT probes
+const probes = ref<any[]>([]);  // All probes for context
+
+// Probe data
+const state = reactive({
+    pingData: [] as ProbeData[],
+    mtrData: [] as ProbeData[],
+    trafficSimData: [] as ProbeData[],
+    timeRange: [new Date(Date.now() - 3*60*60*1000), new Date()] as [Date, Date],
+    title: '' as string,
+    ready: false,
+});
+
+// Helper: format date to RFC3339
+function toRFC3339(v?: Date | string | number): string {
+    return v instanceof Date ? v.toISOString() : typeof v === 'number' ? new Date(v).toISOString() : v || '';
+}
+
+// Transform PING data for graph
+function transformPingDataMulti(rows: ProbeData[]): PingResult[] {
+    return rows.map((r) => {
+        const p = r.payload as any;
+        if (!p) return null;
+        
+        const isAggregated = 'avgLatency' in p || 'minLatency' in p || 'latency' in p;
+        
+        if (isAggregated) {
+            const MS_TO_NS = 1e6;
+            return {
+                start_timestamp: new Date(r.created_at),
+                stop_timestamp: new Date(r.created_at),
+                packets_recv: p.packetsRecv || 0,
+                packets_sent: p.packetsSent || 0,
+                packets_recv_duplicates: 0,
+                packet_loss: p.packetLoss || 0,
+                addr: '',
+                min_rtt: (p.minLatency || 0) * MS_TO_NS,
+                max_rtt: (p.maxLatency || 0) * MS_TO_NS,
+                avg_rtt: (p.avgLatency || p.latency || 0) * MS_TO_NS,
+                std_dev_rtt: 0
+            } as PingResult;
+        } else {
+            return p as PingResult;
+        }
+    }).filter(Boolean) as PingResult[];
+}
+
+// Transform MTR data
+function transformMtrData(data: ProbeData): MtrResult {
+    return data.payload as MtrResult;
+}
+
+// Transform TrafficSim data
+function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
+    return rows.map((r) => {
+        const p = r.payload as any;
+        return {
+            averageRTT: p?.averageRTT ?? 0,
+            minRTT: p?.minRTT ?? 0,
+            maxRTT: p?.maxRTT ?? 0,
+            lostPackets: p?.lostPackets ?? 0,
+            totalPackets: p?.totalPackets ?? 0,
+            outOfSequence: p?.outOfOrder ?? 0,
+            duplicates: p?.duplicates ?? 0,
+            reportTime: p?.timestamp ?? r.created_at,
+        };
+    }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
+}
+
+// Check if probe has data of type
+function containsProbeType(type: string): boolean {
+    switch(type) {
+        case 'PING': return state.pingData.length > 0;
+        case 'MTR': return state.mtrData.length > 0;
+        case 'TRAFFICSIM': return state.trafficSimData.length > 0;
+        default: return false;
+    }
+}
+
+// Load shared agent info first
+async function loadShareInfo(): Promise<boolean> {
+    try {
+        const info = await PublicShareService.getInfo(token.value);
+        
+        if (info.expired) {
+            error.value = 'This share link has expired.';
+            return false;
+        }
+        
+        if (info.has_password) {
+            // Check if we have a cached password in sessionStorage
+            const cachedPassword = sessionStorage.getItem(getSessionKey());
+            if (cachedPassword) {
+                // Try to use cached password
+                try {
+                    const result = await PublicShareService.getAgent(token.value, cachedPassword);
+                    agent.value = result.agent;
+                    probes.value = result.probes || [];
+                    authenticatedPassword.value = cachedPassword;
+                    return true;
+                } catch {
+                    // Cached password invalid, clear it
+                    sessionStorage.removeItem(getSessionKey());
+                }
+            }
+            requiresPassword.value = true;
+            return false;
+        }
+        
+        return true;
+    } catch (err: any) {
+        error.value = err.message || 'Failed to access shared link';
+        return false;
+    }
+}
+
+// Submit password
+async function submitPassword() {
+    passwordError.value = null;
+    try {
+        const result = await PublicShareService.getAgent(token.value, passwordInput.value);
+        agent.value = result.agent;
+        probes.value = result.probes || [];
+        authenticatedPassword.value = passwordInput.value;
+        requiresPassword.value = false;
+        
+        // Cache password in sessionStorage for this session
+        sessionStorage.setItem(getSessionKey(), passwordInput.value);
+        
+        // Now load probe data
+        await loadProbeData();
+    } catch (err: any) {
+        if (err.message === 'INVALID_PASSWORD') {
+            passwordError.value = 'Incorrect password. Please try again.';
+        } else {
+            error.value = err.message || 'Failed to access shared agent';
+        }
+    }
+}
+
+// Load probe and its data
+async function loadProbeData() {
+    loading.value = true;
+    state.ready = false;
+    
+    try {
+        // Load agent and probes info if not already loaded
+        if (!agent.value) {
+            const result = await PublicShareService.getAgent(
+                token.value, 
+                authenticatedPassword.value || undefined
+            );
+            agent.value = result.agent;
+            probes.value = result.probes || [];
+        }
+        
+        // Find the specific probe
+        probe.value = probes.value.find(p => p.id === probeId.value);
+        if (!probe.value) {
+            error.value = 'Probe not found';
+            return;
+        }
+        
+        // Determine title based on probe target
+        const firstTarget = probe.value.targets?.[0];
+        if (firstTarget?.agent_id) {
+            // AGENT probe - try to get target agent name
+            try {
+                const targetAgent = await PublicShareService.getAgentName(
+                    token.value, 
+                    firstTarget.agent_id, 
+                    authenticatedPassword.value || undefined
+                );
+                probeAgent.value = targetAgent;
+                state.title = targetAgent.name || `Agent #${firstTarget.agent_id}`;
+            } catch {
+                state.title = `Agent #${firstTarget.agent_id}`;
+            }
+        } else if (firstTarget?.target) {
+            state.title = String(firstTarget.target).split(':')[0] || firstTarget.target;
+        } else {
+            state.title = `${probe.value.type} #${probe.value.id}`;
+        }
+        
+        // Load probe data
+        const [from, to] = state.timeRange;
+        const params = {
+            from: toRFC3339(from),
+            to: toRFC3339(to),
+            limit: 500,
+            password: authenticatedPassword.value || undefined
+        };
+        
+        const dataResult = await PublicShareService.getProbeData(token.value, probeId.value, params);
+        
+        // Sort data by type
+        state.pingData = [];
+        state.mtrData = [];
+        state.trafficSimData = [];
+        
+        for (const item of (dataResult.items || [])) {
+            // Parse payload if string
+            const payload = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+            const probeData: ProbeData = {
+                id: item.timestamp,
+                probe_id: probeId.value,
+                type: item.type,
+                payload: payload,
+                created_at: item.timestamp,
+            };
+            
+            switch (item.type) {
+                case 'PING': state.pingData.push(probeData); break;
+                case 'MTR': state.mtrData.push(probeData); break;
+                case 'TRAFFICSIM': state.trafficSimData.push(probeData); break;
+            }
+        }
+        
+        state.ready = true;
+    } catch (err: any) {
+        if (err.message === 'PASSWORD_REQUIRED') {
+            requiresPassword.value = true;
+        } else {
+            error.value = err.message || 'Failed to load probe data';
+        }
+    } finally {
+        loading.value = false;
+    }
+}
+
+// Navigate back to agent
+function goBack() {
+    router.push({ name: 'sharedAgent', params: { token: token.value } });
+}
+
+// Initial load
+onMounted(async () => {
+    const canProceed = await loadShareInfo();
+    if (canProceed) {
+        await loadProbeData();
+    } else {
+        loading.value = false;
+    }
+});
+
+// Watch for time range changes
+watch(() => state.timeRange, () => {
+    if (state.ready) {
+        loadProbeData();
+    }
+}, { deep: true });
+</script>
+
+<template>
+    <div class="shared-probe-page">
+        <!-- Header -->
+        <header class="shared-header">
+            <div class="header-content">
+                <div class="brand">
+                    <button class="back-btn" @click="goBack">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
+                    <i class="bi bi-eye"></i>
+                    <span>NetWatcher</span>
+                    <span class="badge">Shared View</span>
+                </div>
+            </div>
+        </header>
+        
+        <main class="shared-main">
+            <!-- Loading State -->
+            <div v-if="loading" class="loading-state">
+                <i class="bi bi-arrow-repeat spin"></i>
+                <p>Loading probe data...</p>
+            </div>
+            
+            <!-- Error State -->
+            <div v-else-if="error" class="error-state">
+                <i class="bi bi-exclamation-triangle"></i>
+                <p>{{ error }}</p>
+                <button @click="goBack" class="back-link">
+                    <i class="bi bi-arrow-left"></i> Back to Agent
+                </button>
+            </div>
+            
+            <!-- Password Required -->
+            <div v-else-if="requiresPassword" class="password-state">
+                <div class="password-card">
+                    <div class="password-icon">
+                        <i class="bi bi-lock"></i>
+                    </div>
+                    <h2>Password Required</h2>
+                    <p>This shared page is password protected.</p>
+                    
+                    <form @submit.prevent="submitPassword" class="password-form">
+                        <input 
+                            type="password" 
+                            v-model="passwordInput"
+                            placeholder="Enter password"
+                            class="password-input"
+                            autofocus
+                        />
+                        <div v-if="passwordError" class="password-error">
+                            <i class="bi bi-exclamation-circle"></i>
+                            {{ passwordError }}
+                        </div>
+                        <button type="submit" class="password-submit">
+                            <i class="bi bi-unlock"></i>
+                            Unlock
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Probe Content -->
+            <div v-else-if="state.ready" class="probe-content">
+                <!-- Probe Header -->
+                <div class="probe-header-section">
+                    <div class="probe-title-row">
+                        <div class="probe-icon" :class="probe?.type?.toLowerCase()">
+                            <i :class="probe?.type === 'AGENT' ? 'bi bi-robot' : 
+                                       probe?.type === 'PING' ? 'bi bi-broadcast-pin' :
+                                       probe?.type === 'MTR' ? 'bi bi-diagram-2' :
+                                       probe?.type === 'TRAFFICSIM' ? 'bi bi-speedometer' : 'bi bi-cpu'"></i>
+                        </div>
+                        <div class="probe-title-info">
+                            <h1>{{ state.title }}</h1>
+                            <div class="probe-meta">
+                                <span class="probe-type-badge" :class="probe?.type?.toLowerCase()">
+                                    {{ probe?.type }}
+                                </span>
+                                <span class="probe-interval" v-if="probe?.interval_sec">
+                                    <i class="bi bi-clock"></i> {{ probe.interval_sec }}s interval
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Agent Info (for AGENT probes) -->
+                    <div v-if="probeAgent" class="agent-context">
+                        <span class="context-label">Target:</span>
+                        <span class="context-value">{{ probeAgent.name }}</span>
+                        <span v-if="probeAgent.location" class="context-location">
+                            <i class="bi bi-geo-alt"></i> {{ probeAgent.location }}
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- Data Tabs -->
+                <div class="data-tabs">
+                    <!-- PING Data -->
+                    <div v-if="containsProbeType('PING')" class="data-section">
+                        <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
+                        <div class="graph-container">
+                            <LatencyGraph 
+                                :results="transformPingDataMulti(state.pingData)" 
+                                :showPacketLoss="true"
+                            />
+                        </div>
+                        
+                        <!-- PING Stats Summary -->
+                        <div v-if="state.pingData.length > 0" class="stats-summary">
+                            <div class="stat-card">
+                                <div class="stat-label">Data Points</div>
+                                <div class="stat-value">{{ state.pingData.length }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- MTR Data -->
+                    <div v-if="containsProbeType('MTR')" class="data-section">
+                        <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
+                        
+                        <!-- MTR Summary -->
+                        <MtrSummary 
+                            v-if="state.mtrData.length > 0" 
+                            :results="state.mtrData.map(d => transformMtrData(d))" 
+                        />
+                        
+                        <!-- Recent MTR Results -->
+                        <div class="mtr-results">
+                            <h3>Recent Traces</h3>
+                            <div v-for="(mtr, idx) in state.mtrData.slice(0, 5)" :key="idx" class="mtr-item">
+                                <div class="mtr-header">
+                                    <span class="mtr-time">
+                                        {{ new Date(mtr.created_at).toLocaleString() }}
+                                    </span>
+                                </div>
+                                <MtrTable :result="transformMtrData(mtr)" />
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- TrafficSim Data -->
+                    <div v-if="containsProbeType('TRAFFICSIM')" class="data-section">
+                        <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
+                        <div class="graph-container">
+                            <TrafficSimGraph :results="transformToTrafficSimResult(state.trafficSimData)" />
+                        </div>
+                    </div>
+                    
+                    <!-- No Data -->
+                    <div v-if="!containsProbeType('PING') && !containsProbeType('MTR') && !containsProbeType('TRAFFICSIM')" class="no-data">
+                        <i class="bi bi-inbox"></i>
+                        <p>No data available for this probe in the selected time range.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <!-- Footer -->
+        <footer class="shared-footer">
+            <p>
+                <i class="bi bi-info-circle"></i>
+                Shared via NetWatcher • Read-only view
+            </p>
+        </footer>
+    </div>
+</template>
+
+<style scoped>
+.shared-probe-page {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #e2e8f0;
+}
+
+.shared-header {
+    background: rgba(15, 23, 42, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1rem 1.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+}
+
+.header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.back-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #e2e8f0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-right: 0.5rem;
+}
+
+.back-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.badge {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.shared-main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+}
+
+/* Loading State */
+.loading-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.loading-state i {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Error State */
+.error-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.error-state i {
+    font-size: 3rem;
+    color: #ef4444;
+    margin-bottom: 1rem;
+}
+
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.75rem 1.5rem;
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.back-link:hover {
+    background: rgba(99, 102, 241, 0.3);
+}
+
+/* Password State */
+.password-state {
+    display: flex;
+    justify-content: center;
+    padding: 4rem 1rem;
+}
+
+.password-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 2.5rem;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+}
+
+.password-icon {
+    width: 64px;
+    height: 64px;
+    background: rgba(99, 102, 241, 0.2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+}
+
+.password-icon i {
+    font-size: 1.75rem;
+    color: #a5b4fc;
+}
+
+.password-form {
+    margin-top: 1.5rem;
+}
+
+.password-input {
+    width: 100%;
+    padding: 0.875rem 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 1rem;
+}
+
+.password-error {
+    color: #f87171;
+    font-size: 0.875rem;
+    margin-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+}
+
+.password-submit {
+    width: 100%;
+    padding: 0.875rem;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+
+.password-submit:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+/* Probe Content */
+.probe-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.probe-header-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+
+.probe-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.probe-icon {
+    width: 56px;
+    height: 56px;
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.probe-icon.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+.probe-icon.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+.probe-icon.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+.probe-icon.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+
+.probe-title-info h1 {
+    margin: 0 0 0.5rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.probe-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.probe-type-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    background: rgba(243, 244, 246, 0.15);
+    color: #9ca3af;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.probe-type-badge.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+.probe-type-badge.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+.probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+.probe-type-badge.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+
+.probe-interval {
+    font-size: 0.875rem;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.agent-context {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.context-label {
+    color: #9ca3af;
+    font-size: 0.875rem;
+}
+
+.context-value {
+    font-weight: 600;
+}
+
+.context-location {
+    color: #9ca3af;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+/* Data Sections */
+.data-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.data-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+
+.data-section h2 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.graph-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 1rem;
+    min-height: 300px;
+}
+
+.stats-summary {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 1rem;
+    min-width: 120px;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+
+.stat-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+/* MTR Results */
+.mtr-results h3 {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 1.5rem 0 1rem;
+    color: #9ca3af;
+}
+
+.mtr-item {
+    margin-bottom: 1.5rem;
+}
+
+.mtr-header {
+    margin-bottom: 0.5rem;
+}
+
+.mtr-time {
+    font-size: 0.875rem;
+    color: #9ca3af;
+}
+
+/* No Data */
+.no-data {
+    text-align: center;
+    padding: 3rem;
+    color: #9ca3af;
+}
+
+.no-data i {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    display: block;
+}
+
+/* Footer */
+.shared-footer {
+    margin-top: 3rem;
+    padding: 1.5rem;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.shared-footer p {
+    color: #666;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+</style>

@@ -15,12 +15,26 @@ type Metric string
 type Operator string
 type Severity string
 type Status string
+type LogicalOperator string
 
 const (
 	MetricPacketLoss Metric = "packet_loss"
 	MetricLatency    Metric = "latency"
 	MetricJitter     Metric = "jitter"
-	MetricOffline    Metric = "offline"
+	MetricOffline    Metric = "offline" // Agent offline (minutes since last seen)
+	// MTR-specific metrics
+	MetricEndHopLoss    Metric = "end_hop_loss"    // Final destination packet loss %
+	MetricEndHopLatency Metric = "end_hop_latency" // Final destination avg latency (ms)
+	MetricRouteChange   Metric = "route_change"    // Route differs from baseline
+	MetricWorstHopLoss  Metric = "worst_hop_loss"  // Any hop exceeding loss threshold
+	// SYSINFO metrics
+	MetricCpuUsage    Metric = "cpu_usage"    // CPU usage percentage
+	MetricMemoryUsage Metric = "memory_usage" // Memory usage percentage
+)
+
+const (
+	LogicalAnd LogicalOperator = "AND"
+	LogicalOr  LogicalOperator = "OR"
 )
 
 const (
@@ -63,10 +77,17 @@ type AlertRule struct {
 	Name        string `gorm:"size:128" json:"name"`
 	Description string `gorm:"size:512" json:"description,omitempty"`
 
+	// Primary condition
 	Metric    Metric   `gorm:"type:VARCHAR(32);index" json:"metric"`
 	Operator  Operator `gorm:"type:VARCHAR(8)" json:"operator"`
 	Threshold float64  `json:"threshold"`
 	Severity  Severity `gorm:"type:VARCHAR(16);default:'warning'" json:"severity"`
+
+	// Optional secondary condition for compound alerts (e.g., latency > 100 OR packet_loss > 5)
+	Metric2    *Metric         `gorm:"type:VARCHAR(32)" json:"metric2,omitempty"`
+	Operator2  *Operator       `gorm:"type:VARCHAR(8)" json:"operator2,omitempty"`
+	Threshold2 *float64        `json:"threshold2,omitempty"`
+	LogicalOp  LogicalOperator `gorm:"type:VARCHAR(8);default:'AND'" json:"logical_op"`
 
 	// Notification channels
 	NotifyPanel   bool   `gorm:"default:true" json:"notify_panel"`         // Show in panel alerts (always on)
@@ -116,16 +137,22 @@ func (Alert) TableName() string { return "alerts" }
 // -------------------- DTOs --------------------
 
 type CreateRuleInput struct {
-	WorkspaceID uint     `json:"workspace_id"`
-	ProbeID     *uint    `json:"probe_id,omitempty"`
-	AgentID     *uint    `json:"agent_id,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Metric      Metric   `json:"metric"`
-	Operator    Operator `json:"operator"`
-	Threshold   float64  `json:"threshold"`
-	Severity    Severity `json:"severity,omitempty"`
-	Enabled     *bool    `json:"enabled,omitempty"`
+	WorkspaceID uint   `json:"workspace_id"`
+	ProbeID     *uint  `json:"probe_id,omitempty"`
+	AgentID     *uint  `json:"agent_id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Primary condition
+	Metric    Metric   `json:"metric"`
+	Operator  Operator `json:"operator"`
+	Threshold float64  `json:"threshold"`
+	Severity  Severity `json:"severity,omitempty"`
+	// Optional secondary condition (compound alert)
+	Metric2    *Metric         `json:"metric2,omitempty"`
+	Operator2  *Operator       `json:"operator2,omitempty"`
+	Threshold2 *float64        `json:"threshold2,omitempty"`
+	LogicalOp  LogicalOperator `json:"logical_op,omitempty"`
+	Enabled    *bool           `json:"enabled,omitempty"`
 	// Notification channels
 	NotifyPanel   *bool  `json:"notify_panel,omitempty"`
 	NotifyEmail   *bool  `json:"notify_email,omitempty"`
@@ -136,13 +163,19 @@ type CreateRuleInput struct {
 
 type UpdateRuleInput struct {
 	ID          uint
-	Name        *string   `json:"name,omitempty"`
-	Description *string   `json:"description,omitempty"`
-	Metric      *Metric   `json:"metric,omitempty"`
-	Operator    *Operator `json:"operator,omitempty"`
-	Threshold   *float64  `json:"threshold,omitempty"`
-	Severity    *Severity `json:"severity,omitempty"`
-	Enabled     *bool     `json:"enabled,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	// Primary condition
+	Metric    *Metric   `json:"metric,omitempty"`
+	Operator  *Operator `json:"operator,omitempty"`
+	Threshold *float64  `json:"threshold,omitempty"`
+	Severity  *Severity `json:"severity,omitempty"`
+	// Optional secondary condition (compound alert)
+	Metric2    *Metric          `json:"metric2,omitempty"`
+	Operator2  *Operator        `json:"operator2,omitempty"`
+	Threshold2 *float64         `json:"threshold2,omitempty"`
+	LogicalOp  *LogicalOperator `json:"logical_op,omitempty"`
+	Enabled    *bool            `json:"enabled,omitempty"`
 	// Notification channels
 	NotifyPanel   *bool   `json:"notify_panel,omitempty"`
 	NotifyEmail   *bool   `json:"notify_email,omitempty"`
@@ -177,6 +210,12 @@ func CreateRule(ctx context.Context, db *gorm.DB, in CreateRuleInput) (*AlertRul
 		enabled = *in.Enabled
 	}
 
+	// Default logical operator to AND if secondary condition is provided
+	logicalOp := in.LogicalOp
+	if logicalOp == "" && in.Metric2 != nil {
+		logicalOp = LogicalAnd
+	}
+
 	rule := &AlertRule{
 		WorkspaceID: in.WorkspaceID,
 		ProbeID:     in.ProbeID,
@@ -187,6 +226,10 @@ func CreateRule(ctx context.Context, db *gorm.DB, in CreateRuleInput) (*AlertRul
 		Operator:    in.Operator,
 		Threshold:   in.Threshold,
 		Severity:    severity,
+		Metric2:     in.Metric2,
+		Operator2:   in.Operator2,
+		Threshold2:  in.Threshold2,
+		LogicalOp:   logicalOp,
 		Enabled:     enabled,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -242,6 +285,19 @@ func UpdateRule(ctx context.Context, db *gorm.DB, in UpdateRuleInput) (*AlertRul
 	}
 	if in.Severity != nil {
 		updates["severity"] = *in.Severity
+	}
+	// Secondary condition fields
+	if in.Metric2 != nil {
+		updates["metric2"] = *in.Metric2
+	}
+	if in.Operator2 != nil {
+		updates["operator2"] = *in.Operator2
+	}
+	if in.Threshold2 != nil {
+		updates["threshold2"] = *in.Threshold2
+	}
+	if in.LogicalOp != nil {
+		updates["logical_op"] = *in.LogicalOp
 	}
 	if in.Enabled != nil {
 		updates["enabled"] = *in.Enabled

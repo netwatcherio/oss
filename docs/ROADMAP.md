@@ -86,7 +86,38 @@ Reduce alert fatigue:
 - [ ] Debounce: Suppress duplicate alerts within time window
 - [ ] Grouping: Combine related alerts (same target, same timeframe)
 - [ ] Escalation: Warning → Critical after N minutes
-- [ ] Recovery notifications
+- [x] Recovery notifications (auto-resolve when condition clears)
+
+### P1.7 Enhanced Alert System ✅
+**Priority: High** | **Effort: Medium** | **Status: Complete**
+
+Advanced alerting capabilities:
+
+**Compound Conditions:**
+- [x] AND/OR logic for combining two conditions in a single rule
+- [x] Secondary metric, operator, and threshold fields
+- [x] UI for configuring compound alert rules
+
+**MTR-Specific Alerting:**
+- [x] End hop packet loss alerting (`end_hop_loss`)
+- [x] End hop latency alerting (`end_hop_latency`)
+- [x] Worst hop loss alerting (`worst_hop_loss`)
+- [x] Route change detection with automatic baseline creation (`route_change`)
+
+**System Resource Alerting:**
+- [x] CPU usage percentage monitoring (`cpu_usage`)
+- [x] Memory usage percentage monitoring (`memory_usage`)
+- [x] Automatic evaluation on SYSINFO probe data
+
+**Agent Offline Detection:**
+- [x] Alert when agent stops reporting (based on `last_seen_at`)
+- [x] Configurable offline threshold (minutes)
+- [x] Periodic scheduler checks every minute
+- [x] Auto-resolve when agent comes back online
+
+**Time Context Navigation:**
+- [x] Alert links navigate to probe with 1-hour time window centered on trigger time
+- [x] Probe view reads `from`/`to` URL parameters for initial time range
 
 ### P1.6 Controller API Services ✅
 **Priority: High** | **Effort: Medium** | **Status: Complete**
@@ -254,17 +285,22 @@ Programmatic access:
 - [ ] Token expiry and rotation
 - [ ] Usage logging
 
-### P3.6 Sharable Agent Pages
-**Priority: Medium** | **Effort: Medium**
+### P3.6 Sharable Agent Pages ✅
+**Priority: Medium** | **Effort: Medium** | **Status: Complete**
 
 Time-limited public access to agent views:
 
-- [ ] Generate shareable link for any agent page
-- [ ] Configurable expiration (1 hour, 24 hours, 7 days, custom)
-- [ ] Optional password protection
-- [ ] Read-only access (no configuration changes)
-- [ ] Link revocation capability
-- [ ] Access logging (views, IPs)
+- [x] Generate shareable link for any agent page
+- [x] Configurable expiration (1 hour, 24 hours, 7 days, 30 days)
+- [x] Optional password protection (bcrypt hashed)
+- [x] Read-only access (no configuration changes)
+- [x] Link revocation capability
+- [x] Access logging (view count, last accessed timestamp)
+- [x] Clickable probe cards with shared probe detail view
+- [x] Agent name display for AGENT-type probes (sanitized)
+- [x] Reverse probe support (probes from other agents targeting shared agent)
+- [x] Session-based password caching (sessionStorage)
+- [x] Speedtest capability gating (only for short-term shares ≤1 hour)
 - [ ] Customizable data scope (all metrics vs specific probes)
 
 **Use Cases:**
@@ -272,6 +308,41 @@ Time-limited public access to agent views:
 - Share agent status with vendors/ISPs for troubleshooting
 - Temporary client access without workspace invitation
 - Public status pages for specific endpoints
+
+### P3.7 Observability Integrations
+**Priority: Medium** | **Effort: Medium**
+
+Prometheus/Loki compatible APIs for integration with existing observability stacks:
+
+**Prometheus Metrics Endpoint:**
+- [ ] `/metrics` endpoint exposing probe data in Prometheus exposition format
+- [ ] Per-agent metrics: latency, jitter, packet_loss, mos_score, hop_count
+- [ ] Per-probe labels: probe_id, probe_type, source_agent, target
+- [ ] System metrics: cpu_usage, memory_usage, disk_usage (from SYSINFO)
+- [ ] Controller metrics: connected_agents, active_probes, alerts_firing
+- [ ] Optional authentication (Bearer token or basic auth)
+- [ ] Configurable metric prefix (e.g., `netwatcher_`)
+
+**Loki-Compatible Log Push:**
+- [ ] Push alert events and probe failures to Loki endpoint
+- [ ] Structured labels: workspace, agent, probe_type, severity
+- [ ] Configurable Loki endpoint URL per workspace
+- [ ] Batch push with configurable interval
+
+**Remote Write Support:**
+- [ ] Prometheus remote_write compatible endpoint for ingestion
+- [ ] Allow external Prometheus instances to push metrics to NetWatcher
+
+**Grafana Integration:**
+- [ ] Pre-built Grafana dashboard JSON exports
+- [ ] Data source configuration documentation
+- [ ] Example alerting rules for Grafana Alerting
+
+**Use Cases:**
+- Unified observability: Combine NetWatcher metrics with application/infrastructure metrics
+- Long-term retention: Use existing Prometheus/Mimir/Thanos for extended storage
+- Custom dashboards: Build Grafana dashboards mixing multiple data sources
+- Alert correlation: Correlate network issues with application performance in single pane
 
 ---
 

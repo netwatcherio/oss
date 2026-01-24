@@ -67,7 +67,19 @@ function navigateToAgent(alert: Alert) {
 
 function navigateToProbe(alert: Alert) {
   if (alert.agent_id && alert.probe_id) {
-    router.push(`/workspaces/${alert.workspace_id}/agents/${alert.agent_id}?probe=${alert.probe_id}`);
+    // Center a 1-hour window around the alert trigger time
+    const triggerTime = new Date(alert.triggered_at);
+    const from = new Date(triggerTime.getTime() - 30 * 60 * 1000); // 30 min before
+    const to = new Date(triggerTime.getTime() + 30 * 60 * 1000);   // 30 min after
+    
+    router.push({
+      path: `/workspaces/${alert.workspace_id}/agents/${alert.agent_id}`,
+      query: {
+        probe: alert.probe_id.toString(),
+        from: from.toISOString(),
+        to: to.toISOString()
+      }
+    });
   }
 }
 

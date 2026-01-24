@@ -19,13 +19,19 @@ const state = reactive({
   editingRule: null as AlertRule | null,
 });
 
-const form = reactive<AlertRuleInput>({
+const form = reactive<AlertRuleInput & { hasSecondCondition?: boolean }>({
   name: '',
   description: '',
   metric: 'packet_loss',
   operator: 'gt',
   threshold: 1,
   severity: 'warning',
+  // Compound condition fields
+  metric2: undefined,
+  operator2: undefined,
+  threshold2: undefined,
+  logical_op: 'OR',
+  hasSecondCondition: false,
   enabled: true,
   notify_panel: true,
   notify_email: false,
@@ -34,10 +40,18 @@ const form = reactive<AlertRuleInput>({
 });
 
 const metrics = [
-  { value: 'packet_loss', label: 'Packet Loss (%)', unit: '%' },
-  { value: 'latency', label: 'Latency (ms)', unit: 'ms' },
-  { value: 'jitter', label: 'Jitter (ms)', unit: 'ms' },
-  { value: 'offline', label: 'Agent Offline (minutes)', unit: 'min' },
+  { value: 'packet_loss', label: 'Packet Loss (%)', unit: '%', category: 'general' },
+  { value: 'latency', label: 'Latency (ms)', unit: 'ms', category: 'general' },
+  { value: 'jitter', label: 'Jitter (ms)', unit: 'ms', category: 'general' },
+  { value: 'offline', label: 'Agent Offline (minutes)', unit: 'min', category: 'general' },
+  // MTR-specific metrics
+  { value: 'end_hop_loss', label: 'End Hop Loss (%)', unit: '%', category: 'mtr' },
+  { value: 'end_hop_latency', label: 'End Hop Latency (ms)', unit: 'ms', category: 'mtr' },
+  { value: 'worst_hop_loss', label: 'Worst Hop Loss (%)', unit: '%', category: 'mtr' },
+  { value: 'route_change', label: 'Route Change', unit: '', category: 'mtr' },
+  // SYSINFO metrics
+  { value: 'cpu_usage', label: 'CPU Usage (%)', unit: '%', category: 'sysinfo' },
+  { value: 'memory_usage', label: 'Memory Usage (%)', unit: '%', category: 'sysinfo' },
 ];
 
 const operators = [
@@ -46,6 +60,11 @@ const operators = [
   { value: 'lt', label: '<' },
   { value: 'lte', label: '≤' },
   { value: 'eq', label: '=' },
+];
+
+const logicalOperators = [
+  { value: 'OR', label: 'OR' },
+  { value: 'AND', label: 'AND' },
 ];
 
 const isFormValid = computed(() => {
@@ -72,6 +91,11 @@ function openCreateForm() {
     operator: 'gt',
     threshold: 1,
     severity: 'warning',
+    metric2: undefined,
+    operator2: undefined,
+    threshold2: undefined,
+    logical_op: 'OR',
+    hasSecondCondition: false,
     enabled: true,
     notify_panel: true,
     notify_email: false,
@@ -83,6 +107,7 @@ function openCreateForm() {
 
 function openEditForm(rule: AlertRule) {
   state.editingRule = rule;
+  const hasCompound = !!rule.metric2;
   Object.assign(form, {
     name: rule.name,
     description: rule.description || '',
@@ -90,6 +115,11 @@ function openEditForm(rule: AlertRule) {
     operator: rule.operator,
     threshold: rule.threshold,
     severity: rule.severity,
+    metric2: rule.metric2,
+    operator2: rule.operator2,
+    threshold2: rule.threshold2,
+    logical_op: rule.logical_op || 'OR',
+    hasSecondCondition: hasCompound,
     enabled: rule.enabled,
     notify_panel: rule.notify_panel,
     notify_email: rule.notify_email,
@@ -198,9 +228,14 @@ onMounted(loadRules);
                 {{ rule.severity }}
               </span>
               <span v-if="!rule.enabled" class="badge bg-secondary">Disabled</span>
+              <span v-if="rule.metric2" class="badge bg-info">Compound</span>
             </div>
             <div class="text-muted small">
               {{ getMetricLabel(rule.metric) }} {{ getOperatorLabel(rule.operator) }} {{ rule.threshold }}
+              <template v-if="rule.metric2">
+                <span class="mx-1 text-primary fw-bold">{{ rule.logical_op }}</span>
+                {{ getMetricLabel(rule.metric2) }} {{ getOperatorLabel(rule.operator2 || '') }} {{ rule.threshold2 }}
+              </template>
             </div>
             <div class="mt-1 small text-muted">
               <span v-if="rule.notify_panel" class="me-2"><i class="bi bi-display"></i> Panel</span>
@@ -242,7 +277,15 @@ onMounted(loadRules);
             <div class="col-5">
               <label class="form-label">Metric</label>
               <select v-model="form.metric" class="form-select">
-                <option v-for="m in metrics" :key="m.value" :value="m.value">{{ m.label }}</option>
+                <optgroup label="General">
+                  <option v-for="m in metrics.filter(m => m.category === 'general')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                </optgroup>
+                <optgroup label="MTR (Traceroute)">
+                  <option v-for="m in metrics.filter(m => m.category === 'mtr')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                </optgroup>
+                <optgroup label="System Resources">
+                  <option v-for="m in metrics.filter(m => m.category === 'sysinfo')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                </optgroup>
               </select>
             </div>
             <div class="col-3">
@@ -254,6 +297,63 @@ onMounted(loadRules);
             <div class="col-4">
               <label class="form-label">Threshold</label>
               <input v-model.number="form.threshold" type="number" class="form-control" step="0.1" min="0">
+            </div>
+          </div>
+
+          <!-- Compound Condition Toggle -->
+          <div class="mb-3">
+            <div class="form-check">
+              <input 
+                type="checkbox" 
+                class="form-check-input" 
+                v-model="form.hasSecondCondition" 
+                id="hasSecondCondition"
+                @change="if (!form.hasSecondCondition) { form.metric2 = undefined; form.operator2 = undefined; form.threshold2 = undefined; }"
+              >
+              <label class="form-check-label" for="hasSecondCondition">
+                <i class="bi bi-plus-circle me-1"></i>Add second condition (compound alert)
+              </label>
+            </div>
+          </div>
+
+          <!-- Secondary Condition (if enabled) -->
+          <div v-if="form.hasSecondCondition" class="compound-condition mb-3">
+            <div class="row g-2 align-items-center mb-2">
+              <div class="col-auto">
+                <select v-model="form.logical_op" class="form-select form-select-sm logical-op-select">
+                  <option v-for="op in logicalOperators" :key="op.value" :value="op.value">{{ op.label }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-5">
+                <label class="form-label small text-muted">Second Metric</label>
+                <select v-model="form.metric2" class="form-select form-select-sm">
+                  <optgroup label="General">
+                    <option v-for="m in metrics.filter(m => m.category === 'general')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                  </optgroup>
+                  <optgroup label="MTR (Traceroute)">
+                    <option v-for="m in metrics.filter(m => m.category === 'mtr')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                  </optgroup>
+                  <optgroup label="System Resources">
+                    <option v-for="m in metrics.filter(m => m.category === 'sysinfo')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                  </optgroup>
+                </select>
+              </div>
+              <div class="col-3">
+                <label class="form-label small text-muted">Operator</label>
+                <select v-model="form.operator2" class="form-select form-select-sm">
+                  <option v-for="o in operators" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label small text-muted">Threshold</label>
+                <input v-model.number="form.threshold2" type="number" class="form-control form-control-sm" step="0.1" min="0">
+              </div>
+            </div>
+            <div class="mt-2 small text-muted">
+              <i class="bi bi-info-circle"></i>
+              {{ form.logical_op === 'OR' ? 'Alert triggers if EITHER condition is met' : 'Alert triggers if BOTH conditions are met' }}
             </div>
           </div>
 
@@ -385,5 +485,26 @@ onMounted(loadRules);
 
 :global([data-theme="dark"]) .rule-form-modal {
   background: #1f2937;
+}
+
+/* Compound condition styles */
+.compound-condition {
+  background: var(--bg-secondary, #f8f9fa);
+  border: 1px dashed var(--border-color, #dee2e6);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.logical-op-select {
+  width: auto;
+  font-weight: 600;
+  background: var(--bs-primary);
+  color: white;
+  border-color: var(--bs-primary);
+}
+
+:global([data-theme="dark"]) .compound-condition {
+  background: #374151;
+  border-color: #4b5563;
 }
 </style>

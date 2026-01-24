@@ -95,6 +95,11 @@ func main() {
 	// Update ClickHouse TTL on startup (in case config changed)
 	go scheduler.EnsureClickHouseTTL(context.Background(), ch, retentionConfig.DataRetentionDays)
 
+	// ---- Alert Scheduler (offline checks) ----
+	alertConfig := scheduler.LoadAlertSchedulerConfig()
+	alertScheduler := scheduler.NewAlertScheduler(db, alertConfig)
+	go alertScheduler.Start(cleanupCtx) // reuse same context for shutdown
+
 	// ---- Iris ----
 	app := iris.New()
 	app.Configure(iris.WithConfiguration(iris.Configuration{
