@@ -804,8 +804,6 @@ async function submit() {
     width: 100%;
   }
 }
-
-}
 </style>
 
 <!-- Dark Mode Styles (unscoped to access ancestor data-bs-theme attribute) -->
