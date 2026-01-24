@@ -89,7 +89,11 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 		}).Debug("whoami request headers")
 
 		clientIP := lookup.GetClientIP(ctx)
-		log.WithField("resolved_ip", clientIP).Debug("resolved client IP")
+		log.WithFields(log.Fields{
+			"resolved_ip":    clientIP,
+			"geo_store_nil":  geoStore == nil,
+			"clickhouse_nil": ch == nil,
+		}).Info("whoami request received")
 
 		// Quick response with just IP (minimal latency)
 		if ctx.URLParamExists("quick") {
