@@ -40,6 +40,46 @@ const state = reactive({
     timeRange: [new Date(Date.now() - 3*60*60*1000), new Date()] as [Date, Date],
     title: '' as string,
     ready: false,
+    // AGENT probe bidirectional support (matching Probe.vue)
+    isAgentProbe: false,
+    reciprocalProbe: null as any,
+    selectedDirection: 0,  // 0 = forward, 1 = reverse
+    agentPairData: [] as Array<{
+        direction: 'forward' | 'reverse';
+        probeId: number;
+        sourceAgentId: number;
+        targetAgentId: number;
+        sourceAgentName: string;
+        targetAgentName: string;
+        pingData: ProbeData[];
+        mtrData: ProbeData[];
+        trafficSimData: ProbeData[];
+    }>,
+});
+
+// Computed: get the active direction's data for AGENT probes
+const activePingData = computed(() => {
+    if (state.isAgentProbe && state.agentPairData.length > 0) {
+        const pair = state.agentPairData[state.selectedDirection] || state.agentPairData[0];
+        return pair?.pingData || [];
+    }
+    return state.pingData;
+});
+
+const activeMtrData = computed(() => {
+    if (state.isAgentProbe && state.agentPairData.length > 0) {
+        const pair = state.agentPairData[state.selectedDirection] || state.agentPairData[0];
+        return pair?.mtrData || [];
+    }
+    return state.mtrData;
+});
+
+const activeTrafficSimData = computed(() => {
+    if (state.isAgentProbe && state.agentPairData.length > 0) {
+        const pair = state.agentPairData[state.selectedDirection] || state.agentPairData[0];
+        return pair?.trafficSimData || [];
+    }
+    return state.trafficSimData;
 });
 
 // Helper: format date to RFC3339
@@ -213,42 +253,109 @@ async function loadProbeData() {
             state.title = `${probe.value.type} #${probe.value.id}`;
         }
         
+        // Detect AGENT probe type (matching Probe.vue logic)
+        state.isAgentProbe = probe.value?.type === 'AGENT';
+        state.reciprocalProbe = null;
+        state.agentPairData = [];
+        
+        // For AGENT probes, find reciprocal probe from the loaded probes list
+        if (state.isAgentProbe && firstTarget?.agent_id) {
+            const targetAgentId = firstTarget.agent_id;
+            // Find AGENT probe that targets the agent this link is for (reverse direction)
+            const reciprocal = probes.value.find(p => 
+                p.type === 'AGENT' && 
+                p.id !== probe.value.id &&
+                p.agent_id === targetAgentId  // Probe owned by target agent
+            );
+            if (reciprocal) {
+                state.reciprocalProbe = reciprocal;
+                console.log('[SharedProbe] Found reciprocal AGENT probe:', reciprocal.id);
+            }
+        }
+        
         // Load probe data
         const [from, to] = state.timeRange;
-        const params = {
+        const baseParams = {
             from: toRFC3339(from),
             to: toRFC3339(to),
-            limit: 500,
             password: authenticatedPassword.value || undefined
         };
         
-        const dataResult = await PublicShareService.getProbeData(token.value, probeId.value, params);
+        // Helper to parse ProbeData response
+        const parseDataResult = (dataResult: { data: any[] }, targetProbeId: number): ProbeData[] => {
+            const result: ProbeData[] = [];
+            for (const item of (dataResult.data || [])) {
+                const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
+                result.push({
+                    id: item.created_at,
+                    probe_id: item.probe_id || targetProbeId,
+                    probe_agent_id: item.probe_agent_id || 0,
+                    agent_id: item.agent_id || 0,
+                    triggered: item.triggered || false,
+                    triggered_reason: item.triggered_reason || '',
+                    type: item.type,
+                    payload: payload,
+                    created_at: item.created_at,
+                    received_at: item.received_at || item.created_at,
+                });
+            }
+            return result;
+        };
         
-        // Sort data by type
-        state.pingData = [];
-        state.mtrData = [];
-        state.trafficSimData = [];
+        // Load forward direction data (current probe)
+        const forwardResult = await PublicShareService.getProbeData(token.value, probeId.value, { ...baseParams, limit: 500 });
+        const forwardData = parseDataResult(forwardResult, probeId.value);
         
-        for (const item of (dataResult.data || [])) {
-            // Parse payload if string (backend returns ProbeData with payload field)
-            const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
-            const probeData: ProbeData = {
-                id: item.created_at,
-                probe_id: item.probe_id || probeId.value,
-                probe_agent_id: item.probe_agent_id || 0,
-                agent_id: item.agent_id || 0,
-                triggered: item.triggered || false,
-                triggered_reason: item.triggered_reason || '',
-                type: item.type,
-                payload: payload,
-                created_at: item.created_at,
-                received_at: item.received_at || item.created_at,
-            };
+        // Separate by type
+        state.pingData = forwardData.filter(d => d.type === 'PING');
+        state.mtrData = forwardData.filter(d => d.type === 'MTR');
+        state.trafficSimData = forwardData.filter(d => d.type === 'TRAFFICSIM');
+        
+        // For AGENT probes, also load reverse direction and build agentPairData
+        if (state.isAgentProbe && firstTarget?.agent_id) {
+            const sourceAgentId = probe.value.agent_id || agent.value?.id || 0;
+            const targetAgentId = firstTarget.agent_id;
+            const sourceAgentName = agent.value?.name || `Agent ${sourceAgentId}`;
+            const targetAgentName = probeAgent.value?.name || `Agent ${targetAgentId}`;
             
-            switch (item.type) {
-                case 'PING': state.pingData.push(probeData); break;
-                case 'MTR': state.mtrData.push(probeData); break;
-                case 'TRAFFICSIM': state.trafficSimData.push(probeData); break;
+            // Forward direction (this probe: source → target)
+            state.agentPairData.push({
+                direction: 'forward',
+                probeId: probe.value.id,
+                sourceAgentId,
+                targetAgentId,
+                sourceAgentName,
+                targetAgentName,
+                pingData: state.pingData,
+                mtrData: state.mtrData,
+                trafficSimData: state.trafficSimData,
+            });
+            
+            // If reciprocal probe exists, load its data (reverse: target → source)
+            if (state.reciprocalProbe) {
+                try {
+                    const reverseResult = await PublicShareService.getProbeData(
+                        token.value, 
+                        state.reciprocalProbe.id, 
+                        { ...baseParams, limit: 500 }
+                    );
+                    const reverseData = parseDataResult(reverseResult, state.reciprocalProbe.id);
+                    
+                    state.agentPairData.push({
+                        direction: 'reverse',
+                        probeId: state.reciprocalProbe.id,
+                        sourceAgentId: targetAgentId,
+                        targetAgentId: sourceAgentId,
+                        sourceAgentName: targetAgentName,
+                        targetAgentName: sourceAgentName,
+                        pingData: reverseData.filter(d => d.type === 'PING'),
+                        mtrData: reverseData.filter(d => d.type === 'MTR'),
+                        trafficSimData: reverseData.filter(d => d.type === 'TRAFFICSIM'),
+                    });
+                    console.log('[SharedProbe] Loaded reverse direction data:', reverseData.length, 'items');
+                } catch (err) {
+                    console.warn('[SharedProbe] Failed to load reciprocal probe data:', err);
+                }
             }
         }
         
@@ -382,22 +489,52 @@ watch(() => state.timeRange, () => {
                     </div>
                 </div>
                 
-                <!-- Data Tabs -->
+                <!-- Direction Toggle for AGENT probes -->
+                <div v-if="state.isAgentProbe && state.agentPairData.length > 1" class="direction-toggle">
+                    <div class="direction-label">
+                        <i class="bi bi-arrow-left-right"></i>
+                        <span>Direction</span>
+                    </div>
+                    <div class="direction-buttons">
+                        <button 
+                            type="button" 
+                            class="direction-btn"
+                            :class="{ active: state.selectedDirection === 0 }"
+                            @click="state.selectedDirection = 0">
+                            <i class="bi bi-arrow-right"></i>
+                            <span class="agent-name">{{ agent?.name || 'Source' }}</span>
+                            <span class="direction-arrow">→</span>
+                            <span class="agent-name">{{ probeAgent?.name || 'Target' }}</span>
+                        </button>
+                        <button 
+                            type="button" 
+                            class="direction-btn"
+                            :class="{ active: state.selectedDirection === 1 }"
+                            @click="state.selectedDirection = 1">
+                            <i class="bi bi-arrow-left"></i>
+                            <span class="agent-name">{{ probeAgent?.name || 'Target' }}</span>
+                            <span class="direction-arrow">→</span>
+                            <span class="agent-name">{{ agent?.name || 'Source' }}</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Data Tabs (for AGENT probes, use selected direction's data) -->
                 <div class="data-tabs">
                     <!-- PING Data -->
                     <div v-if="containsProbeType('PING')" class="data-section">
                         <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
                         <div class="graph-container">
                             <LatencyGraph 
-                                :pingResults="transformPingDataMulti(state.pingData)" 
+                                :pingResults="transformPingDataMulti(activePingData)" 
                             />
                         </div>
                         
                         <!-- PING Stats Summary -->
-                        <div v-if="state.pingData.length > 0" class="stats-summary">
+                        <div v-if="activePingData.length > 0" class="stats-summary">
                             <div class="stat-card">
                                 <div class="stat-label">Data Points</div>
-                                <div class="stat-value">{{ state.pingData.length }}</div>
+                                <div class="stat-value">{{ activePingData.length }}</div>
                             </div>
                         </div>
                     </div>
@@ -408,14 +545,14 @@ watch(() => state.timeRange, () => {
                         
                         <!-- MTR Summary -->
                         <MtrSummary 
-                            v-if="state.mtrData.length > 0" 
-                            :mtrData="state.mtrData" 
+                            v-if="activeMtrData.length > 0" 
+                            :mtrData="activeMtrData" 
                         />
                         
                         <!-- Recent MTR Results -->
                         <div class="mtr-results">
                             <h3>Recent Traces</h3>
-                            <div v-for="(mtr, idx) in state.mtrData.slice(0, 5)" :key="idx" class="mtr-item">
+                            <div v-for="(mtr, idx) in activeMtrData.slice(0, 5)" :key="idx" class="mtr-item">
                                 <div class="mtr-header">
                                     <span class="mtr-time">
                                         {{ new Date(mtr.created_at).toLocaleString() }}
@@ -430,7 +567,7 @@ watch(() => state.timeRange, () => {
                     <div v-if="containsProbeType('TRAFFICSIM')" class="data-section">
                         <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
                         <div class="graph-container">
-                            <TrafficSimGraph :trafficResults="transformToTrafficSimResult(state.trafficSimData)" />
+                            <TrafficSimGraph :trafficResults="transformToTrafficSimResult(activeTrafficSimData)" />
                         </div>
                     </div>
                     
@@ -852,5 +989,72 @@ watch(() => state.timeRange, () => {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+}
+
+/* Direction Toggle for AGENT probes */
+.direction-toggle {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+}
+
+.direction-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #9ca3af;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.direction-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.direction-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #9ca3af;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.direction-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.direction-btn.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #a5b4fc;
+}
+
+.direction-btn .agent-name {
+    font-weight: 500;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.direction-btn .direction-arrow {
+    color: #6b7280;
+    font-weight: 600;
 }
 </style>

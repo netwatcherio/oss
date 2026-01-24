@@ -816,17 +816,28 @@ export const PublicShareService = {
         return response.json();
     },
 
-    /** Get probe data for a shared agent */
+    /** Get probe data for a shared agent - mirrors ProbeDataService.byProbe */
     async getProbeData(
         token: string,
         probeId: number | string,
-        params?: { from?: string; to?: string; limit?: number; password?: string }
+        params?: {
+            from?: string;
+            to?: string;
+            limit?: number;
+            asc?: boolean;
+            aggregate?: number;  // Aggregation bucket in seconds
+            type?: string;       // PING, MTR, TRAFFICSIM
+            password?: string;
+        }
     ): Promise<{ data: any[] }> {
         const baseUrl = this.getBaseUrl();
         const qs = new URLSearchParams();
         if (params?.from) qs.set('from', params.from);
         if (params?.to) qs.set('to', params.to);
         if (params?.limit) qs.set('limit', String(params.limit));
+        if (params?.asc !== undefined) qs.set('asc', String(params.asc));
+        if (params?.aggregate) qs.set('aggregate', String(params.aggregate));
+        if (params?.type) qs.set('type', params.type);
         if (params?.password) qs.set('password', params.password);
         const url = `${baseUrl}/share/${token}/probe-data/${probeId}${qs.toString() ? `?${qs}` : ''}`;
         const response = await fetch(url);
