@@ -28,10 +28,20 @@ const probes = ref<any[]>([]);
 const agentNames = ref<Record<string | number, string>>({});  // Cache for agent names
 
 // Computed: grouped probes by target (like Agent.vue)
+// Filter out groups where the target is THIS agent (reverse probes targeting self)
 const targetGroups = computed<ProbeGroupByTarget[]>(() => {
     if (!probes.value || probes.value.length === 0) return [];
     const result = groupProbesByTarget(probes.value, { excludeDefaults: true, excludeServers: true });
-    return result.groups;
+    
+    // Filter out agent groups that target the current agent itself
+    // These are reverse probes that shouldn't appear as separate cards
+    const currentAgentId = agent.value?.id;
+    return result.groups.filter(g => {
+        // Keep all non-agent groups (host, local)
+        if (g.kind !== 'agent') return true;
+        // For agent groups, exclude if targeting self
+        return Number(g.id) !== currentAgentId;
+    });
 });
 
 // Format expiry as human-readable relative time
