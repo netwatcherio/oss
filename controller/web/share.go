@@ -408,51 +408,31 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 			limit = 100
 		}
 
-		// Query ClickHouse for probe data
-		// Using the same table structure as existing probe data queries
-		query := `
-			SELECT 
-				timestamp,
-				type,
-				data
-			FROM probe_data
-			WHERE workspace_id = ?
-			AND agent_id = ?
-			AND probe_id = ?
-		`
-		args := []any{link.WorkspaceID, link.AgentID, probeID}
-
+		// Parse time range to time.Time
+		var fromTime, toTime time.Time
 		if from != "" {
-			query += " AND timestamp >= toDateTime(?)"
-			args = append(args, from)
+			fromTime, _ = time.Parse(time.RFC3339, from)
 		}
 		if to != "" {
-			query += " AND timestamp <= toDateTime(?)"
-			args = append(args, to)
+			toTime, _ = time.Parse(time.RFC3339, to)
 		}
 
-		query += " ORDER BY timestamp DESC LIMIT ?"
-		args = append(args, limit)
-
-		rows, err := ch.QueryContext(ctx.Request().Context(), query, args...)
+		// Use the existing probe package function to get data
+		// This queries by probe_id which is the correct approach
+		probeData, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), fromTime, toTime, false, limit)
 		if err != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": "failed to query probe data"})
 			return
 		}
-		defer rows.Close()
 
+		// Convert to response format
 		var results []map[string]any
-		for rows.Next() {
-			var timestamp time.Time
-			var probeType, data string
-			if err := rows.Scan(&timestamp, &probeType, &data); err != nil {
-				continue
-			}
+		for _, d := range probeData {
 			results = append(results, map[string]any{
-				"timestamp": timestamp,
-				"type":      probeType,
-				"data":      data,
+				"timestamp": d.CreatedAt,
+				"type":      string(d.Type),
+				"data":      string(d.Payload),
 			})
 		}
 
