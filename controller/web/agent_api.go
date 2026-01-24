@@ -96,7 +96,9 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 		}).Info("whoami request received")
 
 		// Quick response with just IP (minimal latency)
-		if ctx.URLParamExists("quick") {
+		// Check if quick=true (not just if the parameter exists)
+		quickParam, _ := ctx.URLParamBool("quick")
+		if quickParam {
 			_ = ctx.JSON(lookup.QuickLookup(ctx))
 			return
 		}
