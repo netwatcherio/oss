@@ -1251,3 +1251,233 @@ onUnmounted(() => {
   }
 }
 </style>
+
+<!-- Dark Mode Styles (unscoped to access ancestor data-bs-theme attribute) -->
+<style>
+html[data-bs-theme="dark"] .pending-queue-section {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+html[data-bs-theme="dark"] .pending-queue-header {
+  background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
+  border-bottom-color: #b45309;
+}
+
+html[data-bs-theme="dark"] .pending-queue-header h6 {
+  color: #fef3c7;
+}
+
+html[data-bs-theme="dark"] .pending-queue-item {
+  border-bottom-color: #334155;
+}
+
+html[data-bs-theme="dark"] .pending-queue-item:hover {
+  background: #334155;
+}
+
+html[data-bs-theme="dark"] .pending-item-server {
+  color: #f1f5f9;
+}
+
+html[data-bs-theme="dark"] .pending-item-meta {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .pending-item-expires {
+  color: #fbbf24;
+}
+
+html[data-bs-theme="dark"] .pending-test-card {
+  background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
+  border-color: #b45309;
+}
+
+html[data-bs-theme="dark"] .pending-icon {
+  background: #1e293b;
+  color: #fbbf24;
+}
+
+html[data-bs-theme="dark"] .pending-title {
+  color: #fef3c7;
+}
+
+html[data-bs-theme="dark"] .pending-description {
+  color: #fde68a;
+}
+
+html[data-bs-theme="dark"] .pending-description strong {
+  color: #fef3c7;
+}
+
+html[data-bs-theme="dark"] .pending-time {
+  color: #fef3c7;
+}
+
+html[data-bs-theme="dark"] .stat-card {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+html[data-bs-theme="dark"] .stat-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+html[data-bs-theme="dark"] .stat-icon.download {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+html[data-bs-theme="dark"] .stat-icon.upload {
+  background: rgba(16, 185, 129, 0.2);
+}
+
+html[data-bs-theme="dark"] .stat-icon.latency {
+  background: rgba(245, 158, 11, 0.2);
+}
+
+html[data-bs-theme="dark"] .stat-icon.tests {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+html[data-bs-theme="dark"] .stat-label {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .stat-value {
+  color: #f1f5f9;
+}
+
+html[data-bs-theme="dark"] .stat-unit {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .content-card {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+html[data-bs-theme="dark"] .loading-text {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .empty-state i {
+  color: #475569;
+}
+
+html[data-bs-theme="dark"] .empty-state h5 {
+  color: #f1f5f9;
+}
+
+html[data-bs-theme="dark"] .empty-state p {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .speedtest-results {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+html[data-bs-theme="dark"] .results-header {
+  background: #0f172a;
+  border-bottom-color: #334155;
+}
+
+html[data-bs-theme="dark"] .results-title {
+  color: #f1f5f9;
+}
+
+html[data-bs-theme="dark"] .results-count {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .test-item {
+  border-bottom-color: #334155;
+}
+
+html[data-bs-theme="dark"] .test-item:hover {
+  background: #334155;
+}
+
+html[data-bs-theme="dark"] .test-time {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .test-server {
+  color: #f1f5f9;
+}
+
+html[data-bs-theme="dark"] .server-location {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .server-distance {
+  color: #94a3b8;
+  background: #334155;
+}
+
+html[data-bs-theme="dark"] .test-toggle {
+  color: #64748b;
+}
+
+html[data-bs-theme="dark"] .test-details {
+  background: #0f172a;
+  border-top-color: #334155;
+}
+
+html[data-bs-theme="dark"] .detail-section h6 {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .detail-row {
+  border-bottom-color: #334155;
+}
+
+html[data-bs-theme="dark"] .detail-label {
+  color: #94a3b8;
+}
+
+html[data-bs-theme="dark"] .detail-value {
+  color: #f1f5f9;
+}
+
+/* Dark mode for speed/latency metric pills */
+html[data-bs-theme="dark"] .speed-excellent {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+html[data-bs-theme="dark"] .speed-good {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+html[data-bs-theme="dark"] .speed-fair {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+html[data-bs-theme="dark"] .speed-poor {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+html[data-bs-theme="dark"] .latency-excellent {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+html[data-bs-theme="dark"] .latency-good {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+html[data-bs-theme="dark"] .latency-fair {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+html[data-bs-theme="dark"] .latency-poor {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+</style>
