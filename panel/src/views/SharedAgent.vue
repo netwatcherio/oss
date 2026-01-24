@@ -776,17 +776,14 @@ onMounted(() => {
 
 .probe-link {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 1rem;
     padding: 1rem;
-    min-height: 100px;
+    min-height: 80px;
 }
 
 .probe-header {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
+    flex-shrink: 0;
 }
 
 .probe-icon {
@@ -868,8 +865,9 @@ onMounted(() => {
 
 .probe-arrow {
     color: #6b7280;
-    margin-top: 0.25rem;
-    font-size: 0.875rem;
+    font-size: 1rem;
+    margin-left: auto;
+    flex-shrink: 0;
 }
 
 .text-warning {
