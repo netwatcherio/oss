@@ -96,6 +96,7 @@ const activeTrafficSimData = computed(() => {
 // MTR Modal state (matching Probe.vue)
 const showMtrModal = ref(false);
 const selectedNode = ref<{ id: string; hostname?: string; ip?: string; hopNumber: number } | null>(null);
+const showAllTraces = ref(false);  // For "View All Traces" modal
 
 const onNodeSelect = (node: any) => {
     selectedNode.value = node;
@@ -105,6 +106,14 @@ const onNodeSelect = (node: any) => {
 const closeMtrModal = () => {
     showMtrModal.value = false;
     selectedNode.value = null;
+    showAllTraces.value = false;
+};
+
+// Handler for MtrSummary's "View All Traces" button
+const onShowAllTraces = () => {
+    selectedNode.value = null;  // Clear node to show all traces
+    showAllTraces.value = true;
+    showMtrModal.value = true;
 };
 
 // MTR Pagination state (matching Probe.vue)
@@ -763,11 +772,22 @@ watch(
                 </div>
                 
                 <!-- Data Tabs (for AGENT probes, use selected direction's data) -->
+                <!-- Order matches Probe.vue: Latency → TrafficSim → MOS → MTR -->
                 <div class="data-tabs">
-                    <!-- PING Data -->
-                    <div v-if="containsProbeType('PING')" class="data-section">
+                    <!-- PING/Latency Data -->
+                    <div v-if="containsProbeType('PING') || state.isAgentProbe" class="data-section">
                         <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
-                        <div class="graph-container">
+                        <div v-if="loading && activePingData.length === 0" class="loading-state">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Loading latency data...</span>
+                        </div>
+                        <div v-else-if="activePingData.length === 0" class="empty-state">
+                            <i class="bi bi-graph-down"></i>
+                            <p>No latency data available for this time range</p>
+                        </div>
+                        <div v-else class="graph-container">
                             <LatencyGraph 
                                 :pingResults="transformPingDataMulti(activePingData)" 
                                 :aggregationBucketSec="state.aggregationBucketSec"
@@ -775,88 +795,22 @@ watch(
                                 @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
-                        
-                        <!-- MOS Graph (Voice Quality) -->
-                        <h3 class="subsection-title"><i class="bi bi-telephone"></i> Voice Quality (MOS)</h3>
-                        <div class="graph-container">
-                            <MosGraph 
-                                :pingResults="transformPingDataMulti(activePingData)"
-                                :aggregationBucketSec="state.aggregationBucketSec"
-                            />
-                        </div>
-                        
-                        <!-- PING Stats Summary -->
-                        <div v-if="activePingData.length > 0" class="stats-summary">
-                            <div class="stat-card">
-                                <div class="stat-label">Data Points</div>
-                                <div class="stat-value">{{ activePingData.length }}</div>
-                            </div>
-                        </div>
                     </div>
                     
-                    <!-- MTR Data -->
-                    <div v-if="containsProbeType('MTR')" class="data-section">
-                        <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
-                        
-                        <!-- Network Map Visualization -->
-                        <div v-if="activeMtrData.length > 0" class="network-map-container">
-                            <h3 class="subsection-title"><i class="bi bi-bezier2"></i> Network Path</h3>
-                            <NetworkMap 
-                                :mtrResults="transformMtrDataMulti(activeMtrData)" 
-                                @node-select="onNodeSelect"
-                            />
-                        </div>
-                        
-                        <!-- MTR Summary -->
-                        <MtrSummary 
-                            v-if="activeMtrData.length > 0" 
-                            :mtrData="activeMtrData" 
-                        />
-                        
-                        <!-- Paginated MTR Results -->
-                        <div class="mtr-results">
-                            <div class="mtr-results-header">
-                                <h3>Recent Traces</h3>
-                                <span class="mtr-count">{{ getPaginatedMtrResults(activeMtrData, mtrPage).total }} total</span>
-                            </div>
-                            
-                            <div v-for="(mtr, idx) in getPaginatedMtrResults(activeMtrData, mtrPage).items" :key="idx" class="mtr-item">
-                                <div class="mtr-header">
-                                    <span class="mtr-time">
-                                        {{ new Date(mtr.created_at).toLocaleString() }}
-                                    </span>
-                                </div>
-                                <MtrTable :probeData="mtr" />
-                            </div>
-                            
-                            <!-- Pagination Controls -->
-                            <div v-if="getPaginatedMtrResults(activeMtrData, mtrPage).totalPages > 1" class="mtr-pagination">
-                                <button 
-                                    class="pagination-btn"
-                                    :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasPrev"
-                                    @click="goToMtrPage(mtrPage - 1)"
-                                >
-                                    <i class="bi bi-chevron-left"></i> Previous
-                                </button>
-                                <span class="pagination-info">
-                                    Page {{ getPaginatedMtrResults(activeMtrData, mtrPage).currentPage }} 
-                                    of {{ getPaginatedMtrResults(activeMtrData, mtrPage).totalPages }}
-                                </span>
-                                <button 
-                                    class="pagination-btn"
-                                    :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasNext"
-                                    @click="goToMtrPage(mtrPage + 1)"
-                                >
-                                    Next <i class="bi bi-chevron-right"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- TrafficSim Data -->
-                    <div v-if="containsProbeType('TRAFFICSIM')" class="data-section">
+                    <!-- TrafficSim Data (moved before MOS to match Probe.vue) -->
+                    <div v-if="containsProbeType('TRAFFICSIM') || state.isAgentProbe" class="data-section">
                         <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
-                        <div class="graph-container">
+                        <div v-if="loading && activeTrafficSimData.length === 0" class="loading-state">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Loading traffic simulation data...</span>
+                        </div>
+                        <div v-else-if="activeTrafficSimData.length === 0" class="empty-state">
+                            <i class="bi bi-broadcast"></i>
+                            <p>No traffic simulation data available for this time range</p>
+                        </div>
+                        <div v-else class="graph-container">
                             <TrafficSimGraph 
                                 :trafficResults="transformToTrafficSimResult(activeTrafficSimData)"
                                 :currentTimeRange="state.timeRange"
@@ -865,8 +819,92 @@ watch(
                         </div>
                     </div>
                     
+                    <!-- MOS Graph (Voice Quality) -->
+                    <div v-if="activePingData.length > 0 || activeTrafficSimData.length > 0" class="data-section">
+                        <h2><i class="bi bi-telephone"></i> Voice Quality (MOS)</h2>
+                        <div class="graph-container">
+                            <MosGraph 
+                                :pingResults="transformPingDataMulti(activePingData)"
+                                :aggregationBucketSec="state.aggregationBucketSec"
+                            />
+                        </div>
+                    </div>
+                    
+                    <!-- MTR Data -->
+                    <div v-if="containsProbeType('MTR') || state.isAgentProbe" class="data-section">
+                        <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
+                        <div v-if="loading && activeMtrData.length === 0" class="loading-state">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Loading traceroute data...</span>
+                        </div>
+                        <div v-else-if="activeMtrData.length === 0" class="empty-state">
+                            <i class="bi bi-diagram-3"></i>
+                            <p>No traceroute data available for this time range</p>
+                        </div>
+                        <template v-else>
+                            <!-- Network Map Visualization -->
+                            <div class="network-map-container">
+                                <h3 class="subsection-title"><i class="bi bi-bezier2"></i> Network Path</h3>
+                                <NetworkMap 
+                                    :mtrResults="transformMtrDataMulti(activeMtrData)" 
+                                    @node-select="onNodeSelect"
+                                />
+                                <div class="mtr-help-text">
+                                    <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
+                                </div>
+                            </div>
+                            
+                            <!-- MTR Summary with @show-all-traces handler -->
+                            <MtrSummary 
+                                :mtrData="activeMtrData" 
+                                @show-all-traces="onShowAllTraces"
+                            />
+                            
+                            <!-- Paginated MTR Results -->
+                            <div class="mtr-results">
+                                <div class="mtr-results-header">
+                                    <h3>Recent Traces</h3>
+                                    <span class="mtr-count">{{ getPaginatedMtrResults(activeMtrData, mtrPage).total }} total</span>
+                                </div>
+                                
+                                <div v-for="(mtr, idx) in getPaginatedMtrResults(activeMtrData, mtrPage).items" :key="idx" class="mtr-item">
+                                    <div class="mtr-header">
+                                        <span class="mtr-time">
+                                            {{ new Date(mtr.created_at).toLocaleString() }}
+                                        </span>
+                                    </div>
+                                    <MtrTable :probeData="mtr" />
+                                </div>
+                                
+                                <!-- Pagination Controls -->
+                                <div v-if="getPaginatedMtrResults(activeMtrData, mtrPage).totalPages > 1" class="mtr-pagination">
+                                    <button 
+                                        class="pagination-btn"
+                                        :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasPrev"
+                                        @click="goToMtrPage(mtrPage - 1)"
+                                    >
+                                        <i class="bi bi-chevron-left"></i> Previous
+                                    </button>
+                                    <span class="pagination-info">
+                                        Page {{ getPaginatedMtrResults(activeMtrData, mtrPage).currentPage }} 
+                                        of {{ getPaginatedMtrResults(activeMtrData, mtrPage).totalPages }}
+                                    </span>
+                                    <button 
+                                        class="pagination-btn"
+                                        :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasNext"
+                                        @click="goToMtrPage(mtrPage + 1)"
+                                    >
+                                        Next <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    
                     <!-- No Data -->
-                    <div v-if="!containsProbeType('PING') && !containsProbeType('MTR') && !containsProbeType('TRAFFICSIM')" class="no-data">
+                    <div v-if="!loading && !containsProbeType('PING') && !containsProbeType('MTR') && !containsProbeType('TRAFFICSIM') && !state.isAgentProbe" class="no-data">
                         <i class="bi bi-inbox"></i>
                         <p>No data available for this probe in the selected time range.</p>
                     </div>
@@ -1468,5 +1506,60 @@ watch(
 .pagination-info {
     font-size: 0.85rem;
     color: #6b7280;
+}
+
+/* Loading and Empty States */
+.loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
+    color: #94a3b8;
+    gap: 1rem;
+}
+
+.loading-state .spinner-border {
+    width: 2rem;
+    height: 2rem;
+    border-width: 0.2em;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
+    color: #64748b;
+    text-align: center;
+}
+
+.empty-state i {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+    opacity: 0.5;
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+/* MTR Help Text */
+.mtr-help-text {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    color: #64748b;
+    background: rgba(99, 102, 241, 0.05);
+    border-radius: 6px;
+}
+
+.mtr-help-text i {
+    color: #6366f1;
 }
 </style>
