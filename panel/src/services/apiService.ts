@@ -821,7 +821,7 @@ export const PublicShareService = {
         token: string,
         probeId: number | string,
         params?: { from?: string; to?: string; limit?: number; password?: string }
-    ): Promise<{ items: any[]; total: number }> {
+    ): Promise<{ data: any[] }> {
         const baseUrl = this.getBaseUrl();
         const qs = new URLSearchParams();
         if (params?.from) qs.set('from', params.from);

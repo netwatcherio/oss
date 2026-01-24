@@ -229,15 +229,20 @@ async function loadProbeData() {
         state.mtrData = [];
         state.trafficSimData = [];
         
-        for (const item of (dataResult.items || [])) {
-            // Parse payload if string
-            const payload = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+        for (const item of (dataResult.data || [])) {
+            // Parse payload if string (backend returns ProbeData with payload field)
+            const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
             const probeData: ProbeData = {
-                id: item.timestamp,
-                probe_id: probeId.value,
+                id: item.created_at,
+                probe_id: item.probe_id || probeId.value,
+                probe_agent_id: item.probe_agent_id || 0,
+                agent_id: item.agent_id || 0,
+                triggered: item.triggered || false,
+                triggered_reason: item.triggered_reason || '',
                 type: item.type,
                 payload: payload,
-                created_at: item.timestamp,
+                created_at: item.created_at,
+                received_at: item.received_at || item.created_at,
             };
             
             switch (item.type) {
@@ -384,8 +389,7 @@ watch(() => state.timeRange, () => {
                         <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
                         <div class="graph-container">
                             <LatencyGraph 
-                                :results="transformPingDataMulti(state.pingData)" 
-                                :showPacketLoss="true"
+                                :pingResults="transformPingDataMulti(state.pingData)" 
                             />
                         </div>
                         
@@ -405,7 +409,7 @@ watch(() => state.timeRange, () => {
                         <!-- MTR Summary -->
                         <MtrSummary 
                             v-if="state.mtrData.length > 0" 
-                            :results="state.mtrData.map(d => transformMtrData(d))" 
+                            :mtrData="state.mtrData" 
                         />
                         
                         <!-- Recent MTR Results -->
@@ -417,7 +421,7 @@ watch(() => state.timeRange, () => {
                                         {{ new Date(mtr.created_at).toLocaleString() }}
                                     </span>
                                 </div>
-                                <MtrTable :result="transformMtrData(mtr)" />
+                                <MtrTable :probeData="mtr" />
                             </div>
                         </div>
                     </div>
@@ -426,7 +430,7 @@ watch(() => state.timeRange, () => {
                     <div v-if="containsProbeType('TRAFFICSIM')" class="data-section">
                         <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
                         <div class="graph-container">
-                            <TrafficSimGraph :results="transformToTrafficSimResult(state.trafficSimData)" />
+                            <TrafficSimGraph :trafficResults="transformToTrafficSimResult(state.trafficSimData)" />
                         </div>
                     </div>
                     
