@@ -705,3 +705,114 @@ export const OUIService = {
         return data;
     },
 };
+
+/** ===== Share Links (shareable agent pages) ===== */
+export interface ShareLink {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    token: string;
+    workspace_id: number;
+    agent_id: number;
+    created_by_user_id: number;
+    expires_at: string;
+    has_password: boolean;
+    access_count: number;
+    last_accessed_at?: string;
+}
+
+export interface ShareLinkCreateInput {
+    expires_in_seconds: number;
+    password?: string;
+}
+
+export const ShareLinkService = {
+    /** Create a share link for an agent */
+    async create(
+        workspaceId: number | string,
+        agentId: number | string,
+        body: ShareLinkCreateInput
+    ): Promise<{ share_link: ShareLink; token: string }> {
+        const { data } = await request.post<{ share_link: ShareLink; token: string }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/share-links`,
+            body
+        );
+        return data;
+    },
+
+    /** List all share links for an agent */
+    async list(workspaceId: number | string, agentId: number | string): Promise<ShareLink[]> {
+        const { data } = await request.get<{ items: ShareLink[]; total: number }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/share-links`
+        );
+        return data.items || [];
+    },
+
+    /** Revoke (delete) a share link */
+    async remove(workspaceId: number | string, agentId: number | string, linkId: number | string): Promise<void> {
+        await request.delete(`/workspaces/${workspaceId}/agents/${agentId}/share-links/${linkId}`);
+    },
+};
+
+/** ===== Public Share Access (no auth) ===== */
+export const PublicShareService = {
+    /** Get share link info (to check if password required) */
+    async getInfo(token: string): Promise<{ has_password: boolean; expired: boolean; expires_at: string; allow_speedtest: boolean }> {
+        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const response = await fetch(`${baseUrl}/share/${token}/info`);
+        if (!response.ok) {
+            throw new Error(response.status === 404 ? 'Share link not found' : 'Failed to get share info');
+        }
+        return response.json();
+    },
+
+    async getAgent(token: string, password?: string): Promise<{
+        agent: any;
+        probes: any[];
+        expires_at: string;
+        allow_speedtest: boolean;
+    }> {
+        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const url = password
+            ? `${baseUrl}/share/${token}?password=${encodeURIComponent(password)}`
+            : `${baseUrl}/share/${token}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            if (body.requires_password) {
+                throw new Error('PASSWORD_REQUIRED');
+            }
+            if (response.status === 401) {
+                throw new Error('INVALID_PASSWORD');
+            }
+            if (response.status === 410) {
+                throw new Error('LINK_EXPIRED');
+            }
+            if (response.status === 404) {
+                throw new Error('LINK_NOT_FOUND');
+            }
+            throw new Error(body.error || 'Failed to access shared agent');
+        }
+        return response.json();
+    },
+
+    /** Get probe data for a shared agent */
+    async getProbeData(
+        token: string,
+        probeId: number | string,
+        params?: { from?: string; to?: string; limit?: number; password?: string }
+    ): Promise<{ items: any[]; total: number }> {
+        const baseUrl = (window as any).CONTROLLER_ENDPOINT || import.meta.env.VITE_CONTROLLER_ENDPOINT || '';
+        const qs = new URLSearchParams();
+        if (params?.from) qs.set('from', params.from);
+        if (params?.to) qs.set('to', params.to);
+        if (params?.limit) qs.set('limit', String(params.limit));
+        if (params?.password) qs.set('password', params.password);
+        const url = `${baseUrl}/share/${token}/probe-data/${probeId}${qs.toString() ? `?${qs}` : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error('Failed to get probe data');
+        }
+        return response.json();
+    },
+};

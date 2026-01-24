@@ -254,6 +254,25 @@ Programmatic access:
 - [ ] Token expiry and rotation
 - [ ] Usage logging
 
+### P3.6 Sharable Agent Pages
+**Priority: Medium** | **Effort: Medium**
+
+Time-limited public access to agent views:
+
+- [ ] Generate shareable link for any agent page
+- [ ] Configurable expiration (1 hour, 24 hours, 7 days, custom)
+- [ ] Optional password protection
+- [ ] Read-only access (no configuration changes)
+- [ ] Link revocation capability
+- [ ] Access logging (views, IPs)
+- [ ] Customizable data scope (all metrics vs specific probes)
+
+**Use Cases:**
+- NOC handoffs during incidents
+- Share agent status with vendors/ISPs for troubleshooting
+- Temporary client access without workspace invitation
+- Public status pages for specific endpoints
+
 ---
 
 ## Phase 4: Scale & Polish (2027+)

@@ -32,6 +32,7 @@ import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService} from "@/services/apiService";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
+import ShareAgentModal from "@/components/ShareAgentModal.vue";
 
 interface OrganizedProbe {
   key: string;
@@ -550,6 +551,9 @@ const permissions = computed(() => usePermissions(state.workspace.my_role));
 
 // Real-time data state
 const liveUpdating = ref(false);
+
+// Share modal state
+const showShareModal = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
 
 // Get workspace/agent IDs as refs for the WebSocket composable
@@ -816,6 +820,14 @@ onMounted(async () => {
           <i class="bi bi-wifi-off"></i>
           Disconnected
         </div>
+        <button
+            v-if="state.agent.id && state.workspace.id"
+            class="btn btn-outline-secondary"
+            @click="showShareModal = true"
+            title="Share this agent">
+          <i class="bi bi-share"></i>
+          <span class="d-none d-sm-inline">&nbsp;Share</span>
+        </button>
         <router-link
             v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
             :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/edit`"
@@ -1500,6 +1512,15 @@ onMounted(async () => {
       </div>
     </div>
   </div>
+
+  <!-- Share Agent Modal -->
+  <ShareAgentModal
+      v-if="showShareModal && state.agent.id && state.workspace.id"
+      :workspace-id="state.workspace.id"
+      :agent-id="state.agent.id"
+      :agent-name="state.agent.name || 'Agent'"
+      @close="showShareModal = false"
+  />
 </template>
 
 <style scoped>

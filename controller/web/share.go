@@ -1,0 +1,380 @@
+// web/share.go
+package web
+
+import (
+	"database/sql"
+	"errors"
+	"net/http"
+	"strconv"
+	"time"
+
+	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/share"
+	"netwatcher-controller/internal/workspace"
+
+	"github.com/kataras/iris/v12"
+	"gorm.io/gorm"
+)
+
+// -------------------- Protected Endpoints (JWT auth) --------------------
+
+// panelShareLinks registers share link management endpoints for authenticated users.
+func panelShareLinks(api iris.Party, db *gorm.DB) {
+	// Create share link for an agent
+	api.Post("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links", func(ctx iris.Context) {
+		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
+		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+
+		userID, ok := ctx.Values().Get("userID").(uint)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		// Verify user has access to workspace
+		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
+			return
+		}
+
+		// Verify agent belongs to workspace
+		_, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, workspaceID, agentID)
+		if err != nil {
+			if errors.Is(err, agent.ErrNotFound) {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "agent not found"})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// Parse request body
+		var body struct {
+			ExpiresInSeconds int    `json:"expires_in_seconds"`
+			Password         string `json:"password,omitempty"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
+			return
+		}
+
+		// Default to 24 hours if not specified
+		expiresIn := time.Duration(body.ExpiresInSeconds) * time.Second
+		if expiresIn <= 0 {
+			expiresIn = 24 * time.Hour
+		}
+		// Cap at 30 days
+		if expiresIn > 30*24*time.Hour {
+			expiresIn = 30 * 24 * time.Hour
+		}
+
+		// Create share link
+		output, err := share.Create(ctx.Request().Context(), db, share.CreateInput{
+			WorkspaceID:     workspaceID,
+			AgentID:         agentID,
+			CreatedByUserID: userID,
+			ExpiresIn:       expiresIn,
+			Password:        body.Password,
+		})
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		ctx.StatusCode(http.StatusCreated)
+		_ = ctx.JSON(output)
+	})
+
+	// List share links for an agent
+	api.Get("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links", func(ctx iris.Context) {
+		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
+		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+
+		userID, ok := ctx.Values().Get("userID").(uint)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		// Verify user has access to workspace
+		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
+			return
+		}
+
+		links, err := share.ListByAgent(ctx.Request().Context(), db, workspaceID, agentID)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{"items": links, "total": len(links)})
+	})
+
+	// Delete (revoke) a share link
+	api.Delete("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links/{linkID:uint64}", func(ctx iris.Context) {
+		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
+		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+		linkID := uint(ctx.Params().GetUint64Default("linkID", 0))
+
+		userID, ok := ctx.Values().Get("userID").(uint)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		// Verify user has access to workspace
+		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
+			return
+		}
+
+		err := share.Delete(ctx.Request().Context(), db, workspaceID, agentID, linkID)
+		if err != nil {
+			if errors.Is(err, share.ErrShareLinkNotFound) {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "share link not found"})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		ctx.StatusCode(http.StatusNoContent)
+	})
+}
+
+// hasWorkspaceAccess checks if the user has access to the workspace.
+func hasWorkspaceAccess(ctx iris.Context, db *gorm.DB, workspaceID, userID uint) bool {
+	store := workspace.NewStore(db)
+	_, err := store.GetMemberByUserID(ctx.Request().Context(), workspaceID, userID)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			ctx.StatusCode(http.StatusForbidden)
+			_ = ctx.JSON(iris.Map{"error": "access denied"})
+			return false
+		}
+		ctx.StatusCode(http.StatusInternalServerError)
+		_ = ctx.JSON(iris.Map{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
+// -------------------- Public Endpoints (no auth) --------------------
+
+// RegisterShareRoutes registers public share link access endpoints.
+func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
+	shareAPI := app.Party("/share")
+
+	// Get shared agent info (validates token and optional password)
+	shareAPI.Get("/{token:string}", func(ctx iris.Context) {
+		token := ctx.Params().Get("token")
+		password := ctx.URLParam("password")
+
+		// Validate share link
+		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+			Token:    token,
+			Password: password,
+		})
+		if err != nil {
+			handleShareError(ctx, err)
+			return
+		}
+
+		// Record access
+		_ = share.RecordAccess(ctx.Request().Context(), db, link.ID)
+
+		// Get agent info
+		ag, err := agent.GetAgentByID(ctx.Request().Context(), db, link.AgentID)
+		if err != nil {
+			ctx.StatusCode(http.StatusNotFound)
+			_ = ctx.JSON(iris.Map{"error": "agent not found"})
+			return
+		}
+
+		// Get owned probes AND reverse probes (from other agents targeting this one)
+		owned, reverse, err := probe.ListByAgentWithReverse(ctx.Request().Context(), db, link.AgentID)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to fetch probes"})
+			return
+		}
+
+		// Filter to enabled probes only
+		var probes []probe.Probe
+		for _, p := range owned {
+			if p.Enabled {
+				probes = append(probes, p)
+			}
+		}
+		for _, p := range reverse {
+			if p.Enabled {
+				probes = append(probes, p)
+			}
+		}
+
+		// Return limited agent info (no secrets)
+		_ = ctx.JSON(iris.Map{
+			"agent": iris.Map{
+				"id":           ag.ID,
+				"name":         ag.Name,
+				"description":  ag.Description,
+				"location":     ag.Location,
+				"version":      ag.Version,
+				"public_ip":    ag.PublicIPOverride,
+				"initialized":  ag.Initialized,
+				"updated_at":   ag.UpdatedAt,
+				"last_seen_at": ag.LastSeenAt,
+			},
+			"probes":          probes,
+			"reverse_count":   len(reverse), // Number of probes from other agents targeting this one
+			"expires_at":      link.ExpiresAt,
+			"allow_speedtest": link.AllowSpeedtest,
+		})
+	})
+
+	// Check if share link requires password (no password needed for this check)
+	shareAPI.Get("/{token:string}/info", func(ctx iris.Context) {
+		token := ctx.Params().Get("token")
+
+		link, err := share.GetByToken(ctx.Request().Context(), db, token)
+		if err != nil {
+			if errors.Is(err, share.ErrShareLinkNotFound) {
+				ctx.StatusCode(http.StatusNotFound)
+				_ = ctx.JSON(iris.Map{"error": "share link not found"})
+				return
+			}
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+
+		// Check if expired
+		expired := time.Now().After(link.ExpiresAt)
+
+		_ = ctx.JSON(iris.Map{
+			"has_password":    link.HasPassword,
+			"expired":         expired,
+			"expires_at":      link.ExpiresAt,
+			"allow_speedtest": link.AllowSpeedtest,
+		})
+	})
+
+	// Get probe data for shared agent
+	shareAPI.Get("/{token:string}/probe-data/{probeID:uint64}", func(ctx iris.Context) {
+		token := ctx.Params().Get("token")
+		probeID := uint(ctx.Params().GetUint64Default("probeID", 0))
+		password := ctx.URLParam("password")
+
+		// Validate share link
+		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+			Token:    token,
+			Password: password,
+		})
+		if err != nil {
+			handleShareError(ctx, err)
+			return
+		}
+
+		// Verify probe belongs to the shared agent
+		var p probe.Probe
+		if err := db.WithContext(ctx.Request().Context()).
+			Where("id = ? AND agent_id = ?", probeID, link.AgentID).
+			First(&p).Error; err != nil {
+			ctx.StatusCode(http.StatusNotFound)
+			_ = ctx.JSON(iris.Map{"error": "probe not found"})
+			return
+		}
+
+		// Record access
+		_ = share.RecordAccess(ctx.Request().Context(), db, link.ID)
+
+		// Parse time range
+		from := ctx.URLParamDefault("from", "")
+		to := ctx.URLParamDefault("to", "")
+		limitStr := ctx.URLParamDefault("limit", "100")
+		limit, _ := strconv.Atoi(limitStr)
+		if limit <= 0 || limit > 1000 {
+			limit = 100
+		}
+
+		// Query ClickHouse for probe data
+		// Using the same table structure as existing probe data queries
+		query := `
+			SELECT 
+				timestamp,
+				type,
+				data
+			FROM probe_data
+			WHERE workspace_id = ?
+			AND agent_id = ?
+			AND probe_id = ?
+		`
+		args := []any{link.WorkspaceID, link.AgentID, probeID}
+
+		if from != "" {
+			query += " AND timestamp >= toDateTime(?)"
+			args = append(args, from)
+		}
+		if to != "" {
+			query += " AND timestamp <= toDateTime(?)"
+			args = append(args, to)
+		}
+
+		query += " ORDER BY timestamp DESC LIMIT ?"
+		args = append(args, limit)
+
+		rows, err := ch.QueryContext(ctx.Request().Context(), query, args...)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to query probe data"})
+			return
+		}
+		defer rows.Close()
+
+		var results []map[string]any
+		for rows.Next() {
+			var timestamp time.Time
+			var probeType, data string
+			if err := rows.Scan(&timestamp, &probeType, &data); err != nil {
+				continue
+			}
+			results = append(results, map[string]any{
+				"timestamp": timestamp,
+				"type":      probeType,
+				"data":      data,
+			})
+		}
+
+		_ = ctx.JSON(iris.Map{"items": results, "total": len(results)})
+	})
+}
+
+// handleShareError handles common share link errors.
+func handleShareError(ctx iris.Context, err error) {
+	switch {
+	case errors.Is(err, share.ErrShareLinkNotFound):
+		ctx.StatusCode(http.StatusNotFound)
+		_ = ctx.JSON(iris.Map{"error": "share link not found"})
+	case errors.Is(err, share.ErrShareLinkExpired):
+		ctx.StatusCode(http.StatusGone)
+		_ = ctx.JSON(iris.Map{"error": "share link has expired"})
+	case errors.Is(err, share.ErrPasswordRequired):
+		ctx.StatusCode(http.StatusUnauthorized)
+		_ = ctx.JSON(iris.Map{"error": "password required", "requires_password": true})
+	case errors.Is(err, share.ErrInvalidPassword):
+		ctx.StatusCode(http.StatusUnauthorized)
+		_ = ctx.JSON(iris.Map{"error": "invalid password"})
+	default:
+		ctx.StatusCode(http.StatusInternalServerError)
+		_ = ctx.JSON(iris.Map{"error": err.Error()})
+	}
+}

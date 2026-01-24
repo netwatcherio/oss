@@ -98,6 +98,13 @@ const routes: RouteRecordRaw[] = [
     // External auth routes (whatever your module exports)
     ...asArray(auth),
 
+    // Public shared agent view (no auth required)
+    {
+        path: '/shared/:token',
+        name: 'sharedAgent',
+        component: () => import('@/views/SharedAgent.vue'),
+    },
+
     // App shell
     {
         path: '/',

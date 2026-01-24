@@ -7,6 +7,7 @@ import (
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/share"
 	"netwatcher-controller/internal/speedtest"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
@@ -178,6 +179,8 @@ func CreateIndexes(db *gorm.DB) error {
 
 		&alert.AlertRule{}, // TableName(): "alert_rules"
 		&alert.Alert{},     // TableName(): "alerts"
+
+		&share.ShareLink{}, // TableName(): "share_links"
 	); err != nil {
 		return fmt.Errorf("automigrate: %w", err)
 	}
@@ -235,6 +238,11 @@ func CreateIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts (status);`,
 		`CREATE INDEX IF NOT EXISTS idx_alerts_ws_status ON alerts (workspace_id, status);`,
 		`CREATE INDEX IF NOT EXISTS idx_alerts_rule ON alerts (alert_rule_id);`,
+
+		// share_links
+		`CREATE INDEX IF NOT EXISTS idx_share_links_ws ON share_links (workspace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_share_links_agent ON share_links (agent_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_share_links_expires ON share_links (expires_at);`,
 	}
 
 	for _, sql := range stmts {

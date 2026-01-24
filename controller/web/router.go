@@ -51,9 +51,13 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelLookup(api, geoStore, ch) // /lookup/*
 	panelOUI(api, ouiStore)        // /lookup/oui/*
 	panelAlerts(api, db)           // /alerts/* and /workspaces/{id}/alert-rules/*
+	panelShareLinks(api, db)       // /workspaces/{id}/agents/{agentID}/share-links/*
 
 	// Admin panel routes (requires SITE_ADMIN role)
 	RegisterAdminRoutes(api, db)
+
+	// Public share access routes (no auth)
+	RegisterShareRoutes(app, db, ch)
 
 	// Health
 	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })
