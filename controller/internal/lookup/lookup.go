@@ -129,23 +129,36 @@ func UnifiedLookup(ctx context.Context, ch *sql.DB, geoStore *geoip.Store, ip st
 			// Use cached lookup
 			geoResult, err := geoip.LookupWithCache(ctx, ch, geoStore, ip)
 			if err != nil {
-				log.WithError(err).WithField("ip", ip).Debug("GeoIP cached lookup failed")
+				log.WithError(err).WithField("ip", ip).Warn("GeoIP cached lookup failed")
 			} else if geoResult != nil {
 				result.GeoIP = geoResult
-				log.WithField("ip", ip).WithField("cached", geoResult.Cached).Debug("GeoIP lookup successful")
+				// Log detailed result
+				fields := log.Fields{"ip": ip, "cached": geoResult.Cached}
+				if geoResult.LookupResult != nil {
+					if geoResult.Country != nil {
+						fields["country"] = geoResult.Country.Name
+					}
+					if geoResult.City != nil {
+						fields["city"] = geoResult.City.Name
+					}
+					if geoResult.ASN != nil {
+						fields["asn_org"] = geoResult.ASN.Organization
+					}
+				}
+				log.WithFields(fields).Info("GeoIP lookup successful")
 			}
 		} else {
 			// Direct lookup without cache
 			directResult, err := geoStore.LookupAll(ip)
 			if err != nil {
-				log.WithError(err).WithField("ip", ip).Debug("GeoIP direct lookup failed")
+				log.WithError(err).WithField("ip", ip).Warn("GeoIP direct lookup failed")
 			} else if directResult != nil {
 				result.GeoIP = &geoip.CachedResult{LookupResult: directResult, Cached: false}
-				log.WithField("ip", ip).Debug("GeoIP direct lookup successful")
+				log.WithField("ip", ip).Info("GeoIP direct lookup successful")
 			}
 		}
 	} else {
-		log.WithField("ip", ip).Debug("GeoIP lookup skipped: geoStore is nil")
+		log.WithField("ip", ip).Warn("GeoIP lookup skipped: geoStore is nil")
 	}
 
 	// Reverse DNS lookup (quick, no caching)

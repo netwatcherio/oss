@@ -123,7 +123,7 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 			"has_city":    hasCity,
 			"has_asn":     hasASN,
 			"reverse_dns": result.ReverseDNS,
-		}).Debug("whoami response")
+		}).Info("whoami response")
 
 		_ = ctx.JSON(result)
 	})
