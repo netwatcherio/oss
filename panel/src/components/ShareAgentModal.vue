@@ -1,0 +1,724 @@
+<script lang="ts" setup>
+import { ref, computed, onMounted } from 'vue';
+import { ShareLinkService, type ShareLink } from '@/services/apiService';
+
+const props = defineProps<{
+    workspaceId: number | string;
+    agentId: number | string;
+    agentName: string;
+}>();
+
+const emit = defineEmits<{
+    (e: 'close'): void;
+}>();
+
+// State
+const loading = ref(false);
+const creating = ref(false);
+const shareLinks = ref<ShareLink[]>([]);
+const error = ref<string | null>(null);
+const success = ref<string | null>(null);
+
+// Form state
+const expiryOption = ref('24h');
+const customExpiryHours = ref(72);
+const usePassword = ref(false);
+const password = ref('');
+const generatedLink = ref<string | null>(null);
+const copiedLink = ref(false);
+
+// Expiry options
+const expiryOptions = [
+    { label: '1 hour', value: '1h', seconds: 3600 },
+    { label: '24 hours', value: '24h', seconds: 86400 },
+    { label: '7 days', value: '7d', seconds: 604800 },
+    { label: '30 days', value: '30d', seconds: 2592000 },
+    { label: 'Custom', value: 'custom', seconds: 0 },
+];
+
+const expirySeconds = computed(() => {
+    if (expiryOption.value === 'custom') {
+        return customExpiryHours.value * 3600;
+    }
+    const option = expiryOptions.find(o => o.value === expiryOption.value);
+    return option?.seconds || 86400;
+});
+
+// Load existing share links
+async function loadShareLinks() {
+    loading.value = true;
+    error.value = null;
+    try {
+        shareLinks.value = await ShareLinkService.list(props.workspaceId, props.agentId);
+    } catch (err: any) {
+        error.value = err.message || 'Failed to load share links';
+    } finally {
+        loading.value = false;
+    }
+}
+
+// Create new share link
+async function createShareLink() {
+    creating.value = true;
+    error.value = null;
+    success.value = null;
+    try {
+        const result = await ShareLinkService.create(props.workspaceId, props.agentId, {
+            expires_in_seconds: expirySeconds.value,
+            password: usePassword.value ? password.value : undefined,
+        });
+        
+        // Generate the share URL
+        const baseUrl = window.location.origin;
+        generatedLink.value = `${baseUrl}/shared/${result.token}`;
+        
+        // Reload list
+        await loadShareLinks();
+        
+        success.value = 'Share link created successfully!';
+        
+        // Reset form
+        password.value = '';
+        usePassword.value = false;
+    } catch (err: any) {
+        error.value = err.message || 'Failed to create share link';
+    } finally {
+        creating.value = false;
+    }
+}
+
+// Revoke share link
+async function revokeLink(link: ShareLink) {
+    if (!confirm('Are you sure you want to revoke this share link? Anyone with this link will no longer be able to access the agent.')) {
+        return;
+    }
+    
+    try {
+        await ShareLinkService.remove(props.workspaceId, props.agentId, link.id);
+        await loadShareLinks();
+        success.value = 'Share link revoked successfully';
+        
+        // Clear generated link if it was the revoked one
+        if (generatedLink.value?.includes(link.token)) {
+            generatedLink.value = null;
+        }
+    } catch (err: any) {
+        error.value = err.message || 'Failed to revoke share link';
+    }
+}
+
+// Copy link to clipboard
+async function copyLink() {
+    if (!generatedLink.value) return;
+    
+    try {
+        await navigator.clipboard.writeText(generatedLink.value);
+        copiedLink.value = true;
+        setTimeout(() => { copiedLink.value = false; }, 2000);
+    } catch {
+        // Fallback
+        const input = document.createElement('input');
+        input.value = generatedLink.value;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        copiedLink.value = true;
+        setTimeout(() => { copiedLink.value = false; }, 2000);
+    }
+}
+
+// Format expiry time
+function formatExpiry(expiresAt: string): string {
+    const date = new Date(expiresAt);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    
+    if (diffMs < 0) return 'Expired';
+    
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days}d ${hours % 24}h remaining`;
+    if (hours > 0) return `${hours}h remaining`;
+    return 'Less than 1 hour';
+}
+
+// Format date
+function formatDate(dateStr: string): string {
+    return new Date(dateStr).toLocaleString();
+}
+
+// Check if link is expired
+function isExpired(expiresAt: string): boolean {
+    return new Date(expiresAt) < new Date();
+}
+
+onMounted(() => {
+    loadShareLinks();
+});
+</script>
+
+<template>
+    <div class="modal-backdrop" @click.self="emit('close')">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3><i class="bi bi-link-45deg"></i> Share Agent</h3>
+                <button class="close-btn" @click="emit('close')">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Alerts -->
+                <div v-if="error" class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+                </div>
+                <div v-if="success" class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> {{ success }}
+                </div>
+                
+                <!-- Generated Link -->
+                <div v-if="generatedLink" class="generated-link-section">
+                    <label>Share Link</label>
+                    <div class="link-input-group">
+                        <input type="text" readonly :value="generatedLink" class="link-input" />
+                        <button class="copy-btn" @click="copyLink" :class="{ copied: copiedLink }">
+                            <i :class="copiedLink ? 'bi bi-check' : 'bi bi-clipboard'"></i>
+                            {{ copiedLink ? 'Copied!' : 'Copy' }}
+                        </button>
+                    </div>
+                    <p class="link-note">
+                        <i class="bi bi-info-circle"></i>
+                        Anyone with this link can view this agent's status and probe data (read-only).
+                    </p>
+                </div>
+                
+                <!-- Create New Link Form -->
+                <div class="create-section">
+                    <h4>Create New Share Link</h4>
+                    
+                    <div class="form-group">
+                        <label>Expires In</label>
+                        <div class="expiry-options">
+                            <button 
+                                v-for="opt in expiryOptions" 
+                                :key="opt.value"
+                                class="expiry-btn"
+                                :class="{ active: expiryOption === opt.value }"
+                                @click="expiryOption = opt.value"
+                            >
+                                {{ opt.label }}
+                            </button>
+                        </div>
+                        
+                        <div v-if="expiryOption === 'custom'" class="custom-expiry">
+                            <input 
+                                type="number" 
+                                v-model.number="customExpiryHours" 
+                                min="1" 
+                                max="720"
+                                class="form-control"
+                            />
+                            <span class="expiry-unit">hours</span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" v-model="usePassword" />
+                            <span>Password protect this link</span>
+                        </label>
+                        
+                        <input 
+                            v-if="usePassword"
+                            type="password"
+                            v-model="password"
+                            placeholder="Enter password"
+                            class="form-control password-input"
+                        />
+                    </div>
+                    
+                    <button 
+                        class="btn btn-primary create-btn" 
+                        @click="createShareLink"
+                        :disabled="creating || (usePassword && !password)"
+                    >
+                        <i v-if="creating" class="bi bi-arrow-repeat spin"></i>
+                        <i v-else class="bi bi-plus-circle"></i>
+                        {{ creating ? 'Creating...' : 'Create Share Link' }}
+                    </button>
+                </div>
+                
+                <!-- Existing Links -->
+                <div class="existing-links-section" v-if="shareLinks.length > 0">
+                    <h4>Active Share Links</h4>
+                    
+                    <div class="share-links-list">
+                        <div 
+                            v-for="link in shareLinks" 
+                            :key="link.id" 
+                            class="share-link-item"
+                            :class="{ expired: isExpired(link.expires_at) }"
+                        >
+                            <div class="link-info">
+                                <div class="link-token">
+                                    <i class="bi bi-link"></i>
+                                    <code>{{ link.token.substring(0, 12) }}...</code>
+                                    <span v-if="link.has_password" class="badge badge-password">
+                                        <i class="bi bi-lock"></i> Protected
+                                    </span>
+                                </div>
+                                <div class="link-meta">
+                                    <span class="link-expiry" :class="{ 'text-danger': isExpired(link.expires_at) }">
+                                        <i class="bi bi-clock"></i>
+                                        {{ formatExpiry(link.expires_at) }}
+                                    </span>
+                                    <span class="link-views">
+                                        <i class="bi bi-eye"></i>
+                                        {{ link.access_count }} views
+                                    </span>
+                                    <span class="link-created">
+                                        Created {{ formatDate(link.created_at) }}
+                                    </span>
+                                </div>
+                            </div>
+                            <button 
+                                class="revoke-btn" 
+                                @click="revokeLink(link)"
+                                title="Revoke this link"
+                            >
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div v-else-if="!loading" class="no-links">
+                    <i class="bi bi-link-45deg"></i>
+                    <p>No active share links for this agent.</p>
+                </div>
+                
+                <div v-if="loading" class="loading-state">
+                    <i class="bi bi-arrow-repeat spin"></i>
+                    Loading share links...
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+}
+
+.modal-container {
+    background: var(--color-background, #1a1a2e);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--color-text, #fff);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted, #888);
+    padding: 0.5rem;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    color: var(--color-text, #fff);
+    background: rgba(255,255,255,0.1);
+}
+
+.modal-body {
+    padding: 1.25rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+/* Alerts */
+.alert {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.alert-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.alert-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+/* Generated Link */
+.generated-link-section {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+.generated-link-section label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6366f1;
+    margin-bottom: 0.5rem;
+}
+
+.link-input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.link-input {
+    flex: 1;
+    background: var(--color-background-soft, #0f0f1a);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    padding: 0.625rem 0.75rem;
+    color: var(--color-text, #fff);
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+
+.copy-btn {
+    background: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0.625rem 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.copy-btn:hover {
+    background: #4f46e5;
+}
+
+.copy-btn.copied {
+    background: #22c55e;
+}
+
+.link-note {
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
+    color: var(--color-text-muted, #888);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.375rem;
+}
+
+/* Create Section */
+.create-section {
+    background: var(--color-background-soft, rgba(255,255,255,0.03));
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+.create-section h4 {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text, #fff);
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--color-text-muted, #888);
+    margin-bottom: 0.5rem;
+}
+
+.expiry-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.expiry-btn {
+    background: var(--color-background, #1a1a2e);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    color: var(--color-text-muted, #888);
+    padding: 0.5rem 0.875rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.expiry-btn:hover {
+    border-color: #6366f1;
+    color: var(--color-text, #fff);
+}
+
+.expiry-btn.active {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: white;
+}
+
+.custom-expiry {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.custom-expiry .form-control {
+    width: 100px;
+}
+
+.expiry-unit {
+    color: var(--color-text-muted, #888);
+    font-size: 0.875rem;
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #6366f1;
+}
+
+.checkbox-label span {
+    color: var(--color-text, #fff);
+}
+
+.password-input {
+    margin-top: 0.5rem;
+}
+
+.form-control {
+    background: var(--color-background, #1a1a2e);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    padding: 0.625rem 0.75rem;
+    color: var(--color-text, #fff);
+    width: 100%;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #6366f1;
+}
+
+.create-btn {
+    width: 100%;
+    padding: 0.75rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+.btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Existing Links */
+.existing-links-section h4 {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text, #fff);
+}
+
+.share-links-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.share-link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--color-background-soft, rgba(255,255,255,0.03));
+    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    border-radius: 8px;
+    padding: 0.75rem;
+}
+
+.share-link-item.expired {
+    opacity: 0.6;
+}
+
+.link-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.link-token {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.link-token code {
+    font-size: 0.8rem;
+    color: var(--color-text, #fff);
+}
+
+.badge-password {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    padding: 0.125rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.link-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #888);
+}
+
+.link-expiry, .link-views, .link-created {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.text-danger {
+    color: #ef4444 !important;
+}
+
+.revoke-btn {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    padding: 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.revoke-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+/* No Links State */
+.no-links {
+    text-align: center;
+    padding: 2rem;
+    color: var(--color-text-muted, #888);
+}
+
+.no-links i {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.5;
+}
+
+.no-links p {
+    margin: 0;
+}
+
+/* Loading State */
+.loading-state {
+    text-align: center;
+    padding: 1.5rem;
+    color: var(--color-text-muted, #888);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+/* Spin Animation */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+</style>
