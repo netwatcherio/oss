@@ -161,6 +161,25 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
+			// Ping/heartbeat handler - agents send this periodically to keep connection alive
+			// Also serves as online status tracking by updating last_seen_at
+			"ping": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+				ctx := websocket.GetContext(nsConn.Conn)
+				aid, ok := ctx.Values().GetUint("agent_id")
+				if ok != nil || aid == 0 {
+					return errors.New("unauthorized: no agent in context")
+				}
+
+				// Update last_seen_at for status tracking
+				if err := agent.UpdateAgentSeen(context.TODO(), db, aid, time.Now()); err != nil {
+					log.WithError(err).Warnf("[ping] failed to update last_seen for agent %d", aid)
+				}
+
+				// Respond with pong
+				nsConn.Emit("pong", []byte(`{"ok":true}`))
+				return nil
+			},
+
 			"version": func(nsConn *websocket.NSConn, msg websocket.Message) error {
 				var versionData = struct {
 					Version string `json:"version"`

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 
@@ -42,12 +43,19 @@ func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// If there's an existing connection for this agent, it will be replaced
-	// This handles the case where an agent reconnects before the old connection times out
+	// If there's an existing connection for this agent, close it first
+	// This handles the case where an agent reconnects after an update/restart
+	// before the old connection has timed out
 	if old, exists := h.connections[agentID]; exists {
-		log.Warnf("[AgentHub] Agent %d already connected, replacing connection", agentID)
-		// Don't close the old connection here - let it timeout naturally
-		_ = old
+		log.Warnf("[AgentHub] Agent %d already connected, closing old connection before replacing", agentID)
+		// Force disconnect the old connection to ensure clean state
+		go func(oldConn *websocket.NSConn) {
+			// Disconnect in a goroutine to avoid blocking while holding the lock
+			if err := oldConn.Disconnect(context.TODO()); err != nil {
+				log.Debugf("[AgentHub] Error disconnecting old connection for agent %d: %v", agentID, err)
+			}
+		}(old)
+
 	}
 
 	h.connections[agentID] = conn
