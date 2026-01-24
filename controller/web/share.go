@@ -399,14 +399,15 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		// Record access
 		_ = share.RecordAccess(ctx.Request().Context(), db, link.ID)
 
-		// Parse time range
+		// Parse query params - EXACTLY like the normal panel endpoint in data.go
 		from := ctx.URLParamDefault("from", "")
 		to := ctx.URLParamDefault("to", "")
-		limitStr := ctx.URLParamDefault("limit", "100")
+		limitStr := ctx.URLParamDefault("limit", "0")
 		limit, _ := strconv.Atoi(limitStr)
-		if limit <= 0 || limit > 1000 {
-			limit = 100
-		}
+		asc := ctx.URLParamDefault("asc", "") == "true"
+		aggregateSecStr := ctx.URLParamDefault("aggregate", "0")
+		aggregateSec, _ := strconv.Atoi(aggregateSecStr)
+		probeType := ctx.URLParam("type") // "PING", "TRAFFICSIM", or "MTR"
 
 		// Parse time range to time.Time
 		var fromTime, toTime time.Time
@@ -417,26 +418,36 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 			toTime, _ = time.Parse(time.RFC3339, to)
 		}
 
-		// Use the existing probe package function to get data
-		// This queries by probe_id which is the correct approach
-		probeData, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), fromTime, toTime, false, limit)
-		if err != nil {
+		// Use the SAME logic as the normal panel endpoint (data.go lines 156-195)
+		var rows []probe.ProbeData
+		var queryErr error
+
+		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
+			// Use aggregated query for performance
+			rows, queryErr = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, uint64(probeID), probeType, fromTime, toTime, aggregateSec, limit)
+		} else {
+			// Standard non-aggregated query
+			rows, queryErr = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), fromTime, toTime, asc, limit)
+			// Post-filter by type if specified
+			if queryErr == nil && probeType != "" {
+				filtered := make([]probe.ProbeData, 0, len(rows))
+				for _, r := range rows {
+					if string(r.Type) == probeType {
+						filtered = append(filtered, r)
+					}
+				}
+				rows = filtered
+			}
+		}
+
+		if queryErr != nil {
 			ctx.StatusCode(http.StatusInternalServerError)
 			_ = ctx.JSON(iris.Map{"error": "failed to query probe data"})
 			return
 		}
 
-		// Convert to response format
-		var results []map[string]any
-		for _, d := range probeData {
-			results = append(results, map[string]any{
-				"timestamp": d.CreatedAt,
-				"type":      string(d.Type),
-				"data":      string(d.Payload),
-			})
-		}
-
-		_ = ctx.JSON(iris.Map{"items": results, "total": len(results)})
+		// Return the SAME format as the normal panel - NewListResponse(rows)
+		_ = ctx.JSON(NewListResponse(rows))
 	})
 }
 
