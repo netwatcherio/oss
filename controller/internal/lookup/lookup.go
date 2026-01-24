@@ -144,8 +144,12 @@ func UnifiedLookup(ctx context.Context, ch *sql.DB, geoStore *geoip.Store, ip st
 					if geoResult.ASN != nil {
 						fields["asn_org"] = geoResult.ASN.Organization
 					}
+				} else {
+					fields["lookup_result"] = "nil"
 				}
 				log.WithFields(fields).Info("GeoIP lookup successful")
+			} else {
+				log.WithField("ip", ip).Warn("GeoIP cached lookup returned nil")
 			}
 		} else {
 			// Direct lookup without cache
