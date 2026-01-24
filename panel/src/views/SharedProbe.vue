@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, onMounted, computed, reactive, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, reactive, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
@@ -7,6 +7,9 @@ import LatencyGraph from '@/components/PingGraph.vue';
 import TrafficSimGraph from '@/components/TrafficSimGraph.vue';
 import MtrTable from '@/components/MtrTable.vue';
 import MtrSummary from '@/components/MtrSummary.vue';
+import VueDatePicker from '@vuepic/vue-datepicker';
+import '@vuepic/vue-datepicker/dist/main.css';
+import { themeService } from '@/services/themeService';
 import type { PingResult, MtrResult, TrafficSimResult, ProbeData } from '@/types';
 
 const route = useRoute();
@@ -17,6 +20,10 @@ const probeId = computed(() => Number(route.params.probeId));
 
 // Session storage key for password
 const getSessionKey = () => `share_password_${token.value}`;
+
+// Theme detection for date picker
+const isDark = ref(themeService.getTheme() === 'dark');
+let themeUnsubscribe: (() => void) | null = null;
 
 // State
 const loading = ref(true);
@@ -40,6 +47,7 @@ const state = reactive({
     timeRange: [new Date(Date.now() - 3*60*60*1000), new Date()] as [Date, Date],
     title: '' as string,
     ready: false,
+    aggregationBucketSec: 0,  // Current aggregation bucket size (0 = no aggregation)
     // AGENT probe bidirectional support (matching Probe.vue)
     isAgentProbe: false,
     reciprocalProbe: null as any,
@@ -136,6 +144,32 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
             reportTime: p?.timestamp ?? r.created_at,
         };
     }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
+}
+
+// Calculate aggregation bucket size based on time range (matching Probe.vue logic)
+// Goal: aim for ~500 data points regardless of time range
+function calculateAggregateBucket(from: Date, to: Date): number {
+    const rangeMs = to.getTime() - from.getTime();
+    const rangeSec = rangeMs / 1000;
+    const targetPoints = 500;
+    
+    if (rangeSec <= 60) return 0; // No aggregation for < 1 minute
+    
+    const idealBucket = Math.ceil(rangeSec / targetPoints);
+    
+    // Round to nice intervals
+    if (idealBucket <= 10) return 10;
+    if (idealBucket <= 30) return 30;
+    if (idealBucket <= 60) return 60;
+    if (idealBucket <= 120) return 120;
+    if (idealBucket <= 300) return 300;
+    if (idealBucket <= 600) return 600;
+    if (idealBucket <= 1800) return 1800;
+    if (idealBucket <= 3600) return 3600;
+    if (idealBucket <= 7200) return 7200;
+    if (idealBucket <= 14400) return 14400;
+    if (idealBucket <= 21600) return 21600;
+    return Math.ceil(idealBucket / 21600) * 21600;
 }
 
 // Check if probe has data of type
@@ -273,8 +307,12 @@ async function loadProbeData() {
             }
         }
         
-        // Load probe data
+        // Load probe data with aggregation based on time range
         const [from, to] = state.timeRange;
+        const aggregateSec = calculateAggregateBucket(from, to);
+        state.aggregationBucketSec = aggregateSec;
+        console.log(`[SharedProbe] Loading data: aggregateSec=${aggregateSec}`);
+        
         const baseParams = {
             from: toRFC3339(from),
             to: toRFC3339(to),
@@ -302,14 +340,63 @@ async function loadProbeData() {
             return result;
         };
         
-        // Load forward direction data (current probe)
-        const forwardResult = await PublicShareService.getProbeData(token.value, probeId.value, { ...baseParams, limit: 500 });
-        const forwardData = parseDataResult(forwardResult, probeId.value);
-        
-        // Separate by type
-        state.pingData = forwardData.filter(d => d.type === 'PING');
-        state.mtrData = forwardData.filter(d => d.type === 'MTR');
-        state.trafficSimData = forwardData.filter(d => d.type === 'TRAFFICSIM');
+        // For AGENT probes, fetch each sub-type separately (matching Probe.vue)
+        if (state.isAgentProbe) {
+            const pingAgg = aggregateSec > 0;
+            const trafficAgg = aggregateSec > 0;
+            
+            // Fetch PING data with aggregation
+            try {
+                const pingResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                    ...baseParams,
+                    type: 'PING',
+                    aggregate: pingAgg ? aggregateSec : undefined,
+                    limit: pingAgg ? undefined : 300,
+                });
+                state.pingData = parseDataResult(pingResult, probeId.value);
+                console.log(`[SharedProbe] PING: ${state.pingData.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+            } catch (err) { console.warn('[SharedProbe] Failed to fetch PING:', err); }
+            
+            // Fetch MTR data (no aggregation - need full hop data)
+            try {
+                const mtrResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                    ...baseParams,
+                    type: 'MTR',
+                    limit: 300,
+                });
+                state.mtrData = parseDataResult(mtrResult, probeId.value);
+                console.log(`[SharedProbe] MTR: ${state.mtrData.length} raw rows`);
+            } catch (err) { console.warn('[SharedProbe] Failed to fetch MTR:', err); }
+            
+            // Fetch TRAFFICSIM data with aggregation
+            try {
+                const trafficResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                    ...baseParams,
+                    type: 'TRAFFICSIM',
+                    aggregate: trafficAgg ? aggregateSec : undefined,
+                    limit: trafficAgg ? undefined : 300,
+                });
+                state.trafficSimData = parseDataResult(trafficResult, probeId.value);
+                console.log(`[SharedProbe] TRAFFICSIM: ${state.trafficSimData.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
+            } catch (err) { console.warn('[SharedProbe] Failed to fetch TRAFFICSIM:', err); }
+        } else {
+            // Non-AGENT probe: single request (aggregation for PING/TRAFFICSIM types)
+            const probeType = probe.value.type as string;
+            const useAgg = aggregateSec > 0 && (probeType === 'PING' || probeType === 'TRAFFICSIM');
+            
+            const forwardResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                ...baseParams,
+                aggregate: useAgg ? aggregateSec : undefined,
+                type: useAgg ? probeType : undefined,
+                limit: useAgg ? undefined : 500,
+            });
+            const forwardData = parseDataResult(forwardResult, probeId.value);
+            
+            // Separate by type
+            state.pingData = forwardData.filter(d => d.type === 'PING');
+            state.mtrData = forwardData.filter(d => d.type === 'MTR');
+            state.trafficSimData = forwardData.filter(d => d.type === 'TRAFFICSIM');
+        }
         
         // For AGENT probes, also load reverse direction and build agentPairData
         if (state.isAgentProbe && firstTarget?.agent_id) {
@@ -334,25 +421,60 @@ async function loadProbeData() {
             // If reciprocal probe exists, load its data (reverse: target → source)
             if (state.reciprocalProbe) {
                 try {
-                    const reverseResult = await PublicShareService.getProbeData(
-                        token.value, 
-                        state.reciprocalProbe.id, 
-                        { ...baseParams, limit: 500 }
-                    );
-                    const reverseData = parseDataResult(reverseResult, state.reciprocalProbe.id);
+                    const recipProbeId = state.reciprocalProbe.id;
+                    let recipPing: ProbeData[] = [];
+                    let recipMtr: ProbeData[] = [];
+                    let recipTraffic: ProbeData[] = [];
+                    
+                    // Fetch PING with aggregation (matching Probe.vue logic)
+                    const pingAgg = aggregateSec > 0;
+                    try {
+                        const pingResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                            ...baseParams,
+                            type: 'PING',
+                            aggregate: pingAgg ? aggregateSec : undefined,
+                            limit: pingAgg ? undefined : 300,
+                        });
+                        recipPing = parseDataResult(pingResult, recipProbeId);
+                        console.log(`[SharedProbe] Reverse PING: ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse PING:', err); }
+                    
+                    // Fetch MTR without aggregation (need full hop data)
+                    try {
+                        const mtrResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                            ...baseParams,
+                            type: 'MTR',
+                            limit: 300,
+                        });
+                        recipMtr = parseDataResult(mtrResult, recipProbeId);
+                        console.log(`[SharedProbe] Reverse MTR: ${recipMtr.length} raw rows`);
+                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse MTR:', err); }
+                    
+                    // Fetch TRAFFICSIM with aggregation
+                    const trafficAgg = aggregateSec > 0;
+                    try {
+                        const trafficResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                            ...baseParams,
+                            type: 'TRAFFICSIM',
+                            aggregate: trafficAgg ? aggregateSec : undefined,
+                            limit: trafficAgg ? undefined : 300,
+                        });
+                        recipTraffic = parseDataResult(trafficResult, recipProbeId);
+                        console.log(`[SharedProbe] Reverse TRAFFICSIM: ${recipTraffic.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
+                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse TRAFFICSIM:', err); }
                     
                     state.agentPairData.push({
                         direction: 'reverse',
-                        probeId: state.reciprocalProbe.id,
+                        probeId: recipProbeId,
                         sourceAgentId: targetAgentId,
                         targetAgentId: sourceAgentId,
                         sourceAgentName: targetAgentName,
                         targetAgentName: sourceAgentName,
-                        pingData: reverseData.filter(d => d.type === 'PING'),
-                        mtrData: reverseData.filter(d => d.type === 'MTR'),
-                        trafficSimData: reverseData.filter(d => d.type === 'TRAFFICSIM'),
+                        pingData: recipPing,
+                        mtrData: recipMtr,
+                        trafficSimData: recipTraffic,
                     });
-                    console.log('[SharedProbe] Loaded reverse direction data:', reverseData.length, 'items');
+                    console.log('[SharedProbe] Loaded reverse direction data');
                 } catch (err) {
                     console.warn('[SharedProbe] Failed to load reciprocal probe data:', err);
                 }
@@ -376,8 +498,24 @@ function goBack() {
     router.push({ name: 'sharedAgent', params: { token: token.value } });
 }
 
+// Handler for explicit time range updates from date picker
+const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
+    if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
+        console.warn('[SharedProbe] Invalid time range update:', newRange);
+        return;
+    }
+    console.log('[SharedProbe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
+    // Force a new array reference to ensure reactivity
+    state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+};
+
 // Initial load
 onMounted(async () => {
+    // Subscribe to theme changes for date picker
+    themeUnsubscribe = themeService.onThemeChange((theme) => {
+        isDark.value = theme === 'dark';
+    });
+    
     const canProceed = await loadShareInfo();
     if (canProceed) {
         await loadProbeData();
@@ -386,12 +524,38 @@ onMounted(async () => {
     }
 });
 
-// Watch for time range changes
-watch(() => state.timeRange, () => {
-    if (state.ready) {
-        loadProbeData();
+onUnmounted(() => {
+    if (themeUnsubscribe) {
+        themeUnsubscribe();
+        themeUnsubscribe = null;
     }
-}, { deep: true });
+});
+
+// Debounced watch on timeRange to reload data when date picker changes
+let timeRangeDebounceTimer: number | null = null;
+watch(
+    () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
+    (newVal, oldVal) => {
+        // Skip if values are the same or initial mount
+        if (!newVal[0] || !newVal[1]) return;
+        if (oldVal && newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) return;
+        
+        console.log('[SharedProbe] Time range changed, debouncing reload...');
+        
+        // Clear any pending reload
+        if (timeRangeDebounceTimer) {
+            clearTimeout(timeRangeDebounceTimer);
+        }
+        
+        // Debounce reload by 500ms to avoid rapid-fire requests
+        timeRangeDebounceTimer = window.setTimeout(() => {
+            console.log('[SharedProbe] Debounced reload triggered');
+            loadProbeData();
+            timeRangeDebounceTimer = null;
+        }, 500);
+    },
+    { deep: false }
+);
 </script>
 
 <template>
@@ -487,6 +651,33 @@ watch(() => state.timeRange, () => {
                             <i class="bi bi-geo-alt"></i> {{ probeAgent.location }}
                         </span>
                     </div>
+                    
+                    <!-- Date Range Picker -->
+                    <div class="date-picker-wrapper">
+                        <VueDatePicker 
+                            v-model="state.timeRange"
+                            @update:model-value="onTimeRangeUpdate"
+                            :partial-range="false" 
+                            range
+                            :dark="isDark"
+                            :enable-time-picker="true"
+                            :multi-calendars="true"
+                            :auto-apply="true"
+                            :preset-dates="[
+                                { label: 'Last Hour', value: [new Date(Date.now() - 60*60*1000), new Date()] },
+                                { label: 'Last 3 Hours', value: [new Date(Date.now() - 3*60*60*1000), new Date()] },
+                                { label: 'Last 6 Hours', value: [new Date(Date.now() - 6*60*60*1000), new Date()] },
+                                { label: 'Last 24 Hours', value: [new Date(Date.now() - 24*60*60*1000), new Date()] },
+                                { label: 'Last 7 Days', value: [new Date(Date.now() - 7*24*60*60*1000), new Date()] },
+                                { label: 'Last 30 Days', value: [new Date(Date.now() - 30*24*60*60*1000), new Date()] }
+                            ]"
+                            format="MMM dd, yyyy HH:mm"
+                            preview-format="MMM dd, yyyy HH:mm"
+                            input-class-name="date-picker-input"
+                            menu-class-name="date-picker-menu"
+                            calendar-class-name="date-picker-calendar"
+                        />
+                    </div>
                 </div>
                 
                 <!-- Direction Toggle for AGENT probes -->
@@ -527,6 +718,9 @@ watch(() => state.timeRange, () => {
                         <div class="graph-container">
                             <LatencyGraph 
                                 :pingResults="transformPingDataMulti(activePingData)" 
+                                :aggregationBucketSec="state.aggregationBucketSec"
+                                :currentTimeRange="state.timeRange"
+                                @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
                         
@@ -567,7 +761,11 @@ watch(() => state.timeRange, () => {
                     <div v-if="containsProbeType('TRAFFICSIM')" class="data-section">
                         <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
                         <div class="graph-container">
-                            <TrafficSimGraph :trafficResults="transformToTrafficSimResult(activeTrafficSimData)" />
+                            <TrafficSimGraph 
+                                :trafficResults="transformToTrafficSimResult(activeTrafficSimData)"
+                                :currentTimeRange="state.timeRange"
+                                @time-range-change="onTimeRangeUpdate"
+                            />
                         </div>
                     </div>
                     
@@ -794,6 +992,30 @@ watch(() => state.timeRange, () => {
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 1.5rem;
+}
+
+.date-picker-wrapper {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.date-picker-wrapper :deep(.dp__input) {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.date-picker-wrapper :deep(.dp__input:hover) {
+    border-color: rgba(99, 102, 241, 0.5);
+}
+
+.date-picker-wrapper :deep(.dp__input_icon) {
+    color: #94a3b8;
 }
 
 .probe-title-row {
