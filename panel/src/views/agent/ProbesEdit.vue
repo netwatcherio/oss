@@ -733,7 +733,6 @@ const hasSelectedAgentProbes = computed(() => {
             <router-link
                 :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${state.selectedProbe.id}/delete`"
                 class="btn btn-outline-danger"
-                @click="closeProbeModal"
             >
               <i class="bi bi-trash"></i> Delete Probe
             </router-link>

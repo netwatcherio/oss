@@ -196,10 +196,7 @@ onMounted(loadRules);
 
 <template>
   <div class="alert-rules-config">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="mb-0">
-        <i class="bi bi-bell me-2"></i>Alert Rules
-      </h5>
+    <div class="d-flex justify-content-end mb-3">
       <button class="btn btn-primary btn-sm" @click="openCreateForm">
         <i class="bi bi-plus-lg me-1"></i>Add Rule
       </button>
@@ -1072,32 +1069,283 @@ onMounted(loadRules);
   border-color: #374151;
 }
 
-:global([data-theme="dark"]) .condition-box,
-:global([data-theme="dark"]) .webhook-url-input {
+:global([data-theme="dark"]) .form-section-header {
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .form-section-header i {
+  color: #60a5fa;
+}
+
+:global([data-theme="dark"]) .form-label {
+  color: #e5e7eb;
+}
+
+:global([data-theme="dark"]) .form-text {
+  color: #9ca3af !important;
+}
+
+:global([data-theme="dark"]) .form-control,
+:global([data-theme="dark"]) .form-select {
   background: #374151;
+  border-color: #4b5563;
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .form-control::placeholder {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .form-control:focus,
+:global([data-theme="dark"]) .form-select:focus {
+  background: #374151;
+  border-color: #3b82f6;
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .input-group-text {
+  background: #4b5563;
+  border-color: #4b5563;
+  color: #e5e7eb;
+}
+
+:global([data-theme="dark"]) .condition-box {
+  background: #111827;
+  border-color: #374151;
+}
+
+:global([data-theme="dark"]) .condition-box.secondary {
+  border-left-color: #3b82f6;
+}
+
+:global([data-theme="dark"]) .compound-toggle .btn-outline-secondary {
+  border-color: #4b5563;
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .compound-toggle .btn-outline-secondary:hover,
+:global([data-theme="dark"]) .compound-toggle .btn-outline-primary.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+:global([data-theme="dark"]) .compound-hint {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+:global([data-theme="dark"]) .logical-op-toggle .btn-outline-secondary {
+  border-color: #4b5563;
+  color: #9ca3af;
+}
+
+/* Severity Cards - Dark Mode */
+:global([data-theme="dark"]) .severity-card {
+  border-color: #374151;
+  background: #111827;
+}
+
+:global([data-theme="dark"]) .severity-card:hover {
   border-color: #4b5563;
 }
 
-:global([data-theme="dark"]) .severity-card {
-  border-color: #374151;
+:global([data-theme="dark"]) .severity-card.warning.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
 }
 
+:global([data-theme="dark"]) .severity-card.critical.active {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+:global([data-theme="dark"]) .severity-label {
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .severity-desc {
+  color: #9ca3af;
+}
+
+/* Notification Channels - Dark Mode */
 :global([data-theme="dark"]) .channel-card {
   border-color: #374151;
+  background: #111827;
 }
 
+:global([data-theme="dark"]) .channel-card:not(.disabled):hover {
+  border-color: #4b5563;
+  background: #1f2937;
+}
+
+:global([data-theme="dark"]) .channel-card.active:not(.disabled) {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+:global([data-theme="dark"]) .channel-label {
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .channel-desc {
+  color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .webhook-url-input {
+  background: #111827;
+}
+
+/* Empty State - Dark Mode */
 :global([data-theme="dark"]) .empty-state {
   background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
   border-color: #374151;
 }
 
+:global([data-theme="dark"]) .empty-state-title {
+  color: #f1f5f9;
+}
+
+:global([data-theme="dark"]) .empty-state-text {
+  color: #9ca3af;
+}
+
 :global([data-theme="dark"]) .suggestion-tag {
   background: #374151;
   border-color: #4b5563;
+  color: #d1d5db;
 }
 
+:global([data-theme="dark"]) .suggestion-label {
+  color: #9ca3af;
+}
+
+/* Rule Cards - Dark Mode */
 :global([data-theme="dark"]) .rule-condition code {
   background: #374151;
   color: #e5e7eb;
+}
+
+:global([data-theme="dark"]) .rule-metric-icon {
+  color: #60a5fa;
+}
+
+:global([data-theme="dark"]) .channel-badge.panel {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+:global([data-theme="dark"]) .channel-badge.email {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+:global([data-theme="dark"]) .channel-badge.webhook {
+  background: rgba(234, 179, 8, 0.2);
+}
+</style>
+
+<!-- Unscoped dark mode styles for modal form elements -->
+<style>
+[data-theme="dark"] .rule-form-modal .condition-box {
+  background: #111827 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .condition-box.primary {
+  background: #111827 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .form-control,
+[data-theme="dark"] .rule-form-modal .form-select {
+  background: #374151 !important;
+  border-color: #4b5563 !important;
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .form-control::placeholder {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .rule-form-modal .form-label {
+  color: #d1d5db !important;
+}
+
+[data-theme="dark"] .rule-form-modal .input-group-text {
+  background: #4b5563 !important;
+  border-color: #4b5563 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .rule-form-modal .severity-card {
+  background: #111827 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .severity-card.warning.active {
+  background: rgba(245, 158, 11, 0.1) !important;
+  border-color: #f59e0b !important;
+}
+
+[data-theme="dark"] .rule-form-modal .severity-card.critical.active {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-color: #ef4444 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .severity-label {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .severity-desc {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .rule-form-modal .channel-card {
+  background: #111827 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .channel-card.active:not(.disabled) {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .channel-label {
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .rule-form-modal .channel-desc {
+  color: #9ca3af !important;
+}
+
+[data-theme="dark"] .rule-form-modal .compound-toggle .btn {
+  background: transparent;
+  border-color: #4b5563;
+  color: #9ca3af;
+}
+
+[data-theme="dark"] .rule-form-modal .compound-toggle .btn:hover,
+[data-theme="dark"] .rule-form-modal .compound-toggle .btn.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+[data-theme="dark"] .rule-form-modal .logical-op-toggle .btn {
+  border-color: #4b5563;
+  color: #9ca3af;
+}
+
+[data-theme="dark"] .rule-form-modal .logical-op-toggle .btn.btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+
+[data-theme="dark"] .rule-form-modal .compound-hint {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .rule-form-modal .webhook-url-input {
+  background: #111827;
 }
 </style>

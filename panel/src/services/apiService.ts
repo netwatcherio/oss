@@ -225,6 +225,7 @@ export const ProbeDataService = {
      * 
      * @param aggregate - Aggregation bucket size in seconds (e.g., 60 = 1 min buckets)
      * @param type - "PING" or "TRAFFICSIM" - required when using aggregate
+     * @param agentId - Optional: filter by reporting agent (for AGENT probes with bidirectional data)
      */
     async byProbe(
         workspaceId: number | string,
@@ -236,6 +237,7 @@ export const ProbeDataService = {
             asc?: boolean;
             aggregate?: number;  // Seconds for time-bucket aggregation
             type?: string;       // "PING" or "TRAFFICSIM"
+            agentId?: number;    // Filter by reporting agent
         }
     ) {
         const qs = new URLSearchParams();
@@ -246,6 +248,7 @@ export const ProbeDataService = {
             if (params.asc !== undefined) setIf(qs, "asc", params.asc ? "true" : "false");
             setIf(qs, "aggregate", params.aggregate);
             setIf(qs, "type", params.type);
+            setIf(qs, "agentId", params.agentId);
         }
         const { data } = await request.get<ListResponse<ProbeData>>(
             `/workspaces/${workspaceId}/probe-data/probes/${probeId}/data${qs.toString() ? `?${qs}` : ""}`

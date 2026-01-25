@@ -68,7 +68,8 @@ const filteredAgents = computed(() => {
     filtered = filtered.filter(agent =>
       agent.name.toLowerCase().includes(query) ||
       agent.location?.toLowerCase().includes(query) ||
-      agent.id
+      agent.description?.toLowerCase().includes(query) ||
+      String(agent.id).includes(query)
     );
   }
 

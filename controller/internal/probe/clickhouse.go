@@ -163,11 +163,13 @@ func chQuoteTime(t time.Time) string { return "'" + t.UTC().Format("2006-01-02 1
 // GetProbeDataByProbe returns rows for a given probe within a time range.
 // If from.IsZero() or to.IsZero(), that bound is ignored.
 // If limit <= 0, no limit is applied.
+// If agentID is not nil, filters by the reporting agent (agent_id).
 // REWRITE GetProbeDataByProbe: inline literals (no args / ? placeholders)
 func GetProbeDataByProbe(
 	ctx context.Context,
 	db *sql.DB,
 	probeID uint64,
+	agentID *uint64,
 	from, to time.Time,
 	ascending bool,
 	limit int,
@@ -175,6 +177,10 @@ func GetProbeDataByProbe(
 
 	var clauses []string
 	clauses = append(clauses, fmt.Sprintf("probe_id = %d", probeID))
+
+	if agentID != nil {
+		clauses = append(clauses, fmt.Sprintf("agent_id = %d", *agentID))
+	}
 
 	if !from.IsZero() {
 		clauses = append(clauses, fmt.Sprintf("created_at >= %s", chQuoteTime(from)))
@@ -442,10 +448,12 @@ const MaxRawRowsForAggregation = 50000
 // aggregateSec specifies the bucket size in seconds (e.g., 60 = 1 minute buckets).
 // This fetches raw data and aggregates in Go for robustness with JSON parsing.
 // For very large time ranges, it limits raw data to MaxRawRowsForAggregation rows.
+// If agentID is not nil, filters by the reporting agent (agent_id).
 func GetProbeDataAggregated(
 	ctx context.Context,
 	db *sql.DB,
 	probeID uint64,
+	agentID *uint64,
 	probeType string, // "PING", "TRAFFICSIM", or "MTR"
 	from, to time.Time,
 	aggregateSec int,
@@ -453,12 +461,12 @@ func GetProbeDataAggregated(
 ) ([]ProbeData, error) {
 	if aggregateSec <= 0 {
 		// Fall back to non-aggregated query
-		return GetProbeDataByProbe(ctx, db, probeID, from, to, false, limit)
+		return GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, limit)
 	}
 
 	// Fetch raw data from ClickHouse with a sensible limit
 	// This prevents memory exhaustion on very large time ranges
-	rawData, err := GetProbeDataByProbe(ctx, db, probeID, from, to, false, MaxRawRowsForAggregation)
+	rawData, err := GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, MaxRawRowsForAggregation)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch raw probe data: %w", err)
 	}

@@ -610,30 +610,33 @@ async function reloadData() {
             let recipTraffic: ProbeData[] = [];
             
             // Fetch PING with aggregation
+            // Pass agentId to filter by the reciprocal probe owner (prevents cross-agent data mixing)
             const pingAgg = recipAggregateSec > 0;
             try {
               recipPing = await ProbeDataService.byProbe(
                 workspaceID, recipProbe.id,
-                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: pingAgg ? undefined : 300, aggregate: pingAgg ? recipAggregateSec : undefined, type: 'PING' }
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: pingAgg ? undefined : 300, aggregate: pingAgg ? recipAggregateSec : undefined, type: 'PING', agentId: recipProbe.agent_id }
               ) as ProbeData[];
               console.log(`[Reciprocal ${recipProbe.id}] AGENT->PING: Fetched ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
             } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch PING:`, err); }
             
             // Fetch MTR without aggregation
+            // Pass agentId to filter by the reciprocal probe owner (prevents cross-agent data mixing)
             try {
               recipMtr = await ProbeDataService.byProbe(
                 workspaceID, recipProbe.id,
-                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: 300, type: 'MTR' }
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: 300, type: 'MTR', agentId: recipProbe.agent_id }
               ) as ProbeData[];
               console.log(`[Reciprocal ${recipProbe.id}] AGENT->MTR: Fetched ${recipMtr.length} raw rows`);
             } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch MTR:`, err); }
             
             // Fetch TRAFFICSIM with aggregation
+            // Pass agentId to filter by the reciprocal probe owner (prevents cross-agent data mixing)
             const trafficAgg = recipAggregateSec > 0;
             try {
               recipTraffic = await ProbeDataService.byProbe(
                 workspaceID, recipProbe.id,
-                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: trafficAgg ? undefined : 300, aggregate: trafficAgg ? recipAggregateSec : undefined, type: 'TRAFFICSIM' }
+                { from: toRFC3339(fromTime), to: toRFC3339(toTime), limit: trafficAgg ? undefined : 300, aggregate: trafficAgg ? recipAggregateSec : undefined, type: 'TRAFFICSIM', agentId: recipProbe.agent_id }
               ) as ProbeData[];
               console.log(`[Reciprocal ${recipProbe.id}] AGENT->TRAFFICSIM: Fetched ${recipTraffic.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
             } catch (err) { console.warn(`[Reciprocal ${recipProbe.id}] Failed to fetch TRAFFICSIM:`, err); }
@@ -789,6 +792,7 @@ async function loadProbeData(): Promise<void> {
       // Data is stored with the actual sub-type, not 'AGENT', so we need to fetch each separately
       if (probeType === 'AGENT') {
         // Fetch PING data with aggregation for large time ranges
+        // Pass agentId to filter by the probe owner agent (prevents cross-agent data mixing)
         const pingAgg = aggregateSec > 0;
         try {
           const pingRows = await ProbeDataService.byProbe(
@@ -800,7 +804,8 @@ async function loadProbeData(): Promise<void> {
               limit: pingAgg ? undefined : 300,
               asc: false,
               aggregate: pingAgg ? aggregateSec : undefined,
-              type: 'PING'
+              type: 'PING',
+              agentId: p.agent_id
             }
           );
           console.log(`[Probe ${p.id}] AGENT->PING: Fetched ${pingRows.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
@@ -813,6 +818,7 @@ async function loadProbeData(): Promise<void> {
         }
         
         // Fetch MTR data - raw traces, frontend does intelligent grouping
+        // Pass agentId to filter by the probe owner agent (prevents cross-agent data mixing)
         try {
           const mtrRows = await ProbeDataService.byProbe(
             workspaceID,
@@ -822,7 +828,8 @@ async function loadProbeData(): Promise<void> {
               to,
               limit: 500,  // Get enough traces for good grouping
               asc: false,
-              type: 'MTR'
+              type: 'MTR',
+              agentId: p.agent_id
             }
           );
           console.log(`[Probe ${p.id}] AGENT->MTR: Fetched ${mtrRows.length} raw rows`);
@@ -835,6 +842,7 @@ async function loadProbeData(): Promise<void> {
         }
         
         // Fetch TRAFFICSIM data with aggregation for large time ranges
+        // Pass agentId to filter by the probe owner agent (prevents cross-agent data mixing)
         const trafficAgg = aggregateSec > 0;
         try {
           const trafficRows = await ProbeDataService.byProbe(
@@ -846,7 +854,8 @@ async function loadProbeData(): Promise<void> {
               limit: trafficAgg ? undefined : 300,
               asc: false,
               aggregate: trafficAgg ? aggregateSec : undefined,
-              type: 'TRAFFICSIM'
+              type: 'TRAFFICSIM',
+              agentId: p.agent_id
             }
           );
           console.log(`[Probe ${p.id}] AGENT->TRAFFICSIM: Fetched ${trafficRows.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);

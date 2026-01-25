@@ -440,10 +440,10 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 
 		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
 			// Use aggregated query for performance
-			rows, queryErr = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, uint64(probeID), probeType, fromTime, toTime, aggregateSec, limit)
+			rows, queryErr = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, uint64(probeID), nil, probeType, fromTime, toTime, aggregateSec, limit)
 		} else {
 			// Standard non-aggregated query
-			rows, queryErr = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), fromTime, toTime, asc, limit)
+			rows, queryErr = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), nil, fromTime, toTime, asc, limit)
 			// Post-filter by type if specified
 			if queryErr == nil && probeType != "" {
 				filtered := make([]probe.ProbeData, 0, len(rows))

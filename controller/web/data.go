@@ -150,11 +150,20 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	// ------------------------------------------
 	// GET /workspaces/{id}/probe-data/probes/{probeID}/data
 	// Timeseries for one probe (ClickHouse)
-	// Query: from, to, limit, asc=true|false, aggregate=<seconds>, type=PING|TRAFFICSIM
+	// Query: from, to, limit, asc=true|false, aggregate=<seconds>, type=PING|TRAFFICSIM, agentId=<uint>
 	// When aggregate > 0, returns time-bucket averaged data to reduce transfer
+	// When agentId is specified, filters by the reporting agent (for AGENT probes with bidirectional data)
 	// ------------------------------------------
 	base.Get("/probes/{probeID:uint}/data", func(ctx iris.Context) {
 		probeID := uint64(uintParam(ctx, "probeID"))
+
+		// Optional agentId filter - used for AGENT probes to filter by specific reporter
+		var agentID *uint64
+		if v := ctx.URLParam("agentId"); v != "" {
+			if x, ok := parseUint64(v); ok {
+				agentID = &x
+			}
+		}
 
 		from, _ := readTime(ctx.URLParam("from"))
 		to, _ := readTime(ctx.URLParam("to"))
@@ -168,15 +177,15 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
 			// Use aggregated query for performance
-			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, probeType, from, to, aggregateSec, limit)
+			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, agentID, probeType, from, to, aggregateSec, limit)
 			// Log aggregation for debugging
 			if err == nil {
-				ctx.Application().Logger().Debugf("[ProbeData] Aggregated query: probeID=%d type=%s aggregate=%ds from=%v to=%v -> %d rows",
-					probeID, probeType, aggregateSec, from, to, len(rows))
+				ctx.Application().Logger().Debugf("[ProbeData] Aggregated query: probeID=%d agentID=%v type=%s aggregate=%ds from=%v to=%v -> %d rows",
+					probeID, agentID, probeType, aggregateSec, from, to, len(rows))
 			}
 		} else {
 			// Standard non-aggregated query
-			rows, err = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, from, to, asc, limit)
+			rows, err = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, agentID, from, to, asc, limit)
 			// Log raw query for debugging
 			if err == nil && aggregateSec > 0 {
 				ctx.Application().Logger().Debugf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
@@ -298,7 +307,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 				}
 				out = append(out, bundle{ProbeID: pid, Latest: row})
 			} else {
-				rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(pid), from, to, false, limit)
+				rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(pid), nil, from, to, false, limit)
 				if err != nil {
 					ctx.StatusCode(http.StatusInternalServerError)
 					_ = ctx.JSON(iris.Map{"error": err.Error()})
