@@ -356,11 +356,14 @@ async function loadProbeData() {
         // For AGENT probes, find reciprocal probe from the loaded probes list
         if (state.isAgentProbe && firstTarget?.agent_id) {
             const targetAgentId = firstTarget.agent_id;
+            const sourceAgentId = probe.value.agent_id || agent.value?.id;
             // Find AGENT probe that targets the agent this link is for (reverse direction)
+            // Must be: owned by target agent AND targeting our source agent
             const reciprocal = probes.value.find(p => 
                 p.type === 'AGENT' && 
                 p.id !== probe.value.id &&
-                p.agent_id === targetAgentId  // Probe owned by target agent
+                p.agent_id === targetAgentId &&  // Probe owned by target agent
+                p.targets?.some((t: any) => t.agent_id === sourceAgentId)  // AND targets our source agent
             );
             if (reciprocal) {
                 state.reciprocalProbe = reciprocal;
