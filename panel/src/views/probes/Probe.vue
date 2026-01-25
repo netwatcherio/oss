@@ -998,6 +998,15 @@ const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);
 
 // Handler for incoming live probe data
 const handleLiveProbeData = (data: ProbeDataEvent) => {
+  // Filter: Only accept data for the current probe or its reciprocal
+  const mainProbeId = state.probe?.id;
+  const recipProbeId = state.reciprocalProbe?.id;
+  
+  if (data.probe_id !== mainProbeId && data.probe_id !== recipProbeId) {
+    // Data is for a different probe, ignore it
+    return;
+  }
+  
   console.log('[Probe] Live data received:', data.type, data.probe_id);
   
   // Convert WebSocket event to ProbeData format
