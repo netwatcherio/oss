@@ -15,6 +15,8 @@ import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService } from '@/services/themeService';
 import type { PingResult, MtrResult, TrafficSimResult, ProbeData, Probe } from '@/types';
 import { findProbesByInitialTarget } from '@/utils/probeGrouping';
+import { SharedWebSocketService } from '@/services/sharedWebSocketService';
+import type { ProbeDataPayload } from '@/composables/useSharedWebSocket';
 
 const route = useRoute();
 const router = useRouter();
@@ -621,6 +623,9 @@ async function loadProbeData() {
         }
         
         state.ready = true;
+        
+        // Connect to WebSocket for real-time updates (after initial data load)
+        connectWebSocket();
     } catch (err: any) {
         if (err.message === 'PASSWORD_REQUIRED') {
             requiresPassword.value = true;
@@ -629,6 +634,55 @@ async function loadProbeData() {
         }
     } finally {
         loading.value = false;
+    }
+}
+
+// WebSocket connection for real-time probe data updates
+async function connectWebSocket() {
+    try {
+        console.log('[SharedProbe] Connecting WebSocket for real-time updates...');
+        await SharedWebSocketService.connect(token.value, authenticatedPassword.value);
+        
+        // Subscribe to this probe's data (probeId 0 = all probes for this agent)
+        SharedWebSocketService.subscribe(probeId.value, handleWebSocketData);
+        
+        console.log('[SharedProbe] WebSocket connected, subscribed to probe', probeId.value);
+    } catch (err) {
+        console.warn('[SharedProbe] WebSocket connection failed, will rely on cached data:', err);
+    }
+}
+
+// Handle real-time probe data from WebSocket
+function handleWebSocketData(data: ProbeDataPayload) {
+    if (!state.ready) return;  // Ignore if not ready yet
+    
+    // Convert WebSocket payload to ProbeData format
+    const probeData: ProbeData = {
+        id: 0,
+        probe_id: data.probe_id,
+        probe_agent_id: data.probe_agent_id || data.agent_id,
+        agent_id: data.agent_id,
+        created_at: data.created_at,
+        received_at: new Date().toISOString(),
+        type: data.type as any,
+        payload: data.payload,
+        triggered: data.triggered || false,
+        triggered_reason: '',
+    };
+    
+    console.log(`[SharedProbe] Real-time ${data.type} data received for probe ${data.probe_id}`);
+    
+    // Add to appropriate data array based on type
+    if (data.type === 'PING') {
+        state.pingData.unshift(probeData);
+        // Keep reasonable limit
+        if (state.pingData.length > 500) state.pingData.pop();
+    } else if (data.type === 'MTR') {
+        state.mtrData.unshift(probeData);
+        if (state.mtrData.length > 500) state.mtrData.pop();
+    } else if (data.type === 'TRAFFICSIM') {
+        state.trafficSimData.unshift(probeData);
+        if (state.trafficSimData.length > 500) state.trafficSimData.pop();
     }
 }
 
@@ -668,6 +722,8 @@ onUnmounted(() => {
         themeUnsubscribe();
         themeUnsubscribe = null;
     }
+    // Disconnect shared WebSocket
+    SharedWebSocketService.disconnect();
 });
 
 // Debounced watch on timeRange to reload data when date picker changes

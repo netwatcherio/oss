@@ -37,6 +37,9 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	// Raw WebSocket for panel (simpler than neffos, better browser compatibility)
 	RegisterRawPanelWS(app, db)
 
+	// Raw WebSocket for share links (share-token authenticated, no JWT required)
+	RegisterRawShareWS(app, db)
+
 	// ----- Protected (JWT) -----
 	api := app.Party("/")
 	api.Use(JWTMiddleware(db))

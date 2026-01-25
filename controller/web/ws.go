@@ -364,6 +364,20 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					Triggered:    pp.Triggered,
 				})
 
+				// Also broadcast to share-link WebSocket clients (keyed by agent ID)
+				GetRawShareHub().BroadcastToShare(pp.AgentID, ProbeDataBroadcast{
+					WorkspaceID:  wsid,
+					ProbeID:      pp.ProbeID,
+					AgentID:      pp.AgentID,
+					ProbeAgentID: pp.ProbeAgentID,
+					TargetAgent:  pp.TargetAgent,
+					Type:         string(pp.Type),
+					Payload:      pp.Payload,
+					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
+					Target:       pp.Target,
+					Triggered:    pp.Triggered,
+				})
+
 				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))
 				return nil
 			},
