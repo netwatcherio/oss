@@ -1,382 +1,194 @@
-# NetWatcher OSS Roadmap
+# NetWatcher OSS Roadmap 2026
 
 > Last Updated: January 2026
 
-This document outlines the planned features, improvements, and priorities for NetWatcher OSS development.
-
 ---
 
-## Current State (v1.0)
+## Current State Summary
 
-### ✅ Implemented Features
-- **Distributed Agents** - Cross-platform (Windows, Linux, macOS)
-- **Probe Types** - PING, MTR, TrafficSim (synthetic UDP)
-- **Bidirectional Monitoring** - Forward + return path analysis
-- **Workspace Network Map** - D3 topology with multiple layouts
-- **Connectivity Matrix** - High-density mesh health view
-- **Alerting System** - Threshold-based with webhook notifications
-- **Multi-Tenant** - Workspace isolation with member management
-- **ClickHouse Backend** - Scalable time-series telemetry storage
-- **Real-time Updates** - WebSocket-based live dashboards
+### ✅ Implemented Features (v1.0)
+
+| Category | Features |
+|----------|----------|
+| **Agents** | Cross-platform (Windows, Linux, macOS), auto-update with SHA256 verification, watchdog timer |
+| **Probe Types** | PING, MTR, TrafficSim, Speedtest, Sysinfo, Netinfo |
+| **Quality Metrics** | MOS Score (ITU-T G.107 E-Model) for VoIP quality |
+| **Monitoring** | Bidirectional probe detection, 3-tier agent status (Online/Stale/Offline) |
+| **Visualization** | D3 Workspace Network Map, Connectivity Matrix, real-time WebSocket dashboards |
+| **Alerting** | Compound AND/OR conditions, MTR-specific (hop loss/latency/route changes), SysInfo (CPU/Memory), Agent Offline detection |
+| **Controller APIs** | Centralized GeoIP, WHOIS, OUI lookup, `/whoami` for air-gapped networks |
+| **Multi-Tenancy** | Workspace isolation, configurable resource limits, RBAC (Owner/Admin/User/Viewer) |
+| **Sharing** | Sharable Agent Pages (P3.6) with token-based access, password protection, speedtest gating |
+| **Storage** | ClickHouse time-series backend with lazy cache refresh |
+| **Agent Lifecycle** | Deactivation on deletion, kick-and-prevent reconnection |
 
 ---
 
 ## Phase 1: Core Polish (Q1 2026)
 
-Focus: Production-readiness and UX improvements
+### P1.1 Network Interface Binding 🔄
+**Status: Partially Complete** | **Remaining: Medium Effort**
 
-### P1.1 Network Interface Selection
-**Priority: High** | **Effort: Medium** | **Status: Complete** ✅
+| Completed | Pending |
+|-----------|---------|
+| Interface discovery (IPs, MAC, type) | Probe-level interface binding |
+| Cross-platform route discovery | Multi-WAN support |
+| OUI/vendor lookup | Interface validation before probe execution |
+| UI visualization | |
 
-Enhanced network interface detection and probe-level binding:
+**Priority:** High — Critical for SD-WAN and multi-NIC environments
 
-- [x] **Agent Interface Discovery** - Enumerate all available network interfaces with metadata:
-  - Name, IP addresses (v4/v6), MAC address, gateway, type (ethernet, wifi, loopback)
-  - Routing table entries per interface
-- [x] **Cross-Platform Route Discovery** - Windows (PowerShell/netsh), Linux (/proc/net/route, ip route), macOS (netstat)
-- [x] **Backward Compatibility** - `NormalizeFromLegacy()` converts old agent data to new format
-- [x] **OUI Lookup** - Backend API for MAC vendor identification using IEEE database
-- [x] **UI Display** - Panel shows interfaces, routes, and vendor names on agent detail page
-- [ ] **Probe Interface Binding** - New `interface` field on probes allowing explicit interface selection
-- [ ] **Multi-WAN Support** - Enable monitoring over specific ISP links
-- [ ] **Validation** - Verify interface exists on agent before probe execution
+---
 
-**Use Cases:**
-- Servers with multiple NICs (management vs production)
-- SD-WAN deployments with multiple ISP uplinks
-- VPN vs direct internet path comparison
-- Dual-stack (IPv4/IPv6) interface selection
+### P1.3 Dynamic Thresholds ⏳
+**Status: Not Started** | **Effort: Medium**
 
-### P1.2 MOS Score Calculation ✅
-**Priority: High** | **Effort: Low** | **Status: Complete**
-
-VoIP quality metric from existing telemetry:
-
-- [x] Calculate MOS from latency/jitter/loss using ITU-T G.107 E-Model
-- [x] Add MOS field to PING and TrafficSim payloads
-- [x] Display MOS in probe dashboards with quality color coding
-- [x] Aggregated MOS graph combining ICMP and TrafficSim data sources
-- [ ] Add MOS threshold support in alerting
-
-### P1.3 Dynamic Thresholds
-**Priority: High** | **Effort: Medium**
-
-Baseline-relative alerting:
-
-- [ ] Calculate rolling baseline per probe (7-day average)
-- [ ] Alert on deviation from baseline (e.g., 2x standard deviation)
+- [ ] Rolling 7-day baseline calculation per probe
+- [ ] Deviation-based alerting (2x standard deviation)
 - [ ] Hybrid mode: static OR dynamic threshold per rule
-- [ ] UI for baseline visualization
+- [ ] Baseline visualization in UI
 
-### P1.4 Email Notifications
-**Priority: Medium** | **Effort: Low**
+**Priority:** High — Reduces alert fatigue, enables anomaly detection
 
-Complete the partial implementation:
+---
 
+### P1.4 Email & Registration Configuration ⏳
+**Status: Partial (backend scaffolding exists)** | **Effort: Low**
+
+**System-Wide SMTP (via .env):**
 - [ ] Connect `sendEmailNotification` to email queue
-- [ ] SMTP configuration in workspace settings
-- [ ] Email templates for alerts (HTML + plaintext)
+- [ ] SMTP host, port, user, password env vars (mostly in place)
+- [ ] HTML + plaintext email templates
 - [ ] Digest mode option (batch alerts)
 
-### P1.5 Smart Notifications
-**Priority: Medium** | **Effort: Low**
+**Registration & Verification Controls:**
+- [ ] `REQUIRE_EMAIL_VERIFICATION` env var (default: `false`)
+- [ ] `ENABLE_REGISTRATION` env var (default: `true`)
+- [ ] RBAC enforcement: verified email required for workspace creation when enabled
+- [ ] Block unverified users from sensitive actions (invites, API key generation)
 
-Reduce alert fatigue:
+**Priority:** Medium — Essential for production deployments
 
-- [ ] Debounce: Suppress duplicate alerts within time window
-- [ ] Grouping: Combine related alerts (same target, same timeframe)
-- [ ] Escalation: Warning → Critical after N minutes
-- [x] Recovery notifications (auto-resolve when condition clears)
+---
 
-### P1.7 Enhanced Alert System ✅
-**Priority: High** | **Effort: Medium** | **Status: Complete**
+### P1.5 Smart Notifications ⏳
+**Status: Partial** | **Effort: Low**
 
-Advanced alerting capabilities:
+| Completed | Pending |
+|-----------|---------|
+| Recovery notifications | Debouncing (suppress duplicates in time window) |
+| | Grouping (combine related alerts) |
+| | Escalation (Warning → Critical after N minutes) |
 
-**Compound Conditions:**
-- [x] AND/OR logic for combining two conditions in a single rule
-- [x] Secondary metric, operator, and threshold fields
-- [x] UI for configuring compound alert rules
-
-**MTR-Specific Alerting:**
-- [x] End hop packet loss alerting (`end_hop_loss`)
-- [x] End hop latency alerting (`end_hop_latency`)
-- [x] Worst hop loss alerting (`worst_hop_loss`)
-- [x] Route change detection with automatic baseline creation (`route_change`)
-
-**System Resource Alerting:**
-- [x] CPU usage percentage monitoring (`cpu_usage`)
-- [x] Memory usage percentage monitoring (`memory_usage`)
-- [x] Automatic evaluation on SYSINFO probe data
-
-**Agent Offline Detection:**
-- [x] Alert when agent stops reporting (based on `last_seen_at`)
-- [x] Configurable offline threshold (minutes)
-- [x] Periodic scheduler checks every minute
-- [x] Auto-resolve when agent comes back online
-
-**Time Context Navigation:**
-- [x] Alert links navigate to probe with 1-hour time window centered on trigger time
-- [x] Probe view reads `from`/`to` URL parameters for initial time range
-
-### P1.6 Controller API Services ✅
-**Priority: High** | **Effort: Medium** | **Status: Complete**
-
-Centralized APIs to eliminate external service dependencies:
-
-**Public IP Discovery:**
-- [x] Controller endpoint: `GET /agent/api/whoami` returns agent's public IP as seen by controller
-- [x] Agents call controller on startup instead of external APIs (ifconfig.me, speedtest, etc.)
-- [x] Removes dependency on third-party services
-- [x] Works in air-gapped/restricted networks
-
-**GeoIP & Location Services:**
-- [x] Controller-hosted MaxMind GeoLite2 database (existing)
-- [x] Endpoint: `GET /geoip/lookup?ip={ip}` returns city, region, country, coordinates
-- [x] Used by agents for self-location and by panel for hop enrichment
-- [x] ASN lookup included in GeoIP responses
-- [x] Lazy cache refresh (entries >30 days refreshed on access, stale fallback if refresh fails)
-
-**IP Intelligence API:**
-- [x] Unified endpoint: `GET /lookup/ip/{ip}` returns combined data:
-  - GeoIP (city, region, country, lat/lon)
-  - ASN (number, name, organization)
-  - Reverse DNS (PTR record)
-  - Optional: threat score integration
-- [x] Caching layer for frequently queried IPs (ClickHouse cache)
-- [x] Bulk lookup support for MTR hop enrichment (`POST /geoip/lookup`)
-
-**Benefits:**
-- No external API rate limits or costs
-- Works offline/air-gapped after initial DB download
-- Consistent data source across all components
-- Privacy: No IP data sent to external services
+**Priority:** Medium — Reduces notification fatigue
 
 ---
 
 ## Phase 2: Probe Expansion (Q2 2026)
 
-Focus: New probe types for broader monitoring coverage
-
-### P2.1 SNMP Probe Type
+### P2.1 SNMP Probe 🎯
 **Priority: Critical** | **Effort: High**
 
-#1 feature gap vs competitors (Obkio, Kentik):
+The #1 feature gap vs. competitors (Obkio, Kentik):
 
-- [ ] SNMP v2c/v3 support in agent (gosnmp library)
-- [ ] Device discovery and OID auto-detection
-- [ ] Pre-built profiles for common vendors (Cisco, Juniper, Ubiquiti, etc.)
-- [ ] Metrics: CPU, memory, interface bandwidth, errors, discards
-- [ ] Ultra-fast polling option (30s intervals)
-- [ ] Device inventory management
-- [ ] Interface status tracking (up/down/speed)
+- SNMP v2c/v3 support via gosnmp
+- Device discovery and OID auto-detection
+- Vendor profiles (Cisco, Juniper, Ubiquiti, Arista)
+- Metrics: CPU, memory, interface bandwidth/errors/discards
+- Ultra-fast polling (30-second intervals)
+- Interface up/down/speed tracking
 
-### P2.2 DNS Probe Type
+---
+
+### P2.2 DNS Probe
 **Priority: High** | **Effort: Medium**
 
-DNS monitoring:
+- Query types: A, AAAA, MX, TXT, CNAME, NS
+- Resolution time metrics
+- Record validation (expected vs. actual)
+- Multiple resolver support
+- Propagation delay detection
 
-- [ ] Query types: A, AAAA, MX, TXT, CNAME, NS
-- [ ] Metrics: Resolution time, TTL, response code
-- [ ] Record validation (expected vs actual)
-- [ ] Multiple resolver support per probe
-- [ ] Propagation delay detection
+---
 
-### P2.3 HTTP/HTTPS Probe Type
+### P2.3 HTTP/HTTPS Probe
 **Priority: High** | **Effort: Low**
 
-Endpoint health checks:
+- Methods: GET, POST, HEAD
+- Status code validation
+- Response time measurement
+- Body pattern matching
+- TLS certificate expiry monitoring
+- Custom headers, Basic/Bearer auth
 
-- [ ] GET/POST/HEAD methods
-- [ ] Status code validation
-- [ ] Response time measurement
-- [ ] Response body pattern matching
-- [ ] TLS certificate expiry monitoring
-- [ ] Custom headers support
-- [ ] Basic/Bearer auth options
+---
 
 ### P2.4 AS Path Resolution
 **Priority: Medium** | **Effort: Low**
 
-Enhanced path intelligence:
+- IP-to-ASN lookup
+- ASN display in MTR hop table
+- AS path change alerting
+- AS-level grouping in Network Map
 
-- [ ] IP-to-ASN lookup (Team Cymru / local database)
-- [ ] Display ASN in MTR hop table
-- [ ] Alert on AS path changes
-- [ ] AS-level grouping in Network Map
+---
 
 ### P2.5 RIR REST API Integration
 **Priority: Medium** | **Effort: Medium**
 
-Replace/augment command-line WHOIS with RIR REST APIs for faster, structured data:
-
-**ARIN (North America):**
-- [ ] REST API: `https://whois.arin.net/rest/ip/{ip}`
-- [ ] Extract: Network name, handle, CIDR, organization, customer ref
-- [ ] Faster than whois command with structured XML/JSON response
-
-**Other RIRs:**
-- [ ] RIPE (Europe/Middle East): `https://rest.db.ripe.net/search`
-- [ ] APNIC (Asia-Pacific): `https://wq.apnic.net/query`
-- [ ] LACNIC (Latin America): RDAP API
-- [ ] AFRINIC (Africa): RDAP API
-
-**Features:**
-- [ ] Auto-detect RIR based on IP range
-- [ ] Fallback chain: RIR REST API → command-line whois
-- [ ] Cache responses in ClickHouse
-- [ ] Display logical network name in hop tables and agent info
+Replace command-line WHOIS with structured RIR APIs:
+- ARIN, RIPE, APNIC, LACNIC, AFRINIC
+- Auto-detect RIR by IP range
+- Cache responses in ClickHouse
 
 ---
 
 ## Phase 3: Enterprise Features (Q3-Q4 2026)
 
-Focus: Mid-market and enterprise adoption
-
-### P3.1 Custom Dashboards
-**Priority: Medium** | **Effort: Medium**
-
-User-configurable layouts:
-
-- [ ] Widget library (charts, maps, matrices, stat cards)
-- [ ] Drag-and-drop layout editor
-- [ ] Per-workspace dashboard configurations
-- [ ] Time range synchronization across widgets
-- [ ] Dashboard templates
-
-### P3.2 Scheduled Reports
-**Priority: Medium** | **Effort: Medium**
-
-Automated reporting:
-
-- [ ] Report builder with data source selection
-- [ ] Schedule options: daily, weekly, monthly
-- [ ] Output formats: PDF, CSV, JSON
-- [ ] Email delivery with attachment
-- [ ] Public shareable report URLs
-
-### P3.3 RBAC Enhancements
-**Priority: Medium** | **Effort: Medium**
-
-Granular permissions:
-
-- [ ] Workspace roles: Owner, Admin, Operator, Viewer
-- [ ] Per-role permissions matrix
-- [ ] Read-only dashboard access
-- [ ] Audit logging for admin actions
-
-### P3.4 SSO Integration
-**Priority: Medium** | **Effort: Medium**
-
-Enterprise authentication:
-
-- [ ] SAML 2.0 support
-- [ ] OIDC/OAuth2 support
-- [ ] Auto-provisioning from IdP
-- [ ] Group-to-role mapping
-
-### P3.5 API Key Management
-**Priority: Low** | **Effort: Low**
-
-Programmatic access:
-
-- [ ] Per-user API tokens
-- [ ] Token scopes (read-only, full access)
-- [ ] Token expiry and rotation
-- [ ] Usage logging
-
-### P3.6 Sharable Agent Pages ✅
-**Priority: Medium** | **Effort: Medium** | **Status: Complete**
-
-Time-limited public access to agent views:
-
-- [x] Generate shareable link for any agent page
-- [x] Configurable expiration (1 hour, 24 hours, 7 days, 30 days)
-- [x] Optional password protection (bcrypt hashed)
-- [x] Read-only access (no configuration changes)
-- [x] Link revocation capability
-- [x] Access logging (view count, last accessed timestamp)
-- [x] Clickable probe cards with shared probe detail view
-- [x] Agent name display for AGENT-type probes (sanitized)
-- [x] Reverse probe support (probes from other agents targeting shared agent)
-- [x] Session-based password caching (sessionStorage)
-- [x] Speedtest capability gating (only for short-term shares ≤1 hour)
-- [ ] Customizable data scope (all metrics vs specific probes)
-
-**Use Cases:**
-- NOC handoffs during incidents
-- Share agent status with vendors/ISPs for troubleshooting
-- Temporary client access without workspace invitation
-- Public status pages for specific endpoints
-
-### P3.7 Observability Integrations
-**Priority: Medium** | **Effort: Medium**
-
-Prometheus/Loki compatible APIs for integration with existing observability stacks:
-
-**Prometheus Metrics Endpoint:**
-- [ ] `/metrics` endpoint exposing probe data in Prometheus exposition format
-- [ ] Per-agent metrics: latency, jitter, packet_loss, mos_score, hop_count
-- [ ] Per-probe labels: probe_id, probe_type, source_agent, target
-- [ ] System metrics: cpu_usage, memory_usage, disk_usage (from SYSINFO)
-- [ ] Controller metrics: connected_agents, active_probes, alerts_firing
-- [ ] Optional authentication (Bearer token or basic auth)
-- [ ] Configurable metric prefix (e.g., `netwatcher_`)
-
-**Loki-Compatible Log Push:**
-- [ ] Push alert events and probe failures to Loki endpoint
-- [ ] Structured labels: workspace, agent, probe_type, severity
-- [ ] Configurable Loki endpoint URL per workspace
-- [ ] Batch push with configurable interval
-
-**Remote Write Support:**
-- [ ] Prometheus remote_write compatible endpoint for ingestion
-- [ ] Allow external Prometheus instances to push metrics to NetWatcher
-
-**Grafana Integration:**
-- [ ] Pre-built Grafana dashboard JSON exports
-- [ ] Data source configuration documentation
-- [ ] Example alerting rules for Grafana Alerting
-
-**Use Cases:**
-- Unified observability: Combine NetWatcher metrics with application/infrastructure metrics
-- Long-term retention: Use existing Prometheus/Mimir/Thanos for extended storage
-- Custom dashboards: Build Grafana dashboards mixing multiple data sources
-- Alert correlation: Correlate network issues with application performance in single pane
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| **P3.1 Custom Dashboards** | Medium | Drag-and-drop widget library, per-workspace layouts |
+| **P3.2 Scheduled Reports** | Medium | PDF/CSV exports, email delivery, public URLs |
+| **P3.3 RBAC Enhancements** | Medium | Operator role, per-role permissions, audit logging |
+| **P3.4 SSO Integration** | Medium | SAML 2.0, OIDC/OAuth2, auto-provisioning |
+| **P3.5 API Key Management** | Low | Scoped tokens, expiry/rotation, usage logging |
+| **P3.6 Sharable Pages** | ✅ Complete | Token-based public links, password protection |
+| **P3.7 Observability Integrations** | Medium | Prometheus `/metrics` endpoint, Loki log push, Grafana dashboards |
 
 ---
 
 ## Phase 4: Scale & Polish (2027+)
 
-### P4.1 Horizontal Scaling
-- [ ] ClickHouse cluster deployment guide
-- [ ] Controller load balancing patterns
-- [ ] Agent connection pooling
+| Feature | Description |
+|---------|-------------|
+| **Horizontal Scaling** | ClickHouse cluster, controller load balancing |
+| **Cloud Templates** | Terraform (AWS/Azure/GCP), Helm charts, K8s DaemonSet |
+| **Advanced Speed Tests** | Improved bandwidth testing |
+| **Geographic Visualization** | GeoIP-based agent/hop locations with latency gradients |
 
-### P4.2 Cloud Deployment Templates
-- [ ] Terraform modules (AWS, Azure, GCP)
-- [ ] Kubernetes DaemonSet for agents
-- [ ] Helm chart for controller stack
+---
 
-### P4.3 Speed Tests
-- [ ] Upload/download bandwidth testing
-- [ ] Scheduled and on-demand modes
-- [ ] Integration with TrafficSim
+## Proposed Priority Order for Q1-Q2 2026
 
-### P4.4 Geographic Visualization
-- [ ] GeoIP-based agent/hop locations
-- [ ] Map overlay with latency gradients
-- [ ] Optional enhancement (topology view preferred)
+Based on user value and competitive positioning:
+
+| Priority | Feature | Rationale |
+|----------|---------|-----------|
+| 1 | P2.1 SNMP Probe | Critical competitor gap |
+| 2 | P1.4 Email Notifications | Essential for production use |
+| 3 | P2.3 HTTP/HTTPS Probe | Low effort, high value |
+| 4 | P1.3 Dynamic Thresholds | Differentiating intelligence |
+| 5 | P2.2 DNS Probe | Completes probe coverage |
+| 6 | P1.1 Interface Binding | Finishes existing feature |
+| 7 | P3.7 Prometheus/Loki API | Enterprise integration demand |
 
 ---
 
 ## Not Planned
 
-Features explicitly out of scope:
-
 | Feature | Reason |
 |---------|--------|
-| AI/NLP Queries | High cost, low differentiation vs good UX |
+| AI/NLP Queries | High cost, low differentiation |
 | Full NetFlow Ingestion | Separate product vertical |
 | DDoS Mitigation | Requires carrier-grade infrastructure |
 | CDN/OTT Tracking | Needs DPI or flow analysis |
@@ -386,13 +198,13 @@ Features explicitly out of scope:
 
 ## Success Metrics
 
-### 6-Month (Phase 2 Complete)
+### 6-Month Goals (Mid-2026)
 - [ ] SNMP polling shipped
 - [ ] DNS + HTTP probes shipped
-- [ ] MOS score implemented
+- [ ] Email notifications complete
 - [ ] 500+ GitHub stars
 
-### 12-Month (Phase 3 Complete)
+### 12-Month Goals (End of 2026)
 - [ ] Custom dashboards shipped
 - [ ] SSO integration shipped
 - [ ] 2,000+ GitHub stars
@@ -404,9 +216,9 @@ Features explicitly out of scope:
 
 We welcome community contributions! Priority areas:
 
-1. **SNMP device profiles** - Vendor-specific OID mappings
-2. **Probe types** - New monitoring capabilities
-3. **Integrations** - Notification channels, export formats
-4. **Documentation** - Deployment guides, tutorials
+1. **SNMP device profiles** — Vendor-specific OID mappings
+2. **Probe types** — New monitoring capabilities
+3. **Integrations** — Notification channels, export formats
+4. **Documentation** — Deployment guides, tutorials
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.

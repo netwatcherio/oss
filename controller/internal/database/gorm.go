@@ -166,7 +166,8 @@ func CreateIndexes(db *gorm.DB) error {
 	// 2) Remaining models (ordered loosely by dependency)
 	if err := db.WithContext(context.TODO()).AutoMigrate(
 		&users.User{},
-		&users.Session{}, // TableName(): "sessions"
+		&users.Session{},   // TableName(): "sessions"
+		&users.UserToken{}, // TableName(): "user_tokens" - email verification, password reset
 
 		&agent.Agent{},
 		&agent.Auth{}, // TableName(): "agent_pins"

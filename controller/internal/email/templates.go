@@ -194,3 +194,38 @@ If you didn't request this, you can safely ignore this email.
 </body>
 </html>`,
 }
+
+// DefaultEmailVerificationTemplate returns the email verification template
+var DefaultEmailVerificationTemplate = Template{
+	Subject: "Verify your NetWatcher email",
+	Body: `Hello{{greeting}},
+
+Please verify your email address to complete your NetWatcher registration.
+
+Click the link below to verify:
+{{action_url}}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, you can safely ignore this email.
+
+- The NetWatcher Team`,
+	BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333;">
+<div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+<h2 style="color: #2563eb;">Verify Your Email</h2>
+<p>Hello{{greeting}},</p>
+<p>Please verify your email address to complete your NetWatcher registration.</p>
+<p style="margin: 30px 0;">
+<a href="{{action_url}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Verify Email</a>
+</p>
+<p style="color: #666; font-size: 14px;">This link will expire in 24 hours.</p>
+<p style="color: #666; font-size: 14px;">If you didn't create an account, you can safely ignore this email.</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+<p style="color: #999; font-size: 12px;">- The NetWatcher Team</p>
+</div>
+</body>
+</html>`,
+}

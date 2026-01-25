@@ -46,6 +46,12 @@ func currentUserID(ctx iris.Context) uint {
 	return 0
 }
 
+// currentUser extracts the authenticated user object from the Iris context.
+// Returns nil if not authenticated.
+func currentUser(ctx iris.Context) interface{} {
+	return ctx.Values().Get("user")
+}
+
 // getUserID is an alias for currentUserID for backward compatibility.
 func getUserID(ctx iris.Context) uint {
 	return currentUserID(ctx)

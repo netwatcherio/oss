@@ -11,6 +11,7 @@ import (
 	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/limits"
+	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
 	"github.com/kataras/iris/v12"
@@ -75,6 +76,19 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 	// POST /workspaces
 	wsParty.Post("/", func(ctx iris.Context) {
 		uid := currentUserID(ctx)
+
+		// Check email verification requirement
+		if isEmailVerificationRequired() {
+			userVal := ctx.Values().Get("user")
+			if userVal != nil {
+				if user, ok := userVal.(*users.User); ok && !user.Verified {
+					ctx.StatusCode(http.StatusForbidden)
+					_ = ctx.JSON(iris.Map{"error": "email_verification_required", "message": "Please verify your email before creating a workspace"})
+					return
+				}
+			}
+		}
+
 		var body struct {
 			Name        string         `json:"name"`
 			DisplayName string         `json:"displayName"`

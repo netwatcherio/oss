@@ -2,6 +2,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -19,7 +20,8 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 	// GET /auth/config - public endpoint for panel to check registration settings
 	auth.Get("/config", func(ctx iris.Context) {
 		_ = ctx.JSON(iris.Map{
-			"registration_enabled": isRegistrationEnabled(),
+			"registration_enabled":        isRegistrationEnabled(),
+			"email_verification_required": isEmailVerificationRequired(),
 		})
 	})
 
@@ -64,6 +66,14 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			_ = emailStore.EnqueueRegistrationConfirmation(ctx.Request().Context(), u.Email, u.Name)
 		}
 
+		// Send verification email if required and email store is available
+		if emailStore != nil && isEmailVerificationRequired() {
+			verifyToken, err := users.CreateToken(ctx.Request().Context(), db, u.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
+			if err == nil {
+				_ = emailStore.EnqueueEmailVerification(ctx.Request().Context(), u.Email, u.Name, verifyToken.Token, u.ID)
+			}
+		}
+
 		_ = ctx.JSON(iris.Map{"token": token, "data": u})
 	})
 
@@ -84,10 +94,11 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 		}
 
 		_ = ctx.JSON(iris.Map{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
-			"role":  user.Role,
+			"id":       user.ID,
+			"email":    user.Email,
+			"name":     user.Name,
+			"role":     user.Role,
+			"verified": user.Verified,
 		})
 	})
 
@@ -160,6 +171,164 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 		}
 		_ = ctx.JSON(iris.Map{"token": token, "data": u})
 	})
+
+	// POST /auth/verify-email - verify email with token
+	auth.Post("/verify-email", func(ctx iris.Context) {
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
+			return
+		}
+
+		userID, err := users.ConsumeToken(ctx.Request().Context(), db, body.Token, users.TokenTypeEmailVerification)
+		if err != nil {
+			status := http.StatusBadRequest
+			msg := "invalid or expired token"
+			if errors.Is(err, users.ErrTokenExpired) {
+				msg = "token has expired"
+			} else if errors.Is(err, users.ErrTokenNotFound) {
+				msg = "token not found"
+			}
+			ctx.StatusCode(status)
+			_ = ctx.JSON(iris.Map{"error": msg})
+			return
+		}
+
+		// Mark user as verified
+		if err := users.MarkVerified(ctx.Request().Context(), db, userID); err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to verify user"})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{"success": true, "message": "email verified successfully"})
+	})
+
+	// POST /auth/resend-verification - resend verification email
+	auth.Post("/resend-verification", JWTMiddleware(db), func(ctx iris.Context) {
+		userVal := ctx.Values().Get("user")
+		if userVal == nil {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
+			return
+		}
+
+		user, ok := userVal.(*users.User)
+		if !ok {
+			ctx.StatusCode(http.StatusUnauthorized)
+			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
+			return
+		}
+
+		if user.Verified {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "email already verified"})
+			return
+		}
+
+		if emailStore == nil {
+			ctx.StatusCode(http.StatusServiceUnavailable)
+			_ = ctx.JSON(iris.Map{"error": "email service unavailable"})
+			return
+		}
+
+		// Create new verification token
+		verifyToken, err := users.CreateToken(ctx.Request().Context(), db, user.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to create verification token"})
+			return
+		}
+
+		// Queue verification email
+		if err := emailStore.EnqueueEmailVerification(ctx.Request().Context(), user.Email, user.Name, verifyToken.Token, user.ID); err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to queue verification email"})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{"success": true, "message": "verification email sent"})
+	})
+
+	// POST /auth/forgot-password - request password reset
+	auth.Post("/forgot-password", func(ctx iris.Context) {
+		var body struct {
+			Email string `json:"email"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
+			return
+		}
+
+		email := strings.ToLower(strings.TrimSpace(body.Email))
+		if email == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "email is required"})
+			return
+		}
+
+		// Always return success to prevent email enumeration
+		// But only actually send email if user exists
+		user, err := users.GetByEmail(ctx.Request().Context(), db, email)
+		if err == nil && user != nil && emailStore != nil {
+			// Create password reset token
+			resetToken, err := users.CreateToken(ctx.Request().Context(), db, user.ID, users.TokenTypePasswordReset, users.GetPasswordResetExpiryHours())
+			if err == nil {
+				_ = emailStore.EnqueuePasswordReset(ctx.Request().Context(), user.Email, user.Name, resetToken.Token, user.ID)
+			}
+		}
+
+		// Always return success to prevent email enumeration
+		_ = ctx.JSON(iris.Map{"success": true, "message": "if that email exists, a reset link has been sent"})
+	})
+
+	// POST /auth/reset-password - complete password reset with token
+	auth.Post("/reset-password", func(ctx iris.Context) {
+		var body struct {
+			Token       string `json:"token"`
+			NewPassword string `json:"new_password"`
+		}
+		if err := ctx.ReadJSON(&body); err != nil {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
+			return
+		}
+
+		if strings.TrimSpace(body.NewPassword) == "" {
+			ctx.StatusCode(http.StatusBadRequest)
+			_ = ctx.JSON(iris.Map{"error": "new_password is required"})
+			return
+		}
+
+		userID, err := users.ConsumeToken(ctx.Request().Context(), db, body.Token, users.TokenTypePasswordReset)
+		if err != nil {
+			status := http.StatusBadRequest
+			msg := "invalid or expired token"
+			if errors.Is(err, users.ErrTokenExpired) {
+				msg = "token has expired"
+			} else if errors.Is(err, users.ErrTokenNotFound) {
+				msg = "token not found"
+			}
+			ctx.StatusCode(status)
+			_ = ctx.JSON(iris.Map{"error": msg})
+			return
+		}
+
+		// Update user's password (without requiring old password)
+		if err := users.ChangePassword(ctx.Request().Context(), db, userID, users.ChangePasswordInput{
+			NewPassword: body.NewPassword,
+		}); err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": "failed to update password"})
+			return
+		}
+
+		_ = ctx.JSON(iris.Map{"success": true, "message": "password reset successfully"})
+	})
 }
 
 // shouldSendRegistrationConfirmation checks if registration confirmation emails should be sent
@@ -176,4 +345,10 @@ func isRegistrationEnabled() bool {
 		return true
 	}
 	return false
+}
+
+// isEmailVerificationRequired checks if email verification is required (default: false)
+func isEmailVerificationRequired() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("REQUIRE_EMAIL_VERIFICATION")))
+	return v == "true" || v == "1" || v == "yes"
 }

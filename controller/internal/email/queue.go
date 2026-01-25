@@ -25,6 +25,7 @@ const (
 	TypeInvite                   EmailType = "invite"
 	TypeRegistrationConfirmation EmailType = "registration_confirmation"
 	TypePasswordReset            EmailType = "password_reset"
+	TypeEmailVerification        EmailType = "email_verification"
 )
 
 // EmailQueue represents an email in the queue
@@ -140,6 +141,29 @@ func (s *QueueStore) EnqueuePasswordReset(ctx context.Context, toEmail, toName, 
 
 	return s.Enqueue(ctx, &EmailQueue{
 		Type:        TypePasswordReset,
+		ToEmail:     toEmail,
+		ToName:      toName,
+		Subject:     subject,
+		Body:        body,
+		BodyHTML:    bodyHTML,
+		RelatedID:   &userID,
+		RelatedType: "user",
+	})
+}
+
+// EnqueueEmailVerification queues an email verification email
+func (s *QueueStore) EnqueueEmailVerification(ctx context.Context, toEmail, toName, verificationToken string, userID uint) error {
+	vars := TemplateVars{
+		ToEmail:       toEmail,
+		ToName:        toName,
+		PanelEndpoint: GetPanelEndpoint(),
+		ActionURL:     GetPanelEndpoint() + "/auth/verify-email/" + verificationToken,
+	}
+
+	subject, body, bodyHTML := DefaultEmailVerificationTemplate.Render(vars)
+
+	return s.Enqueue(ctx, &EmailQueue{
+		Type:        TypeEmailVerification,
 		ToEmail:     toEmail,
 		ToName:      toName,
 		Subject:     subject,
