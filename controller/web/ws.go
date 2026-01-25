@@ -145,8 +145,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, _ := ctx.Values().GetUint("agent_id")
 
-				// Unregister from AgentHub
-				GetAgentHub().UnregisterAgent(aid)
+				// Unregister from AgentHub - pass connection to prevent race condition
+				// where old disconnect removes newly registered connection
+				GetAgentHub().UnregisterAgent(aid, nsConn)
 
 				log.Infof("[%s] disconnected from namespace [%s] (agent=%d)", nsConn, msg.Namespace, aid)
 				return nil

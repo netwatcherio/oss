@@ -63,13 +63,22 @@ func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
 }
 
 // UnregisterAgent removes an agent connection
-func (h *AgentHub) UnregisterAgent(agentID uint) {
+// Only removes if the agent is currently registered (prevents race conditions
+// where an old connection's disconnect event fires after a new connection was registered)
+func (h *AgentHub) UnregisterAgent(agentID uint, conn *websocket.NSConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if _, exists := h.connections[agentID]; exists {
-		delete(h.connections, agentID)
-		log.Infof("[AgentHub] Agent %d unregistered (total: %d)", agentID, len(h.connections))
+	// Only remove if the connection matches what's currently registered
+	// This prevents race conditions where an old connection disconnects after
+	// a new one was registered
+	if current, exists := h.connections[agentID]; exists {
+		if current == conn {
+			delete(h.connections, agentID)
+			log.Infof("[AgentHub] Agent %d unregistered (total: %d)", agentID, len(h.connections))
+		} else {
+			log.Debugf("[AgentHub] Agent %d disconnect ignored - connection was replaced", agentID)
+		}
 	}
 }
 
