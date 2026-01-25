@@ -1009,12 +1009,12 @@ watch(
 }
 
 .badge {
-    background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    background: linear-gradient(135deg, #3b82f6, #10b981);
+    color: white;
     padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
+    border-radius: 4px;
     font-size: 0.75rem;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .shared-main {
@@ -1061,8 +1061,8 @@ watch(
     gap: 0.5rem;
     margin-top: 1rem;
     padding: 0.75rem 1.5rem;
-    background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
     border: none;
     border-radius: 8px;
     cursor: pointer;
@@ -1070,7 +1070,7 @@ watch(
 }
 
 .back-link:hover {
-    background: rgba(99, 102, 241, 0.3);
+    background: rgba(59, 130, 246, 0.3);
 }
 
 /* Password State */
@@ -1093,7 +1093,7 @@ watch(
 .password-icon {
     width: 64px;
     height: 64px;
-    background: rgba(99, 102, 241, 0.2);
+    background: rgba(59, 130, 246, 0.2);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -1103,7 +1103,7 @@ watch(
 
 .password-icon i {
     font-size: 1.75rem;
-    color: #a5b4fc;
+    color: #93c5fd;
 }
 
 .password-form {
@@ -1133,7 +1133,7 @@ watch(
 .password-submit {
     width: 100%;
     padding: 0.875rem;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    background: linear-gradient(135deg, #3b82f6, #10b981);
     border: none;
     border-radius: 8px;
     color: white;
@@ -1149,7 +1149,7 @@ watch(
 
 .password-submit:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 /* Probe Content */
@@ -1183,7 +1183,7 @@ watch(
 }
 
 .date-picker-wrapper :deep(.dp__input:hover) {
-    border-color: rgba(99, 102, 241, 0.5);
+    border-color: rgba(59, 130, 246, 0.5);
 }
 
 .date-picker-wrapper :deep(.dp__input_icon) {
@@ -1434,9 +1434,9 @@ watch(
 }
 
 .direction-btn.active {
-    background: rgba(99, 102, 241, 0.15);
-    border-color: rgba(99, 102, 241, 0.4);
-    color: #a5b4fc;
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #93c5fd;
 }
 
 .direction-btn .agent-name {
@@ -1464,7 +1464,7 @@ watch(
 }
 
 .subsection-title i {
-    color: #6366f1;
+    color: #3b82f6;
 }
 
 /* Network Map Container */
@@ -1523,9 +1523,9 @@ watch(
 }
 
 .pagination-btn:hover:not(:disabled) {
-    background: rgba(99, 102, 241, 0.15);
-    border-color: rgba(99, 102, 241, 0.3);
-    color: #a5b4fc;
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
 }
 
 .pagination-btn:disabled {
@@ -1585,11 +1585,11 @@ watch(
     padding: 0.5rem 0.75rem;
     font-size: 0.8rem;
     color: #64748b;
-    background: rgba(99, 102, 241, 0.05);
+    background: rgba(59, 130, 246, 0.05);
     border-radius: 6px;
 }
 
 .mtr-help-text i {
-    color: #6366f1;
+    color: #3b82f6;
 }
 </style>

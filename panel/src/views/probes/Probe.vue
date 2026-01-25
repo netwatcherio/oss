@@ -550,7 +550,15 @@ async function reloadData() {
       let sourceAgentName = state.agent?.name || `Agent ${sourceAgentId}`;
       let targetAgentName = state.probeAgent?.name || `Agent ${targetAgentId}`;
       
-      // Build the agent pair data from loaded data
+      // Filter data by probe_id to ensure each direction only shows its own probe's data
+      // This prevents data from other probes with the same target from mixing in
+      const mainProbeId = state.probe.id;
+      const forwardPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
+      const forwardMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
+      const forwardTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
+      const forwardRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId);
+      
+      // Build the agent pair data with filtered data
       state.agentPairData = [{
         direction: 'forward' as const,
         probeId: state.probe.id,
@@ -558,10 +566,10 @@ async function reloadData() {
         targetAgentId: targetAgentId,
         sourceAgentName: sourceAgentName,
         targetAgentName: targetAgentName,
-        pingData: state.pingData,
-        mtrData: state.mtrData,
-        trafficSimData: state.trafficSimData,
-        rperfData: state.rperfData
+        pingData: forwardPingData,
+        mtrData: forwardMtrData,
+        trafficSimData: forwardTrafficSimData,
+        rperfData: forwardRperfData
       }];
       
       // If reciprocal probe exists, load its data too for in-page direction switching
@@ -996,7 +1004,7 @@ const handleLiveProbeData = (data: ProbeDataEvent) => {
   const probeData: ProbeData = {
     id: 0, // Will be assigned by addProbeDataUnique
     probe_id: data.probe_id,
-    probe_agent_id: data.agent_id, // Same as agent_id for live data
+    probe_agent_id: (data as any).probe_agent_id || data.agent_id, // Use broadcast field if available
     agent_id: data.agent_id,
     type: data.type as ProbeType,
     payload: data.payload,
@@ -1015,6 +1023,31 @@ const handleLiveProbeData = (data: ProbeDataEvent) => {
   if (data.type === 'MTR') addProbeDataUnique(state.mtrData, probeData);
   if (data.type === 'TRAFFICSIM') addProbeDataUnique(state.trafficSimData, probeData);
   if (data.type === 'RPERF' && !(state.probe as any).server) addProbeDataUnique(state.rperfData, probeData);
+  
+  // For AGENT probes, route to the correct direction in agentPairData
+  if (state.isAgentProbe && state.agentPairData.length > 0) {
+    const mainProbeId = state.probe?.id;
+    const recipProbeId = state.reciprocalProbe?.id;
+    
+    // Determine which direction this data belongs to based on probe_id
+    if (data.probe_id === mainProbeId) {
+      // Forward direction - add to agentPairData[0]
+      const forwardPair = state.agentPairData[0];
+      if (forwardPair) {
+        if (data.type === 'PING') addProbeDataUnique(forwardPair.pingData, probeData);
+        if (data.type === 'MTR') addProbeDataUnique(forwardPair.mtrData, probeData);
+        if (data.type === 'TRAFFICSIM') addProbeDataUnique(forwardPair.trafficSimData, probeData);
+      }
+    } else if (recipProbeId && data.probe_id === recipProbeId) {
+      // Reverse direction - add to agentPairData[1]
+      const reversePair = state.agentPairData[1];
+      if (reversePair) {
+        if (data.type === 'PING') addProbeDataUnique(reversePair.pingData, probeData);
+        if (data.type === 'MTR') addProbeDataUnique(reversePair.mtrData, probeData);
+        if (data.type === 'TRAFFICSIM') addProbeDataUnique(reversePair.trafficSimData, probeData);
+      }
+    }
+  }
 };
 
 // Set up WebSocket subscription for this probe

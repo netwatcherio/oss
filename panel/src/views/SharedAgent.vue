@@ -463,16 +463,16 @@ onMounted(() => {
 }
 
 .brand i {
-    color: #6366f1;
+    color: #3b82f6;
 }
 
 .brand .badge {
-    background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    background: linear-gradient(135deg, #3b82f6, #10b981);
+    color: white;
     padding: 0.25rem 0.625rem;
     border-radius: 4px;
     font-size: 0.7rem;
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -550,7 +550,7 @@ onMounted(() => {
 
 .password-card i {
     font-size: 3rem;
-    color: #6366f1;
+    color: #3b82f6;
     margin-bottom: 1rem;
 }
 
@@ -593,11 +593,11 @@ onMounted(() => {
 
 .password-input:focus {
     outline: none;
-    border-color: #6366f1;
+    border-color: #3b82f6;
 }
 
 .password-btn {
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    background: linear-gradient(135deg, #3b82f6, #10b981);
     color: white;
     border: none;
     border-radius: 8px;
@@ -613,7 +613,7 @@ onMounted(() => {
 
 .password-btn:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 .password-btn:disabled {
@@ -731,8 +731,8 @@ onMounted(() => {
 }
 
 .probe-count {
-    background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
     padding: 0.125rem 0.5rem;
     border-radius: 4px;
     font-size: 0.8rem;
@@ -769,7 +769,7 @@ onMounted(() => {
 }
 
 .probe-card:hover {
-    border-color: rgba(99, 102, 241, 0.4);
+    border-color: rgba(59, 130, 246, 0.4);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
     transform: translateY(-2px);
 }

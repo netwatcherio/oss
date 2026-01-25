@@ -278,18 +278,24 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				log.Infof("[BIDIR-DEBUG] probe_post: agent %d sent data for probe_id=%d type=%s target=%s",
 					aid, pp.ProbeID, pp.Type, pp.Target)
 
-				// Resolve TargetAgent from probe configuration if not already set
+				// Resolve TargetAgent and ProbeAgentID from probe configuration if not already set
 				// This handles bidirectional probe direction detection
-				if pp.TargetAgent == 0 && pp.ProbeID != 0 {
+				if pp.ProbeID != 0 {
 					p, err := probe.GetByID(context.TODO(), db, pp.ProbeID)
-					if err == nil && p != nil && len(p.Targets) > 0 {
-						// Determine direction based on reporting agent
-						if aid == p.AgentID && p.Targets[0].AgentID != nil {
-							// Forward direction: probe owner reporting, target is Target.AgentID
-							pp.TargetAgent = *p.Targets[0].AgentID
-						} else if p.Targets[0].AgentID != nil && aid == *p.Targets[0].AgentID {
-							// Reverse direction: target agent reporting, target is probe owner
-							pp.TargetAgent = p.AgentID
+					if err == nil && p != nil {
+						// Always set ProbeAgentID to the probe owner for direction identification
+						pp.ProbeAgentID = p.AgentID
+
+						// Set TargetAgent if not already set and probe has targets
+						if pp.TargetAgent == 0 && len(p.Targets) > 0 {
+							// Determine direction based on reporting agent
+							if aid == p.AgentID && p.Targets[0].AgentID != nil {
+								// Forward direction: probe owner reporting, target is Target.AgentID
+								pp.TargetAgent = *p.Targets[0].AgentID
+							} else if p.Targets[0].AgentID != nil && aid == *p.Targets[0].AgentID {
+								// Reverse direction: target agent reporting, target is probe owner
+								pp.TargetAgent = p.AgentID
+							}
 						}
 					}
 				}
@@ -305,26 +311,30 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 
 				GetPanelHub().Broadcast(ProbeDataBroadcast{
-					WorkspaceID: wsid,
-					ProbeID:     pp.ProbeID,
-					AgentID:     pp.AgentID,
-					Type:        string(pp.Type),
-					Payload:     pp.Payload,
-					CreatedAt:   pp.CreatedAt.Format(time.RFC3339),
-					Target:      pp.Target,
-					Triggered:   pp.Triggered,
+					WorkspaceID:  wsid,
+					ProbeID:      pp.ProbeID,
+					AgentID:      pp.AgentID,
+					ProbeAgentID: pp.ProbeAgentID,
+					TargetAgent:  pp.TargetAgent,
+					Type:         string(pp.Type),
+					Payload:      pp.Payload,
+					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
+					Target:       pp.Target,
+					Triggered:    pp.Triggered,
 				})
 
 				// Also broadcast to raw WebSocket clients
 				GetRawPanelHub().BroadcastRaw(ProbeDataBroadcast{
-					WorkspaceID: wsid,
-					ProbeID:     pp.ProbeID,
-					AgentID:     pp.AgentID,
-					Type:        string(pp.Type),
-					Payload:     pp.Payload,
-					CreatedAt:   pp.CreatedAt.Format(time.RFC3339),
-					Target:      pp.Target,
-					Triggered:   pp.Triggered,
+					WorkspaceID:  wsid,
+					ProbeID:      pp.ProbeID,
+					AgentID:      pp.AgentID,
+					ProbeAgentID: pp.ProbeAgentID,
+					TargetAgent:  pp.TargetAgent,
+					Type:         string(pp.Type),
+					Payload:      pp.Payload,
+					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
+					Target:       pp.Target,
+					Triggered:    pp.Triggered,
 				})
 
 				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))

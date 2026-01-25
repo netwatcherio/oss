@@ -31,14 +31,16 @@ type subscription struct {
 
 // ProbeDataBroadcast represents the data sent to panel clients
 type ProbeDataBroadcast struct {
-	WorkspaceID uint            `json:"workspace_id"`
-	ProbeID     uint            `json:"probe_id"`
-	AgentID     uint            `json:"agent_id"`
-	Type        string          `json:"type"`
-	Payload     json.RawMessage `json:"payload"`
-	CreatedAt   string          `json:"created_at"`
-	Target      string          `json:"target,omitempty"`
-	Triggered   bool            `json:"triggered,omitempty"`
+	WorkspaceID  uint            `json:"workspace_id"`
+	ProbeID      uint            `json:"probe_id"`
+	AgentID      uint            `json:"agent_id"`       // Reporting agent (who sent this data)
+	ProbeAgentID uint            `json:"probe_agent_id"` // Probe owner agent (for direction detection)
+	TargetAgent  uint            `json:"target_agent"`   // Target agent ID (for direction detection)
+	Type         string          `json:"type"`
+	Payload      json.RawMessage `json:"payload"`
+	CreatedAt    string          `json:"created_at"`
+	Target       string          `json:"target,omitempty"`
+	Triggered    bool            `json:"triggered,omitempty"`
 }
 
 // Global panel hub instance
