@@ -195,18 +195,46 @@
 
             <div class="demo-grid" style="grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));">
 
-                <!-- Workspace Dashboard -->
+                <!-- Workspaces Overview -->
                 <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-grid-1x2"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
+                    <img src="assets/img_1.png" alt="Workspaces Overview"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
                     <div class="demo-content">
-                        <h3>Workspace Dashboard</h3>
-                        <p>Overview of all agents, probes, and network health at a glance. Quick access to alerts and
-                            recent activity.</p>
+                        <h3>Workspaces Overview</h3>
+                        <p>Multi-tenant workspace management with agent counts, member access, and quick workspace
+                            switching.</p>
                         <div class="demo-tags">
                             <span class="demo-tag">Dashboard</span>
+                            <span class="demo-tag">Multi-tenant</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Topology Map -->
+                <div class="demo-item">
+                    <img src="assets/img_2.png" alt="Network Topology Map"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>Network Topology Map</h3>
+                        <p>Interactive D3 visualization showing agent relationships, network paths, and real-time
+                            connectivity status.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">Topology</span>
+                            <span class="demo-tag">D3.js</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Destination Overview -->
+                <div class="demo-item">
+                    <img src="assets/img_3.png" alt="Destination Overview"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>Destination Overview</h3>
+                        <p>Comprehensive probe listing with targets, endpoints, latency, loss, and agent assignments at
+                            a glance.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">Probes</span>
                             <span class="demo-tag">Overview</span>
                         </div>
                     </div>
@@ -214,10 +242,8 @@
 
                 <!-- Connectivity Matrix -->
                 <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-grid-3x3"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
+                    <img src="assets/img_4.png" alt="Connectivity Matrix"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
                     <div class="demo-content">
                         <h3>Connectivity Matrix</h3>
                         <p>High-density mesh view showing all agent-to-target relationships. Color-coded health status
@@ -229,50 +255,14 @@
                     </div>
                 </div>
 
-                <!-- Network Map -->
+                <!-- Latency Metrics -->
                 <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-diagram-3"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
+                    <img src="assets/img_5.png" alt="Latency Metrics"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
                     <div class="demo-content">
-                        <h3>Network Topology Map</h3>
-                        <p>Interactive D3 visualization of network paths. Shared hop detection, path highlighting, and
-                            drill-down details.</p>
-                        <div class="demo-tags">
-                            <span class="demo-tag">Topology</span>
-                            <span class="demo-tag">D3.js</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- MTR Analysis -->
-                <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-reception-4"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
-                    <div class="demo-content">
-                        <h3>MTR Path Analysis</h3>
-                        <p>Hop-by-hop traceroute data with latency, jitter, and packet loss. Route change detection and
-                            historical comparison.</p>
-                        <div class="demo-tags">
-                            <span class="demo-tag">MTR</span>
-                            <span class="demo-tag">Traceroute</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Probe Dashboard -->
-                <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-graph-up"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
-                    <div class="demo-content">
-                        <h3>Probe Metrics Dashboard</h3>
-                        <p>Real-time latency, jitter, and packet loss charts. Bidirectional comparison for
-                            agent-to-agent probes.</p>
+                        <h3>Latency Metrics Dashboard</h3>
+                        <p>Real-time latency, jitter, and packet loss charts with statistical summaries and trend
+                            analysis.</p>
                         <div class="demo-tags">
                             <span class="demo-tag">Metrics</span>
                             <span class="demo-tag">Charts</span>
@@ -280,19 +270,77 @@
                     </div>
                 </div>
 
-                <!-- Alerting -->
+                <!-- Voice Quality Score (MOS) -->
                 <div class="demo-item">
-                    <div class="demo-placeholder">
-                        <i class="bi bi-bell"></i>
-                        <span>Screenshot Placeholder</span>
-                    </div>
+                    <img src="assets/img_6.png" alt="Voice Quality Score"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
                     <div class="demo-content">
-                        <h3>Alerts & Notifications</h3>
-                        <p>Threshold-based alerting with active, acknowledged, and resolved states. Webhook integration
-                            for external notifications.</p>
+                        <h3>Voice Quality Score (MOS)</h3>
+                        <p>Aggregated voice quality scoring from multiple data sources. Current, average, and range
+                            metrics for VoIP monitoring.</p>
                         <div class="demo-tags">
-                            <span class="demo-tag">Alerting</span>
-                            <span class="demo-tag">Webhooks</span>
+                            <span class="demo-tag">MOS</span>
+                            <span class="demo-tag">VoIP</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Traceroute Topology -->
+                <div class="demo-item">
+                    <img src="assets/img_7.png" alt="Traceroute Topology"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>Traceroute Topology</h3>
+                        <p>Interactive network path visualization with shared hop detection, status indicators, and AI
+                            analysis.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">Traceroute</span>
+                            <span class="demo-tag">AI Analysis</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Path Details -->
+                <div class="demo-item">
+                    <img src="assets/img_8.png" alt="Network Path Details"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>Network Path Details</h3>
+                        <p>Hop-by-hop details with hostname resolution, IP addresses, latency metrics, and packet loss
+                            analysis.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">Topology</span>
+                            <span class="demo-tag">Details</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MTR Trace History -->
+                <div class="demo-item">
+                    <img src="assets/img_9.png" alt="MTR Trace History"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>MTR Trace History</h3>
+                        <p>Historical traceroute data with hop counts, latency trends, and quick access to view all
+                            traces.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">MTR</span>
+                            <span class="demo-tag">History</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Route Change Detection -->
+                <div class="demo-item">
+                    <img src="assets/img_10.png" alt="Route Change Detection"
+                        style="width: 100%; aspect-ratio: 16/9; object-fit: cover; border-bottom: 1px solid var(--border-color);">
+                    <div class="demo-content">
+                        <h3>Route Change Detection</h3>
+                        <p>Side-by-side comparison of previous and current routes. Automatic detection and highlighting
+                            of path changes.</p>
+                        <div class="demo-tags">
+                            <span class="demo-tag">Route Changes</span>
+                            <span class="demo-tag">Comparison</span>
                         </div>
                     </div>
                 </div>
