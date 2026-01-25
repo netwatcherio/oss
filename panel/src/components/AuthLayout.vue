@@ -71,10 +71,7 @@
 
 .brand-icon {
   font-size: 1.75rem;
-  background: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--bs-primary);
 }
 
 .auth-content {

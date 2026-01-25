@@ -155,10 +155,7 @@ function logout() {
 
 .brand-icon {
   font-size: 1.5rem;
-  background: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #3b82f6;
   transition: transform 0.2s;
 }
 
@@ -169,10 +166,6 @@ function logout() {
 .brand-text {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   letter-spacing: -0.025em;
-  background: linear-gradient(135deg, #1f2937 0%, #3b82f6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 /* Navbar Actions */
@@ -385,13 +378,6 @@ function logout() {
 
 :global([data-theme="dark"]) .navbar-brand {
   color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .brand-text {
-  background: linear-gradient(135deg, #f0f4f8 0%, #3b82f6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 :global([data-theme="dark"]) .navbar-brand:hover {
