@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"netwatcher-controller/internal/agent"
 	probe "netwatcher-controller/internal/probe"
@@ -260,15 +261,12 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					log.Errorf("probe_get: %v", err)
 				}
 
-				// Debug: log what probes are being sent to this agent
-				log.Infof("[BIDIR-DEBUG] probe_get: sending %d probes to agent %d", len(ownedP), a.ID)
+				// Log summary of probes being sent (not full JSON)
+				typeCounts := make(map[string]int)
 				for _, p := range ownedP {
-					targetStr := ""
-					if len(p.Targets) > 0 {
-						targetStr = p.Targets[0].Target
-					}
-					log.Infof("[BIDIR-DEBUG]   -> ID=%d Type=%s AgentID=%d Target=%s", p.ID, p.Type, p.AgentID, targetStr)
+					typeCounts[string(p.Type)]++
 				}
+				log.Infof("[probe_get] agent %d: sending %d probes %v", a.ID, len(ownedP), typeCounts)
 
 				payload, err := json.Marshal(ownedP)
 				if err != nil {
@@ -287,8 +285,6 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 				wsid, _ := ctx.Values().GetUint("workspace_id")
 
-				log.Infof("[%s] posted message to namespace [%s]: %s", nsConn, msg.Namespace, msg.Body)
-
 				var pp probe.ProbeData
 				if err := json.Unmarshal(msg.Body, &pp); err != nil {
 					log.Error(err)
@@ -301,9 +297,13 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 				pp.ReceivedAt = time.Now()
 
-				// Debug: log received probe data
-				log.Infof("[BIDIR-DEBUG] probe_post: agent %d sent data for probe_id=%d type=%s target=%s",
-					aid, pp.ProbeID, pp.Type, pp.Target)
+				// Log summarized probe data (not the full body)
+				targetInfo := pp.Target
+				if pp.TargetAgent > 0 {
+					targetInfo = fmt.Sprintf("agent:%d", pp.TargetAgent)
+				}
+				log.Infof("[probe_post] agent=%d probe=%d type=%s target=%s",
+					aid, pp.ProbeID, pp.Type, targetInfo)
 
 				// Resolve TargetAgent and ProbeAgentID from probe configuration if not already set
 				// This handles bidirectional probe direction detection

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/kataras/iris/v12/websocket"
 	log "github.com/sirupsen/logrus"
@@ -49,8 +50,12 @@ func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
 	if old, exists := h.connections[agentID]; exists {
 		log.Warnf("[AgentHub] Agent %d already connected, closing old connection before replacing", agentID)
 		// Force disconnect the old connection to ensure clean state
+		// Use a delay to allow the new connection to stabilize first
 		go func(oldConn *websocket.NSConn) {
-			// Disconnect in a goroutine to avoid blocking while holding the lock
+			// Brief delay to let the new connection fully register before
+			// disconnecting the old one (prevents race condition where
+			// old disconnect event interferes with new connection)
+			time.Sleep(500 * time.Millisecond)
 			if err := oldConn.Disconnect(context.TODO()); err != nil {
 				log.Debugf("[AgentHub] Error disconnecting old connection for agent %d: %v", agentID, err)
 			}
