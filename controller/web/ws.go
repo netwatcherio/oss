@@ -17,10 +17,36 @@ import (
 	"github.com/kataras/iris/v12"
 	"gorm.io/gorm"
 
+	gorillaWs "github.com/gorilla/websocket"
 	_ "github.com/kataras/iris/v12"
 	"github.com/kataras/iris/v12/websocket"
 	log "github.com/sirupsen/logrus"
 )
+
+// WebSocket connection settings for improved stability
+const (
+	// Time allowed to write a message to the peer
+	writeWait = 60 * time.Second
+
+	// Time allowed to read the next pong message from the peer
+	pongWait = 90 * time.Second
+
+	// Send pings to peer with this period (must be less than pongWait)
+	pingPeriod = 30 * time.Second
+
+	// Maximum message size allowed from peer
+	maxMessageSize = 512 * 1024 // 512KB
+)
+
+// agentUpgrader is a custom upgrader with proper buffer sizes for agent connections
+var agentUpgrader = gorillaWs.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for agent connections
+	},
+	HandshakeTimeout: 10 * time.Second,
+}
 
 // Expected headers for WS:
 //   X-Workspace-ID: <uint>
@@ -30,9 +56,9 @@ import (
 // If valid, we attach agent/workspace IDs to the Iris context for use in events.
 
 func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
-	// Agent WebSocket server - uses PSK header auth
+	// Agent WebSocket server - uses PSK header auth with custom upgrader for stability
 	agentWsServer := websocket.New(
-		websocket.DefaultGorillaUpgrader,
+		websocket.GorillaUpgrader(agentUpgrader),
 		getAgentWebsocketEvents(app, db, ch),
 	)
 	agentWsServer.OnConnect = func(c *websocket.Conn) error {
