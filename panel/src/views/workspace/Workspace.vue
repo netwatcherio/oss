@@ -159,7 +159,7 @@ onUnmounted(() => {
 
 <template>
   <div class="container-fluid">
-    <Title :title="state.workspace.name || 'Loading...'" :history="[{title: 'workspaces', link: '/workspaces'}]">
+    <Title :title="state.workspace.name || 'Loading...'" :history="[{title: 'Workspaces', link: '/workspaces'}]">
       <div class="d-flex flex-wrap gap-2">
         <router-link 
           v-if="permissions.canManage.value" 

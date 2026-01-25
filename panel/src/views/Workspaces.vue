@@ -116,7 +116,7 @@ onMounted(async () => {
 <template>
   <div class="container-fluid">
     <Title
-      title="workspaces"
+      title="Workspaces"
       subtitle="an overview of the workspaces you have access to"
     >
       <div class="d-flex gap-2">

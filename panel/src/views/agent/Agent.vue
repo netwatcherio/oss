@@ -801,7 +801,7 @@ onMounted(async () => {
   <div class="container-fluid">
     <Title
         :history="[
-        {title: 'workspaces', link: '/workspaces'},
+        {title: 'Workspaces', link: '/workspaces'},
         {title: state.workspace.name || 'Loading...', link: `/workspaces/${state.workspace.id || ''}`}
       ]"
         :title="state.agent.name || 'Loading...'"
