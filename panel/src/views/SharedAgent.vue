@@ -190,7 +190,7 @@ async function loadAgent() {
     }
 }
 
-// Fetch agent names for AGENT-type probe groups
+// Fetch agent names for AGENT-type probe groups IN PARALLEL
 async function fetchAgentNames() {
     // Collect unique agent IDs from AGENT-type probes
     const agentIds = new Set<number>();
@@ -207,20 +207,27 @@ async function fetchAgentNames() {
         }
     }
     
-    // Fetch names for each agent
-    for (const agentId of agentIds) {
-        if (agentNames.value[agentId]) continue;  // Already cached
-        try {
-            const result = await PublicShareService.getAgentName(
-                token.value, 
-                agentId, 
-                authenticatedPassword.value || undefined
-            );
-            agentNames.value[agentId] = result.name;
-        } catch {
-            // Fallback to generic name if not accessible
-            agentNames.value[agentId] = `Agent #${agentId}`;
-        }
+    // Filter out already-cached IDs
+    const uncachedIds = Array.from(agentIds).filter(id => !agentNames.value[id]);
+    
+    if (uncachedIds.length === 0) return;
+    
+    // Fetch all names in parallel
+    const fetchPromises = uncachedIds.map(agentId => 
+        PublicShareService.getAgentName(
+            token.value, 
+            agentId, 
+            authenticatedPassword.value || undefined
+        )
+        .then(result => ({ agentId, name: result.name, success: true }))
+        .catch(() => ({ agentId, name: `Agent #${agentId}`, success: false }))
+    );
+    
+    const results = await Promise.all(fetchPromises);
+    
+    // Update cache with results
+    for (const { agentId, name } of results) {
+        agentNames.value[agentId] = name;
     }
 }
 

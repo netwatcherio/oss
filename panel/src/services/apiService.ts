@@ -770,7 +770,43 @@ export const ShareLinkService = {
 };
 
 /** ===== Public Share Access (no auth) ===== */
+
+// In-memory cache for share token validation and probe data
+// Reduces repeated token validation overhead on sub-requests
+interface CacheEntry<T> {
+    data: T;
+    expiry: number;
+}
+const shareCache = new Map<string, CacheEntry<any>>();
+const AGENT_CACHE_TTL_MS = 5 * 60 * 1000;  // 5 minutes for agent/probe metadata
+const DATA_CACHE_TTL_MS = 30 * 1000;        // 30 seconds for probe data
+
+// Cache helpers
+function getCached<T>(key: string): T | null {
+    const entry = shareCache.get(key);
+    if (entry && Date.now() < entry.expiry) {
+        return entry.data as T;
+    }
+    if (entry) {
+        shareCache.delete(key); // Expired, clean up
+    }
+    return null;
+}
+
+function setCache<T>(key: string, data: T, ttlMs: number): void {
+    shareCache.set(key, { data, expiry: Date.now() + ttlMs });
+}
+
 export const PublicShareService = {
+    /** Clear all cache entries for a specific token (for explicit refresh) */
+    clearCache(token: string): void {
+        for (const key of shareCache.keys()) {
+            if (key.includes(token)) {
+                shareCache.delete(key);
+            }
+        }
+    },
+
     /** Get the base URL for API calls */
     getBaseUrl(): string {
         return (window as any).CONTROLLER_ENDPOINT
@@ -795,6 +831,13 @@ export const PublicShareService = {
         expires_at: string;
         allow_speedtest: boolean;
     }> {
+        // Check cache first to avoid repeated token validation
+        const cacheKey = `agent:${token}:${password || ''}`;
+        const cached = getCached<{ agent: any; probes: any[]; expires_at: string; allow_speedtest: boolean }>(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
         const baseUrl = this.getBaseUrl();
         const url = password
             ? `${baseUrl}/share/${token}?password=${encodeURIComponent(password)}`
@@ -816,7 +859,11 @@ export const PublicShareService = {
             }
             throw new Error(body.error || 'Failed to access shared agent');
         }
-        return response.json();
+        const result = await response.json();
+
+        // Cache successful result
+        setCache(cacheKey, result, AGENT_CACHE_TTL_MS);
+        return result;
     },
 
     /** Get probe data for a shared agent - mirrors ProbeDataService.byProbe */
@@ -831,8 +878,20 @@ export const PublicShareService = {
             aggregate?: number;  // Aggregation bucket in seconds
             type?: string;       // PING, MTR, TRAFFICSIM
             password?: string;
+            skipCache?: boolean; // Force fresh fetch
         }
     ): Promise<{ data: any[] }> {
+        // Build cache key from all params that affect the result
+        const cacheKey = `data:${token}:${probeId}:${params?.type || ''}:${params?.from || ''}:${params?.to || ''}:${params?.aggregate || ''}`;
+
+        // Check cache unless explicitly skipped
+        if (!params?.skipCache) {
+            const cached = getCached<{ data: any[] }>(cacheKey);
+            if (cached) {
+                return cached;
+            }
+        }
+
         const baseUrl = this.getBaseUrl();
         const qs = new URLSearchParams();
         if (params?.from) qs.set('from', params.from);
@@ -847,7 +906,11 @@ export const PublicShareService = {
         if (!response.ok) {
             throw new Error('Failed to get probe data');
         }
-        return response.json();
+        const result = await response.json();
+
+        // Cache successful result (30 seconds)
+        setCache(cacheKey, result, DATA_CACHE_TTL_MS);
+        return result;
     },
 
     /** Get sanitized agent name for shared context */
@@ -856,6 +919,13 @@ export const PublicShareService = {
         agentId: number | string,
         password?: string
     ): Promise<{ id: number; name: string; location: string }> {
+        // Check cache first
+        const cacheKey = `agentName:${token}:${agentId}`;
+        const cached = getCached<{ id: number; name: string; location: string }>(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
         const baseUrl = this.getBaseUrl();
         const qs = new URLSearchParams();
         if (password) qs.set('password', password);
@@ -864,6 +934,10 @@ export const PublicShareService = {
         if (!response.ok) {
             throw new Error('Agent not found');
         }
-        return response.json();
+        const result = await response.json();
+
+        // Cache successful result
+        setCache(cacheKey, result, AGENT_CACHE_TTL_MS);
+        return result;
     },
 };

@@ -418,98 +418,118 @@ async function loadProbeData() {
             return result;
         };
         
-        // For AGENT probes, fetch each sub-type separately (matching Probe.vue)
+        // For AGENT probes, fetch each sub-type IN PARALLEL (performance improvement)
         if (state.isAgentProbe) {
             const pingAgg = aggregateSec > 0;
             const trafficAgg = aggregateSec > 0;
             
-            // Fetch PING data with aggregation
-            try {
-                const pingResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+            // Fetch all three types in parallel using Promise.allSettled
+            const [pingResult, mtrResult, trafficResult] = await Promise.allSettled([
+                PublicShareService.getProbeData(token.value, probeId.value, {
                     ...baseParams,
                     type: 'PING',
                     aggregate: pingAgg ? aggregateSec : undefined,
                     limit: pingAgg ? undefined : 300,
-                });
-                state.pingData = parseDataResult(pingResult, probeId.value);
-                console.log(`[SharedProbe] PING: ${state.pingData.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
-            } catch (err) { console.warn('[SharedProbe] Failed to fetch PING:', err); }
-            
-            // Fetch MTR data (no aggregation - need full hop data)
-            try {
-                const mtrResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                }),
+                PublicShareService.getProbeData(token.value, probeId.value, {
                     ...baseParams,
                     type: 'MTR',
                     limit: 300,
-                });
-                state.mtrData = parseDataResult(mtrResult, probeId.value);
-                console.log(`[SharedProbe] MTR: ${state.mtrData.length} raw rows`);
-            } catch (err) { console.warn('[SharedProbe] Failed to fetch MTR:', err); }
-            
-            // Fetch TRAFFICSIM data with aggregation
-            try {
-                const trafficResult = await PublicShareService.getProbeData(token.value, probeId.value, {
+                }),
+                PublicShareService.getProbeData(token.value, probeId.value, {
                     ...baseParams,
                     type: 'TRAFFICSIM',
                     aggregate: trafficAgg ? aggregateSec : undefined,
                     limit: trafficAgg ? undefined : 300,
-                });
-                state.trafficSimData = parseDataResult(trafficResult, probeId.value);
+                }),
+            ]);
+            
+            // Process results - failures don't block other types
+            if (pingResult.status === 'fulfilled') {
+                state.pingData = parseDataResult(pingResult.value, probeId.value);
+                console.log(`[SharedProbe] PING: ${state.pingData.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+            } else {
+                console.warn('[SharedProbe] Failed to fetch PING:', pingResult.reason);
+            }
+            
+            if (mtrResult.status === 'fulfilled') {
+                state.mtrData = parseDataResult(mtrResult.value, probeId.value);
+                console.log(`[SharedProbe] MTR: ${state.mtrData.length} raw rows`);
+            } else {
+                console.warn('[SharedProbe] Failed to fetch MTR:', mtrResult.reason);
+            }
+            
+            if (trafficResult.status === 'fulfilled') {
+                state.trafficSimData = parseDataResult(trafficResult.value, probeId.value);
                 console.log(`[SharedProbe] TRAFFICSIM: ${state.trafficSimData.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
-            } catch (err) { console.warn('[SharedProbe] Failed to fetch TRAFFICSIM:', err); }
+            } else {
+                console.warn('[SharedProbe] Failed to fetch TRAFFICSIM:', trafficResult.reason);
+            }
         } else {
-            // Non-AGENT probes: iterate over ALL matching probes (MTR, PING, etc. targeting same host)
+            // Non-AGENT probes: fetch ALL matching probes IN PARALLEL
             // This mirrors Probe.vue behavior where multiple probe types share a view
             const useAgg = aggregateSec > 0;
             
-            for (const p of state.matchingProbes) {
+            // Build fetch promises for all matching probes
+            const fetchPromises = state.matchingProbes.map(p => {
                 const currentProbeId = p.id;
                 const probeType = p.type as string;
-                console.log(`[SharedProbe] Loading data for ${probeType}#${currentProbeId}`);
                 
-                try {
-                    if (probeType === 'PING') {
-                        const pingResult = await PublicShareService.getProbeData(token.value, currentProbeId, {
-                            ...baseParams,
-                            type: 'PING',
-                            aggregate: useAgg ? aggregateSec : undefined,
-                            limit: useAgg ? undefined : 500,
-                        });
-                        const rows = parseDataResult(pingResult, currentProbeId);
+                if (probeType === 'PING') {
+                    return PublicShareService.getProbeData(token.value, currentProbeId, {
+                        ...baseParams,
+                        type: 'PING',
+                        aggregate: useAgg ? aggregateSec : undefined,
+                        limit: useAgg ? undefined : 500,
+                    }).then(result => ({ type: 'PING', probeId: currentProbeId, result }));
+                } else if (probeType === 'MTR') {
+                    return PublicShareService.getProbeData(token.value, currentProbeId, {
+                        ...baseParams,
+                        type: 'MTR',
+                        limit: 300,
+                    }).then(result => ({ type: 'MTR', probeId: currentProbeId, result }));
+                } else if (probeType === 'TRAFFICSIM') {
+                    return PublicShareService.getProbeData(token.value, currentProbeId, {
+                        ...baseParams,
+                        type: 'TRAFFICSIM',
+                        aggregate: useAgg ? aggregateSec : undefined,
+                        limit: useAgg ? undefined : 500,
+                    }).then(result => ({ type: 'TRAFFICSIM', probeId: currentProbeId, result }));
+                } else {
+                    // Fallback for other probe types
+                    return PublicShareService.getProbeData(token.value, currentProbeId, {
+                        ...baseParams,
+                        limit: 500,
+                    }).then(result => ({ type: 'OTHER', probeId: currentProbeId, result }));
+                }
+            });
+            
+            // Execute all fetches in parallel
+            const results = await Promise.allSettled(fetchPromises);
+            
+            // Process results
+            for (const result of results) {
+                if (result.status === 'fulfilled') {
+                    const { type, probeId: fetchedProbeId, result: dataResult } = result.value;
+                    const rows = parseDataResult(dataResult, fetchedProbeId);
+                    
+                    if (type === 'PING') {
                         state.pingData.push(...rows);
-                        console.log(`[SharedProbe] PING#${currentProbeId}: ${rows.length} ${useAgg ? 'aggregated' : 'raw'} rows`);
-                    } else if (probeType === 'MTR') {
-                        const mtrResult = await PublicShareService.getProbeData(token.value, currentProbeId, {
-                            ...baseParams,
-                            type: 'MTR',
-                            limit: 300,
-                        });
-                        const rows = parseDataResult(mtrResult, currentProbeId);
+                        console.log(`[SharedProbe] PING#${fetchedProbeId}: ${rows.length} ${useAgg ? 'aggregated' : 'raw'} rows`);
+                    } else if (type === 'MTR') {
                         state.mtrData.push(...rows);
-                        console.log(`[SharedProbe] MTR#${currentProbeId}: ${rows.length} raw rows`);
-                    } else if (probeType === 'TRAFFICSIM') {
-                        const trafficResult = await PublicShareService.getProbeData(token.value, currentProbeId, {
-                            ...baseParams,
-                            type: 'TRAFFICSIM',
-                            aggregate: useAgg ? aggregateSec : undefined,
-                            limit: useAgg ? undefined : 500,
-                        });
-                        const rows = parseDataResult(trafficResult, currentProbeId);
+                        console.log(`[SharedProbe] MTR#${fetchedProbeId}: ${rows.length} raw rows`);
+                    } else if (type === 'TRAFFICSIM') {
                         state.trafficSimData.push(...rows);
-                        console.log(`[SharedProbe] TRAFFICSIM#${currentProbeId}: ${rows.length} ${useAgg ? 'aggregated' : 'raw'} rows`);
+                        console.log(`[SharedProbe] TRAFFICSIM#${fetchedProbeId}: ${rows.length} ${useAgg ? 'aggregated' : 'raw'} rows`);
                     } else {
-                        // Fallback for other probe types - fetch without type filter
-                        const result = await PublicShareService.getProbeData(token.value, currentProbeId, {
-                            ...baseParams,
-                            limit: 500,
-                        });
-                        const data = parseDataResult(result, currentProbeId);
-                        state.pingData.push(...data.filter(d => d.type === 'PING'));
-                        state.mtrData.push(...data.filter(d => d.type === 'MTR'));
-                        state.trafficSimData.push(...data.filter(d => d.type === 'TRAFFICSIM'));
+                        // Fallback: distribute by type
+                        state.pingData.push(...rows.filter(d => d.type === 'PING'));
+                        state.mtrData.push(...rows.filter(d => d.type === 'MTR'));
+                        state.trafficSimData.push(...rows.filter(d => d.type === 'TRAFFICSIM'));
                     }
-                } catch (err) {
-                    console.warn(`[SharedProbe] Failed to fetch data for ${probeType}#${currentProbeId}:`, err);
+                } else {
+                    console.warn(`[SharedProbe] Failed to fetch probe data:`, result.reason);
                 }
             }
             
@@ -536,50 +556,51 @@ async function loadProbeData() {
                 trafficSimData: state.trafficSimData,
             });
             
-            // If reciprocal probe exists, load its data (reverse: target → source)
+            // If reciprocal probe exists, load its data IN PARALLEL (reverse: target → source)
             if (state.reciprocalProbe) {
                 try {
                     const recipProbeId = state.reciprocalProbe.id;
-                    let recipPing: ProbeData[] = [];
-                    let recipMtr: ProbeData[] = [];
-                    let recipTraffic: ProbeData[] = [];
-                    
-                    // Fetch PING with aggregation (matching Probe.vue logic)
                     const pingAgg = aggregateSec > 0;
-                    try {
-                        const pingResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                    const trafficAgg = aggregateSec > 0;
+                    
+                    // Fetch all three types in parallel
+                    const [pingResult, mtrResult, trafficResult] = await Promise.allSettled([
+                        PublicShareService.getProbeData(token.value, recipProbeId, {
                             ...baseParams,
                             type: 'PING',
                             aggregate: pingAgg ? aggregateSec : undefined,
                             limit: pingAgg ? undefined : 300,
-                        });
-                        recipPing = parseDataResult(pingResult, recipProbeId);
-                        console.log(`[SharedProbe] Reverse PING: ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
-                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse PING:', err); }
-                    
-                    // Fetch MTR without aggregation (need full hop data)
-                    try {
-                        const mtrResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                        }),
+                        PublicShareService.getProbeData(token.value, recipProbeId, {
                             ...baseParams,
                             type: 'MTR',
                             limit: 300,
-                        });
-                        recipMtr = parseDataResult(mtrResult, recipProbeId);
-                        console.log(`[SharedProbe] Reverse MTR: ${recipMtr.length} raw rows`);
-                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse MTR:', err); }
-                    
-                    // Fetch TRAFFICSIM with aggregation
-                    const trafficAgg = aggregateSec > 0;
-                    try {
-                        const trafficResult = await PublicShareService.getProbeData(token.value, recipProbeId, {
+                        }),
+                        PublicShareService.getProbeData(token.value, recipProbeId, {
                             ...baseParams,
                             type: 'TRAFFICSIM',
                             aggregate: trafficAgg ? aggregateSec : undefined,
                             limit: trafficAgg ? undefined : 300,
-                        });
-                        recipTraffic = parseDataResult(trafficResult, recipProbeId);
+                        }),
+                    ]);
+                    
+                    // Process results
+                    const recipPing = pingResult.status === 'fulfilled' 
+                        ? parseDataResult(pingResult.value, recipProbeId) : [];
+                    const recipMtr = mtrResult.status === 'fulfilled' 
+                        ? parseDataResult(mtrResult.value, recipProbeId) : [];
+                    const recipTraffic = trafficResult.status === 'fulfilled' 
+                        ? parseDataResult(trafficResult.value, recipProbeId) : [];
+                    
+                    if (pingResult.status === 'fulfilled') {
+                        console.log(`[SharedProbe] Reverse PING: ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
+                    }
+                    if (mtrResult.status === 'fulfilled') {
+                        console.log(`[SharedProbe] Reverse MTR: ${recipMtr.length} raw rows`);
+                    }
+                    if (trafficResult.status === 'fulfilled') {
                         console.log(`[SharedProbe] Reverse TRAFFICSIM: ${recipTraffic.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
-                    } catch (err) { console.warn('[SharedProbe] Failed to fetch reverse TRAFFICSIM:', err); }
+                    }
                     
                     state.agentPairData.push({
                         direction: 'reverse',
@@ -667,7 +688,9 @@ watch(
         
         // Debounce reload by 500ms to avoid rapid-fire requests
         timeRangeDebounceTimer = window.setTimeout(() => {
-            console.log('[SharedProbe] Debounced reload triggered');
+            console.log('[SharedProbe] Debounced reload triggered, clearing cache for fresh data');
+            // Clear probe data cache for this token to ensure fresh data for new time range
+            PublicShareService.clearCache(token.value);
             loadProbeData();
             timeRangeDebounceTimer = null;
         }, 500);
