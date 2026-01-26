@@ -434,7 +434,7 @@ export default defineComponent({
             speed: 400,
             animateGradually: { enabled: true, delay: 100 }
           },
-          zoom: { type: 'x', enabled: true, autoScaleYaxis: false },
+          zoom: { type: 'x', enabled: true, autoScaleYaxis: false, allowMouseWheelZoom: false },
           toolbar: {
             show: true,
             offsetX: -5,

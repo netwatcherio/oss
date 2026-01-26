@@ -596,7 +596,8 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       zoom: {
         type: 'x',
         enabled: true,
-        autoScaleYaxis: false
+        autoScaleYaxis: false,
+        allowMouseWheelZoom: false
       },
       toolbar: {
         show: true,

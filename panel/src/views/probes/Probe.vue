@@ -95,6 +95,10 @@ const state = reactive({
   selectedMtrData: [] as ProbeData[],  // MTR data for modal display (used by AGENT probe View All)
   rawGroups: {} as any,
   aggregationBucketSec: 0,  // Current aggregation bucket size (0 = no aggregation)
+  // Per-type loading states for independent reload
+  loadingPing: false,
+  loadingMtr: false,
+  loadingTrafficSim: false,
 });
 
 // Pagination state for MTR results
@@ -924,6 +928,121 @@ function onCreate(_: any) { router.push("/workspace"); }
 function onError(response: any) { alert(response); }
 function submit() {}
 
+// ---------- Per-type reload functions for independent graph refresh ----------
+async function reloadPingData() {
+  state.loadingPing = true;
+  const [from, to] = state.timeRange;
+  const rangeMs = new Date(to).getTime() - new Date(from).getTime();
+  const rangeSec = rangeMs / 1000;
+  const targetPoints = 500;
+  let aggregateSec = 0;
+  
+  if (rangeSec > 60) {
+    const idealBucket = Math.ceil(rangeSec / targetPoints);
+    if (idealBucket <= 10) aggregateSec = 10;
+    else if (idealBucket <= 30) aggregateSec = 30;
+    else if (idealBucket <= 60) aggregateSec = 60;
+    else if (idealBucket <= 120) aggregateSec = 120;
+    else if (idealBucket <= 300) aggregateSec = 300;
+    else if (idealBucket <= 600) aggregateSec = 600;
+    else if (idealBucket <= 1800) aggregateSec = 1800;
+    else aggregateSec = 3600;
+  }
+  
+  try {
+    const pingAgg = aggregateSec > 0;
+    const newPingData: ProbeData[] = [];
+    
+    for (const p of state.probes) {
+      try {
+        const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+          from: toRFC3339(from), to: toRFC3339(to),
+          limit: pingAgg ? undefined : 300, asc: false,
+          aggregate: pingAgg ? aggregateSec : undefined, type: 'PING'
+        });
+        newPingData.push(...rows);
+      } catch (err) { console.warn(`[Reload] PING probe ${p.id} failed:`, err); }
+    }
+    
+    state.pingData = newPingData;
+    console.log(`[Reload] PING: ${newPingData.length} rows`);
+  } catch (e) {
+    console.error('[Reload] PING failed:', e);
+  } finally {
+    state.loadingPing = false;
+  }
+}
+
+async function reloadMtrData() {
+  state.loadingMtr = true;
+  const [from, to] = state.timeRange;
+  
+  try {
+    const newMtrData: ProbeData[] = [];
+    
+    for (const p of state.probes) {
+      try {
+        const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+          from: toRFC3339(from), to: toRFC3339(to),
+          limit: 500, asc: false, type: 'MTR'
+        });
+        newMtrData.push(...rows);
+      } catch (err) { console.warn(`[Reload] MTR probe ${p.id} failed:`, err); }
+    }
+    
+    state.mtrData = newMtrData;
+    console.log(`[Reload] MTR: ${newMtrData.length} rows`);
+  } catch (e) {
+    console.error('[Reload] MTR failed:', e);
+  } finally {
+    state.loadingMtr = false;
+  }
+}
+
+async function reloadTrafficSimData() {
+  state.loadingTrafficSim = true;
+  const [from, to] = state.timeRange;
+  const rangeMs = new Date(to).getTime() - new Date(from).getTime();
+  const rangeSec = rangeMs / 1000;
+  const targetPoints = 500;
+  let aggregateSec = 0;
+  
+  if (rangeSec > 60) {
+    const idealBucket = Math.ceil(rangeSec / targetPoints);
+    if (idealBucket <= 10) aggregateSec = 10;
+    else if (idealBucket <= 30) aggregateSec = 30;
+    else if (idealBucket <= 60) aggregateSec = 60;
+    else if (idealBucket <= 120) aggregateSec = 120;
+    else if (idealBucket <= 300) aggregateSec = 300;
+    else if (idealBucket <= 600) aggregateSec = 600;
+    else if (idealBucket <= 1800) aggregateSec = 1800;
+    else aggregateSec = 3600;
+  }
+  
+  try {
+    const trafficAgg = aggregateSec > 0;
+    const newTrafficData: ProbeData[] = [];
+    
+    for (const p of state.probes) {
+      try {
+        const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+          from: toRFC3339(from), to: toRFC3339(to),
+          limit: trafficAgg ? undefined : 300, asc: false,
+          aggregate: trafficAgg ? aggregateSec : undefined, type: 'TRAFFICSIM'
+        });
+        newTrafficData.push(...rows);
+      } catch (err) { console.warn(`[Reload] TRAFFICSIM probe ${p.id} failed:`, err); }
+    }
+    
+    state.trafficSimData = newTrafficData;
+    console.log(`[Reload] TRAFFICSIM: ${newTrafficData.length} rows`);
+  } catch (e) {
+    console.error('[Reload] TRAFFICSIM failed:', e);
+  } finally {
+    state.loadingTrafficSim = false;
+  }
+}
+
 // Toggle to reciprocal direction (in-page, no navigation)
 function switchToReciprocal() {
   if (!state.reciprocalProbe) return;
@@ -1175,11 +1294,19 @@ const { connected: wsConnected } = useProbeSubscription(
             <!-- Ping/Latency Data -->
             <div class="col-lg-12 mb-3">
               <div class="card h-100">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                   <h6 class="mb-0">
                     <i class="bi bi-speedometer2 me-2"></i>
                     Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                   </h6>
+                  <button 
+                    class="btn btn-sm btn-outline-primary" 
+                    @click="reloadPingData" 
+                    :disabled="state.loadingPing"
+                    title="Reload latency data"
+                  >
+                    <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                  </button>
                 </div>
                 <div class="card-body">
                   <div v-if="state.loading && pair.pingData.length === 0" class="text-center py-4">
@@ -1200,11 +1327,19 @@ const { connected: wsConnected } = useProbeSubscription(
             <!-- Traffic Sim Data -->
             <div class="col-lg-12 mb-3">
               <div class="card h-100">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                   <h6 class="mb-0">
                     <i class="bi bi-broadcast me-2"></i>
                     Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                   </h6>
+                  <button 
+                    class="btn btn-sm btn-outline-primary" 
+                    @click="reloadTrafficSimData" 
+                    :disabled="state.loadingTrafficSim"
+                    title="Reload traffic simulation data"
+                  >
+                    <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                  </button>
                 </div>
                 <div class="card-body">
                   <div v-if="state.loading && pair.trafficSimData.length === 0" class="text-center py-4">
@@ -1242,11 +1377,19 @@ const { connected: wsConnected } = useProbeSubscription(
             <!-- MTR Data -->
             <div class="col-12 mb-3">
               <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                   <h6 class="mb-0">
                     <i class="bi bi-diagram-3 me-2"></i>
                     Traceroutes ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                   </h6>
+                  <button 
+                    class="btn btn-sm btn-outline-primary" 
+                    @click="reloadMtrData" 
+                    :disabled="state.loadingMtr"
+                    title="Reload traceroute data"
+                  >
+                    <i class="bi" :class="state.loadingMtr ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                  </button>
                 </div>
                 <div class="card-body">
                   <div v-if="state.loading && pair.mtrData.length === 0" class="text-center py-4">
@@ -1298,9 +1441,21 @@ const { connected: wsConnected } = useProbeSubscription(
         <!-- Ping/Latency Graph -->
       <div class="col-sm-12" v-if="containsProbeType('PING')">
         <div class="card mb-3">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="card-title mb-0">Latency</h5>
+              <small class="text-muted">displays the stats associated with latency</small>
+            </div>
+            <button 
+              class="btn btn-sm btn-outline-primary" 
+              @click="reloadPingData" 
+              :disabled="state.loadingPing"
+              title="Reload latency data"
+            >
+              <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+            </button>
+          </div>
           <div class="card-body">
-            <h5 class="card-title">Latency</h5>
-            <p class="card-text">displays the stats associated with latency</p>
             <div v-if="state.loading && state.pingData.length === 0" class="text-center py-5">
               <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -1323,9 +1478,21 @@ const { connected: wsConnected } = useProbeSubscription(
       <!-- TrafficSim Graph -->
       <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM')">
         <div class="card mb-3">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="card-title mb-0">Simulated Traffic</h5>
+              <small class="text-muted">displays the stats for simulated traffic</small>
+            </div>
+            <button 
+              class="btn btn-sm btn-outline-primary" 
+              @click="reloadTrafficSimData" 
+              :disabled="state.loadingTrafficSim"
+              title="Reload traffic simulation data"
+            >
+              <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+            </button>
+          </div>
           <div class="card-body">
-            <h5 class="card-title">Simulated Traffic</h5>
-            <p class="card-text">displays the stats for simulated traffic</p>
             <div v-if="state.loading && state.trafficSimData.length === 0" class="text-center py-5">
               <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -1510,6 +1677,16 @@ const { connected: wsConnected } = useProbeSubscription(
 .badge.bg-orange {
   background-color: #f97316 !important;
   color: white;
+}
+
+/* Spin animation for reload buttons */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Direction Selector */

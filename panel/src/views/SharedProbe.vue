@@ -75,6 +75,10 @@ const state = reactive({
         mtrData: ProbeData[];
         trafficSimData: ProbeData[];
     }>,
+    // Per-type loading states for independent reload
+    loadingPing: false,
+    loadingMtr: false,
+    loadingTrafficSim: false,
 });
 
 // Computed: get the active direction's data for AGENT probes
@@ -250,6 +254,27 @@ function containsProbeType(type: string): boolean {
         case 'TRAFFICSIM': return state.trafficSimData.length > 0;
         default: return false;
     }
+}
+
+// Helper to parse ProbeData response (extracted for use in reload functions)
+function parseDataResult(dataResult: { data: any[] }, targetProbeId: number): ProbeData[] {
+    const result: ProbeData[] = [];
+    for (const item of (dataResult.data || [])) {
+        const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
+        result.push({
+            id: item.created_at,
+            probe_id: item.probe_id || targetProbeId,
+            probe_agent_id: item.probe_agent_id || 0,
+            agent_id: item.agent_id || 0,
+            triggered: item.triggered || false,
+            triggered_reason: item.triggered_reason || '',
+            type: item.type,
+            payload: payload,
+            created_at: item.created_at,
+            received_at: item.received_at || item.created_at,
+        });
+    }
+    return result;
 }
 
 // Load shared agent info first
@@ -707,6 +732,104 @@ const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
     state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
 };
 
+// ---------- Per-type reload functions for independent graph refresh ----------
+async function reloadPingData() {
+    state.loadingPing = true;
+    try {
+        const [from, to] = state.timeRange;
+        const rangeMs = to.getTime() - from.getTime();
+        const rangeSec = rangeMs / 1000;
+        const targetPoints = 500;
+        let aggregateSec = 0;
+        
+        if (rangeSec > 60) {
+            const idealBucket = Math.ceil(rangeSec / targetPoints);
+            if (idealBucket <= 10) aggregateSec = 10;
+            else if (idealBucket <= 30) aggregateSec = 30;
+            else if (idealBucket <= 60) aggregateSec = 60;
+            else if (idealBucket <= 120) aggregateSec = 120;
+            else if (idealBucket <= 300) aggregateSec = 300;
+            else if (idealBucket <= 600) aggregateSec = 600;
+            else if (idealBucket <= 1800) aggregateSec = 1800;
+            else aggregateSec = 3600;
+        }
+        
+        const result = await PublicShareService.getProbeData(token.value, probeId.value, {
+            from: from.toISOString(),
+            to: to.toISOString(),
+            type: 'PING',
+            aggregate: aggregateSec > 0 ? aggregateSec : undefined,
+            limit: aggregateSec > 0 ? undefined : 300,
+        });
+        
+        state.pingData = parseDataResult(result, probeId.value);
+        console.log(`[SharedProbe Reload] PING: ${state.pingData.length} rows`);
+    } catch (e) {
+        console.error('[SharedProbe Reload] PING failed:', e);
+    } finally {
+        state.loadingPing = false;
+    }
+}
+
+async function reloadMtrData() {
+    state.loadingMtr = true;
+    try {
+        const [from, to] = state.timeRange;
+        
+        const result = await PublicShareService.getProbeData(token.value, probeId.value, {
+            from: from.toISOString(),
+            to: to.toISOString(),
+            type: 'MTR',
+            limit: 500,
+        });
+        
+        state.mtrData = parseDataResult(result, probeId.value);
+        console.log(`[SharedProbe Reload] MTR: ${state.mtrData.length} rows`);
+    } catch (e) {
+        console.error('[SharedProbe Reload] MTR failed:', e);
+    } finally {
+        state.loadingMtr = false;
+    }
+}
+
+async function reloadTrafficSimData() {
+    state.loadingTrafficSim = true;
+    try {
+        const [from, to] = state.timeRange;
+        const rangeMs = to.getTime() - from.getTime();
+        const rangeSec = rangeMs / 1000;
+        const targetPoints = 500;
+        let aggregateSec = 0;
+        
+        if (rangeSec > 60) {
+            const idealBucket = Math.ceil(rangeSec / targetPoints);
+            if (idealBucket <= 10) aggregateSec = 10;
+            else if (idealBucket <= 30) aggregateSec = 30;
+            else if (idealBucket <= 60) aggregateSec = 60;
+            else if (idealBucket <= 120) aggregateSec = 120;
+            else if (idealBucket <= 300) aggregateSec = 300;
+            else if (idealBucket <= 600) aggregateSec = 600;
+            else if (idealBucket <= 1800) aggregateSec = 1800;
+            else aggregateSec = 3600;
+        }
+        
+        const result = await PublicShareService.getProbeData(token.value, probeId.value, {
+            from: from.toISOString(),
+            to: to.toISOString(),
+            type: 'TRAFFICSIM',
+            aggregate: aggregateSec > 0 ? aggregateSec : undefined,
+            limit: aggregateSec > 0 ? undefined : 300,
+        });
+        
+        state.trafficSimData = parseDataResult(result, probeId.value);
+        console.log(`[SharedProbe Reload] TRAFFICSIM: ${state.trafficSimData.length} rows`);
+    } catch (e) {
+        console.error('[SharedProbe Reload] TRAFFICSIM failed:', e);
+    } finally {
+        state.loadingTrafficSim = false;
+    }
+}
+
 // Initial load
 onMounted(async () => {
     // Subscribe to theme changes for date picker and toggle
@@ -923,7 +1046,17 @@ watch(
                 <div class="data-tabs">
                     <!-- PING/Latency Data -->
                     <div v-if="containsProbeType('PING') || state.isAgentProbe" class="data-section">
-                        <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
+                        <div class="section-header">
+                            <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
+                            <button 
+                                class="reload-btn" 
+                                @click="reloadPingData" 
+                                :disabled="state.loadingPing"
+                                title="Reload latency data"
+                            >
+                                <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                            </button>
+                        </div>
                         <div v-if="loading && activePingData.length === 0" class="loading-state">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -946,7 +1079,17 @@ watch(
                     
                     <!-- TrafficSim Data (moved before MOS to match Probe.vue) -->
                     <div v-if="containsProbeType('TRAFFICSIM') || state.isAgentProbe" class="data-section">
-                        <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
+                        <div class="section-header">
+                            <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
+                            <button 
+                                class="reload-btn" 
+                                @click="reloadTrafficSimData" 
+                                :disabled="state.loadingTrafficSim"
+                                title="Reload traffic simulation data"
+                            >
+                                <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                            </button>
+                        </div>
                         <div v-if="loading && activeTrafficSimData.length === 0" class="loading-state">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -979,7 +1122,17 @@ watch(
                     
                     <!-- MTR Data -->
                     <div v-if="containsProbeType('MTR') || state.isAgentProbe" class="data-section">
-                        <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
+                        <div class="section-header">
+                            <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
+                            <button 
+                                class="reload-btn" 
+                                @click="reloadMtrData" 
+                                :disabled="state.loadingMtr"
+                                title="Reload traceroute data"
+                            >
+                                <i class="bi" :class="state.loadingMtr ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                            </button>
+                        </div>
                         <div v-if="loading && activeMtrData.length === 0" class="loading-state">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -1186,6 +1339,39 @@ watch(
 @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+}
+
+/* Section header with reload button */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.section-header h2 {
+    margin: 0;
+}
+
+.reload-btn {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.reload-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.reload-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* Error State */

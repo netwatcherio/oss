@@ -670,6 +670,13 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 			return "", fmt.Errorf("no netinfo payload found for agent %d", agentID)
 		}
 
+		// Warn if NETINFO is stale (>5 minutes old) - may indicate agent restart
+		// where the old cached IP might be outdated
+		if time.Since(netInfoPayload.CreatedAt) > 5*time.Minute {
+			log.Warnf("getPublicIP: agent %d NETINFO is stale (%v old), IP may be outdated",
+				agentID, time.Since(netInfoPayload.CreatedAt).Round(time.Second))
+		}
+
 		var netInfo = struct {
 			LocalAddress     string    `json:"local_address" bson:"local_address"`
 			DefaultGateway   string    `json:"default_gateway" bson:"default_gateway"`

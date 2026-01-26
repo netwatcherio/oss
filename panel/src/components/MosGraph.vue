@@ -275,7 +275,7 @@ export default defineComponent({
             easing: 'easeinout',
             speed: 400
           },
-          zoom: { type: 'x', enabled: true, autoScaleYaxis: false },
+          zoom: { type: 'x', enabled: true, autoScaleYaxis: false, allowMouseWheelZoom: false },
           toolbar: {
             show: true,
             offsetX: -5,
