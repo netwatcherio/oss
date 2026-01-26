@@ -401,10 +401,12 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	var out []Probe
 
 	// 1. Get probes owned by this agent
+	// Filter by: enabled=true, not soft-deleted (deleted_at IS NULL)
+	// GORM should auto-filter deleted_at, but we add explicit check for safety
 	var allProbes []Probe
 	err := db.WithContext(ctx).
-		Preload("Targets").
-		Where("agent_id = ?", agentID).
+		Preload("Targets", "deleted_at IS NULL").
+		Where("agent_id = ? AND enabled = ? AND deleted_at IS NULL", agentID, true).
 		Order("id DESC").
 		Find(&allProbes).Error
 	if err != nil {
@@ -700,14 +702,21 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 // ListByAgentWithReverse returns probes owned by agentID,
 // and also “reverse” probes owned by others that target agentID via Target.AgentID.
 func ListByAgentWithReverse(ctx context.Context, db *gorm.DB, agentID uint) (owned []Probe, reverse []Probe, err error) {
-	ownedErr := db.WithContext(ctx).Preload("Targets").Where("agent_id = ?", agentID).Order("id DESC").Find(&owned).Error
+	// Get owned probes - filter by enabled=true and not deleted
+	ownedErr := db.WithContext(ctx).
+		Preload("Targets", "deleted_at IS NULL").
+		Where("agent_id = ? AND enabled = ? AND deleted_at IS NULL", agentID, true).
+		Order("id DESC").
+		Find(&owned).Error
 	if ownedErr != nil {
 		return nil, nil, ownedErr
 	}
 	// Reverse = someone else’s probe (often TypeAgent/TypeTrafficSim) whose target.agent_id = agentID
-	revErr := db.WithContext(ctx).Preload("Targets").
-		Joins("JOIN probe_targets t ON t.probe_id = probes.id").
-		Where("t.agent_id = ? AND probes.agent_id <> ?", agentID, agentID).
+	// Filter by enabled=true and not deleted for both probes and targets
+	revErr := db.WithContext(ctx).
+		Preload("Targets", "deleted_at IS NULL").
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id AND t.deleted_at IS NULL").
+		Where("t.agent_id = ? AND probes.agent_id <> ? AND probes.enabled = ? AND probes.deleted_at IS NULL", agentID, agentID, true).
 		Find(&reverse).Error
 	if revErr != nil {
 		return nil, nil, revErr
