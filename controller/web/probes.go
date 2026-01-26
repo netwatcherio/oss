@@ -115,8 +115,8 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 		_ = ctx.JSON(p)
 	})
 
-	// DELETE /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanManage (ADMIN+)
-	pid.Delete("/", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
+	// DELETE /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanEdit (USER+)
+	pid.Delete("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		id := uintParam(ctx, "probeID")
 		if err := probe.Delete(ctx.Request().Context(), db, id); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)

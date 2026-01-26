@@ -12,7 +12,7 @@ import MtrSummary from '@/components/MtrSummary.vue';
 import MtrDetailModal from '@/components/MtrDetailModal.vue';
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
-import { themeService } from '@/services/themeService';
+import { themeService, type Theme } from '@/services/themeService';
 import type { PingResult, MtrResult, TrafficSimResult, ProbeData, Probe } from '@/types';
 import { findProbesByInitialTarget } from '@/utils/probeGrouping';
 import { SharedWebSocketService } from '@/services/sharedWebSocketService';
@@ -27,9 +27,14 @@ const probeId = computed(() => Number(route.params.probeId));
 // Session storage key for password
 const getSessionKey = () => `share_password_${token.value}`;
 
-// Theme detection for date picker
+// Theme detection for date picker and toggle
 const isDark = ref(themeService.getTheme() === 'dark');
+const currentTheme = ref<Theme>(themeService.getTheme());
 let themeUnsubscribe: (() => void) | null = null;
+
+function toggleTheme() {
+    themeService.toggle();
+}
 
 // State
 const loading = ref(true);
@@ -704,9 +709,10 @@ const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
 
 // Initial load
 onMounted(async () => {
-    // Subscribe to theme changes for date picker
+    // Subscribe to theme changes for date picker and toggle
     themeUnsubscribe = themeService.onThemeChange((theme) => {
         isDark.value = theme === 'dark';
+        currentTheme.value = theme;
     });
     
     const canProceed = await loadShareInfo();
@@ -767,6 +773,11 @@ watch(
                     <i class="bi bi-eye"></i>
                     <span>NetWatcher</span>
                     <span class="badge">Shared View</span>
+                </div>
+                <div class="header-actions">
+                    <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+                        <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
+                    </button>
                 </div>
             </div>
         </header>
@@ -1121,6 +1132,34 @@ watch(
     border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 600;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.theme-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.theme-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.theme-toggle-btn i {
+    font-size: 1.125rem;
 }
 
 .shared-main {
@@ -1697,5 +1736,281 @@ watch(
 
 .mtr-help-text i {
     color: #3b82f6;
+}
+
+/* Light Theme Support - Comprehensive */
+[data-theme="light"] .shared-probe-page {
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    color: #1f2937;
+}
+
+[data-theme="light"] .shared-header {
+    background: rgba(255, 255, 255, 0.95);
+    border-bottom-color: #e5e7eb;
+}
+
+[data-theme="light"] .brand {
+    color: #1f2937;
+}
+
+[data-theme="light"] .back-btn {
+    background: rgba(0, 0, 0, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .back-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #1f2937;
+}
+
+[data-theme="light"] .theme-toggle-btn {
+    background: rgba(0, 0, 0, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .theme-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #1f2937;
+}
+
+[data-theme="light"] .loading-state,
+[data-theme="light"] .error-state {
+    color: #6b7280;
+}
+
+[data-theme="light"] .error-state i {
+    color: #ef4444;
+}
+
+[data-theme="light"] .back-link {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+}
+
+[data-theme="light"] .back-link:hover {
+    background: rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="light"] .password-card {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #e5e7eb;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .password-card h2 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .password-card p {
+    color: #6b7280;
+}
+
+[data-theme="light"] .password-icon {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+[data-theme="light"] .password-icon i {
+    color: #2563eb;
+}
+
+[data-theme="light"] .password-input {
+    background: #f9fafb;
+    border-color: #d1d5db;
+    color: #1f2937;
+}
+
+[data-theme="light"] .password-input:focus {
+    border-color: #3b82f6;
+    background: white;
+}
+
+[data-theme="light"] .password-error {
+    color: #dc2626;
+}
+
+[data-theme="light"] .probe-header-section {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .probe-title-info h1 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .probe-icon {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+}
+
+[data-theme="light"] .probe-icon.agent { background: rgba(236, 72, 153, 0.1); color: #db2777; }
+[data-theme="light"] .probe-icon.ping { background: rgba(34, 197, 94, 0.1); color: #15803d; }
+[data-theme="light"] .probe-icon.mtr { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
+[data-theme="light"] .probe-icon.trafficsim { background: rgba(168, 85, 247, 0.1); color: #7c3aed; }
+
+[data-theme="light"] .probe-type-badge {
+    background: rgba(107, 114, 128, 0.1);
+    color: #6b7280;
+}
+
+[data-theme="light"] .probe-type-badge.ping { background: rgba(34, 197, 94, 0.1); color: #15803d; }
+[data-theme="light"] .probe-type-badge.mtr { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
+[data-theme="light"] .probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.1); color: #7c3aed; }
+[data-theme="light"] .probe-type-badge.agent { background: rgba(236, 72, 153, 0.1); color: #db2777; }
+
+[data-theme="light"] .probe-interval {
+    color: #6b7280;
+}
+
+[data-theme="light"] .agent-context {
+    border-top-color: #e5e7eb;
+}
+
+[data-theme="light"] .context-label {
+    color: #6b7280;
+}
+
+[data-theme="light"] .context-value {
+    color: #1f2937;
+}
+
+[data-theme="light"] .context-location {
+    color: #6b7280;
+}
+
+[data-theme="light"] .date-picker-wrapper :deep(.dp__input) {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: #d1d5db;
+    color: #1f2937;
+}
+
+[data-theme="light"] .date-picker-wrapper :deep(.dp__input:hover) {
+    border-color: #3b82f6;
+}
+
+[data-theme="light"] .date-picker-wrapper :deep(.dp__input_icon) {
+    color: #6b7280;
+}
+
+[data-theme="light"] .direction-toggle {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: #e5e7eb;
+}
+
+[data-theme="light"] .direction-label {
+    color: #6b7280;
+}
+
+[data-theme="light"] .direction-btn {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: #e5e7eb;
+    color: #6b7280;
+}
+
+[data-theme="light"] .direction-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: #d1d5db;
+}
+
+[data-theme="light"] .direction-btn.active {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #2563eb;
+}
+
+[data-theme="light"] .direction-btn .direction-arrow {
+    color: #9ca3af;
+}
+
+[data-theme="light"] .data-section {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .data-section h2 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .graph-container {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .stat-card {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .stat-label {
+    color: #6b7280;
+}
+
+[data-theme="light"] .stat-value {
+    color: #1f2937;
+}
+
+[data-theme="light"] .subsection-title {
+    color: #6b7280;
+}
+
+[data-theme="light"] .network-map-container {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .mtr-results-header h3 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .mtr-count {
+    background: rgba(0, 0, 0, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .mtr-time {
+    color: #6b7280;
+}
+
+[data-theme="light"] .mtr-pagination {
+    border-top-color: #e5e7eb;
+}
+
+[data-theme="light"] .pagination-btn {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: #e5e7eb;
+    color: #6b7280;
+}
+
+[data-theme="light"] .pagination-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #2563eb;
+}
+
+[data-theme="light"] .pagination-info {
+    color: #6b7280;
+}
+
+[data-theme="light"] .no-data {
+    color: #9ca3af;
+}
+
+[data-theme="light"] .empty-state {
+    color: #6b7280;
+}
+
+[data-theme="light"] .loading-state {
+    color: #6b7280;
+}
+
+[data-theme="light"] .mtr-help-text {
+    background: rgba(59, 130, 246, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .shared-footer {
+    border-top-color: #e5e7eb;
+}
+
+[data-theme="light"] .shared-footer p {
+    color: #9ca3af;
 }
 </style>

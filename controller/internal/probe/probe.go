@@ -41,6 +41,7 @@ var (
 	ErrNoTargets    = errors.New("no targets provided")
 	ErrTargetFormat = errors.New("invalid target format")
 	ErrDuplicate    = errors.New("duplicate probe already exists")
+	ErrSelfTarget   = errors.New("probe cannot target itself")
 )
 
 // -------------------- Models --------------------
@@ -259,6 +260,13 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 	}
 	if len(in.Targets) == 0 && len(in.AgentTargets) == 0 {
 		return nil, ErrNoTargets
+	}
+
+	// Check for self-targeting: a probe cannot target its own agent
+	for _, targetAgentID := range in.AgentTargets {
+		if targetAgentID == in.AgentID {
+			return nil, fmt.Errorf("%w: agent %d cannot create a probe targeting itself", ErrSelfTarget, in.AgentID)
+		}
 	}
 
 	// Check for duplicate probe (same agent, type, and targets)

@@ -241,13 +241,13 @@ const routes: RouteRecordRaw[] = [
                                         props: true,
                                         meta: { requiresRole: 'USER' }
                                     },
-                                    // probes - delete (ADMIN+)
+                                    // probes - delete (USER+)
                                     {
                                         path: 'probes/:pID(\\d+)/delete',
                                         name: 'probeDelete',
                                         component: DeleteProbe,
                                         props: true,
-                                        meta: { requiresRole: 'ADMIN' }
+                                        meta: { requiresRole: 'USER' }
                                     },
 
                                     // speedtests

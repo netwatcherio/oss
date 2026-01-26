@@ -1,9 +1,10 @@
 <script lang="ts" setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
 import { groupProbesByTarget, type ProbeGroupByTarget } from '@/utils/probeGrouping';
+import { themeService, type Theme } from '@/services/themeService';
 
 const route = useRoute();
 const token = computed(() => route.params.token as string);
@@ -231,8 +232,27 @@ async function fetchAgentNames() {
     }
 }
 
+// Theme toggle
+const currentTheme = ref<Theme>(themeService.getTheme());
+let themeUnsubscribe: (() => void) | null = null;
+
+function toggleTheme() {
+    themeService.toggle();
+}
+
 onMounted(() => {
+    // Subscribe to theme changes
+    themeUnsubscribe = themeService.onThemeChange((theme) => {
+        currentTheme.value = theme;
+    });
     loadAgent();
+});
+
+onUnmounted(() => {
+    if (themeUnsubscribe) {
+        themeUnsubscribe();
+        themeUnsubscribe = null;
+    }
 });
 </script>
 
@@ -245,6 +265,11 @@ onMounted(() => {
                     <i class="bi bi-eye"></i>
                     <span>NetWatcher</span>
                     <span class="badge">Shared View</span>
+                </div>
+                <div class="header-actions">
+                    <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+                        <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
+                    </button>
                 </div>
             </div>
         </header>
@@ -459,6 +484,37 @@ onMounted(() => {
 .header-content {
     max-width: 1200px;
     margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.theme-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.theme-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.theme-toggle-btn i {
+    font-size: 1.125rem;
 }
 
 .brand {
@@ -951,27 +1007,186 @@ onMounted(() => {
     animation: spin 1s linear infinite;
 }
 
-/* Light Theme Support */
+/* Light Theme Support - Comprehensive */
 [data-theme="light"] .shared-agent-page {
     background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     color: #1f2937;
 }
 
 [data-theme="light"] .shared-header {
-    background: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.9);
     border-bottom-color: #e5e7eb;
+    backdrop-filter: blur(8px);
 }
 
-[data-theme="light"] .password-card,
-[data-theme="light"] .info-card,
-[data-theme="light"] .probe-card {
-    background: rgba(255, 255, 255, 0.8);
+[data-theme="light"] .theme-toggle-btn {
+    background: rgba(0, 0, 0, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .theme-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #1f2937;
+}
+
+[data-theme="light"] .brand {
+    color: #1f2937;
+}
+
+[data-theme="light"] .loading-state,
+[data-theme="light"] .error-state,
+[data-theme="light"] .expired-state {
+    color: #6b7280;
+}
+
+[data-theme="light"] .error-state i {
+    color: #ef4444;
+}
+
+[data-theme="light"] .expired-state i {
+    color: #f59e0b;
+}
+
+[data-theme="light"] .password-state .password-card {
+    background: rgba(255, 255, 255, 0.95);
     border-color: #e5e7eb;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .password-card p {
+    color: #6b7280;
 }
 
 [data-theme="light"] .password-input {
-    background: white;
+    background: #f9fafb;
     border-color: #d1d5db;
     color: #1f2937;
+}
+
+[data-theme="light"] .password-input:focus {
+    border-color: #3b82f6;
+    background: white;
+}
+
+[data-theme="light"] .expiry-notice {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.2);
+    color: #b45309;
+}
+
+[data-theme="light"] .speedtest-notice {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.2);
+    color: #15803d;
+}
+
+[data-theme="light"] .agent-info h1 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .agent-info p {
+    color: #6b7280;
+}
+
+[data-theme="light"] .agent-status {
+    background: rgba(0, 0, 0, 0.03);
+    color: #1f2937;
+}
+
+[data-theme="light"] .info-card {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .info-label {
+    color: #6b7280;
+}
+
+[data-theme="light"] .info-value {
+    color: #1f2937;
+}
+
+[data-theme="light"] .probes-section h2 {
+    color: #1f2937;
+}
+
+[data-theme="light"] .probe-count {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+}
+
+[data-theme="light"] .probe-card {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .probe-card:hover {
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .probe-icon {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+}
+
+[data-theme="light"] .probe-title {
+    color: #1f2937;
+}
+
+[data-theme="light"] .probe-type-badge {
+    background: rgba(107, 114, 128, 0.1);
+    color: #6b7280;
+}
+
+[data-theme="light"] .probe-type-badge.ping { 
+    background: rgba(34, 197, 94, 0.1); 
+    color: #15803d; 
+}
+
+[data-theme="light"] .probe-type-badge.mtr { 
+    background: rgba(59, 130, 246, 0.1); 
+    color: #2563eb; 
+}
+
+[data-theme="light"] .probe-type-badge.trafficsim { 
+    background: rgba(168, 85, 247, 0.1); 
+    color: #7c3aed; 
+}
+
+[data-theme="light"] .probe-type-badge.agent { 
+    background: rgba(236, 72, 153, 0.1); 
+    color: #db2777; 
+}
+
+[data-theme="light"] .probe-stat {
+    color: #6b7280;
+}
+
+[data-theme="light"] .probe-arrow {
+    color: #9ca3af;
+}
+
+[data-theme="light"] .no-probes {
+    color: #9ca3af;
+}
+
+[data-theme="light"] .target-badge {
+    background: rgba(0, 0, 0, 0.05);
+    color: #6b7280;
+}
+
+[data-theme="light"] .probe-meta {
+    color: #9ca3af;
+}
+
+[data-theme="light"] .shared-footer {
+    border-top-color: #e5e7eb;
+}
+
+[data-theme="light"] .shared-footer p {
+    color: #9ca3af;
 }
 </style>

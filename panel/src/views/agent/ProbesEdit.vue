@@ -1516,6 +1516,9 @@ const hasSelectedAgentProbes = computed(() => {
   flex-direction: column;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   animation: slideUp 0.2s ease;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
 @keyframes slideUp {
