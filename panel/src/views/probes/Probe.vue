@@ -214,32 +214,34 @@ function generateTable(probeData: ProbeData) {
 function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
   if (!newData) return;
 
-  // --- ensure stable unique key ---
-  // Many backends reuse `id=0` or null; generate UUID if missing or falsy
-  if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
-    (newData as any).id = (crypto as any).randomUUID();
-  } else {
-    (newData as any).id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
-
-  // --- deduplication logic ---
-  // Use a stable composite key instead of only `id` when data sources overlap
-  const key = `${newData.id}-${(newData as any).timestamp ?? ""}-${(newData as any).type ?? ""}`;
-
+  // --- deduplication logic (check BEFORE assigning ID) ---
+  // Use a stable composite key: probe_id + created_at + type
+  const newKey = `${newData.probe_id}-${newData.created_at}-${newData.type}`;
+  
   const exists = targetArray.some(
-      (item) =>
-          item.id === newData.id ||
-          `${item.id}-${(item as any).timestamp ?? ""}-${(item as any).type ?? ""}` === key
+      (item) => `${item.probe_id}-${item.created_at}-${item.type}` === newKey
   );
 
-  if (!exists) {
-    // Use .push() to preserve reactivity in Vue arrays
-    targetArray.push(newData);
+  if (exists) {
+    // Duplicate found, skip
+    return;
   }
+
+  // --- assign stable unique id for Vue reactivity if missing ---
+  if (!newData.id || newData.id === 0) {
+    if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
+      (newData as any).id = (crypto as any).randomUUID();
+    } else {
+      (newData as any).id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+  }
+
+  // Use .push() to preserve reactivity in Vue arrays
+  targetArray.push(newData);
 }
 // --------- Adapters for graphs (expecting your components’ input shapes) ---------
 
