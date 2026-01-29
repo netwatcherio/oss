@@ -21,9 +21,9 @@ func initNetInfo(db *sql.DB) {
 				return err
 			}
 
-			// Store to DB / compute / alert as needed:
-			log.Printf("[netinfo] wan=%s lan=%s gw=%s source=%s",
-				p.PublicAddress, p.LocalAddress, p.DefaultGateway, p.Source)
+			// Log with agent ID for debugging IP resolution issues
+			log.Infof("[netinfo] agent=%d probe=%d wan=%s lan=%s gw=%s source=%s",
+				data.AgentID, data.ProbeID, p.PublicAddress, p.LocalAddress, p.DefaultGateway, p.Source)
 			return nil
 		},
 	))

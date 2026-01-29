@@ -1,0 +1,48 @@
+# Single-Domain Caddyfile for NetWatcher OSS
+# Use this when you only have one domain available
+# Copy this to Caddyfile or mount in docker-compose:
+#   volumes:
+#     - ./Caddyfile.single-domain:/etc/caddy/Caddyfile:ro
+
+# Standard headers - Caddy automatically handles X-Forwarded-For, X-Forwarded-Proto, etc.
+(standard_headers) {
+	header_up X-Real-IP {http.request.remote.host}
+}
+
+# Cloudflare-specific headers - use when behind Cloudflare
+(cloudflare_headers) {
+	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+}
+
+{$DOMAIN} {
+	# API routes - strip /api prefix and proxy to controller
+	handle_path /api/* {
+		# WebSocket connections
+		@ws {
+			header Connection *Upgrade*
+			header Upgrade websocket
+		}
+		reverse_proxy @ws {$CONTROLLER_UPSTREAM} {
+			import standard_headers
+			header_up Connection {http.request.header.Connection}
+			header_up Upgrade {http.request.header.Upgrade}
+		}
+		
+		# Regular HTTP requests
+		reverse_proxy {$CONTROLLER_UPSTREAM} {
+			import standard_headers
+		}
+	}
+	
+	# All other routes - proxy to panel
+	handle {
+		@ws {
+			header Connection *Upgrade*
+			header Upgrade websocket
+		}
+		reverse_proxy {$PANEL_UPSTREAM} {
+			import standard_headers
+		}
+	}
+}

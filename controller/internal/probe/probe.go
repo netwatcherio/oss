@@ -740,8 +740,8 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		}
 
 		publicIP = netInfo.PublicAddress
-		log.Debugf("[getPublicIP] agent %d: resolved PublicAddress=%q from NETINFO (age: %v)",
-			agentID, publicIP, dataAge.Round(time.Second))
+		log.Infof("[getPublicIP] agent %d: NETINFO probe %d returned PublicAddress=%q (age: %v, record_agent_id=%d)",
+			agentID, netInfoPayload.ProbeID, publicIP, dataAge.Round(time.Second), netInfoPayload.AgentID)
 	}
 	return publicIP, nil
 }
