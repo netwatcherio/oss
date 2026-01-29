@@ -87,9 +87,16 @@ Panel runs at: `http://localhost:5173`
 
 ## Production Deployment
 
+NetWatcher supports two deployment modes:
+
+| Mode | Domains Required | Caddyfile | Best For |
+|------|------------------|-----------|----------|
+| **Dual-domain** (default) | 2 (`api.`, `app.`) | `Caddyfile` | Production, cleaner URLs |
+| **Single-domain** | 1 | `Caddyfile.single-domain` | Simple deployments, testing |
+
 ### Prerequisites
 - Docker & Docker Compose
-- Domain names configured (e.g., `api.example.com`, `app.example.com`)
+- One or two domain names (see table above)
 - (Optional) Cloudflare for CDN/DDoS protection
 
 ### 1. Configure Environment
@@ -102,17 +109,28 @@ cp sample.env .env
 nano .env
 ```
 
-**Required variables:**
+**Required variables (dual-domain):**
 
 | Variable | Description |
 |----------|-------------|
 | `API_DOMAIN` | API domain (e.g., `api.netwatcher.io`) |
 | `APP_DOMAIN` | Panel domain (e.g., `app.netwatcher.io`) |
+| `CONTROLLER_ENDPOINT` | Public API URL (e.g., `https://api.netwatcher.io`) |
 | `POSTGRES_PASSWORD` | Strong database password |
 | `CLICKHOUSE_PASSWORD` | Strong ClickHouse password |
 | `JWT_SECRET` | 32+ character random string |
 | `PIN_PEPPER` | Random string for PIN hashing |
-| `CONTROLLER_ENDPOINT` | Public API URL for panel |
+
+**Required variables (single-domain):**
+
+| Variable | Description |
+|----------|-------------|
+| `DOMAIN` | Your domain (e.g., `netwatcher.io`) |
+| `CONTROLLER_ENDPOINT` | Public API URL (e.g., `https://netwatcher.io/api`) |
+| `POSTGRES_PASSWORD` | Strong database password |
+| `CLICKHOUSE_PASSWORD` | Strong ClickHouse password |
+| `JWT_SECRET` | 32+ character random string |
+| `PIN_PEPPER` | Random string for PIN hashing |
 
 **Generate secrets:**
 ```bash
@@ -130,7 +148,19 @@ docker build -t netwatcher-controller ./controller
 docker build -t netwatcher-panel ./panel
 ```
 
-### 3. Deploy
+### 3. Choose Caddyfile
+
+**Dual-domain (default):** No changes needed, uses `Caddyfile`.
+
+**Single-domain:** Update `docker-compose.yml` to mount the single-domain config:
+
+```yaml
+caddy:
+  volumes:
+    - ./Caddyfile.single-domain:/etc/caddy/Caddyfile:ro
+```
+
+### 4. Deploy
 
 ```bash
 # Start all services
@@ -143,17 +173,21 @@ docker compose logs -f
 docker compose ps
 ```
 
-### 4. Verify
+### 5. Verify
 
+**Dual-domain:**
 ```bash
-# Test API health
 curl https://api.example.com/healthz
-
-# Open panel
 open https://app.example.com
 ```
 
-### 5. Agent Setup
+**Single-domain:**
+```bash
+curl https://example.com/api/healthz
+open https://example.com
+```
+
+### 6. Agent Setup
 
 After creating an agent in the panel, a setup modal displays the bootstrap PIN and installation commands:
 
@@ -225,14 +259,15 @@ The PIN is valid for 24 hours. After successful bootstrap, the agent receives a 
 
 ```
 netwatcher-oss/
-├── docker-compose.yml      # Production deployment
-├── docker-compose.dev.yml  # Development (databases only)
-├── Caddyfile               # Reverse proxy config
-├── sample.env              # Environment template
+├── docker-compose.yml          # Production deployment
+├── docker-compose.dev.yml      # Development (databases only)
+├── Caddyfile                   # Dual-domain reverse proxy (default)
+├── Caddyfile.single-domain     # Single-domain reverse proxy (optional)
+├── .env.example                # Environment template
 ├── controller/
-│   └── Dockerfile          # Controller image
+│   └── Dockerfile              # Controller image
 └── panel/
-    └── Dockerfile          # Panel image
+    └── Dockerfile              # Panel image
 ```
 
 ---

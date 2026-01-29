@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	log "github.com/sirupsen/logrus"
 )
 
 // OpenClickHouseFromEnv returns a *sql.DB using clickhouse-go v2.
@@ -410,6 +411,7 @@ func GetLatestNetInfoForAgent(
 	agentID uint64,
 	probeID *uint64, // pass nil to ignore probe_id
 ) (*ProbeData, error) {
+	log.Infof("[IP-DEBUG] GetLatestNetInfoForAgent: querying NETINFO for agent_id=%d", agentID)
 	typ := string(TypeNetInfo) // or string(probe.TypeNetInfo) if you prefer
 	params := FindParams{
 		Type:    &typ,
@@ -418,7 +420,18 @@ func GetLatestNetInfoForAgent(
 	if probeID != nil {
 		params.ProbeID = probeID
 	}
-	return GetLatest(ctx, db, params)
+	result, err := GetLatest(ctx, db, params)
+	if err != nil {
+		log.Errorf("[IP-DEBUG] GetLatestNetInfoForAgent: query error for agent %d: %v", agentID, err)
+		return nil, err
+	}
+	if result != nil {
+		log.Infof("[IP-DEBUG] GetLatestNetInfoForAgent: found record for agent %d - result.AgentID=%d, ProbeID=%d",
+			agentID, result.AgentID, result.ProbeID)
+	} else {
+		log.Warnf("[IP-DEBUG] GetLatestNetInfoForAgent: no record found for agent %d", agentID)
+	}
+	return result, nil
 }
 
 // Convenience wrapper for your stated use-case:

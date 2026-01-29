@@ -427,6 +427,8 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			for _, t := range p.Targets {
 				if t.AgentID != nil {
 					targetAgentID := *t.AgentID
+					log.Infof("[IP-DEBUG] Expanding AGENT probe %d: owner=%d, target.AgentID=%d, target.Target=%q",
+						p.ID, p.AgentID, targetAgentID, t.Target)
 					expanded, err := expandAgentProbeForOwner(ctx, db, ch, p, targetAgentID, pubIPCache)
 					if err != nil {
 						log.Warnf("ListForAgent: error expanding owned AGENT probe %d: %v", p.ID, err)
@@ -491,6 +493,8 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	agentProbe *Probe, targetAgentID uint, pubIPCache map[uint]string) ([]Probe, error) {
 
 	// Get target agent's public IP
+	log.Infof("[IP-DEBUG] expandAgentProbeForOwner: probeID=%d, probeOwner=%d, lookingUpIPFor=agent%d",
+		agentProbe.ID, agentProbe.AgentID, targetAgentID)
 	targetIP, ok := pubIPCache[targetAgentID]
 	if !ok {
 		var err error
@@ -498,7 +502,10 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		if err != nil {
 			return nil, fmt.Errorf("failed to get target agent %d public IP: %w", targetAgentID, err)
 		}
+		log.Infof("[IP-DEBUG] getPublicIP returned: agent%d -> IP=%q", targetAgentID, targetIP)
 		pubIPCache[targetAgentID] = targetIP
+	} else {
+		log.Infof("[IP-DEBUG] Using cached IP for agent%d -> IP=%q", targetAgentID, targetIP)
 	}
 
 	if targetIP == "" {
@@ -661,15 +668,29 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		return "", err
 	}
 
+	log.Infof("[IP-DEBUG] getPublicIP called: looking up IP for agent %d", agentID)
 	if agentByID.PublicIPOverride != "" {
 		publicIP = agentByID.PublicIPOverride
+		log.Infof("[IP-DEBUG] agent %d: using PublicIPOverride=%q", agentID, publicIP)
 	} else {
 		netInfoPayload, err := GetLatestNetInfoForAgent(ctx, ch, uint64(agentID), nil)
 		if err != nil {
+			log.Errorf("[IP-DEBUG] agent %d: GetLatestNetInfoForAgent failed: %v", agentID, err)
 			return "", err
 		}
 		if netInfoPayload == nil || netInfoPayload.Payload == nil {
+			log.Errorf("[IP-DEBUG] agent %d: no NETINFO payload found", agentID)
 			return "", fmt.Errorf("no netinfo payload found for agent %d", agentID)
+		}
+
+		// Log the NETINFO record details for debugging
+		log.Infof("[IP-DEBUG] agent %d: NETINFO record found - AgentID=%d, CreatedAt=%v, ProbeID=%d",
+			agentID, netInfoPayload.AgentID, netInfoPayload.CreatedAt, netInfoPayload.ProbeID)
+
+		// CRITICAL: Verify the NETINFO record is for the correct agent
+		if netInfoPayload.AgentID != agentID {
+			log.Errorf("[IP-DEBUG] AGENT MISMATCH! Requested agent %d but got NETINFO for agent %d",
+				agentID, netInfoPayload.AgentID)
 		}
 
 		// Warn if NETINFO is stale (>5 minutes old) - may indicate agent restart
@@ -695,6 +716,7 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		}
 
 		publicIP = netInfo.PublicAddress
+		log.Infof("[IP-DEBUG] agent %d: resolved PublicAddress=%q from NETINFO", agentID, publicIP)
 	}
 	return publicIP, nil
 }
