@@ -263,10 +263,12 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 
 				// Log summary of probes being sent (not full JSON)
 				typeCounts := make(map[string]int)
+				var probeIDs []uint
 				for _, p := range ownedP {
 					typeCounts[string(p.Type)]++
+					probeIDs = append(probeIDs, p.ID)
 				}
-				log.Infof("[probe_get] agent %d: sending %d probes %v", a.ID, len(ownedP), typeCounts)
+				log.Infof("[probe_get] agent %d: sending %d probes %v (IDs: %v)", a.ID, len(ownedP), typeCounts, probeIDs)
 
 				payload, err := json.Marshal(ownedP)
 				if err != nil {

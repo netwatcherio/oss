@@ -413,8 +413,21 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		return nil, err
 	}
 
+	// Log what we got from the database
+	dbTypeCounts := make(map[string]int)
+	var dbProbeIDs []uint
+	for _, p := range allProbes {
+		dbTypeCounts[string(p.Type)]++
+		dbProbeIDs = append(dbProbeIDs, p.ID)
+	}
+	log.Infof("[agent %d] DB: %d probes %v IDs=%v",
+		agentID, len(allProbes), dbTypeCounts, dbProbeIDs)
+
 	// cache public IP lookups per agent to avoid repeat DB hits
 	pubIPCache := make(map[uint]string)
+
+	// Track expansion stats
+	var agentProbesExpanded, agentProbesFailed int
 
 	// 2. Process owned probes - expand AGENT probes, resolve IPs for others
 	for i := range allProbes {
@@ -427,13 +440,16 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			for _, t := range p.Targets {
 				if t.AgentID != nil {
 					targetAgentID := *t.AgentID
-					log.Infof("[IP-DEBUG] Expanding AGENT probe %d: owner=%d, target.AgentID=%d, target.Target=%q",
-						p.ID, p.AgentID, targetAgentID, t.Target)
+					log.Debugf("[agent %d] Expanding AGENT probe %d -> target agent %d",
+						agentID, p.ID, targetAgentID)
 					expanded, err := expandAgentProbeForOwner(ctx, db, ch, p, targetAgentID, pubIPCache)
 					if err != nil {
-						log.Warnf("ListForAgent: error expanding owned AGENT probe %d: %v", p.ID, err)
+						log.Warnf("[agent %d] AGENT probe %d FAILED (target %d): %v",
+							agentID, p.ID, targetAgentID, err)
+						agentProbesFailed++
 						continue
 					}
+					agentProbesExpanded++
 					out = append(out, expanded...)
 				}
 			}
@@ -449,7 +465,8 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 					if !ok {
 						ip, err = getPublicIP(ctx, db, ch, aid)
 						if err != nil {
-							log.Error(err)
+							log.Errorf("[agent %d] Probe %d: IP lookup FAILED for agent %d: %v",
+								agentID, p.ID, aid, err)
 							continue
 						}
 						pubIPCache[aid] = ip
@@ -462,15 +479,15 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 	}
 
-	// Debug: log what probes are being sent to this agent
-	log.Infof("[BIDIR-DEBUG] ListForAgent: agent %d receiving %d probes", agentID, len(out))
+	// Summary log with final counts
+	outTypeCounts := make(map[string]int)
+	var outProbeIDs []uint
 	for _, p := range out {
-		targetStr := ""
-		if len(p.Targets) > 0 {
-			targetStr = p.Targets[0].Target
-		}
-		log.Infof("[BIDIR-DEBUG]   -> Probe ID=%d Type=%s Target=%s", p.ID, p.Type, targetStr)
+		outTypeCounts[string(p.Type)]++
+		outProbeIDs = append(outProbeIDs, p.ID)
 	}
+	log.Infof("[agent %d] OUTPUT: %d probes %v (expanded: %d ok, %d fail) IDs=%v",
+		agentID, len(out), outTypeCounts, agentProbesExpanded, agentProbesFailed, outProbeIDs)
 
 	return out, nil
 }
@@ -492,9 +509,11 @@ func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint
 func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	agentProbe *Probe, targetAgentID uint, pubIPCache map[uint]string) ([]Probe, error) {
 
+	ownerAgentID := agentProbe.AgentID
+
 	// Get target agent's public IP
-	log.Infof("[IP-DEBUG] expandAgentProbeForOwner: probeID=%d, probeOwner=%d, lookingUpIPFor=agent%d",
-		agentProbe.ID, agentProbe.AgentID, targetAgentID)
+	log.Debugf("[agent %d] Looking up IP for target agent %d (probe %d expansion)",
+		ownerAgentID, targetAgentID, agentProbe.ID)
 	targetIP, ok := pubIPCache[targetAgentID]
 	if !ok {
 		var err error
@@ -502,10 +521,10 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		if err != nil {
 			return nil, fmt.Errorf("failed to get target agent %d public IP: %w", targetAgentID, err)
 		}
-		log.Infof("[IP-DEBUG] getPublicIP returned: agent%d -> IP=%q", targetAgentID, targetIP)
+		log.Debugf("[agent %d] Resolved target agent %d IP: %q", ownerAgentID, targetAgentID, targetIP)
 		pubIPCache[targetAgentID] = targetIP
 	} else {
-		log.Infof("[IP-DEBUG] Using cached IP for agent%d -> IP=%q", targetAgentID, targetIP)
+		log.Debugf("[agent %d] Using cached IP for target agent %d: %q", ownerAgentID, targetAgentID, targetIP)
 	}
 
 	if targetIP == "" {
@@ -543,15 +562,11 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		// No port needed - the server will use the existing connection from the client
 		tsProbe.Targets[0].Target = targetIP + ":bidir" // Special marker for bidirectional
 		expanded = append(expanded, tsProbe)
-		log.Infof("[BIDIR-DEBUG] Created bidirectional TRAFFICSIM probe for owner %d -> target %d", agentProbe.AgentID, targetAgentID)
+		log.Debugf("[agent %d] Created bidirectional TRAFFICSIM for target agent %d", ownerAgentID, targetAgentID)
 	}
 
-	log.Infof("[BIDIR-DEBUG] expandAgentProbeForOwner: AGENT probe %d (owned by agent %d) expanded into %d probes (MTR/PING/TS) targeting agent %d @ %s",
-		agentProbe.ID, agentProbe.AgentID, len(expanded), targetAgentID, targetIP)
-	for _, ep := range expanded {
-		log.Infof("[BIDIR-DEBUG]   -> Expanded probe: ID=%d Type=%s AgentID=%d Target=%s",
-			ep.ID, ep.Type, ep.AgentID, ep.Targets[0].Target)
-	}
+	log.Infof("[agent %d] AGENT probe %d expanded: %d probes -> target agent %d @ %s",
+		ownerAgentID, agentProbe.ID, len(expanded), targetAgentID, targetIP)
 
 	return expanded, nil
 }
@@ -661,6 +676,11 @@ func getTrafficSimServerPort(ctx context.Context, db *gorm.DB, agentID uint) str
 }
 
 func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (string, error) {
+	// netInfoMaxAge is the maximum age of NETINFO data we'll accept.
+	// Data older than this is considered too stale to reliably use.
+	const netInfoMaxAge = 1 * time.Hour
+	const netInfoWarnAge = 5 * time.Minute
+
 	var publicIP string
 
 	agentByID, err := agent.GetAgentByID(ctx, db, agentID)
@@ -668,36 +688,40 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		return "", err
 	}
 
-	log.Infof("[IP-DEBUG] getPublicIP called: looking up IP for agent %d", agentID)
+	log.Debugf("[getPublicIP] looking up IP for agent %d", agentID)
 	if agentByID.PublicIPOverride != "" {
 		publicIP = agentByID.PublicIPOverride
-		log.Infof("[IP-DEBUG] agent %d: using PublicIPOverride=%q", agentID, publicIP)
+		log.Debugf("[getPublicIP] agent %d: using PublicIPOverride=%q", agentID, publicIP)
 	} else {
 		netInfoPayload, err := GetLatestNetInfoForAgent(ctx, ch, uint64(agentID), nil)
 		if err != nil {
-			log.Errorf("[IP-DEBUG] agent %d: GetLatestNetInfoForAgent failed: %v", agentID, err)
+			log.Errorf("[getPublicIP] agent %d: GetLatestNetInfoForAgent failed: %v", agentID, err)
 			return "", err
 		}
 		if netInfoPayload == nil || netInfoPayload.Payload == nil {
-			log.Errorf("[IP-DEBUG] agent %d: no NETINFO payload found", agentID)
+			log.Errorf("[getPublicIP] agent %d: no NETINFO payload found", agentID)
 			return "", fmt.Errorf("no netinfo payload found for agent %d", agentID)
 		}
 
-		// Log the NETINFO record details for debugging
-		log.Infof("[IP-DEBUG] agent %d: NETINFO record found - AgentID=%d, CreatedAt=%v, ProbeID=%d",
-			agentID, netInfoPayload.AgentID, netInfoPayload.CreatedAt, netInfoPayload.ProbeID)
+		// Check data age - fail only if too old
+		dataAge := time.Since(netInfoPayload.CreatedAt)
+		if dataAge > netInfoMaxAge {
+			log.Errorf("[getPublicIP] agent %d: NETINFO too stale (%v old, max %v) - cannot use",
+				agentID, dataAge.Round(time.Second), netInfoMaxAge)
+			return "", fmt.Errorf("netinfo too stale for agent %d (%v old)", agentID, dataAge.Round(time.Second))
+		}
+
+		// Warn if somewhat stale but still usable
+		if dataAge > netInfoWarnAge {
+			log.Warnf("[getPublicIP] agent %d: NETINFO is %v old (warn threshold: %v), still using",
+				agentID, dataAge.Round(time.Second), netInfoWarnAge)
+		}
 
 		// CRITICAL: Verify the NETINFO record is for the correct agent
 		if netInfoPayload.AgentID != agentID {
-			log.Errorf("[IP-DEBUG] AGENT MISMATCH! Requested agent %d but got NETINFO for agent %d",
+			log.Errorf("[getPublicIP] AGENT MISMATCH! Requested agent %d but got NETINFO for agent %d",
 				agentID, netInfoPayload.AgentID)
-		}
-
-		// Warn if NETINFO is stale (>5 minutes old) - may indicate agent restart
-		// where the old cached IP might be outdated
-		if time.Since(netInfoPayload.CreatedAt) > 5*time.Minute {
-			log.Warnf("getPublicIP: agent %d NETINFO is stale (%v old), IP may be outdated",
-				agentID, time.Since(netInfoPayload.CreatedAt).Round(time.Second))
+			return "", fmt.Errorf("agent mismatch: requested %d, got %d", agentID, netInfoPayload.AgentID)
 		}
 
 		var netInfo = struct {
@@ -716,7 +740,8 @@ func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (st
 		}
 
 		publicIP = netInfo.PublicAddress
-		log.Infof("[IP-DEBUG] agent %d: resolved PublicAddress=%q from NETINFO", agentID, publicIP)
+		log.Debugf("[getPublicIP] agent %d: resolved PublicAddress=%q from NETINFO (age: %v)",
+			agentID, publicIP, dataAge.Round(time.Second))
 	}
 	return publicIP, nil
 }
