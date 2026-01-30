@@ -268,24 +268,37 @@ function getTotalProbesByType(type: string): number {
 }
 
 function updateSystemData(info: SysInfoPayload): SystemData {
-  let cpuCapacity: number = (info.CPUTimes?.idle || 0) + info.CPUTimes.system + info.CPUTimes.user;
-  let ramCapacity: number = info.memoryInfo.total_bytes;
-  let virtualCapacity: number = info.memoryInfo.virtual_total_bytes;
+  // Guard against missing data (e.g., agent is offline)
+  if (!info?.CPUTimes || !info?.memoryInfo) {
+    return {
+      cpu: { idle: 0, system: 0, user: 0 },
+      ram: { used: 0, free: 0, total: 0 },
+      virtual: { used: 0, free: 0, total: 0 }
+    } as SystemData;
+  }
+  
+  let cpuCapacity: number = (info.CPUTimes.idle || 0) + (info.CPUTimes.system || 0) + (info.CPUTimes.user || 0);
+  // Avoid division by zero
+  if (cpuCapacity === 0) cpuCapacity = 1;
+  
+  let ramCapacity: number = info.memoryInfo.total_bytes || 1;
+  let virtualCapacity: number = info.memoryInfo.virtual_total_bytes || 1;
+  
   return {
     cpu: {
-      idle: roundTo((info.CPUTimes?.idle || 0) / cpuCapacity),
-      system: roundTo((info.CPUTimes?.system || 0) / cpuCapacity),
-      user: roundTo((info.CPUTimes?.user || 0) / cpuCapacity),
+      idle: roundTo((info.CPUTimes.idle || 0) / cpuCapacity),
+      system: roundTo((info.CPUTimes.system || 0) / cpuCapacity),
+      user: roundTo((info.CPUTimes.user || 0) / cpuCapacity),
     },
     ram: {
-      used: roundTo(info.memoryInfo.used_bytes / ramCapacity),
-      free: roundTo(info.memoryInfo.available_bytes / ramCapacity),
-      total: roundTo(info.memoryInfo.total_bytes / ramCapacity),
+      used: roundTo((info.memoryInfo.used_bytes || 0) / ramCapacity),
+      free: roundTo((info.memoryInfo.available_bytes || 0) / ramCapacity),
+      total: roundTo((info.memoryInfo.total_bytes || 0) / ramCapacity),
     },
     virtual: {
-      used: roundTo(info.memoryInfo.virtual_used_bytes / ramCapacity),
-      free: roundTo(info.memoryInfo.virtual_free_bytes / virtualCapacity),
-      total: roundTo(info.memoryInfo.virtual_total_bytes / virtualCapacity),
+      used: roundTo((info.memoryInfo.virtual_used_bytes || 0) / ramCapacity),
+      free: roundTo((info.memoryInfo.virtual_free_bytes || 0) / virtualCapacity),
+      total: roundTo((info.memoryInfo.virtual_total_bytes || 0) / virtualCapacity),
     }
   } as SystemData
 }
@@ -671,6 +684,11 @@ onMounted(async () => {
   ProbeService.sysInfo(workspaceID, agentID)
       .then(res => {
         let pD = res as ProbeData
+        // Guard against empty/null payload (agent offline or no data yet)
+        if (!pD?.payload) {
+          console.log('No system info data available (agent may be offline)');
+          return;
+        }
         state.systemInfo = pD.payload as SysInfoPayload
         state.systemData = updateSystemData(state.systemInfo)
         state.hasData = true
