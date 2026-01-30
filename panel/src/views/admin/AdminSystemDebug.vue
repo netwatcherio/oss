@@ -11,13 +11,13 @@
         <div class="stat-icon"><i class="bi bi-broadcast"></i></div>
         <div class="stat-content">
           <div class="stat-value">{{ connections.connected_count }}</div>
-          <div class="stat-label">Active Connections</div>
+          <div class="stat-label">Active Agents</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon ws"><i class="bi bi-diagram-3"></i></div>
+        <div class="stat-icon ws"><i class="bi bi-folder2-open"></i></div>
         <div class="stat-content">
-          <div class="stat-value">{{ uniqueWorkspaces }}</div>
+          <div class="stat-value">{{ connections.workspace_count }}</div>
           <div class="stat-label">Workspaces</div>
         </div>
       </div>
@@ -36,12 +36,28 @@
         <i class="bi bi-arrow-clockwise" :class="{ 'spin': loading }"></i>
         Refresh
       </button>
+      <div class="view-toggle">
+        <button 
+          class="btn btn-sm" 
+          :class="viewMode === 'grouped' ? 'btn-primary' : 'btn-outline-secondary'"
+          @click="viewMode = 'grouped'"
+        >
+          <i class="bi bi-collection"></i> By Workspace
+        </button>
+        <button 
+          class="btn btn-sm" 
+          :class="viewMode === 'flat' ? 'btn-primary' : 'btn-outline-secondary'"
+          @click="viewMode = 'flat'"
+        >
+          <i class="bi bi-list"></i> All Connections
+        </button>
+      </div>
       <div class="auto-refresh">
         <input type="checkbox" id="autoRefresh" v-model="autoRefresh" />
         <label for="autoRefresh">Auto-refresh (10s)</label>
       </div>
       <span class="last-updated" v-if="lastUpdated">
-        Last updated: {{ lastUpdated }}
+        Updated: {{ lastUpdated }}
       </span>
     </div>
 
@@ -57,33 +73,73 @@
       <i class="bi bi-exclamation-triangle"></i> {{ error }}
     </div>
 
-    <!-- Connections Table -->
-    <div class="connections-panel" v-if="connections && connections.connections.length > 0">
-      <h3><i class="bi bi-plug"></i> Active Agent Connections</h3>
+    <!-- Grouped View -->
+    <div v-if="viewMode === 'grouped' && connections && connections.by_workspace.length > 0">
+      <div class="workspace-group" v-for="ws in connections.by_workspace" :key="ws.workspace_id">
+        <div class="workspace-header">
+          <div class="workspace-info">
+            <i class="bi bi-folder2"></i>
+            <router-link :to="`/admin/workspaces/${ws.workspace_id}`" class="workspace-name">
+              {{ ws.workspace_name || `Workspace ${ws.workspace_id}` }}
+            </router-link>
+            <span class="badge bg-primary">{{ ws.agent_count }} agent{{ ws.agent_count > 1 ? 's' : '' }}</span>
+          </div>
+        </div>
+        <div class="agent-cards">
+          <div class="agent-card" v-for="conn in ws.connections" :key="conn.conn_id">
+            <div class="agent-main">
+              <div class="agent-name">
+                <i class="bi bi-hdd-network"></i>
+                {{ conn.agent_name || `Agent ${conn.agent_id}` }}
+              </div>
+              <span class="agent-id">#{{ conn.agent_id }}</span>
+            </div>
+            <div class="agent-details">
+              <div class="detail">
+                <i class="bi bi-globe"></i>
+                <span class="ip">{{ conn.client_ip }}</span>
+              </div>
+              <div class="detail">
+                <i class="bi bi-clock"></i>
+                <span>{{ getDuration(conn.connected_at) }}</span>
+              </div>
+              <div class="detail conn-id-detail">
+                <i class="bi bi-link-45deg"></i>
+                <code>{{ conn.conn_id.substring(0, 8) }}</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flat View -->
+    <div class="connections-panel" v-if="viewMode === 'flat' && connections && connections.connections.length > 0">
+      <h3><i class="bi bi-plug"></i> All Active Connections</h3>
       <div class="table-responsive">
         <table class="table table-hover">
           <thead>
             <tr>
-              <th>Agent ID</th>
+              <th>Agent</th>
               <th>Workspace</th>
-              <th>Connection ID</th>
               <th>Client IP</th>
               <th>Connected</th>
               <th>Duration</th>
+              <th>Connection ID</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="conn in sortedConnections" :key="conn.conn_id">
               <td>
-                <span class="badge bg-primary">{{ conn.agent_id }}</span>
+                <div class="agent-cell">
+                  <span class="name">{{ conn.agent_name || 'Unknown' }}</span>
+                  <span class="badge bg-secondary">{{ conn.agent_id }}</span>
+                </div>
               </td>
               <td>
                 <router-link :to="`/admin/workspaces/${conn.workspace_id}`" class="ws-link">
-                  WS {{ conn.workspace_id }}
+                  {{ conn.workspace_name || `WS ${conn.workspace_id}` }}
                 </router-link>
-              </td>
-              <td>
-                <code class="conn-id">{{ conn.conn_id.substring(0, 12) }}...</code>
               </td>
               <td>
                 <span class="ip-badge">{{ conn.client_ip }}</span>
@@ -92,6 +148,9 @@
               <td>
                 <span class="duration">{{ getDuration(conn.connected_at) }}</span>
               </td>
+              <td>
+                <code class="conn-id">{{ conn.conn_id.substring(0, 12) }}...</code>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -99,7 +158,7 @@
     </div>
 
     <!-- Empty State -->
-    <div class="empty-state" v-else-if="connections && connections.connections.length === 0">
+    <div class="empty-state" v-if="connections && connections.connections.length === 0">
       <i class="bi bi-plug"></i>
       <p>No active agent connections</p>
     </div>
@@ -108,11 +167,18 @@
     <div class="ip-distribution" v-if="connections && connections.connections.length > 0">
       <h3><i class="bi bi-geo-alt"></i> Connections by IP</h3>
       <div class="ip-list">
-        <div class="ip-row" v-for="(count, ip) in ipCounts" :key="ip">
-          <span class="ip">{{ ip }}</span>
-          <span class="count badge" :class="count > 1 ? 'bg-warning' : 'bg-secondary'">
-            {{ count }} agent{{ count > 1 ? 's' : '' }}
-          </span>
+        <div class="ip-row" v-for="(agents, ip) in ipGroups" :key="ip">
+          <div class="ip-info">
+            <span class="ip">{{ ip }}</span>
+            <span class="badge" :class="agents.length > 1 ? 'bg-warning text-dark' : 'bg-secondary'">
+              {{ agents.length }} agent{{ agents.length > 1 ? 's' : '' }}
+            </span>
+          </div>
+          <div class="ip-agents">
+            <span v-for="a in agents" :key="a.agent_id" class="agent-tag">
+              {{ a.agent_name || `Agent ${a.agent_id}` }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -120,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import * as adminService from '@/services/adminService';
 import type { DebugConnectionsResponse, AgentConnection } from '@/services/adminService';
 
@@ -129,13 +195,8 @@ const loading = ref(true);
 const error = ref('');
 const lastUpdated = ref('');
 const autoRefresh = ref(false);
+const viewMode = ref<'grouped' | 'flat'>('grouped');
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
-
-const uniqueWorkspaces = computed(() => {
-  if (!connections.value) return 0;
-  const wsSet = new Set(connections.value.connections.map(c => c.workspace_id));
-  return wsSet.size;
-});
 
 const uniqueIPs = computed(() => {
   if (!connections.value) return 0;
@@ -150,13 +211,14 @@ const sortedConnections = computed(() => {
   );
 });
 
-const ipCounts = computed(() => {
+const ipGroups = computed(() => {
   if (!connections.value) return {};
-  const counts: Record<string, number> = {};
+  const groups: Record<string, AgentConnection[]> = {};
   connections.value.connections.forEach(c => {
-    counts[c.client_ip] = (counts[c.client_ip] || 0) + 1;
+    if (!groups[c.client_ip]) groups[c.client_ip] = [];
+    groups[c.client_ip].push(c);
   });
-  return counts;
+  return groups;
 });
 
 async function refresh() {
@@ -187,7 +249,6 @@ function getDuration(dateStr: string): string {
   return `${Math.floor(diff / 86400)}d`;
 }
 
-// Watch autoRefresh toggle
 function startAutoRefresh() {
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(refresh, 10000);
@@ -208,8 +269,6 @@ onUnmounted(() => {
   stopAutoRefresh();
 });
 
-// React to autoRefresh changes
-import { watch } from 'vue';
 watch(autoRefresh, (val) => {
   if (val) startAutoRefresh();
   else stopAutoRefresh();
@@ -236,7 +295,7 @@ watch(autoRefresh, (val) => {
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -290,6 +349,11 @@ watch(autoRefresh, (val) => {
   flex-wrap: wrap;
 }
 
+.view-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
 .auto-refresh {
   display: flex;
   align-items: center;
@@ -304,6 +368,106 @@ watch(autoRefresh, (val) => {
   color: var(--color-text-muted);
 }
 
+/* Grouped View Styles */
+.workspace-group {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.workspace-header {
+  padding: 1rem 1.25rem;
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.workspace-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.workspace-info i {
+  color: var(--color-primary);
+  font-size: 1.1rem;
+}
+
+.workspace-name {
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.workspace-name:hover {
+  color: var(--color-primary);
+}
+
+.agent-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.agent-card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.875rem;
+}
+
+.agent-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.agent-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.agent-name i {
+  color: var(--color-primary);
+}
+
+.agent-id {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.agent-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.detail .ip {
+  font-family: monospace;
+}
+
+.conn-id-detail code {
+  font-size: 0.7rem;
+  background: var(--color-surface);
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+}
+
+/* Flat View Styles */
 .connections-panel, .ip-distribution {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -329,7 +493,7 @@ watch(autoRefresh, (val) => {
 .table th {
   border-color: var(--color-border);
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -337,6 +501,16 @@ watch(autoRefresh, (val) => {
 .table td {
   border-color: var(--color-border);
   vertical-align: middle;
+}
+
+.agent-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.agent-cell .name {
+  font-weight: 500;
 }
 
 .conn-id {
@@ -365,6 +539,7 @@ watch(autoRefresh, (val) => {
   font-size: 0.85rem;
 }
 
+/* IP Distribution */
 .ip-list {
   display: flex;
   flex-direction: column;
@@ -375,13 +550,36 @@ watch(autoRefresh, (val) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.75rem;
+  padding: 0.75rem 1rem;
   background: var(--color-surface-elevated);
   border-radius: 6px;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
-.ip-row .ip {
+.ip-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ip-info .ip {
   font-family: monospace;
+  font-weight: 500;
+}
+
+.ip-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.agent-tag {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
 }
 
 .empty-state {

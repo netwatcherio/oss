@@ -160,15 +160,26 @@ export async function getAgentStats(): Promise<ListResponse<WorkspaceStats>> {
 // Debug / System Status
 interface AgentConnection {
     agent_id: number;
+    agent_name: string;
     workspace_id: number;
+    workspace_name: string;
     conn_id: string;
     client_ip: string;
     connected_at: string;
 }
 
+interface WorkspaceGroup {
+    workspace_id: number;
+    workspace_name: string;
+    agent_count: number;
+    connections: AgentConnection[];
+}
+
 interface DebugConnectionsResponse {
     connected_count: number;
+    workspace_count: number;
     connections: AgentConnection[];
+    by_workspace: WorkspaceGroup[];
 }
 
 export async function getDebugConnections(): Promise<DebugConnectionsResponse> {
@@ -176,6 +187,7 @@ export async function getDebugConnections(): Promise<DebugConnectionsResponse> {
     return res.data;
 }
 
-export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse, AgentConnection, DebugConnectionsResponse };
+export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse, AgentConnection, WorkspaceGroup, DebugConnectionsResponse };
+
 
 

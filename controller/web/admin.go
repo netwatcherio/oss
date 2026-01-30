@@ -48,7 +48,7 @@ func RegisterAdminRoutes(api iris.Party, db *gorm.DB) {
 	adminAPI.Get("/agents/stats", adminAgentStatsHandler(db))
 
 	// Debug endpoints for session/connection diagnostics
-	adminAPI.Get("/debug/connections", adminDebugConnectionsHandler())
+	adminAPI.Get("/debug/connections", adminDebugConnectionsHandler(db))
 }
 
 // ==================== Stats ====================
@@ -507,15 +507,104 @@ func adminAgentStatsHandler(db *gorm.DB) iris.Handler {
 
 // ==================== Debug ====================
 
+// EnrichedConnection adds friendly names to connection info
+type EnrichedConnection struct {
+	AgentID       uint   `json:"agent_id"`
+	AgentName     string `json:"agent_name"`
+	WorkspaceID   uint   `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	ConnID        string `json:"conn_id"`
+	ClientIP      string `json:"client_ip"`
+	ConnectedAt   string `json:"connected_at"`
+}
+
+// WorkspaceGroup groups connections by workspace
+type WorkspaceGroup struct {
+	WorkspaceID   uint                 `json:"workspace_id"`
+	WorkspaceName string               `json:"workspace_name"`
+	AgentCount    int                  `json:"agent_count"`
+	Connections   []EnrichedConnection `json:"connections"`
+}
+
 // adminDebugConnectionsHandler returns active WebSocket connection info for debugging
-func adminDebugConnectionsHandler() iris.Handler {
+func adminDebugConnectionsHandler(db *gorm.DB) iris.Handler {
 	return func(ctx iris.Context) {
 		hub := GetAgentHub()
 		connections := hub.GetActiveConnections()
 
+		// Collect all agent IDs and workspace IDs
+		agentIDs := make([]uint, 0, len(connections))
+		workspaceIDs := make([]uint, 0, len(connections))
+		for _, c := range connections {
+			agentIDs = append(agentIDs, c.AgentID)
+			workspaceIDs = append(workspaceIDs, c.WorkspaceID)
+		}
+
+		// Fetch agent names
+		agentNames := make(map[uint]string)
+		if len(agentIDs) > 0 {
+			var agents []struct {
+				ID   uint
+				Name string
+			}
+			db.Table("agents").Select("id, name").Where("id IN ?", agentIDs).Find(&agents)
+			for _, a := range agents {
+				agentNames[a.ID] = a.Name
+			}
+		}
+
+		// Fetch workspace names
+		workspaceNames := make(map[uint]string)
+		if len(workspaceIDs) > 0 {
+			var workspaces []struct {
+				ID   uint
+				Name string
+			}
+			db.Table("workspaces").Select("id, name").Where("id IN ?", workspaceIDs).Find(&workspaces)
+			for _, w := range workspaces {
+				workspaceNames[w.ID] = w.Name
+			}
+		}
+
+		// Build enriched connections and group by workspace
+		groupMap := make(map[uint]*WorkspaceGroup)
+		var enriched []EnrichedConnection
+
+		for _, c := range connections {
+			ec := EnrichedConnection{
+				AgentID:       c.AgentID,
+				AgentName:     agentNames[c.AgentID],
+				WorkspaceID:   c.WorkspaceID,
+				WorkspaceName: workspaceNames[c.WorkspaceID],
+				ConnID:        c.ConnID,
+				ClientIP:      c.ClientIP,
+				ConnectedAt:   c.ConnectedAt.Format("2006-01-02T15:04:05Z07:00"),
+			}
+			enriched = append(enriched, ec)
+
+			// Group by workspace
+			if _, exists := groupMap[c.WorkspaceID]; !exists {
+				groupMap[c.WorkspaceID] = &WorkspaceGroup{
+					WorkspaceID:   c.WorkspaceID,
+					WorkspaceName: workspaceNames[c.WorkspaceID],
+					Connections:   []EnrichedConnection{},
+				}
+			}
+			groupMap[c.WorkspaceID].Connections = append(groupMap[c.WorkspaceID].Connections, ec)
+			groupMap[c.WorkspaceID].AgentCount++
+		}
+
+		// Convert map to slice
+		groups := make([]WorkspaceGroup, 0, len(groupMap))
+		for _, g := range groupMap {
+			groups = append(groups, *g)
+		}
+
 		_ = ctx.JSON(iris.Map{
 			"connected_count": len(connections),
-			"connections":     connections,
+			"workspace_count": len(groups),
+			"connections":     enriched,
+			"by_workspace":    groups,
 		})
 	}
 }
