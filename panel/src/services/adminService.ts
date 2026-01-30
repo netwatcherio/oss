@@ -157,5 +157,25 @@ export async function getAgentStats(): Promise<ListResponse<WorkspaceStats>> {
     return res.data;
 }
 
-export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse };
+// Debug / System Status
+interface AgentConnection {
+    agent_id: number;
+    workspace_id: number;
+    conn_id: string;
+    client_ip: string;
+    connected_at: string;
+}
+
+interface DebugConnectionsResponse {
+    connected_count: number;
+    connections: AgentConnection[];
+}
+
+export async function getDebugConnections(): Promise<DebugConnectionsResponse> {
+    const res = await request.get<DebugConnectionsResponse>('/admin/debug/connections');
+    return res.data;
+}
+
+export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse, AgentConnection, DebugConnectionsResponse };
+
 

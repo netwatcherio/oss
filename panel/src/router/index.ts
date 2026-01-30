@@ -42,6 +42,7 @@ import AdminUsers from '@/views/admin/AdminUsers.vue'
 import AdminWorkspaces from '@/views/admin/AdminWorkspaces.vue'
 import AdminWorkspaceDetail from '@/views/admin/AdminWorkspaceDetail.vue'
 import AdminAgents from '@/views/admin/AdminAgents.vue'
+import AdminSystemDebug from '@/views/admin/AdminSystemDebug.vue'
 
 // Permission utilities
 import { hasMinimumRole } from '@/composables/usePermissions'
@@ -287,6 +288,7 @@ const routes: RouteRecordRaw[] = [
                     { path: 'workspaces', name: 'adminWorkspaces', component: AdminWorkspaces },
                     { path: 'workspaces/:wID', name: 'adminWorkspaceDetail', component: AdminWorkspaceDetail },
                     { path: 'agents', name: 'adminAgents', component: AdminAgents },
+                    { path: 'system', name: 'adminSystem', component: AdminSystemDebug },
                 ],
             },
 
