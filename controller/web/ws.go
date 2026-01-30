@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/lookup"
 	probe "netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/speedtest"
 	"netwatcher-controller/internal/users"
@@ -101,8 +102,9 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 		ctx.Values().Set("agent_id", a.ID)
 		ctx.Values().Set("workspace_id", a.WorkspaceID)
 		ctx.Values().Set("client_type", "agent")
+		ctx.Values().Set("conn_id", c.ID()) // Track connection ID for session debugging
 
-		log.Infof("WS auth ok — agent %d (ws %d) connected as %s", a.ID, a.WorkspaceID, c.ID())
+		log.Infof("WS auth ok — agent %d (ws %d) conn_id=%s", a.ID, a.WorkspaceID, c.ID())
 		return nil
 	}
 
@@ -161,22 +163,32 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, _ := ctx.Values().GetUint("agent_id")
 				wsid, _ := ctx.Values().GetUint("workspace_id")
-				log.Infof("[%s] connected to namespace [%s] (agent=%d ws=%d)", nsConn, msg.Namespace, aid, wsid)
+				connID := ctx.Values().GetString("conn_id")
+				clientIP := lookup.GetClientIP(ctx)
+				log.Infof("[NS_CONNECT] agent=%d ws=%d conn_id=%s ip=%s ns=%s", aid, wsid, connID, clientIP, msg.Namespace)
 
-				// Register with AgentHub for targeted broadcasts (e.g., deactivation)
-				GetAgentHub().RegisterAgent(aid, nsConn)
+				// Register with AgentHub with full metadata for debugging
+				GetAgentHub().RegisterAgentWithInfo(AgentConnectionInfo{
+					AgentID:     aid,
+					WorkspaceID: wsid,
+					ConnID:      connID,
+					ClientIP:    clientIP,
+					ConnectedAt: time.Now(),
+					conn:        nsConn,
+				})
 
 				return nil
 			},
 			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
 				ctx := websocket.GetContext(nsConn.Conn)
 				aid, _ := ctx.Values().GetUint("agent_id")
+				connID := ctx.Values().GetString("conn_id")
 
 				// Unregister from AgentHub - pass connection to prevent race condition
 				// where old disconnect removes newly registered connection
 				GetAgentHub().UnregisterAgent(aid, nsConn)
 
-				log.Infof("[%s] disconnected from namespace [%s] (agent=%d)", nsConn, msg.Namespace, aid)
+				log.Infof("[NS_DISCONNECT] agent=%d conn_id=%s ns=%s", aid, connID, msg.Namespace)
 				return nil
 			},
 
@@ -286,6 +298,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					return errors.New("unauthorized: no agent in context")
 				}
 				wsid, _ := ctx.Values().GetUint("workspace_id")
+				connID := ctx.Values().GetString("conn_id")
 
 				var pp probe.ProbeData
 				if err := json.Unmarshal(msg.Body, &pp); err != nil {
@@ -299,7 +312,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				}
 				pp.ReceivedAt = time.Now()
 
-				// Log summarized probe data (not the full body)
+				// Log summarized probe data with connection ID for session debugging
 				targetInfo := pp.Target
 				if pp.TargetAgent > 0 {
 					targetInfo = fmt.Sprintf("agent:%d", pp.TargetAgent)
@@ -314,6 +327,14 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					if err == nil && p != nil {
 						// Always set ProbeAgentID to the probe owner for direction identification
 						pp.ProbeAgentID = p.AgentID
+
+						// SESSION INTEGRITY CHECK: Detect if probe is being submitted by wrong agent
+						// For NETINFO probes, the submitting agent should match the probe owner
+						// (NETINFO is self-reporting, not cross-agent like PING/MTR)
+						if pp.Type == probe.TypeNetInfo && p.AgentID != aid {
+							log.Errorf("[SESSION_INTEGRITY] NETINFO probe %d owned by agent %d but submitted by agent %d (conn_id=%s, ws=%d)",
+								pp.ProbeID, p.AgentID, aid, connID, wsid)
+						}
 
 						// Set TargetAgent if not already set and probe has targets
 						if pp.TargetAgent == 0 && len(p.Targets) > 0 {

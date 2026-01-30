@@ -46,6 +46,9 @@ func RegisterAdminRoutes(api iris.Party, db *gorm.DB) {
 	// Agents
 	adminAPI.Get("/agents", adminListAgentsHandler(db))
 	adminAPI.Get("/agents/stats", adminAgentStatsHandler(db))
+
+	// Debug endpoints for session/connection diagnostics
+	adminAPI.Get("/debug/connections", adminDebugConnectionsHandler())
 }
 
 // ==================== Stats ====================
@@ -499,5 +502,20 @@ func adminAgentStatsHandler(db *gorm.DB) iris.Handler {
 			return
 		}
 		_ = ctx.JSON(iris.Map{"data": stats})
+	}
+}
+
+// ==================== Debug ====================
+
+// adminDebugConnectionsHandler returns active WebSocket connection info for debugging
+func adminDebugConnectionsHandler() iris.Handler {
+	return func(ctx iris.Context) {
+		hub := GetAgentHub()
+		connections := hub.GetActiveConnections()
+
+		_ = ctx.JSON(iris.Map{
+			"connected_count": len(connections),
+			"connections":     connections,
+		})
 	}
 }

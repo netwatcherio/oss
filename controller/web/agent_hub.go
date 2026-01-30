@@ -10,13 +10,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// AgentConnectionInfo tracks metadata about an agent's WebSocket connection
+type AgentConnectionInfo struct {
+	AgentID     uint              `json:"agent_id"`
+	WorkspaceID uint              `json:"workspace_id"`
+	ConnID      string            `json:"conn_id"`
+	ClientIP    string            `json:"client_ip"`
+	ConnectedAt time.Time         `json:"connected_at"`
+	conn        *websocket.NSConn // internal, not exposed in JSON
+}
+
 // AgentHub manages WebSocket connections for agents.
 // Tracks connected agents by ID for targeted deactivation broadcasts.
 type AgentHub struct {
 	mu sync.RWMutex
 
 	// Connections indexed by agent ID (one connection per agent)
-	connections map[uint]*websocket.NSConn
+	connections map[uint]*AgentConnectionInfo
 }
 
 // AgentDeactivateMessage is sent to agents when they are deleted
@@ -35,36 +45,43 @@ func GetAgentHub() *AgentHub {
 // NewAgentHub creates a new AgentHub instance
 func NewAgentHub() *AgentHub {
 	return &AgentHub{
-		connections: make(map[uint]*websocket.NSConn),
+		connections: make(map[uint]*AgentConnectionInfo),
 	}
 }
 
-// RegisterAgent registers an agent connection
-func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
+// RegisterAgentWithInfo registers an agent connection with metadata
+func (h *AgentHub) RegisterAgentWithInfo(info AgentConnectionInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// If there's an existing connection for this agent, close it first
-	// This handles the case where an agent reconnects after an update/restart
-	// before the old connection has timed out
-	if old, exists := h.connections[agentID]; exists {
-		log.Warnf("[AgentHub] Agent %d already connected, closing old connection before replacing", agentID)
-		// Force disconnect the old connection to ensure clean state
-		// Use a delay to allow the new connection to stabilize first
+	// If there's an existing connection for this agent, log and close it
+	if old, exists := h.connections[info.AgentID]; exists {
+		log.Warnf("[AgentHub] Agent %d already connected (old: conn_id=%s ip=%s since=%s), replacing with new connection (conn_id=%s ip=%s)",
+			info.AgentID,
+			old.ConnID, old.ClientIP, old.ConnectedAt.Format(time.RFC3339),
+			info.ConnID, info.ClientIP)
+
+		// Force disconnect the old connection in background
 		go func(oldConn *websocket.NSConn) {
-			// Brief delay to let the new connection fully register before
-			// disconnecting the old one (prevents race condition where
-			// old disconnect event interferes with new connection)
 			time.Sleep(500 * time.Millisecond)
 			if err := oldConn.Disconnect(context.TODO()); err != nil {
-				log.Debugf("[AgentHub] Error disconnecting old connection for agent %d: %v", agentID, err)
+				log.Debugf("[AgentHub] Error disconnecting old connection for agent %d: %v", info.AgentID, err)
 			}
-		}(old)
-
+		}(old.conn)
 	}
 
-	h.connections[agentID] = conn
-	log.Infof("[AgentHub] Agent %d registered (total: %d)", agentID, len(h.connections))
+	h.connections[info.AgentID] = &info
+	log.Infof("[AgentHub] Agent %d registered (total: %d) conn_id=%s ip=%s ws=%d",
+		info.AgentID, len(h.connections), info.ConnID, info.ClientIP, info.WorkspaceID)
+}
+
+// RegisterAgent registers an agent connection (legacy compatibility)
+func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
+	h.RegisterAgentWithInfo(AgentConnectionInfo{
+		AgentID:     agentID,
+		conn:        conn,
+		ConnectedAt: time.Now(),
+	})
 }
 
 // UnregisterAgent removes an agent connection
@@ -75,26 +92,24 @@ func (h *AgentHub) UnregisterAgent(agentID uint, conn *websocket.NSConn) {
 	defer h.mu.Unlock()
 
 	// Only remove if the connection matches what's currently registered
-	// This prevents race conditions where an old connection disconnects after
-	// a new one was registered
 	if current, exists := h.connections[agentID]; exists {
-		if current == conn {
+		if current.conn == conn {
 			delete(h.connections, agentID)
-			log.Infof("[AgentHub] Agent %d unregistered (total: %d)", agentID, len(h.connections))
+			log.Infof("[AgentHub] Agent %d unregistered (total: %d) conn_id=%s", agentID, len(h.connections), current.ConnID)
 		} else {
-			log.Debugf("[AgentHub] Agent %d disconnect ignored - connection was replaced", agentID)
+			log.Debugf("[AgentHub] Agent %d disconnect ignored - connection was replaced (old=%s, current=%s)",
+				agentID, current.ConnID, current.ConnID)
 		}
 	}
 }
 
 // DeactivateAgent sends a deactivation message to a connected agent
-// This is called when an agent is deleted from the panel
 func (h *AgentHub) DeactivateAgent(agentID uint, reason string) bool {
 	h.mu.RLock()
-	conn, exists := h.connections[agentID]
+	info, exists := h.connections[agentID]
 	h.mu.RUnlock()
 
-	if !exists {
+	if !exists || info.conn == nil {
 		log.Debugf("[AgentHub] Agent %d not connected, cannot send deactivate", agentID)
 		return false
 	}
@@ -106,7 +121,7 @@ func (h *AgentHub) DeactivateAgent(agentID uint, reason string) bool {
 		return false
 	}
 
-	if !conn.Emit("deactivate", payload) {
+	if !info.conn.Emit("deactivate", payload) {
 		log.Warnf("[AgentHub] Failed to emit deactivate to agent %d", agentID)
 		return false
 	}
@@ -128,4 +143,51 @@ func (h *AgentHub) GetConnectedAgentCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.connections)
+}
+
+// GetConnectedAgentIDs returns a list of all connected agent IDs
+func (h *AgentHub) GetConnectedAgentIDs() []uint {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	ids := make([]uint, 0, len(h.connections))
+	for id := range h.connections {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetActiveConnections returns connection info for all connected agents (for admin debugging)
+func (h *AgentHub) GetActiveConnections() []AgentConnectionInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	result := make([]AgentConnectionInfo, 0, len(h.connections))
+	for _, info := range h.connections {
+		// Return a copy without the internal connection pointer
+		result = append(result, AgentConnectionInfo{
+			AgentID:     info.AgentID,
+			WorkspaceID: info.WorkspaceID,
+			ConnID:      info.ConnID,
+			ClientIP:    info.ClientIP,
+			ConnectedAt: info.ConnectedAt,
+		})
+	}
+	return result
+}
+
+// GetConnectionInfo returns connection info for a specific agent (for debugging)
+func (h *AgentHub) GetConnectionInfo(agentID uint) *AgentConnectionInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if info, exists := h.connections[agentID]; exists {
+		return &AgentConnectionInfo{
+			AgentID:     info.AgentID,
+			WorkspaceID: info.WorkspaceID,
+			ConnID:      info.ConnID,
+			ClientIP:    info.ClientIP,
+			ConnectedAt: info.ConnectedAt,
+		}
+	}
+	return nil
 }
