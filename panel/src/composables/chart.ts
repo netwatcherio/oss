@@ -24,18 +24,18 @@ export class Chart {
         this.style = style
         this.data = data
         let ctx = this.element.getContext("2d") || {} as CanvasRenderingContext2D
-        this.w = ctx.canvas.clientWidth*2
-        this.h = ctx.canvas.clientHeight*2
+        this.w = ctx.canvas.clientWidth * 2
+        this.h = ctx.canvas.clientHeight * 2
 
-        ctx.scale(0.5,0.5)
+        ctx.scale(0.5, 0.5)
         this.ctx = ctx
         this.draw()
     }
 
     draw() {
         let ctx = this.ctx
-        this.w = this.ctx.canvas.width*2
-        this.h = this.ctx.canvas.height*2
+        this.w = this.ctx.canvas.width * 2
+        this.h = this.ctx.canvas.height * 2
         let w = this.w
         let h = this.h
 
@@ -56,7 +56,7 @@ export class Chart {
         }
 
         let getY = (index: number): number => {
-            return map_range(this.data[index], minY, maxY, h, 0)
+            return map_range(this.data[index]!, minY, maxY, h, 0)
         }
         // ctx.strokeRect(2,2, w-4, h-4)
         ctx.moveTo(getX(0), getY(0));
@@ -73,8 +73,8 @@ export class Chart {
             ctx.quadraticCurveTo(x, y, xc, yc)
         }
 
-        ctx.quadraticCurveTo(getX(i), getY(i), getX(i+1), getY(i+1))
-        ctx.lineTo(getX(i+1), h)
+        ctx.quadraticCurveTo(getX(i), getY(i), getX(i + 1), getY(i + 1))
+        ctx.lineTo(getX(i + 1), h)
         ctx.lineTo(0, h)
 
         ctx.stroke();

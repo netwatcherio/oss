@@ -22,10 +22,10 @@ export class FillChart {
 
         this.data = data
         let ctx = this.element.getContext("2d") || {} as CanvasRenderingContext2D
-        this.w = ctx.canvas.clientWidth*2
-        this.h = ctx.canvas.clientHeight*2
+        this.w = ctx.canvas.clientWidth * 2
+        this.h = ctx.canvas.clientHeight * 2
 
-        ctx.scale(0.5,0.5)
+        ctx.scale(0.5, 0.5)
         this.ctx = ctx
         this.draw()
     }
@@ -33,13 +33,13 @@ export class FillChart {
     public pickColor(index: number): string {
         const colors: string[] = ["0,128,255", "48,209,88", "255,128,12"]
         let idx: number = index % colors.length
-        return colors[idx];
+        return colors[idx]!;
     }
 
     draw() {
         let ctx = this.ctx
-        this.w = this.ctx.canvas.width*2
-        this.h = this.ctx.canvas.height*2
+        this.w = this.ctx.canvas.width * 2
+        this.h = this.ctx.canvas.height * 2
         let w = this.w
         let h = this.h
 
@@ -61,12 +61,12 @@ export class FillChart {
         }
 
         let getW = (index: number): number => {
-            return map_range(this.data[index], 0, sum, 0, w)
+            return map_range(this.data[index]!, 0, sum, 0, w)
         }
 
         for (let i = 0; i < this.data.length; i++) {
-            let r = Math.random()*255;
-            let g = Math.random()*255;
+            let r = Math.random() * 255;
+            let g = Math.random() * 255;
             ctx.strokeStyle = `rgba(${this.pickColor(i)}, 1)`
             ctx.fillStyle = `rgba(${this.pickColor(i)}, 0.8)`
             let x = getX(i);
@@ -74,7 +74,7 @@ export class FillChart {
 
 
             ctx.fillRect(x, 0, w, h)
-            last = x+w
+            last = x + w
         }
 
 
