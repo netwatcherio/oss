@@ -102,7 +102,7 @@ function canonicalTargetKey(probe: Probe): string | null {
 
 ### Core API (`panel/src/services/apiService.ts`)
 
-Wraps all controller REST endpoints:
+Wraps all controller REST endpoints. Built on top of `request.ts` which provides base HTTP helpers.
 
 | Service | Key Methods |
 |---------|-------------|
@@ -151,6 +151,30 @@ IP geolocation and WHOIS lookups:
 | `whoisLookup()` | WHOIS query for IP/domain |
 | `combinedLookup()` | GeoIP + WHOIS in one call |
 
+### Shared WebSocket Service (`panel/src/services/sharedWebSocketService.ts`)
+
+WebSocket service for sharable pages (non-authenticated):
+
+| Method | Description |
+|--------|-------------|
+| `connect()`, `disconnect()` | WebSocket lifecycle for shared pages |
+| `subscribe()` | Subscribe to shared probe data |
+| `isConnected()` | Connection status |
+
+### Theme Service (`panel/src/services/themeService.ts`)
+
+Manages theme preferences (light/dark) with persistence:
+
+| Method | Description |
+|--------|-------------|
+| `getTheme()` | Get current theme |
+| `setTheme()` | Set and persist theme |
+| `toggleTheme()` | Toggle between light/dark |
+
+### HTTP Request Utilities (`panel/src/services/request.ts`)
+
+Base HTTP request functions used by all other services. Handles auth headers, error mapping, and response parsing.
+
 
 ---
 
@@ -184,14 +208,18 @@ All components in `panel/src/components/`:
 | Component | File | Purpose |
 |-----------|------|---------|
 | `LatencyGraph` | `PingGraph.vue` | Ping RTT visualization with P95 stats |
+| `MosGraph` | `MosGraph.vue` | MOS (Mean Opinion Score) quality visualization |
 | `TrafficSimGraph` | `TrafficSimGraph.vue` | Traffic simulation metrics |
 | `RperfGraph` | `RperfGraph.vue` | Rperf network performance charts |
 | `NetworkMap` | `NetworkMap.vue` | MTR hop visualization |
 | `WorkspaceNetworkMap` | `WorkspaceNetworkMap.vue` | Full workspace topology map |
 | `ConnectivityMatrix` | `ConnectivityMatrix.vue` | Agent-to-agent connectivity grid |
+| `MatrixCell` | `MatrixCell.vue` | Individual cell in connectivity matrix |
 | `MtrSummary` | `MtrSummary.vue` | MTR data summary display |
 | `MtrTable` | `MtrTable.vue` | MTR hop-by-hop table |
 | `MtrDetailModal` | `MtrDetailModal.vue` | Detailed MTR analysis modal |
+| `Chart` | `Chart.vue` | Base Chart.js wrapper |
+| `FillChart` | `FillChart.vue` | Area/fill chart wrapper |
 
 ### UI Components
 | Component | File | Purpose |
@@ -199,8 +227,22 @@ All components in `panel/src/components/`:
 | `AgentCard` | `AgentCard.vue` | Agent status card |
 | `NavHeader` | `NavHeader.vue` | Top navigation bar |
 | `NavSidebar` | `NavSidebar.vue` | Side navigation |
+| `Sidebar` | `Sidebar.vue` | Sidebar layout |
 | `AlertRulesConfig` | `AlertRulesConfig.vue` | Alert rule configuration form |
 | `IpLookupPanel` | `IpLookupPanel.vue` | IP lookup interface |
+| `ShareAgentModal` | `ShareAgentModal.vue` | Agent sharing dialog |
+| `AuthLayout` | `AuthLayout.vue` | Auth page layout wrapper |
+| `Title` | `Title.vue` | Page title component |
+| `Widget` | `Widget.vue` | Dashboard widget wrapper |
+| `Footer` | `Footer.vue` | Page footer |
+| `Loader` | `Loader.vue` | Loading spinner |
+| `Code` | `Code.vue` | Code block display |
+| `FormElement` | `FormElement.vue` | Form field wrapper |
+| `Element` | `Element.vue` | Base display element |
+| `ElementExpand` | `ElementExpand.vue` | Expandable element |
+| `ElementLink` | `ElementLink.vue` | Linked element |
+| `ElementPair` | `ElementPair.vue` | Key-value pair element |
+| `List` | `List.vue` | List container |
 
 ### Graph Component Props
 
@@ -223,9 +265,12 @@ Vue composables in `panel/src/composables/`:
 |------------|------|---------|
 | `useWebSocket` | `useWebSocket.ts` | Real-time probe data subscription |
 | `useProbeSubscription` | `useWebSocket.ts` | Simplified probe-specific subscription |
+| `useSharedWebSocket` | `useSharedWebSocket.ts` | WebSocket for shared/public pages |
 | `usePermissions` | `usePermissions.ts` | Role-based permission flags |
+| `useAgentStatus` | `useAgentStatus.ts` | Agent online/stale/offline status tracking |
 | `useChart` | `chart.ts` | Chart.js configuration utilities |
 | `useFillChart` | `fillChart.ts` | Area chart configuration |
+| `noise` | `noise.ts` | Noise generation for visual effects |
 
 ### useWebSocket
 
@@ -352,6 +397,7 @@ All views in `panel/src/views/`:
 | `AdminWorkspaces.vue` | Workspace management (list, delete) |
 | `AdminWorkspaceDetail.vue` | Workspace detail with members and agents |
 | `AdminAgents.vue` | All agents across workspaces |
+| `AdminSystemDebug.vue` | System debug info (active WebSocket connections, health) |
 
 ### Profile Views
 | View | Purpose |
@@ -367,6 +413,12 @@ All views in `panel/src/views/`:
 | `Alerts.vue` | Alert management and history |
 | `IpLookup.vue` | IP geolocation and WHOIS lookup |
 | `BasicView.vue` | Minimal template |
+
+### Shared Views (Public/Token-Based Access)
+| View | Purpose |
+|------|---------|
+| `SharedAgent.vue` | Public agent dashboard via share token |
+| `SharedProbe.vue` | Public probe data view via share token |
 
 
 ---

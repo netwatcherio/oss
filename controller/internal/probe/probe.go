@@ -531,6 +531,22 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		return nil, fmt.Errorf("target agent %d has no public IP", targetAgentID)
 	}
 
+	// CRITICAL: Cross-check that the resolved target IP is NOT the owner agent's own IP.
+	// During concurrent agent restarts, stale ClickHouse NETINFO data can cause
+	// getPublicIP to return the wrong agent's IP, leading to self-connection loops.
+	ownerIP, ok := pubIPCache[ownerAgentID]
+	if !ok {
+		ownerIP, _ = getPublicIP(ctx, db, ch, ownerAgentID)
+		if ownerIP != "" {
+			pubIPCache[ownerAgentID] = ownerIP
+		}
+	}
+	if ownerIP != "" && targetIP == ownerIP && targetAgentID != ownerAgentID {
+		log.Errorf("[agent %d] SELF-TARGET PREVENTED: target agent %d resolved to owner's IP %q — skipping expansion (stale NETINFO?)",
+			ownerAgentID, targetAgentID, targetIP)
+		return nil, fmt.Errorf("target agent %d resolved to owner's own IP %s (stale data)", targetAgentID, targetIP)
+	}
+
 	var expanded []Probe
 
 	// Create MTR probe targeting the target agent

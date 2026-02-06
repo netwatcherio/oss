@@ -22,6 +22,8 @@ Welcome to the NetWatcher documentation. This folder contains comprehensive tech
 | [Speedtest](./speedtest.md) | Speedtest probe configuration and server selection |
 | [Network Map](./network-map.md) | Network topology visualization |
 | [Simplifications](./simplifications.md) | Recommendations for code cleanup and improvements |
+| [Sentry Integration](./sentry-integration.md) | Error tracking and performance monitoring |
+| [ClickHouse Vector Search](./clickhouse-vector-search.md) | Vector similarity search planning (future) |
 
 ---
 
@@ -82,7 +84,7 @@ NetWatcher is a distributed network monitoring system with three main components
 
 1. See [Deployment Guide](./deployment.md) for production and development setup
 2. Review [Architecture](./architecture.md) for system design
-3. Check [sample.env](../sample.env) for all configuration options
+3. Check [.env.example](../.env.example) for all configuration options
 
 ---
 

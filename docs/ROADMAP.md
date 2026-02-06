@@ -1,6 +1,6 @@
 # NetWatcher OSS Roadmap 2026
 
-> Last Updated: January 2026
+> Last Updated: February 2026
 
 ---
 

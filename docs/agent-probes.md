@@ -20,7 +20,7 @@ The agent executes network monitoring probes based on configurations received fr
 │                          AGENT                                 │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐   │
 │  │  WSClient   │───▶│   Workers   │───▶│     Probes      │   │
-│  │  (neffos)   │    │             │    │  (PING/MTR/etc) │   │
+│  │  (gobwas)   │    │             │    │  (PING/MTR/etc) │   │
 │  └─────────────┘    └─────────────┘    └─────────────────┘   │
 └───────────────────────────────────────────────────────────────┘
 ```
@@ -339,6 +339,14 @@ These probes are **not** executed as active clients—they exist only as anchors
 **Purpose:** Bandwidth/throughput testing (iPerf-like)
 
 **Why Disabled:** Compilation issues
+
+---
+
+### TRAFFICSIM Legacy (trafficsim.go.disabled)
+
+**Purpose:** Previous TrafficSim implementation (78 KB)
+
+**Why Disabled:** Superseded by current `trafficsim.go` implementation
 
 ---
 

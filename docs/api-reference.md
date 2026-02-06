@@ -59,6 +59,7 @@ All errors return:
 {
   "error": "error message here"
 }
+```
 
 ---
 

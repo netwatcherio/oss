@@ -82,9 +82,14 @@ controller/
 │   ├── alert/           # Alert rules and incident management
 │   ├── database/        # Database connection helpers
 │   ├── email/           # Email queue, SMTP client, background worker
+│   ├── errors/          # Structured error types
 │   ├── geoip/           # MaxMind GeoIP2 database lookups
+│   ├── limits/          # Workspace resource limit enforcement
+│   ├── lookup/          # IP lookup helpers
+│   ├── oui/             # IEEE OUI (MAC vendor) database
 │   ├── probe/           # Probe CRUD, ClickHouse handlers
 │   ├── scheduler/       # Data retention and cleanup scheduler
+│   ├── share/           # Sharable agent/probe page tokens
 │   ├── speedtest/       # Speedtest Queue & Server Cache
 │   ├── users/           # User registration, JWT auth
 │   ├── whois/           # WHOIS lookups via system command
@@ -96,15 +101,25 @@ controller/
     ├── alerts.go        # Alert CRUD endpoints
     ├── auth.go          # User auth endpoints
     ├── agent.go         # Agent login endpoint
+    ├── agent_api.go     # Agent-facing API (whoami, lookup)
+    ├── agent_hub.go     # Agent WebSocket connection hub
     ├── agents.go        # Agent CRUD endpoints
     ├── broadcast.go     # Real-time broadcast helpers
-    ├── geoip.go         # GeoIP & WHOIS endpoints
-    ├── invite.go        # Workspace invitation endpoints
-    ├── workspaces.go    # Workspace CRUD endpoints
-    ├── probes.go        # Probe CRUD endpoints
     ├── data.go          # Probe data query endpoints
+    ├── geoip.go         # GeoIP & WHOIS endpoints
+    ├── helpers.go       # Shared handler helpers
+    ├── invite.go        # Workspace invitation endpoints
+    ├── middleware.go    # Request middleware
+    ├── oui.go           # OUI/MAC vendor lookup endpoints
+    ├── permissions.go   # Permission enforcement helpers
+    ├── probes.go        # Probe CRUD endpoints
+    ├── proxy.go         # Proxy endpoints
+    ├── share.go         # Sharable page endpoints
+    ├── speedtest.go     # Speedtest queue endpoints
+    ├── workspaces.go    # Workspace CRUD endpoints
     ├── ws.go            # WebSocket server (agents)
-    └── ws_raw_panel.go  # WebSocket server (panel clients)
+    ├── ws_raw_panel.go  # WebSocket server (panel clients)
+    └── ws_raw_share.go  # WebSocket server (shared pages)
 ```
 
 ---
@@ -122,16 +137,26 @@ controller/
 ```
 agent/
 ├── main.go                    # Entrypoint, WS connection
+├── env.go                     # Environment variable loading
+├── auto_updater.go            # Agent self-update with SHA256 verification
+├── dependency_download.go     # External binary downloads (trippy, etc.)
 ├── probes/
 │   ├── types.go               # Probe/ProbeData structures
 │   ├── mtr.go                 # MTR probe (uses Trippy)
 │   ├── ping.go                # ICMP ping probe
 │   ├── speedtest.go           # Speed test
+│   ├── speedtest_queue.go     # Speedtest job queue
 │   ├── sysinfo.go             # System information
-│   └── netinfo.go             # Network information
+│   ├── netinfo.go             # Network information
+│   ├── trafficsim.go          # TrafficSim UDP client/server
+│   ├── interfaces.go          # Network interface discovery
+│   ├── interfaces_unix.go     # Unix-specific interface helpers
+│   ├── interfaces_windows.go  # Windows-specific interface helpers
+│   └── utils.go               # Probe utility functions
 ├── workers/
-│   ├── fetch_probes.go        # Probe polling worker
-│   └── probe_data.go          # Data submission worker
+│   ├── probes.go              # Probe polling & execution worker
+│   ├── data.go                # Data submission worker
+│   └── retry_queue.go         # Failed submission retry queue
 └── web/                       # WS client + config
 ```
 
@@ -234,31 +259,97 @@ flowchart LR
 
 ## Environment Variables
 
-### Controller
+See [.env.example](../.env.example) for a complete annotated reference.
+
+### Controller – Core
 
 | Variable | Description |
 |----------|-------------|
+| `DEBUG` | Enable debug mode (default: `false`) |
 | `LISTEN` | HTTP listen address (default: `0.0.0.0:8080`) |
+| `JWT_SECRET` | JWT signing key |
+| `PIN_PEPPER` | Salt for PIN hashing |
+| `REGISTRATION_ENABLED` | Allow new user registration (default: `true`) |
+
+### Controller – PostgreSQL
+
+| Variable | Description |
+|----------|-------------|
+| `DB_DRIVER` | Database driver: `postgres`, `mysql`, `sqlite`, `sqlserver` |
 | `POSTGRES_HOST` | PostgreSQL host |
 | `POSTGRES_PORT` | PostgreSQL port |
 | `POSTGRES_USER` | PostgreSQL user |
 | `POSTGRES_PASSWORD` | PostgreSQL password |
 | `POSTGRES_DB` | PostgreSQL database name |
+| `POSTGRES_SSLMODE` | SSL mode (default: `disable`) |
+| `POSTGRES_TIMEZONE` | Timezone (default: `America/Vancouver`) |
+| `GORM_LOG` | GORM log level: `silent`, `error`, `warn`, `info` |
+| `DB_MAX_OPEN_CONNS` | Max open connections (default: `25`) |
+| `DB_MAX_IDLE_CONNS` | Max idle connections (default: `25`) |
+| `DB_CONN_MAX_LIFETIME` | Connection max lifetime (default: `30m`) |
+| `DB_CONN_MAX_IDLE_TIME` | Connection max idle time (default: `10m`) |
+
+### Controller – ClickHouse
+
+| Variable | Description |
+|----------|-------------|
 | `CLICKHOUSE_HOST` | ClickHouse host |
+| `CLICKHOUSE_PORT` | ClickHouse native port (default: `9000`) |
 | `CLICKHOUSE_USER` | ClickHouse user |
 | `CLICKHOUSE_PASSWORD` | ClickHouse password |
-| `JWT_SECRET` | JWT signing key |
-| `PIN_PEPPER` | Salt for PIN hashing |
+| `CLICKHOUSE_DB` | ClickHouse database (default: `default`) |
+
+### Controller – Email / SMTP
+
+| Variable | Description |
+|----------|-------------|
+| `SMTP_HOST` | SMTP server host |
+| `SMTP_PORT` | SMTP port (default: `587`) |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password |
+| `SMTP_FROM_EMAIL` | Sender address |
+| `SMTP_FROM_NAME` | Sender display name |
+| `SMTP_TLS` | Use TLS (default: `true`) |
+| `SMTP_SKIP_VERIFY` | Skip TLS certificate verification |
+| `EMAIL_WEBHOOK_URL` | Webhook URL (alternative to SMTP, takes precedence) |
+| `EMAIL_WEBHOOK_AUTH_TOKEN` | Webhook auth token |
+| `EMAIL_WEBHOOK_TIMEOUT` | Webhook timeout (default: `30s`) |
+
+### Controller – Email Features
+
+| Variable | Description |
+|----------|-------------|
+| `EMAIL_SEND_REGISTRATION_CONFIRMATION` | Send welcome email on registration |
+| `REQUIRE_EMAIL_VERIFICATION` | Require verified email for workspace creation |
+| `EMAIL_VERIFICATION_EXPIRY_HOURS` | Verification token expiry (default: `24`) |
+| `EMAIL_INVITE_EXPIRY_HOURS` | Invite token expiry (default: `168`) |
+| `EMAIL_PASSWORD_RESET_EXPIRY_HOURS` | Password reset token expiry (default: `1`) |
+| `PANEL_ENDPOINT` | Panel URL for links in emails |
+
+### Controller – GeoIP
+
+| Variable | Description |
+|----------|-------------|
 | `GEOIP_CITY_PATH` | Path to GeoLite2-City.mmdb |
 | `GEOIP_COUNTRY_PATH` | Path to GeoLite2-Country.mmdb |
 | `GEOIP_ASN_PATH` | Path to GeoLite2-ASN.mmdb |
-| `OUI_PATH` | Path to oui.txt (IEEE MAC vendor database) |
-| `DEFAULT_ADMIN_EMAIL` | Email for default admin (default: `admin@netwatcher.local`) |
-| `DEFAULT_ADMIN_PASSWORD` | Password for default admin (if set, creates admin on first run) |
+
+### Controller – Data Retention
+
+| Variable | Description |
+|----------|-------------|
 | `DATA_RETENTION_DAYS` | Days to keep probe data in ClickHouse (default: `90`) |
 | `SOFT_DELETE_GRACE_DAYS` | Days before hard-deleting soft-deleted entities (default: `30`) |
 | `CLEANUP_INTERVAL_HOURS` | Hours between cleanup runs (default: `24`) |
 
+### Controller – Workspace Limits
+
+| Variable | Description |
+|----------|-------------|
+| `MAX_MEMBERS_PER_WORKSPACE` | Max members per workspace (`0` = unlimited) |
+| `MAX_AGENTS_PER_WORKSPACE` | Max agents per workspace (`0` = unlimited) |
+| `MAX_PROBES_PER_AGENT` | Max probes per agent (`0` = unlimited) |
+| `MAX_WORKSPACES_PER_USER` | Max workspaces per user (`0` = unlimited) |
 
 ### Agent
 
