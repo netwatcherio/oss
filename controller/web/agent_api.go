@@ -75,6 +75,12 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 	// GET /agent/api/whoami - Returns the agent's public IP as seen by the controller
 	// This allows agents to discover their public IP without external services.
 	agentAPI.Get("/whoami", func(ctx iris.Context) {
+		// CRITICAL: Prevent caching by reverse proxies (Caddy, Nginx, Cloudflare)
+		// This endpoint must always return the unique IP of the current requestor.
+		// Caching here causes "IP Confusion" where Agent B gets Agent A's cached IP.
+		ctx.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		ctx.Header("Pragma", "no-cache")
+
 		// Debug logging for header diagnosis
 		remoteAddr := ctx.RemoteAddr()
 		xForwardedFor := ctx.GetHeader("X-Forwarded-For")
