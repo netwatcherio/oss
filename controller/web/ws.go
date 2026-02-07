@@ -99,10 +99,14 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 		}
 
 		_ = agent.UpdateAgentSeen(ctx, db, a.ID, time.Now())
-		ctx.Values().Set("agent_id", a.ID)
-		ctx.Values().Set("workspace_id", a.WorkspaceID)
-		ctx.Values().Set("client_type", "agent")
-		ctx.Values().Set("conn_id", c.ID()) // Track connection ID for session debugging
+
+		// Store session data in the Connection state (safe for long-lived access)
+		// Accessing ctx.Values() later causes race conditions as Iris pools contexts.
+		c.Set("agent_id", a.ID)
+		c.Set("workspace_id", a.WorkspaceID)
+		c.Set("client_type", "agent")
+		c.Set("conn_id", c.ID())
+		c.Set("client_ip", lookup.GetClientIP(ctx)) // Capture IP once during handshake
 
 		log.Infof("WS auth ok — agent %d (ws %d) conn_id=%s", a.ID, a.WorkspaceID, c.ID())
 		return nil
@@ -160,11 +164,14 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 	return websocket.Namespaces{
 		"agent": websocket.Events{
 			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, _ := ctx.Values().GetUint("agent_id")
-				wsid, _ := ctx.Values().GetUint("workspace_id")
-				connID := ctx.Values().GetString("conn_id")
-				clientIP := lookup.GetClientIP(ctx)
+				// Retrieve agent info from Connection state (set in OnConnect)
+				// Do NOT use websocket.GetContext() as that accesses the pooled Iris context
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				wsid, _ := nsConn.Conn.Get("workspace_id").(uint)
+				connID := nsConn.Conn.Get("conn_id").(string)
+				// client_ip is stored as string in OnConnect
+				clientIP := nsConn.Conn.Get("client_ip").(string)
+
 				log.Infof("[NS_CONNECT] agent=%d ws=%d conn_id=%s ip=%s ns=%s", aid, wsid, connID, clientIP, msg.Namespace)
 
 				// Register with AgentHub with full metadata for debugging
@@ -180,9 +187,8 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, _ := ctx.Values().GetUint("agent_id")
-				connID := ctx.Values().GetString("conn_id")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				connID := nsConn.Conn.Get("conn_id").(string)
 
 				// Unregister from AgentHub - pass connection to prevent race condition
 				// where old disconnect removes newly registered connection
@@ -204,10 +210,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			// Ping/heartbeat handler - agents send this periodically to keep connection alive
 			// Also serves as online status tracking by updating last_seen_at
 			"ping": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if ok != nil || aid == 0 {
-					return errors.New("unauthorized: no agent in context")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				// Update last_seen_at for status tracking
@@ -225,10 +230,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					Version string `json:"version"`
 				}{}
 
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				log.Infof("[%s] received version update message [%s]: %s", nsConn, msg.Namespace, msg.Body)
@@ -253,10 +257,10 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			},
 
 			"probe_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				// Retrieve agent info safely from Connection state
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				a, err := agent.GetAgentByID(context.TODO(), db, aid)
@@ -292,13 +296,13 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			},
 
 			"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				// Retrieve agent info safely from Connection state
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
-				wsid, _ := ctx.Values().GetUint("workspace_id")
-				connID := ctx.Values().GetString("conn_id")
+				wsid, _ := nsConn.Conn.Get("workspace_id").(uint)
+				connID := nsConn.Conn.Get("conn_id").(string)
 
 				var pp probe.ProbeData
 				if err := json.Unmarshal(msg.Body, &pp); err != nil {
