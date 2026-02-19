@@ -52,6 +52,13 @@ const metrics = [
   // SYSINFO metrics
   { value: 'cpu_usage', label: 'CPU Usage (%)', unit: '%', category: 'sysinfo', icon: 'bi-cpu' },
   { value: 'memory_usage', label: 'Memory Usage (%)', unit: '%', category: 'sysinfo', icon: 'bi-memory' },
+  // AI Analysis metrics (workspace-level)
+  { value: 'health_score', label: 'Health Score (0-100)', unit: '', category: 'analysis', icon: 'bi-heart-pulse' },
+  { value: 'latency_baseline', label: 'Latency Regression', unit: '', category: 'analysis', icon: 'bi-graph-up-arrow' },
+  { value: 'loss_baseline', label: 'Loss Regression', unit: '', category: 'analysis', icon: 'bi-graph-down-arrow' },
+  { value: 'ip_change', label: 'IP Address Change', unit: '', category: 'analysis', icon: 'bi-globe2' },
+  { value: 'isp_change', label: 'ISP Provider Change', unit: '', category: 'analysis', icon: 'bi-building' },
+  { value: 'incident_count', label: 'Active Incidents', unit: '', category: 'analysis', icon: 'bi-lightning-charge' },
 ];
 
 const operators = [
@@ -341,6 +348,9 @@ onMounted(loadRules);
                       <optgroup label="💻 System Resources">
                         <option v-for="m in metrics.filter(m => m.category === 'sysinfo')" :key="m.value" :value="m.value">{{ m.label }}</option>
                       </optgroup>
+                      <optgroup label="🤖 AI Analysis">
+                        <option v-for="m in metrics.filter(m => m.category === 'analysis')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                      </optgroup>
                     </select>
                   </div>
                   <div class="col-3">
@@ -406,6 +416,9 @@ onMounted(loadRules);
                           </optgroup>
                           <optgroup label="💻 System Resources">
                             <option v-for="m in metrics.filter(m => m.category === 'sysinfo')" :key="m.value" :value="m.value">{{ m.label }}</option>
+                          </optgroup>
+                          <optgroup label="🤖 AI Analysis">
+                            <option v-for="m in metrics.filter(m => m.category === 'analysis')" :key="m.value" :value="m.value">{{ m.label }}</option>
                           </optgroup>
                         </select>
                       </div>

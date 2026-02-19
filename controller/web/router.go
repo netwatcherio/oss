@@ -55,6 +55,7 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	panelOUI(api, ouiStore)        // /lookup/oui/*
 	panelAlerts(api, db)           // /alerts/* and /workspaces/{id}/alert-rules/*
 	panelShareLinks(api, db)       // /workspaces/{id}/agents/{agentID}/share-links/*
+	panelAnalysis(api, db, ch)     // /workspaces/{id}/analysis/*
 
 	// Admin panel routes (requires SITE_ADMIN role)
 	RegisterAdminRoutes(api, db)

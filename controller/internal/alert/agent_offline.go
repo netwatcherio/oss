@@ -77,7 +77,7 @@ func EvaluateAgentOffline(ctx context.Context, db *gorm.DB) error {
 					continue
 				}
 
-				triggered := shouldTrigger(rule.Operator, minutesSinceLastSeen, rule.Threshold)
+				triggered := ShouldTrigger(rule.Operator, minutesSinceLastSeen, rule.Threshold)
 
 				if triggered {
 					// Check if there's already an active alert for this rule + agent

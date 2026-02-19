@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import core from "@/core";
 import {clearSession, type Session} from "@/session";
 import { themeService, type Theme } from "@/services/themeService";
@@ -11,6 +11,7 @@ const session = core.session()
 
 const currentTheme = ref<Theme>(themeService.getTheme());
 const alertCount = ref(0);
+const isSiteAdmin = computed(() => session.user?.role === 'SITE_ADMIN');
 let unsubscribe: (() => void) | null = null;
 let alertPollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -72,6 +73,11 @@ function logout() {
         <router-link to="/workspaces/alerts" class="nav-icon-btn" title="Alerts">
           <i class="bi bi-bell"></i>
           <span v-if="alertCount > 0" class="notification-badge">{{ alertCount > 99 ? '99+' : alertCount }}</span>
+        </router-link>
+
+        <!-- Admin Panel (site admins only) -->
+        <router-link v-if="isSiteAdmin" to="/admin" class="nav-icon-btn admin-btn" title="Admin Panel">
+          <i class="bi bi-shield-lock"></i>
         </router-link>
 
         <!-- Divider -->
@@ -198,6 +204,16 @@ function logout() {
 
 .nav-icon-btn i {
   font-size: 1.125rem;
+}
+
+/* Admin Button */
+.admin-btn {
+  color: #8b5cf6;
+}
+
+.admin-btn:hover {
+  background: rgba(139, 92, 246, 0.1);
+  color: #7c3aed;
 }
 
 /* Notification Badge */
@@ -386,6 +402,15 @@ function logout() {
 
 :global([data-theme="dark"]) .nav-icon-btn {
   color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .admin-btn {
+  color: #a78bfa;
+}
+
+:global([data-theme="dark"]) .admin-btn:hover {
+  background: rgba(167, 139, 250, 0.15);
+  color: #c4b5fd;
 }
 
 :global([data-theme="dark"]) .nav-icon-btn:hover {

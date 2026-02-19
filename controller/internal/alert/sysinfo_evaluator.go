@@ -121,7 +121,7 @@ func evaluateSysInfoRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte)
 		return nil
 	}
 
-	triggered := shouldTrigger(rule.Operator, *value, rule.Threshold)
+	triggered := ShouldTrigger(rule.Operator, *value, rule.Threshold)
 
 	if triggered {
 		return &EvaluationResult{

@@ -136,7 +136,7 @@ func evaluateStandardRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte
 	if value1 == nil {
 		return nil // Metric not applicable to this probe type
 	}
-	cond1 := shouldTrigger(rule.Operator, *value1, rule.Threshold)
+	cond1 := ShouldTrigger(rule.Operator, *value1, rule.Threshold)
 
 	// If no secondary condition, use primary result
 	if rule.Metric2 == nil {
@@ -165,7 +165,7 @@ func evaluateStandardRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte
 		}
 		return &EvaluationResult{Triggered: false}
 	}
-	cond2 := shouldTrigger(*rule.Operator2, *value2, *rule.Threshold2)
+	cond2 := ShouldTrigger(*rule.Operator2, *value2, *rule.Threshold2)
 
 	// Combine conditions based on logical operator
 	var triggered bool
@@ -246,7 +246,7 @@ func evaluateMtrRule(ctx context.Context, db *gorm.DB, rule *AlertRule, pctx Pro
 		return nil
 	}
 
-	triggered := shouldTrigger(rule.Operator, *value, rule.Threshold)
+	triggered := ShouldTrigger(rule.Operator, *value, rule.Threshold)
 
 	if triggered {
 		return &EvaluationResult{
@@ -327,8 +327,8 @@ func getMetricValue(payload *ProbeDataPayload, metric Metric, probeType string) 
 	return nil
 }
 
-// shouldTrigger checks if the value meets the threshold condition
-func shouldTrigger(op Operator, value, threshold float64) bool {
+// ShouldTrigger checks if the value meets the threshold condition
+func ShouldTrigger(op Operator, value, threshold float64) bool {
 	switch op {
 	case OperatorGT:
 		return value > threshold

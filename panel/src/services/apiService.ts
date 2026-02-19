@@ -344,7 +344,6 @@ export const ProbeDataService = {
     },
     /**
      * Speedtest results for an agent (queries by agent_id + type, NOT probe_id).
-     * This works around historical data having incorrect probe_id values.
      * GET /workspaces/{id}/probe-data/agents/{agentID}/speedtests
      */
     async speedtestsByAgent(workspaceId: number | string, agentId: number | string, limit?: number) {
@@ -354,6 +353,32 @@ export const ProbeDataService = {
             `/workspaces/${workspaceId}/probe-data/agents/${agentId}/speedtests${qs.toString() ? `?${qs}` : ""}`
         );
         return data?.data || [];
+    },
+
+    /**
+     * Workspace-level health analysis with per-agent health vectors.
+     * GET /workspaces/{id}/analysis
+     */
+    async workspaceAnalysis(workspaceId: number | string, params?: { lookback?: number }) {
+        const q = new URLSearchParams();
+        if (params?.lookback) q.set("lookback", String(params.lookback));
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/analysis${q.toString() ? `?${q}` : ""}`
+        );
+        return data;
+    },
+
+    /**
+     * Detailed probe analysis with bidirectional comparison.
+     * GET /workspaces/{id}/analysis/probes/{probeId}
+     */
+    async probeAnalysis(workspaceId: number | string, probeId: number | string, params?: { lookback?: number }) {
+        const q = new URLSearchParams();
+        if (params?.lookback) q.set("lookback", String(params.lookback));
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/analysis/probes/${probeId}${q.toString() ? `?${q}` : ""}`
+        );
+        return data;
     },
 };
 

@@ -16,6 +16,7 @@ import (
 	"netwatcher-controller/internal/database"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
+	"netwatcher-controller/internal/llm"
 	"netwatcher-controller/internal/oui"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/scheduler"
@@ -99,6 +100,16 @@ func main() {
 	alertConfig := scheduler.LoadAlertSchedulerConfig()
 	alertScheduler := scheduler.NewAlertScheduler(db, alertConfig)
 	go alertScheduler.Start(cleanupCtx) // reuse same context for shutdown
+
+	// ---- AI Analysis Loop (background incident detection + alerting) ----
+	analysisConfig := probe.LoadAnalysisLoopConfig()
+	go probe.StartAnalysisLoop(cleanupCtx, ch, db, analysisConfig)
+
+	// ---- Optional LLM Enrichment ----
+	llmConfig := llm.LoadConfig()
+	if llmP := llm.NewProvider(llmConfig); llmP != nil {
+		probe.SetLLMProvider(llmP)
+	}
 
 	// ---- Iris ----
 	app := iris.New()

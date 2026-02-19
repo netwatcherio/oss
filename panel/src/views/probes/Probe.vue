@@ -12,6 +12,7 @@ import MtrTable from "@/components/MtrTable.vue";
 import MtrSummary from "@/components/MtrSummary.vue";
 import MtrDetailModal from "@/components/MtrDetailModal.vue";
 import { MtrAnalysisDemo } from "@/components/mtr-analysis-prototype";
+import ProbeAnalysisView from "@/components/analysis/ProbeAnalysisView.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService } from '@/services/themeService';
@@ -1432,6 +1433,21 @@ const { connected: wsConnected } = useProbeSubscription(
             <i class="bi bi-inbox fs-1 text-muted mb-3"></i>
             <h5 class="text-muted">No Agent-to-Agent Data Available</h5>
             <p class="text-muted">No monitoring data found for the selected time range. Try adjusting the date range.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Probe Analysis -->
+      <div class="col-sm-12" v-if="state.probe?.id && workspaceIdRef">
+        <div class="card mb-3">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="card-title mb-0"><i class="bi bi-cpu me-1"></i> AI Analysis</h5>
+              <small class="text-muted">detected issues, suggested causes, and health scoring</small>
+            </div>
+          </div>
+          <div class="card-body">
+            <ProbeAnalysisView :workspace-id="workspaceIdRef" :probe-id="state.probe.id" />
           </div>
         </div>
       </div>
