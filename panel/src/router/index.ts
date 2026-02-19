@@ -13,6 +13,7 @@ import Workspaces from '@/views/Workspaces.vue'
 import NewWorkspace from '@/views/workspace/NewWorkspace.vue'
 import Workspace from '@/views/workspace/Workspace.vue'
 import EditWorkspace from '@/views/workspace/EditWorkspace.vue'
+import DeleteWorkspace from '@/views/workspace/DeleteWorkspace.vue'
 import Members from '@/views/workspace/Members.vue'
 import InviteMember from '@/views/workspace/InviteMember.vue'
 import RemoveMember from '@/views/workspace/RemoveMember.vue'
@@ -142,6 +143,15 @@ const routes: RouteRecordRaw[] = [
                         component: EditWorkspace,
                         props: true,
                         meta: { requiresRole: 'ADMIN' }
+                    },
+
+                    // Delete: /workspaces/:wID/delete (OWNER only)
+                    {
+                        path: 'delete',
+                        name: 'workspaceDelete',
+                        component: DeleteWorkspace,
+                        props: true,
+                        meta: { requiresRole: 'OWNER' }
                     },
 
                     // ----- Members: /workspaces/:wID/members[...] -----
