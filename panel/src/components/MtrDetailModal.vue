@@ -688,5 +688,213 @@ const formatTimestamp = (result: ProbeData): string => {
 .hop-changed .hop-ip {
   color: #e0af68;
 }
+
+/* ==================== LIGHT THEME ==================== */
+[data-theme="light"] .mtr-modal {
+  background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+  border-color: #e5e7eb;
+  box-shadow: 0 25px 80px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .mtr-modal-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border-bottom-color: #e5e7eb;
+}
+
+[data-theme="light"] .mtr-modal-title {
+  color: #1f2937;
+}
+
+[data-theme="light"] .mtr-modal-title i {
+  color: #3b82f6;
+}
+
+[data-theme="light"] .node-badge {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  color: #1e40af;
+}
+
+[data-theme="light"] .close-btn {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .close-btn:hover {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+[data-theme="light"] .no-data {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .summary-bar {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border-color: #e5e7eb;
+}
+
+[data-theme="light"] .stat-value {
+  color: #1f2937;
+}
+
+[data-theme="light"] .stat-label {
+  color: #6b7280;
+}
+
+[data-theme="light"] .route-change-alert {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: #b45309;
+}
+
+[data-theme="light"] .traceroute-item {
+  border-color: #e5e7eb;
+}
+
+[data-theme="light"] .traceroute-item:hover {
+  border-color: #93c5fd;
+}
+
+[data-theme="light"] .traceroute-item.route-changed {
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.08);
+}
+
+[data-theme="light"] .traceroute-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border-bottom-color: #e5e7eb;
+}
+
+[data-theme="light"] .traceroute-time {
+  color: #2563eb;
+}
+
+[data-theme="light"] .route-change-badge {
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+}
+
+[data-theme="light"] .route-diff-container {
+  border-color: #d1d5db;
+}
+
+[data-theme="light"] .route-diff-header {
+  background: #f3f4f6;
+  color: #2563eb;
+}
+
+[data-theme="light"] .route-diff-header:hover {
+  background: #e5e7eb;
+}
+
+[data-theme="light"] .route-diff-content {
+  background: #ffffff;
+}
+
+[data-theme="light"] .route-column {
+  background: #f9fafb;
+}
+
+[data-theme="light"] .route-column.previous .column-header {
+  background: rgba(239, 68, 68, 0.06);
+  color: #dc2626;
+}
+
+[data-theme="light"] .route-column.current .column-header {
+  background: rgba(34, 197, 94, 0.06);
+  color: #16a34a;
+}
+
+[data-theme="light"] .hop-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .hop-number {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .hop-ip {
+  color: #1f2937;
+}
+
+[data-theme="light"] .hop-added {
+  background: rgba(34, 197, 94, 0.08);
+  border-left-color: #16a34a;
+}
+
+[data-theme="light"] .hop-added .hop-ip {
+  color: #16a34a;
+}
+
+[data-theme="light"] .hop-removed {
+  background: rgba(239, 68, 68, 0.08);
+  border-left-color: #dc2626;
+}
+
+[data-theme="light"] .hop-removed .hop-ip {
+  color: #dc2626;
+}
+
+[data-theme="light"] .hop-changed {
+  background: rgba(245, 158, 11, 0.08);
+  border-left-color: #d97706;
+}
+
+[data-theme="light"] .hop-changed .hop-ip {
+  color: #d97706;
+}
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .mtr-modal-overlay {
+    padding: 0.5rem;
+    align-items: flex-end;
+  }
+
+  .mtr-modal {
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 12px 12px 0 0;
+  }
+
+  .mtr-modal-header {
+    padding: 1rem;
+  }
+
+  .mtr-modal-title {
+    font-size: 1rem;
+  }
+
+  .mtr-modal-body {
+    padding: 0.75rem 1rem;
+  }
+
+  .summary-bar {
+    gap: 1rem;
+    padding: 0.875rem 1rem;
+    flex-wrap: wrap;
+  }
+
+  .stat-value {
+    font-size: 1.15rem;
+  }
+
+  .route-diff-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .traceroute-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .pagination .page-link {
+    padding: 0.5rem 0.75rem;
+    min-width: 2.5rem;
+    text-align: center;
+  }
+}
 </style>
 

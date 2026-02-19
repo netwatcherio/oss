@@ -307,4 +307,121 @@ const copyToClipboard = async () => {
   color: #f7768e !important;
   font-weight: 600;
 }
+
+/* ==================== LIGHT THEME ==================== */
+[data-theme="light"] .mtr-table-container {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+[data-theme="light"] .mtr-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border-bottom-color: #e5e7eb;
+}
+
+[data-theme="light"] .mtr-title {
+  color: #4b5563;
+}
+
+[data-theme="light"] .copy-btn {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+[data-theme="light"] .copy-btn:hover {
+  background: #2563eb;
+}
+
+[data-theme="light"] .copy-btn.copied {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+[data-theme="light"] .mtr-data-table th {
+  background: #f3f4f6;
+  color: #6b7280;
+  border-bottom-color: #d1d5db;
+}
+
+[data-theme="light"] .mtr-data-table td {
+  border-bottom-color: #e5e7eb;
+  color: #374151;
+}
+
+[data-theme="light"] .mtr-data-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.04);
+}
+
+[data-theme="light"] .col-hop {
+  color: #2563eb !important;
+}
+
+[data-theme="light"] .host-name {
+  color: #0369a1;
+}
+
+[data-theme="light"] .host-ip {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .unknown-hop td {
+  color: #d1d5db;
+}
+
+[data-theme="light"] .unknown-marker {
+  color: #d1d5db;
+}
+
+[data-theme="light"] .metric-excellent {
+  color: #16a34a !important;
+}
+
+[data-theme="light"] .metric-good {
+  color: #ca8a04 !important;
+}
+
+[data-theme="light"] .metric-warning {
+  color: #ea580c !important;
+}
+
+[data-theme="light"] .metric-critical {
+  color: #dc2626 !important;
+}
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 640px) {
+  .mtr-header {
+    padding: 0.625rem 0.875rem;
+  }
+
+  .mtr-title {
+    font-size: 0.75rem;
+  }
+
+  .copy-btn {
+    padding: 0.35rem 0.625rem;
+    font-size: 0.75rem;
+  }
+
+  .mtr-data-table {
+    font-size: 0.7rem;
+  }
+
+  .mtr-data-table th {
+    padding: 0.45rem 0.5rem;
+    font-size: 0.6rem;
+  }
+
+  .mtr-data-table td {
+    padding: 0.4rem 0.5rem;
+  }
+
+  .col-host {
+    min-width: 140px;
+  }
+
+  .col-metric {
+    min-width: 45px;
+  }
+}
 </style>
