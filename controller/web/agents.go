@@ -247,8 +247,17 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 		}
 		_ = ctx.ReadJSON(&body)
 
-		// 1) Clear the PSK hash - this invalidates any existing sessions
-		// The connected agent will fail auth on the next heartbeat/reconnect attempt
+		// 1) Send deactivation signal to connected agent BEFORE invalidating PSK
+		// This ensures the agent receives the message while still authenticated
+		// and triggers its cleanup/uninstall flow
+		if GetAgentHub().DeactivateAgent(aID, "regenerated") {
+			log.Infof("Sent deactivation to connected agent %d before regeneration", aID)
+			// Brief pause to allow the deactivate message to be delivered
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// 2) Clear the PSK hash - this invalidates any existing sessions
+		// If the agent missed the deactivate signal, it will fail auth on next reconnect
 		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, map[string]any{
 			"psk_hash":    "",    // Clear PSK - invalidates existing sessions
 			"initialized": false, // Mark as not initialized - requires bootstrap
