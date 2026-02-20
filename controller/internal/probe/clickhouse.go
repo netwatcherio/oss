@@ -57,7 +57,7 @@ func getenv(k, def string) string {
 	return def
 }
 
-// MigrateCH creates the table with configurable retention (idempotent).
+// MigrateCH creates the tables with configurable retention (idempotent).
 func MigrateCH(ctx context.Context, ch *sql.DB, retentionDays int) error {
 	if retentionDays <= 0 {
 		retentionDays = 90 // default
@@ -86,7 +86,40 @@ func MigrateCH(ctx context.Context, ch *sql.DB, retentionDays int) error {
 	TTL created_at + INTERVAL %d DAY DELETE
 	SETTINGS index_granularity = 8192;
 `, retentionDays)
-	_, err := ch.ExecContext(ctx, ddl)
+	if _, err := ch.ExecContext(ctx, ddl); err != nil {
+		return err
+	}
+
+	// Analysis snapshots — stores periodic workspace health analysis results
+	// for long-term trend analysis. Top-level metrics are native columns for
+	// efficient ClickHouse queries; detail data is stored as JSON strings.
+	snapshotDDL := fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS analysis_snapshots (
+		workspace_id      UInt64,
+		generated_at      DateTime('UTC')  DEFAULT now('UTC'),
+		overall_health    Float64,
+		grade             LowCardinality(String),
+		latency_score     Float64,
+		packet_loss_score Float64,
+		route_stability   Float64,
+		mos_score         Float64,
+		status            LowCardinality(String),
+		status_message    String,
+		incident_count    UInt32,
+		total_agents      UInt32,
+		online_agents     UInt32,
+		total_probes      UInt32,
+		incidents_json    String,
+		agents_json       String,
+		llm_summary       String DEFAULT ''
+	)
+	ENGINE = MergeTree
+	PARTITION BY toYYYYMM(generated_at)
+	ORDER BY (workspace_id, generated_at)
+	TTL generated_at + INTERVAL %d DAY DELETE
+	SETTINGS index_granularity = 8192;
+`, retentionDays)
+	_, err := ch.ExecContext(ctx, snapshotDDL)
 	return err
 }
 
@@ -1120,4 +1153,143 @@ func sortProbeDataDesc(data []ProbeData) {
 			}
 		}
 	}
+}
+
+// ── Analysis Snapshot Persistence ──
+
+// AnalysisSnapshot represents a stored workspace analysis result.
+type AnalysisSnapshot struct {
+	WorkspaceID     uint      `json:"workspace_id"`
+	GeneratedAt     time.Time `json:"generated_at"`
+	OverallHealth   float64   `json:"overall_health"`
+	Grade           string    `json:"grade"`
+	LatencyScore    float64   `json:"latency_score"`
+	PacketLossScore float64   `json:"packet_loss_score"`
+	RouteStability  float64   `json:"route_stability"`
+	MosScore        float64   `json:"mos_score"`
+	Status          string    `json:"status"`
+	StatusMessage   string    `json:"status_message"`
+	IncidentCount   int       `json:"incident_count"`
+	TotalAgents     int       `json:"total_agents"`
+	OnlineAgents    int       `json:"online_agents"`
+	TotalProbes     int       `json:"total_probes"`
+	IncidentsJSON   string    `json:"incidents_json,omitempty"`
+	AgentsJSON      string    `json:"agents_json,omitempty"`
+	LLMSummary      string    `json:"llm_summary,omitempty"`
+}
+
+// SaveAnalysisSnapshot persists a workspace analysis result to ClickHouse.
+// The LLM summary is only stored if it was already generated during analysis
+// (no additional LLM calls are made). Errors are non-fatal — callers should
+// log and continue.
+func SaveAnalysisSnapshot(ctx context.Context, ch *sql.DB, analysis *WorkspaceAnalysis) error {
+	if analysis == nil {
+		return nil
+	}
+
+	// Count online agents
+	onlineCount := 0
+	for _, a := range analysis.Agents {
+		if a.IsOnline {
+			onlineCount++
+		}
+	}
+
+	// Serialize detail data as JSON
+	incidentsJSON, _ := json.Marshal(analysis.Incidents)
+	agentsJSON, _ := json.Marshal(analysis.Agents)
+
+	// The status message may contain the LLM summary if enrichment was active,
+	// otherwise it's the rule-based message. We always store whatever was
+	// generated — no extra LLM calls.
+	llmSummary := ""
+	if analysis.Status.Message != "" {
+		llmSummary = analysis.Status.Message
+	}
+
+	const ins = `
+INSERT INTO analysis_snapshots
+(workspace_id, generated_at, overall_health, grade, latency_score,
+ packet_loss_score, route_stability, mos_score, status, status_message,
+ incident_count, total_agents, online_agents, total_probes,
+ incidents_json, agents_json, llm_summary)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+	_, err := ch.ExecContext(ctx, ins,
+		uint64(analysis.WorkspaceID),
+		analysis.GeneratedAt,
+		analysis.OverallHealth.OverallHealth,
+		analysis.OverallHealth.Grade,
+		analysis.OverallHealth.LatencyScore,
+		analysis.OverallHealth.PacketLossScore,
+		analysis.OverallHealth.RouteStability,
+		analysis.OverallHealth.MosScore,
+		analysis.Status.Status,
+		analysis.Status.Message,
+		uint32(len(analysis.Incidents)),
+		uint32(analysis.TotalAgents),
+		uint32(onlineCount),
+		uint32(analysis.TotalProbes),
+		string(incidentsJSON),
+		string(agentsJSON),
+		llmSummary,
+	)
+	return err
+}
+
+// GetAnalysisSnapshots returns historical analysis snapshots for a workspace.
+// Results are ordered by generated_at descending (newest first).
+func GetAnalysisSnapshots(
+	ctx context.Context,
+	ch *sql.DB,
+	workspaceID uint,
+	from, to time.Time,
+	limit int,
+) ([]AnalysisSnapshot, error) {
+	var clauses []string
+	clauses = append(clauses, fmt.Sprintf("workspace_id = %d", workspaceID))
+
+	if !from.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("generated_at >= %s", chQuoteTime(from)))
+	}
+	if !to.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("generated_at <= %s", chQuoteTime(to)))
+	}
+
+	if limit <= 0 {
+		limit = 288 // 24h of 5-min intervals
+	}
+
+	q := `
+SELECT
+    workspace_id, generated_at, overall_health, grade,
+    latency_score, packet_loss_score, route_stability, mos_score,
+    status, status_message, incident_count, total_agents,
+    online_agents, total_probes, incidents_json, agents_json, llm_summary
+FROM analysis_snapshots
+WHERE ` + strings.Join(clauses, " AND ") + `
+ORDER BY generated_at DESC
+` + fmt.Sprintf("LIMIT %d", limit)
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AnalysisSnapshot
+	for rows.Next() {
+		var s AnalysisSnapshot
+		if err := rows.Scan(
+			&s.WorkspaceID, &s.GeneratedAt, &s.OverallHealth, &s.Grade,
+			&s.LatencyScore, &s.PacketLossScore, &s.RouteStability, &s.MosScore,
+			&s.Status, &s.StatusMessage, &s.IncidentCount, &s.TotalAgents,
+			&s.OnlineAgents, &s.TotalProbes, &s.IncidentsJSON, &s.AgentsJSON,
+			&s.LLMSummary,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }

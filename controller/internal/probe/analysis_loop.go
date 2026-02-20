@@ -80,6 +80,12 @@ func runAnalysisCycle(ctx context.Context, ch *sql.DB, pg *gorm.DB) {
 
 		totalIncidents += len(analysis.Incidents)
 
+		// Persist snapshot to ClickHouse for long-term trend analysis.
+		// Fire-and-forget: storage failure must not block alert evaluation.
+		if err := SaveAnalysisSnapshot(ctx, ch, analysis); err != nil {
+			log.Warnf("[analysis_loop] workspace %d snapshot save failed: %v", wsID, err)
+		}
+
 		// Evaluate analysis against alert rules
 		if err := EvaluateAnalysisIncidents(ctx, pg, wsID, analysis); err != nil {
 			log.Warnf("[analysis_loop] workspace %d alert eval failed: %v", wsID, err)
