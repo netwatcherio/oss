@@ -1445,20 +1445,6 @@ const { connected: wsConnected } = useProbeSubscription(
         </div>
       </div>
 
-      <!-- AI Probe Analysis -->
-      <div class="col-sm-12" v-if="state.probe?.id && workspaceIdRef">
-        <div class="card mb-3">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <div>
-              <h5 class="card-title mb-0"><i class="bi bi-cpu me-1"></i> AI Analysis</h5>
-              <small class="text-muted">detected issues, suggested causes, and health scoring</small>
-            </div>
-          </div>
-          <div class="card-body">
-            <ProbeAnalysisView :workspace-id="workspaceIdRef" :probe-id="state.probe.id" />
-          </div>
-        </div>
-      </div>
 
       <!-- Original probe views for non-AGENT probes -->
       <template v-if="!state.isAgentProbe">
