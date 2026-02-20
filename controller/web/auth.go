@@ -169,7 +169,7 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			_ = ctx.JSON(iris.Map{"error": err.Error()})
 			return
 		}
-		_ = ctx.JSON(iris.Map{"token": token, "data": u})
+		_ = ctx.JSON(iris.Map{"token": token, "data": u, "email_verification_required": isEmailVerificationRequired()})
 	})
 
 	// POST /auth/verify-email - verify email with token

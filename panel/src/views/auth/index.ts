@@ -5,6 +5,7 @@ import Register from "./Register.vue";
 import Reset from "./Reset.vue";
 import ResetComplete from "./ResetComplete.vue";
 import VerifyEmail from "./VerifyEmail.vue";
+import VerificationRequired from "./VerificationRequired.vue";
 import InviteComplete from "./InviteComplete.vue";
 
 export default [
@@ -37,6 +38,11 @@ export default [
         path: '/auth/verify-email/:token',
         name: 'verifyEmail',
         component: VerifyEmail
+      },
+      {
+        path: '/auth/verify-required',
+        name: 'verifyRequired',
+        component: VerificationRequired
       },
     ]
   },

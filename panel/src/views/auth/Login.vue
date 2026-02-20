@@ -55,6 +55,7 @@ interface User {
 interface LoginResponse {
   token: string;
   data?: any; // user object; keep loose to avoid tight coupling
+  email_verification_required?: boolean;
 }
 
 let legacySession = core.session?.();
@@ -71,7 +72,12 @@ function onLogin(payload: LoginResponse) {
     //legacySession.data = payload.data;
   }
 
-  router.push("/");
+  // Redirect unverified users to verification gate
+  if (payload.email_verification_required && !payload.data?.verified) {
+    router.push("/auth/verify-required");
+  } else {
+    router.push("/");
+  }
 }
 
 function onFailure(error: unknown) {
@@ -96,7 +102,7 @@ function done() {
   }, Math.max(minTimeout - delta, 0));
 }
 
-async function submit(e: MouseEvent) {
+async function submit(e: Event) {
   e.preventDefault();
   state.registrationSuccess = false; // Clear success banner on login attempt
   begin();
