@@ -1616,19 +1616,18 @@ const { connected: wsConnected } = useProbeSubscription(
     @close="closeMtrModal" 
   />
 
-  <!-- AI Analysis Slide-out Panel -->
-  <Transition name="slide-panel">
-    <div v-if="showAnalysisModal && state.probe?.id && workspaceIdRef" class="analysis-panel-overlay" @click.self="showAnalysisModal = false">
-      <div class="analysis-panel">
-        <div class="analysis-panel-header">
-          <div class="d-flex align-items-center gap-2">
-            <i class="bi bi-cpu"></i>
-            <h6 class="mb-0">AI Analysis</h6>
-            <small class="text-muted">{{ state.title }}</small>
-          </div>
-          <button class="btn btn-sm btn-close" @click="showAnalysisModal = false"></button>
+  <!-- AI Analysis Modal -->
+  <Transition name="modal-fade">
+    <div v-if="showAnalysisModal && state.probe?.id && workspaceIdRef" class="analysis-modal-backdrop" @click.self="showAnalysisModal = false">
+      <div class="analysis-modal-container">
+        <div class="analysis-modal-header">
+          <h3><i class="bi bi-cpu"></i> AI Analysis</h3>
+          <span class="analysis-modal-subtitle">{{ state.title }}</span>
+          <button class="close-btn" @click="showAnalysisModal = false">
+            <i class="bi bi-x-lg"></i>
+          </button>
         </div>
-        <div class="analysis-panel-body">
+        <div class="analysis-modal-body">
           <ProbeAnalysisView :workspace-id="workspaceIdRef" :probe-id="state.probe.id" />
         </div>
       </div>
@@ -1890,82 +1889,147 @@ const { connected: wsConnected } = useProbeSubscription(
 
 /* AI Analysis Toggle Button */
 .ai-analysis-toggle {
-  background: var(--bg-card, #fff);
-  border: 1px solid var(--border-color, #e9ecef);
-  color: var(--text-primary, #212529);
+  background: var(--color-background, #1a1a2e);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  color: var(--color-text-muted, #888);
   font-weight: 500;
   font-size: 0.8rem;
   padding: 0.35rem 0.75rem;
   border-radius: 0.5rem;
   transition: all 0.2s ease;
   white-space: nowrap;
+  cursor: pointer;
 }
 .ai-analysis-toggle:hover {
-  border-color: var(--bs-primary);
-  color: var(--bs-primary);
-  background: rgba(var(--bs-primary-rgb), 0.05);
+  border-color: var(--bs-primary, #6366f1);
+  color: var(--color-text, #fff);
 }
 .ai-analysis-toggle.active {
-  background: var(--bs-primary);
-  border-color: var(--bs-primary);
+  background: var(--bs-primary, #6366f1);
+  border-color: var(--bs-primary, #6366f1);
   color: #fff;
 }
 
-/* AI Analysis Slide-out Panel */
-.analysis-panel-overlay {
+/* AI Analysis Modal */
+.analysis-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
-  z-index: 1050;
-  display: flex;
-  justify-content: flex-end;
-}
-.analysis-panel {
-  width: min(520px, 90vw);
-  height: 100vh;
-  background: var(--bg-card, #fff);
-  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.analysis-panel-header {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color, #e9ecef);
-  background: linear-gradient(135deg, var(--bs-primary) 0%, #4a9eff 100%);
-  color: #fff;
+  justify-content: center;
+  z-index: 1050;
+  padding: 1rem;
 }
-.analysis-panel-header h6 { color: #fff; }
-.analysis-panel-header .text-muted { color: rgba(255,255,255,0.7) !important; }
-.analysis-panel-header .btn-close { filter: brightness(0) invert(1); }
-.analysis-panel-body {
+.analysis-modal-container {
+  background: var(--color-background, #1a1a2e);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+}
+.analysis-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+}
+.analysis-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text, #fff);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+.analysis-modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.analysis-modal-header .close-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted, #888);
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.analysis-modal-header .close-btn:hover {
+  color: var(--color-text, #fff);
+  background: rgba(255,255,255,0.1);
+}
+.analysis-modal-body {
   flex: 1;
   overflow-y: auto;
   padding: 1.25rem;
 }
 
-/* Slide-panel transition */
-.slide-panel-enter-active,
-.slide-panel-leave-active {
-  transition: opacity 0.25s ease;
+/* Modal fade transition */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.2s ease;
 }
-.slide-panel-enter-active .analysis-panel,
-.slide-panel-leave-active .analysis-panel {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+.modal-fade-enter-active .analysis-modal-container,
+.modal-fade-leave-active .analysis-modal-container {
+  transition: transform 0.2s ease;
 }
-.slide-panel-enter-from,
-.slide-panel-leave-to {
+.modal-fade-enter-from,
+.modal-fade-leave-to {
   opacity: 0;
 }
-.slide-panel-enter-from .analysis-panel {
-  transform: translateX(100%);
+.modal-fade-enter-from .analysis-modal-container {
+  transform: scale(0.95);
 }
-.slide-panel-leave-to .analysis-panel {
-  transform: translateX(100%);
+.modal-fade-leave-to .analysis-modal-container {
+  transform: scale(0.95);
+}
+
+/* ===== LIGHT theme overrides for AI Analysis ===== */
+[data-theme="light"] .ai-analysis-toggle {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #6b7280;
+}
+[data-theme="light"] .ai-analysis-toggle:hover {
+  border-color: var(--bs-primary, #6366f1);
+  color: #1f2937;
+}
+[data-theme="light"] .analysis-modal-container {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .analysis-modal-header {
+  border-bottom-color: #e5e7eb;
+}
+[data-theme="light"] .analysis-modal-header h3 {
+  color: #1f2937;
+}
+[data-theme="light"] .analysis-modal-subtitle {
+  color: #6b7280;
+}
+[data-theme="light"] .analysis-modal-header .close-btn {
+  color: #9ca3af;
+}
+[data-theme="light"] .analysis-modal-header .close-btn:hover {
+  color: #1f2937;
+  background: rgba(0, 0, 0, 0.05);
 }
 
 </style>
