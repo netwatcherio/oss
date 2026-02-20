@@ -16,7 +16,7 @@ export const AuthService = {
         return data;
     },
     async getConfig() {
-        const { data } = await request.get<{ registration_enabled: boolean }>("/auth/config");
+        const { data } = await request.get<{ registration_enabled: boolean; email_verification_required?: boolean }>("/auth/config");
         return data;
     },
     async requestPasswordReset(email: string) {

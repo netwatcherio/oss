@@ -4,8 +4,7 @@
 FROM caddy:2-alpine
 
 # Copy static files
-COPY index.html /srv/
-COPY demo.html /srv/
+COPY *.html /srv/
 COPY style.css /srv/
 COPY script.js /srv/
 COPY assets/ /srv/assets/

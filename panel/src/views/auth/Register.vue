@@ -23,6 +23,7 @@ const state = reactive({
   began: 0,
   error: false,
   registrationDisabled: false, // Will be set on mount if registration is disabled
+  emailVerificationRequired: false,
 });
 
 // Check if registration is enabled on mount
@@ -33,6 +34,9 @@ onMounted(async () => {
       state.registrationDisabled = true;
       state.error = true;
       state.errorMessage = "Registration is currently disabled. Please contact your administrator.";
+    }
+    if (config.email_verification_required) {
+      state.emailVerificationRequired = true;
     }
   } catch {
     // If config fetch fails, allow registration attempt (server will still block if disabled)
@@ -56,8 +60,11 @@ function done() {
 
 function onRegister(_: unknown) {
   done();
-  // Optional: show a toast/snackbar "Registered! Please log in."
-  router.push("/auth/login");
+  const query: Record<string, string> = { registered: "true" };
+  if (state.emailVerificationRequired) {
+    query.verify = "true";
+  }
+  router.push({ path: "/auth/login", query });
 }
 
 function onFailure(error: any) {

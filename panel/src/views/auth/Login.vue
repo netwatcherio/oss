@@ -14,12 +14,28 @@ const state = reactive({
   waiting: false,
   error: false,
   registrationEnabled: true, // Default to true until we know
+  registrationSuccess: false,
+  verificationRequired: false,
 });
 
 const router = core.router();
+const route = router.currentRoute;
 
-// Check if registration is enabled
+// Check if registration is enabled + handle registration redirect
 onMounted(async () => {
+  // Check for registration success query params
+  const query = route.value.query;
+  if (query.registered === "true") {
+    state.registrationSuccess = true;
+    state.verificationRequired = query.verify === "true";
+    // Clean up the URL without triggering a navigation
+    router.replace({ path: "/auth/login", query: {} });
+    // Auto-dismiss after 10 seconds
+    setTimeout(() => {
+      state.registrationSuccess = false;
+    }, 10_000);
+  }
+
   try {
     const config = await AuthService.getConfig();
     state.registrationEnabled = config.registration_enabled;
@@ -82,6 +98,7 @@ function done() {
 
 async function submit(e: MouseEvent) {
   e.preventDefault();
+  state.registrationSuccess = false; // Clear success banner on login attempt
   begin();
 
   try {
@@ -104,6 +121,18 @@ async function submit(e: MouseEvent) {
             Need an account?
             <router-link id="to-register" to="/auth/register">Register</router-link>
           </span>
+        </div>
+
+        <!-- Registration success banner -->
+        <div v-if="state.registrationSuccess" class="success-message mb-3">
+          <template v-if="state.verificationRequired">
+            <i class="bi bi-envelope-check me-2"></i>
+            Registration successful! A verification email has been sent. Please check your inbox and verify your email before logging in.
+          </template>
+          <template v-else>
+            <i class="bi bi-check-circle me-2"></i>
+            Registration successful! You can now log in with your credentials.
+          </template>
         </div>
 
         <form class="auth-form" @submit.prevent="submit">
