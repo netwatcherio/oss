@@ -426,6 +426,72 @@ LIMIT 2000
 	}, nil
 }
 
+// probeTrafficSimMetrics fetches TrafficSim metrics for a specific probe.
+// Used by AGENT probe analysis to combine PING + MTR + TrafficSim data.
+func probeTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) ProbeMetrics {
+	if len(agentIDs) == 0 {
+		return ProbeMetrics{}
+	}
+
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
+	q := fmt.Sprintf(`
+SELECT payload_raw
+FROM probe_data
+WHERE type = 'TRAFFICSIM'
+  AND probe_id = %d
+  AND agent_id IN (%s)
+  AND created_at >= %s
+ORDER BY created_at DESC
+LIMIT 2000
+`, probeID, agentIDList, chQuoteTime(from))
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		log.Warnf("[Analysis] Failed to fetch TrafficSim metrics for probe %d: %v", probeID, err)
+		return ProbeMetrics{}
+	}
+	defer rows.Close()
+
+	var latencies []float64
+	var totalLoss float64
+	var count int
+
+	for rows.Next() {
+		var payloadRaw string
+		if err := rows.Scan(&payloadRaw); err != nil || payloadRaw == "" {
+			continue
+		}
+
+		var payload struct {
+			AverageRTT     float64 `json:"averageRTT"`
+			LossPercentage float64 `json:"lossPercentage"`
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
+			continue
+		}
+
+		latencies = append(latencies, payload.AverageRTT)
+		totalLoss += payload.LossPercentage
+		count++
+	}
+
+	if count == 0 {
+		return ProbeMetrics{}
+	}
+
+	return ProbeMetrics{
+		AvgLatency:  sanitizeFloat(avg(latencies)),
+		P95Latency:  sanitizeFloat(percentile(latencies, 95)),
+		PacketLoss:  sanitizeFloat(totalLoss / float64(count)),
+		SampleCount: count,
+	}
+}
+
 // analyzeMtrForProbe fetches MTR traces and produces path analysis + signals
 func analyzeMtrForProbe(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*MtrPathAnalysis, []AnalysisSignal, error) {
 	if len(agentIDs) == 0 {
@@ -678,6 +744,25 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, probeID, from)
 	if err != nil {
 		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", probeID, err)
+	}
+
+	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type)
+	if p.Type == TypeAgent {
+		tsMetrics := probeTrafficSimMetrics(ctx, ch, agentIDs, probeID, from)
+		if tsMetrics.SampleCount > 0 {
+			// If PING data was empty, use TrafficSim as primary metrics
+			if metrics.SampleCount == 0 {
+				metrics.AvgLatency = tsMetrics.AvgLatency
+				metrics.P95Latency = tsMetrics.P95Latency
+				metrics.PacketLoss = tsMetrics.PacketLoss
+				metrics.SampleCount = tsMetrics.SampleCount
+			} else {
+				// Blend: use worse of PING/TrafficSim loss, average the latencies
+				if tsMetrics.PacketLoss > metrics.PacketLoss {
+					metrics.PacketLoss = tsMetrics.PacketLoss
+				}
+			}
+		}
 	}
 
 	// Route stability from MTR (100% if no MTR data)
