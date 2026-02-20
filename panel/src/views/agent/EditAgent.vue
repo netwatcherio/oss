@@ -234,13 +234,13 @@ async function submit() {
                     id="trafficsimPort"
                     class="form-control"
                     v-model.number="state.agent.trafficsim_port"
-                    placeholder="8677"
+                    placeholder="5000"
                     type="number"
                     min="1"
                     max="65535"
                     :disabled="state.loading"
                   >
-                  <div class="form-text">Default: 8677</div>
+                  <div class="form-text">Default: 5000</div>
                 </div>
               </div>
 

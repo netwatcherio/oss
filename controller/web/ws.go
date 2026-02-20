@@ -326,6 +326,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 
 				// Resolve TargetAgent and ProbeAgentID from probe configuration if not already set
 				// This handles bidirectional probe direction detection
+				// Skip lookup for virtual probes (ID=0) — these are self-reporting default probes
 				if pp.ProbeID != 0 {
 					p, err := probe.GetByID(context.TODO(), db, pp.ProbeID)
 					if err == nil && p != nil {
@@ -352,6 +353,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 							}
 						}
 					}
+				} else {
+					// Virtual probe (ID=0): set ProbeAgentID to the submitting agent
+					pp.ProbeAgentID = aid
 				}
 
 				err := agent.UpdateAgentSeen(context.TODO(), db, pp.AgentID, time.Now())
@@ -519,31 +523,11 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 					}
 
 					if len(result.Data) > 0 && queueItem != nil {
-						// Look up the actual SPEEDTEST probe for this agent
-						probes, err := probe.ListByAgent(context.TODO(), db, aid)
-						if err != nil {
-							log.Errorf("speedtest_result list probes: %v", err)
-							return err
-						}
-
-						// Find the SPEEDTEST probe
-						var speedtestProbeID uint
-						for _, p := range probes {
-							if p.Type == probe.TypeSpeedtest {
-								speedtestProbeID = p.ID
-								break
-							}
-						}
-
-						if speedtestProbeID == 0 {
-							log.Warnf("speedtest_result: no SPEEDTEST probe found for agent %d, using queue ID", aid)
-							speedtestProbeID = result.QueueID // Fallback to queue ID if probe not found
-						}
-
+						// Virtual probes use probe_id=0 — no DB lookup needed
 						pp := probe.ProbeData{
 							Type:       probe.TypeSpeedtest,
 							AgentID:    aid,
-							ProbeID:    speedtestProbeID,
+							ProbeID:    0, // Virtual probe
 							Payload:    result.Data,
 							CreatedAt:  time.Now(),
 							ReceivedAt: time.Now(),

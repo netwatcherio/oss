@@ -65,7 +65,7 @@ type Agent struct {
 	// TrafficSim server configuration (per-agent, not per-probe)
 	TrafficSimEnabled bool   `gorm:"default:false" json:"trafficsim_enabled"`
 	TrafficSimHost    string `gorm:"size:64;default:0.0.0.0" json:"trafficsim_host"`
-	TrafficSimPort    int    `gorm:"default:8677" json:"trafficsim_port"`
+	TrafficSimPort    int    `gorm:"default:5000" json:"trafficsim_port"`
 }
 
 // -------------------- Auth placeholders in separate tables --------------------
@@ -155,12 +155,7 @@ func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput) (*CreateOutpu
 			return err
 		}
 
-		// 2) Default probes
-		if err := createDefaultProbesTx(tx, a); err != nil {
-			return err
-		}
-
-		// 3) Issue PIN (simplified - no pepper/index needed)
+		// 2) Issue PIN (simplified - no pepper/index needed)
 		var expiresAt *time.Time
 		if in.PINTTL != nil && *in.PINTTL > 0 {
 			t := now.Add(*in.PINTTL)
@@ -567,23 +562,3 @@ type dbTarget struct {
 }
 
 func (dbTarget) TableName() string { return "probe_targets" }
-
-// Inserts 4 default probes and SPEEDTEST target "ok"
-func createDefaultProbesTx(tx *gorm.DB, a *Agent) error {
-	now := time.Now()
-	empty := datatypes.JSON([]byte(`{}`))
-
-	p := []*dbProbe{
-		{WorkspaceID: a.WorkspaceID, AgentID: a.ID, Type: "NETINFO", CreatedAt: now, UpdatedAt: now, Labels: empty, Metadata: empty},
-		{WorkspaceID: a.WorkspaceID, AgentID: a.ID, Type: "SYSINFO", CreatedAt: now, UpdatedAt: now, Labels: empty, Metadata: empty},
-		{WorkspaceID: a.WorkspaceID, AgentID: a.ID, Type: "SPEEDTEST_SERVERS", CreatedAt: now, UpdatedAt: now, Labels: empty, Metadata: empty},
-		{WorkspaceID: a.WorkspaceID, AgentID: a.ID, Type: "SPEEDTEST", CreatedAt: now, UpdatedAt: now, Labels: empty, Metadata: empty},
-	}
-	for _, row := range p {
-		if err := tx.Create(row).Error; err != nil {
-			return err
-		}
-	}
-	t := dbTarget{ProbeID: p[3].ID, Target: "ok", CreatedAt: now, UpdatedAt: now}
-	return tx.Create(&t).Error
-}

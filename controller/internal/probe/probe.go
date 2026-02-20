@@ -489,7 +489,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 		port := agentObj.TrafficSimPort
 		if port <= 0 {
-			port = 8677
+			port = 5000
 		}
 		now := time.Now()
 		serverProbe := Probe{
@@ -516,6 +516,51 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 		out = append(out, serverProbe)
 		log.Infof("[agent %d] Added virtual TRAFFICSIM server probe from agent settings (%s:%d)", agentID, host, port)
+	}
+
+	// Inject virtual default probes (NETINFO, SYSINFO, SPEEDTEST, SPEEDTEST_SERVERS).
+	// These are always present for every agent but no longer stored in the database.
+	{
+		wsID := uint(0)
+		if agentObj != nil {
+			wsID = agentObj.WorkspaceID
+		} else if a, err := agent.GetAgentByID(ctx, db, agentID); err == nil {
+			wsID = a.WorkspaceID
+		}
+		now := time.Now()
+		empty := datatypes.JSON([]byte(`{}`))
+
+		defaultProbes := []Probe{
+			{
+				ID: 0, WorkspaceID: wsID, AgentID: agentID,
+				Type: TypeNetInfo, Enabled: true,
+				CreatedAt: now, UpdatedAt: now,
+				Labels: empty, Metadata: empty,
+			},
+			{
+				ID: 0, WorkspaceID: wsID, AgentID: agentID,
+				Type: TypeSysInfo, Enabled: true,
+				CreatedAt: now, UpdatedAt: now,
+				Labels: empty, Metadata: empty,
+			},
+			{
+				ID: 0, WorkspaceID: wsID, AgentID: agentID,
+				Type: TypeSpeedtestServer, Enabled: true,
+				CreatedAt: now, UpdatedAt: now,
+				Labels: empty, Metadata: empty,
+			},
+			{
+				ID: 0, WorkspaceID: wsID, AgentID: agentID,
+				Type: TypeSpeedtest, Enabled: true,
+				CreatedAt: now, UpdatedAt: now,
+				Labels: empty, Metadata: empty,
+				Targets: []Target{
+					{ProbeID: 0, Target: "ok", CreatedAt: now, UpdatedAt: now},
+				},
+			},
+		}
+		out = append(out, defaultProbes...)
+		log.Infof("[agent %d] Added %d virtual default probes (NETINFO, SYSINFO, SPEEDTEST_SERVERS, SPEEDTEST)", agentID, len(defaultProbes))
 	}
 
 	// Summary log with final counts
@@ -714,7 +759,7 @@ func getTrafficSimServerPort(ctx context.Context, db *gorm.DB, agentID uint) str
 		return ""
 	}
 	if a.TrafficSimPort <= 0 {
-		return "8677" // default
+		return "5000" // default
 	}
 	return strconv.Itoa(a.TrafficSimPort)
 }
