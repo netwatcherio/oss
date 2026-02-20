@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/speedtest"
 	"strconv"
 	"strings"
 	"time"
@@ -121,13 +122,14 @@ type UpdateInput struct {
 
 // CopyInput defines parameters for copying probes to destination agents
 type CopyInput struct {
-	SourceAgentID  uint   `json:"source_agent_id"`       // Agent to copy probes FROM
-	DestAgentIDs   []uint `json:"dest_agent_ids"`        // Agents to copy probes TO
-	WorkspaceID    uint   `json:"workspace_id"`          // Workspace context
-	ProbeIDs       []uint `json:"probe_ids,omitempty"`   // Specific probes to copy (if empty, copies all)
-	ProbeTypes     []Type `json:"probe_types,omitempty"` // Filter by type (AGENT, MTR, PING, TRAFFICSIM)
-	MatchTargets   bool   `json:"match_targets"`         // Only copy probes with targets matching dest agents
-	SkipDuplicates bool   `json:"skip_duplicates"`       // Skip probes that already exist on dest (recommended)
+	SourceAgentID  uint   `json:"source_agent_id"`         // Agent to copy probes FROM
+	DestAgentIDs   []uint `json:"dest_agent_ids"`          // Agents to copy probes TO
+	WorkspaceID    uint   `json:"workspace_id"`            // Workspace context
+	ProbeIDs       []uint `json:"probe_ids,omitempty"`     // Specific probes to copy (if empty, copies all)
+	ProbeTypes     []Type `json:"probe_types,omitempty"`   // Filter by type (AGENT, MTR, PING, TRAFFICSIM)
+	MatchTargets   bool   `json:"match_targets"`           // Only copy probes with targets matching dest agents
+	SkipDuplicates bool   `json:"skip_duplicates"`         // Skip probes that already exist on dest (recommended)
+	Bidirectional  *bool  `json:"bidirectional,omitempty"` // Override bidirectional flag (nil = use source value)
 }
 
 // CopyResult contains the result of copying a single probe
@@ -554,9 +556,25 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 				Type: TypeSpeedtest, Enabled: true,
 				CreatedAt: now, UpdatedAt: now,
 				Labels: empty, Metadata: empty,
-				Targets: []Target{
-					{ProbeID: 0, Target: "ok", CreatedAt: now, UpdatedAt: now},
-				},
+				Targets: func() []Target {
+					// Check for pending speedtest queue items — set target to the server ID
+					// so the agent's SpeedTest handler picks it up
+					pending, err := speedtest.ListPendingForAgent(ctx, db, agentID)
+					if err == nil && len(pending) > 0 {
+						serverID := pending[0].ServerID
+						if serverID == "" {
+							serverID = "auto" // auto-select nearest server
+						}
+						log.Infof("[agent %d] SPEEDTEST probe target set to queued server %q (queue_id=%d)",
+							agentID, serverID, pending[0].ID)
+						return []Target{
+							{ProbeID: 0, Target: serverID, CreatedAt: now, UpdatedAt: now},
+						}
+					}
+					return []Target{
+						{ProbeID: 0, Target: "ok", CreatedAt: now, UpdatedAt: now},
+					}
+				}(),
 			},
 		}
 		out = append(out, defaultProbes...)
@@ -1102,6 +1120,11 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 				} else if t.Target != "" {
 					copyInput.Targets = append(copyInput.Targets, t.Target)
 				}
+			}
+
+			// Apply bidirectional from CopyInput if set
+			if in.Bidirectional != nil && *in.Bidirectional {
+				copyInput.Bidirectional = true
 			}
 
 			// Check for duplicates if requested

@@ -414,10 +414,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			},
 
 			"speedtest_servers": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				log.Infof("[%s] received speedtest_servers from agent %d", nsConn, aid)
@@ -439,10 +438,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			},
 
 			"speedtest_queue_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				if expired, err := speedtest.ExpirePendingItems(context.TODO(), db); err != nil {
@@ -477,10 +475,9 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 			},
 
 			"speedtest_result": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				aid, ok := ctx.Values().GetUint("agent_id")
-				if (ok != nil) || (aid == 0) {
-					return errors.New("unauthorized: no agent in context")
+				aid, _ := nsConn.Conn.Get("agent_id").(uint)
+				if aid == 0 {
+					return errors.New("unauthorized: no agent in connection state")
 				}
 
 				log.Infof("[%s] received speedtest_result from agent %d: %s", nsConn, aid, msg.Body)
