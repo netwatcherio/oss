@@ -479,6 +479,45 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 	}
 
+	// If the agent has TrafficSim server enabled in its settings,
+	// inject a virtual TRAFFICSIM server probe so the agent binary starts the server.
+	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
+	if err == nil && agentObj.TrafficSimEnabled {
+		host := agentObj.TrafficSimHost
+		if host == "" {
+			host = "0.0.0.0"
+		}
+		port := agentObj.TrafficSimPort
+		if port <= 0 {
+			port = 8677
+		}
+		now := time.Now()
+		serverProbe := Probe{
+			ID:          0, // Virtual probe - no DB record
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			WorkspaceID: agentObj.WorkspaceID,
+			AgentID:     agentID,
+			Type:        TypeTrafficSim,
+			Enabled:     true,
+			IntervalSec: 60,
+			TimeoutSec:  10,
+			Server:      true,
+			Labels:      datatypes.JSON([]byte(`{}`)),
+			Metadata:    datatypes.JSON([]byte(`{}`)),
+			Targets: []Target{
+				{
+					ProbeID:   0,
+					Target:    fmt.Sprintf("%s:%d", host, port),
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+			},
+		}
+		out = append(out, serverProbe)
+		log.Infof("[agent %d] Added virtual TRAFFICSIM server probe from agent settings (%s:%d)", agentID, host, port)
+	}
+
 	// Summary log with final counts
 	outTypeCounts := make(map[string]int)
 	var outProbeIDs []uint
@@ -659,36 +698,25 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 	}
 }
 
-// hasTrafficSimServer checks if an agent has a TrafficSim server probe configured.
+// hasTrafficSimServer checks if an agent has TrafficSim server enabled in its settings.
 func hasTrafficSimServer(ctx context.Context, db *gorm.DB, agentID uint) bool {
-	var count int64
-	db.WithContext(ctx).Model(&Probe{}).
-		Where("agent_id = ? AND type = ? AND server = true", agentID, TypeTrafficSim).
-		Count(&count)
-	return count > 0
+	a, err := agent.GetAgentByID(ctx, db, agentID)
+	if err != nil {
+		return false
+	}
+	return a.TrafficSimEnabled
 }
 
-// getTrafficSimServerPort returns the port from an agent's TrafficSim server probe.
+// getTrafficSimServerPort returns the TrafficSim server port from agent settings.
 func getTrafficSimServerPort(ctx context.Context, db *gorm.DB, agentID uint) string {
-	var probes []Probe
-	err := db.WithContext(ctx).
-		Preload("Targets").
-		Where("agent_id = ? AND type = ? AND server = true", agentID, TypeTrafficSim).
-		Limit(1).
-		Find(&probes).Error
-	if err != nil || len(probes) == 0 || len(probes[0].Targets) == 0 {
+	a, err := agent.GetAgentByID(ctx, db, agentID)
+	if err != nil || !a.TrafficSimEnabled {
 		return ""
 	}
-
-	// Extract port from target (format: "0.0.0.0:port" or ":port")
-	target := probes[0].Targets[0].Target
-	if strings.Contains(target, ":") {
-		parts := strings.Split(target, ":")
-		if len(parts) >= 2 {
-			return parts[len(parts)-1]
-		}
+	if a.TrafficSimPort <= 0 {
+		return "8677" // default
 	}
-	return ""
+	return strconv.Itoa(a.TrafficSimPort)
 }
 
 func getPublicIP(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) (string, error) {

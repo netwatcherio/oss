@@ -557,6 +557,9 @@ let state = reactive({
   systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
   hasData: false,
+  // Pending PIN for uninitialized agents
+  pendingPin: '',
+  loadingPendingPin: false,
 })
 
 // Permissions based on user's role in this workspace
@@ -568,6 +571,65 @@ const liveUpdating = ref(false);
 // Share modal state
 const showShareModal = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
+
+// Pending PIN copy state
+const copiedPinField = ref<string | null>(null);
+
+// Controller info for install commands
+function getControllerInfo() {
+  const anyWindow = window as any;
+  let endpoint = anyWindow?.CONTROLLER_ENDPOINT 
+    || import.meta.env?.CONTROLLER_ENDPOINT 
+    || `${window.location.protocol}//${window.location.host}`;
+  try {
+    const url = new URL(endpoint);
+    return { host: url.host, ssl: url.protocol === 'https:' };
+  } catch {
+    return { host: window.location.host, ssl: window.location.protocol === 'https:' };
+  }
+}
+
+// Install commands (computed, only when we have a pending PIN)
+const linuxInstallCmd = computed(() => {
+  if (!state.agent.id || !state.pendingPin) return '';
+  const { host, ssl } = getControllerInfo();
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
+  --host ${host} \\
+  --ssl ${ssl} \\
+  --workspace ${state.workspace.id} \\
+  --id ${state.agent.id} \\
+  --pin ${state.pendingPin}`;
+});
+
+const windowsInstallCmd = computed(() => {
+  if (!state.agent.id || !state.pendingPin) return '';
+  const { host, ssl } = getControllerInfo();
+  return `Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
+.\\install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.pendingPin}"`;
+});
+
+const dockerInstallCmd = computed(() => {
+  if (!state.agent.id || !state.pendingPin) return '';
+  const { host, ssl } = getControllerInfo();
+  return `docker run -d --name netwatcher-agent \\
+  -e CONTROLLER_HOST="${host}" \\
+  -e CONTROLLER_SSL="${ssl}" \\
+  -e WORKSPACE_ID="${state.workspace.id}" \\
+  -e AGENT_ID="${state.agent.id}" \\
+  -e AGENT_PIN="${state.pendingPin}" \\
+  --restart unless-stopped \\
+  netwatcher/agent:latest`;
+});
+
+async function copyPinText(text: string, field: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedPinField.value = field;
+    setTimeout(() => { copiedPinField.value = null; }, 2000);
+  } catch (err) {
+    console.error('Failed to copy:', err);
+  }
+}
 
 // Get workspace/agent IDs as refs for the WebSocket composable
 const workspaceIdRef = computed(() => state.workspace.id);
@@ -672,6 +734,19 @@ onMounted(async () => {
     state.agent = agentRes as Agent;
     loadingState.workspace = false;
     loadingState.agent = false;
+
+    // If agent is not initialized, fetch pending PIN
+    if (!state.agent.initialized) {
+      state.loadingPendingPin = true;
+      try {
+        const pinResult = await AgentService.getPendingPin(workspaceID, agentID);
+        state.pendingPin = pinResult.pin || '';
+      } catch (err) {
+        console.log('No pending PIN available');
+      } finally {
+        state.loadingPendingPin = false;
+      }
+    }
   } catch (err) {
     console.error('Failed to load workspace/agent:', err);
     errors.workspace = 'Failed to load workspace';
@@ -997,6 +1072,56 @@ onMounted(async () => {
       <i class="bi bi-exclamation-triangle-fill text-warning"></i>
       <h5>Agent Not Initialized</h5>
       <p>This agent needs to be initialized before it can be used.</p>
+      
+      <!-- Pending PIN display -->
+      <div v-if="state.loadingPendingPin" class="mt-3">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2">Loading PIN...</span>
+      </div>
+      <div v-else-if="state.pendingPin" class="card mt-3 text-start" style="max-width: 720px; margin: 0 auto;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bi bi-key me-2"></i>Bootstrap PIN</h6>
+        </div>
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-3 mb-3 p-3 rounded" style="background: var(--bs-tertiary-bg, #f8f9fa); border: 1px solid var(--bs-border-color, #dee2e6);">
+            <code style="font-size: 1.5rem; font-weight: 700; letter-spacing: 3px; color: var(--bs-primary, #0d6efd); flex: 1;">{{ state.pendingPin }}</code>
+            <button class="btn btn-sm btn-outline-primary" @click="copyPinText(state.pendingPin, 'pin')">
+              <i class="bi" :class="copiedPinField === 'pin' ? 'bi-check' : 'bi-clipboard'"></i>
+            </button>
+          </div>
+          <p class="text-muted small mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            This PIN is available until the agent connects and activates. You can revisit this page to view it.
+          </p>
+
+          <!-- Linux install -->
+          <h6 class="mt-3"><i class="bi bi-terminal me-2"></i>Linux / macOS</h6>
+          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
+            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ linuxInstallCmd }}</pre>
+            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(linuxInstallCmd, 'linux')">
+              <i class="bi" :class="copiedPinField === 'linux' ? 'bi-check' : 'bi-clipboard'"></i> Copy
+            </button>
+          </div>
+
+          <!-- Windows install -->
+          <h6 class="mt-3"><i class="bi bi-windows me-2"></i>Windows PowerShell</h6>
+          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
+            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ windowsInstallCmd }}</pre>
+            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(windowsInstallCmd, 'windows')">
+              <i class="bi" :class="copiedPinField === 'windows' ? 'bi-check' : 'bi-clipboard'"></i> Copy
+            </button>
+          </div>
+
+          <!-- Docker install -->
+          <h6 class="mt-3"><i class="bi bi-box me-2"></i>Docker</h6>
+          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
+            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ dockerInstallCmd }}</pre>
+            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(dockerInstallCmd, 'docker')">
+              <i class="bi" :class="copiedPinField === 'docker' ? 'bi-check' : 'bi-clipboard'"></i> Copy
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-else class="agent-content">

@@ -58,6 +58,11 @@ export interface Agent {
 
     // Authentication: PSKHash is omitted (json:"-")
     initialized: boolean;
+
+    // TrafficSim server configuration
+    trafficsim_enabled: boolean;
+    trafficsim_host: string;
+    trafficsim_port: number;
 }
 
 /** ===== Probes ===== */

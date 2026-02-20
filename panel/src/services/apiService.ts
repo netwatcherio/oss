@@ -179,6 +179,16 @@ export const AgentService = {
         const { data } = await request.post(`/workspaces/${workspaceId}/agents/${agentId}/regenerate`, body ?? {});
         return data as { pin: string; agent: Agent };
     },
+    /**
+     * Get the pending (unconsumed) PIN for an agent, if one exists.
+     * Only returns a PIN if the agent is not yet initialized (bootstrap not completed).
+     */
+    async getPendingPin(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.get<{ pin: string; initialized: boolean }>(
+            `/workspaces/${workspaceId}/agents/${agentId}/pending-pin`
+        );
+        return data;
+    },
 };
 
 /** ===== Utils (local) ===== */

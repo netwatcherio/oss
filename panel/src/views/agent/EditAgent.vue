@@ -71,7 +71,10 @@ async function submit() {
       name: state.agent.name,
       location: state.agent.location,
       description: state.agent.description,
-      public_ip_override: state.agent.public_ip_override
+      public_ip_override: state.agent.public_ip_override,
+      trafficsim_enabled: state.agent.trafficsim_enabled,
+      trafficsim_host: state.agent.trafficsim_host,
+      trafficsim_port: state.agent.trafficsim_port,
     });
     router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
   } catch (err: any) {
@@ -187,6 +190,60 @@ async function submit() {
                 </div>
               </div>
 
+              <hr>
+
+              <!-- TrafficSim Server Configuration -->
+              <h6 class="mb-3">
+                <i class="bi bi-speedometer2 me-2"></i>TrafficSim Server
+                <span class="badge bg-info ms-1">Optional</span>
+              </h6>
+
+              <div class="mb-3">
+                <div class="form-check form-switch">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    role="switch"
+                    id="trafficsimEnabled"
+                    v-model="state.agent.trafficsim_enabled"
+                    :disabled="state.loading"
+                  >
+                  <label class="form-check-label" for="trafficsimEnabled">
+                    Enable TrafficSim Server
+                  </label>
+                </div>
+                <div class="form-text">Run a TrafficSim server on this agent for inter-agent traffic simulation testing.</div>
+              </div>
+
+              <div v-if="state.agent.trafficsim_enabled" class="row mb-3">
+                <div class="col-8">
+                  <label class="form-label" for="trafficsimHost">Listen Host</label>
+                  <input
+                    id="trafficsimHost"
+                    class="form-control"
+                    v-model="state.agent.trafficsim_host"
+                    placeholder="0.0.0.0"
+                    type="text"
+                    :disabled="state.loading"
+                  >
+                  <div class="form-text">IP address to bind the server to (default: 0.0.0.0)</div>
+                </div>
+                <div class="col-4">
+                  <label class="form-label" for="trafficsimPort">Port</label>
+                  <input
+                    id="trafficsimPort"
+                    class="form-control"
+                    v-model.number="state.agent.trafficsim_port"
+                    placeholder="8677"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    :disabled="state.loading"
+                  >
+                  <div class="form-text">Default: 8677</div>
+                </div>
+              </div>
+
               <!-- Error display -->
               <div v-if="state.error" class="alert alert-danger mb-0">
                 <i class="bi bi-x-circle me-2"></i>{{ state.error }}
@@ -256,6 +313,19 @@ async function submit() {
                 When other agents target this agent (e.g., for PING or MTR probes), 
                 the controller resolves the target IP from NETINFO data. 
                 Set an override if auto-detection doesn't work for your network.
+              </p>
+            </div>
+          </div>
+
+          <div class="card bg-light mt-3">
+            <div class="card-body">
+              <h6 class="card-title">
+                <i class="bi bi-speedometer2 me-2"></i>TrafficSim Server
+              </h6>
+              <p class="card-text small text-muted mb-0">
+                Enable a TrafficSim server to allow other agents to measure 
+                bidirectional latency, packet loss, and jitter between this agent 
+                and others in the same workspace. Only one server can run per agent.
               </p>
             </div>
           </div>

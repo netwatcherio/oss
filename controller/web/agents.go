@@ -44,15 +44,18 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 	as.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		wsID := uintParam(ctx, "id")
 		var body struct {
-			Name             string         `json:"name"`
-			Description      string         `json:"description"`
-			Location         string         `json:"location"`
-			PublicIPOverride string         `json:"public_ip_override"`
-			Version          string         `json:"version"`
-			PinLength        int            `json:"pinLength"`
-			PinTTLSeconds    int            `json:"pinTTLSeconds"`
-			Labels           map[string]any `json:"labels"`
-			Metadata         map[string]any `json:"metadata"`
+			Name              string         `json:"name"`
+			Description       string         `json:"description"`
+			Location          string         `json:"location"`
+			PublicIPOverride  string         `json:"public_ip_override"`
+			Version           string         `json:"version"`
+			PinLength         int            `json:"pinLength"`
+			PinTTLSeconds     int            `json:"pinTTLSeconds"`
+			Labels            map[string]any `json:"labels"`
+			Metadata          map[string]any `json:"metadata"`
+			TrafficSimEnabled *bool          `json:"trafficsim_enabled"`
+			TrafficSimHost    string         `json:"trafficsim_host"`
+			TrafficSimPort    int            `json:"trafficsim_port"`
 		}
 		if err := ctx.ReadJSON(&body); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
@@ -138,13 +141,16 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 	aid.Patch("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
 		aID := uintParam(ctx, "agentID")
 		var body struct {
-			Name             *string         `json:"name"`
-			Description      *string         `json:"description"`
-			Location         *string         `json:"location"`
-			PublicIPOverride *string         `json:"public_ip_override"`
-			Version          *string         `json:"version"`
-			Labels           *map[string]any `json:"labels"`
-			Metadata         *map[string]any `json:"metadata"`
+			Name              *string         `json:"name"`
+			Description       *string         `json:"description"`
+			Location          *string         `json:"location"`
+			PublicIPOverride  *string         `json:"public_ip_override"`
+			Version           *string         `json:"version"`
+			Labels            *map[string]any `json:"labels"`
+			Metadata          *map[string]any `json:"metadata"`
+			TrafficSimEnabled *bool           `json:"trafficsim_enabled"`
+			TrafficSimHost    *string         `json:"trafficsim_host"`
+			TrafficSimPort    *int            `json:"trafficsim_port"`
 		}
 		if err := ctx.ReadJSON(&body); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
@@ -171,6 +177,15 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 		}
 		if body.Metadata != nil {
 			patch["metadata"] = jsonFromMap(*body.Metadata)
+		}
+		if body.TrafficSimEnabled != nil {
+			patch["trafficsim_enabled"] = *body.TrafficSimEnabled
+		}
+		if body.TrafficSimHost != nil {
+			patch["trafficsim_host"] = *body.TrafficSimHost
+		}
+		if body.TrafficSimPort != nil {
+			patch["trafficsim_port"] = *body.TrafficSimPort
 		}
 
 		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, patch); err != nil {
@@ -287,5 +302,33 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			"pin":   pin,
 			"agent": a,
 		})
+	})
+
+	// GET /workspaces/{id}/agents/{agentID}/pending-pin - requires CanEdit (USER+)
+	// Returns the pending (unconsumed) PIN for an agent, if one exists.
+	// Only returns a PIN if the agent is not yet initialized (bootstrap not completed).
+	aid.Get("/pending-pin", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
+		wsID := uintParam(ctx, "id")
+		aID := uintParam(ctx, "agentID")
+
+		// Check if agent is already initialized
+		a, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, wsID, aID)
+		if err != nil || a == nil {
+			ctx.StatusCode(http.StatusNotFound)
+			return
+		}
+		if a.Initialized {
+			// Agent already bootstrapped - no PIN to show
+			_ = ctx.JSON(iris.Map{"pin": "", "initialized": true})
+			return
+		}
+
+		pin, err := agent.GetPendingPIN(ctx.Request().Context(), db, wsID, aID)
+		if err != nil {
+			ctx.StatusCode(http.StatusInternalServerError)
+			_ = ctx.JSON(iris.Map{"error": err.Error()})
+			return
+		}
+		_ = ctx.JSON(iris.Map{"pin": pin, "initialized": false})
 	})
 }

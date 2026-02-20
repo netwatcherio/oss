@@ -61,22 +61,28 @@ type Agent struct {
 
 	// Authentication (post-bootstrap)
 	PSKHash string `gorm:"size:255" json:"-"` // bcrypt hash of server-generated PSK
+
+	// TrafficSim server configuration (per-agent, not per-probe)
+	TrafficSimEnabled bool   `gorm:"default:false" json:"trafficsim_enabled"`
+	TrafficSimHost    string `gorm:"size:64;default:0.0.0.0" json:"trafficsim_host"`
+	TrafficSimPort    int    `gorm:"default:8677" json:"trafficsim_port"`
 }
 
 // -------------------- Auth placeholders in separate tables --------------------
 
-// Auth One-time bootstrap PINs (plaintext never stored)
+// Auth One-time bootstrap PINs (plaintext stored until consumed for reviewability)
 type Auth struct {
 	ID        uint           `gorm:"primaryKey;autoIncrement" json:"id"`
 	CreatedAt time.Time      `gorm:"index" json:"created_at"`
 	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	WorkspaceID uint       `gorm:"index:idx_agent_pins_scope" json:"workspace_id"`
-	AgentID     uint       `gorm:"index:idx_agent_pins_scope" json:"agent_id"`
-	PinHash     string     `gorm:"size:255" json:"-"`
-	Consumed    *time.Time `gorm:"index" json:"-"`
-	ExpiresAt   *time.Time `json:"-"`
+	WorkspaceID  uint       `gorm:"index:idx_agent_pins_scope" json:"workspace_id"`
+	AgentID      uint       `gorm:"index:idx_agent_pins_scope" json:"agent_id"`
+	PinHash      string     `gorm:"size:255" json:"-"`
+	PinPlaintext string     `gorm:"size:255" json:"-"` // Stored until consumed, then cleared
+	Consumed     *time.Time `gorm:"index" json:"-"`
+	ExpiresAt    *time.Time `json:"-"`
 }
 
 func (Auth) TableName() string { return "agent_pins" }
@@ -170,12 +176,13 @@ func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput) (*CreateOutpu
 			return err
 		}
 		ap := &Auth{
-			WorkspaceID: a.WorkspaceID,
-			AgentID:     a.ID,
-			PinHash:     string(hash),
-			ExpiresAt:   expiresAt,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			WorkspaceID:  a.WorkspaceID,
+			AgentID:      a.ID,
+			PinHash:      string(hash),
+			PinPlaintext: p, // Stored for reviewability until consumed
+			ExpiresAt:    expiresAt,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}
 		if err := tx.Create(ap).Error; err != nil {
 			return err
@@ -311,12 +318,13 @@ func IssuePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pinLe
 			return err
 		}
 		ap := &Auth{
-			WorkspaceID: workspaceID,
-			AgentID:     agentID,
-			PinHash:     string(hash),
-			ExpiresAt:   expiresAt,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			WorkspaceID:  workspaceID,
+			AgentID:      agentID,
+			PinHash:      string(hash),
+			PinPlaintext: p, // Stored for reviewability until consumed
+			ExpiresAt:    expiresAt,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}
 		if err := tx.Create(ap).Error; err != nil {
 			return err
@@ -352,16 +360,41 @@ func ConsumePIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, pin
 		if err := bcrypt.CompareHashAndPassword([]byte(ap.PinHash), []byte(pin)); err != nil {
 			continue // Wrong PIN, try next
 		}
-		// Match! Mark consumed
+		// Match! Mark consumed and clear plaintext
 		now := time.Now()
-		if err := db.WithContext(ctx).Model(&ap).Update("consumed", &now).Error; err != nil {
+		if err := db.WithContext(ctx).Model(&ap).Updates(map[string]any{
+			"consumed":      &now,
+			"pin_plaintext": "", // Clear plaintext on consumption
+		}).Error; err != nil {
 			return nil, err
 		}
 		ap.Consumed = &now
+		ap.PinPlaintext = ""
 		return &ap, nil
 	}
 
 	return nil, ErrInvalidPIN
+}
+
+// GetPendingPIN returns the plaintext PIN for an agent if an unconsumed, non-expired PIN exists.
+// Returns empty string if no pending PIN exists.
+func GetPendingPIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint) (string, error) {
+	var pin Auth
+	err := db.WithContext(ctx).
+		Where("workspace_id = ? AND agent_id = ? AND consumed IS NULL AND pin_plaintext != ''", workspaceID, agentID).
+		Order("created_at DESC").
+		First(&pin).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil // No pending PIN
+		}
+		return "", err
+	}
+	// Check if expired
+	if pin.ExpiresAt != nil && time.Now().After(*pin.ExpiresAt) {
+		return "", nil
+	}
+	return pin.PinPlaintext, nil
 }
 
 // -------------------- PSK operations --------------------
