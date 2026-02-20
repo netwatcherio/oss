@@ -3,6 +3,8 @@ import Auth from "./Auth.vue";
 import Login from './Login.vue'
 import Register from "./Register.vue";
 import Reset from "./Reset.vue";
+import ResetComplete from "./ResetComplete.vue";
+import VerifyEmail from "./VerifyEmail.vue";
 import InviteComplete from "./InviteComplete.vue";
 
 export default [
@@ -25,6 +27,16 @@ export default [
         path: '/auth/reset',
         name: 'reset',
         component: Reset
+      },
+      {
+        path: '/auth/reset/:token',
+        name: 'resetComplete',
+        component: ResetComplete
+      },
+      {
+        path: '/auth/verify-email/:token',
+        name: 'verifyEmail',
+        component: VerifyEmail
       },
     ]
   },

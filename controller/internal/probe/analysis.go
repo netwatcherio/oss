@@ -740,6 +740,9 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		metrics = ProbeMetrics{}
 	}
 
+	log.Debugf("[Analysis] Probe %d (type=%s): PING samples=%d, avgLat=%.1f, loss=%.2f%%, agentIDs=%v",
+		probeID, p.Type, metrics.SampleCount, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
+
 	// Fetch MTR path analysis
 	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, probeID, from)
 	if err != nil {
@@ -749,6 +752,8 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type)
 	if p.Type == TypeAgent {
 		tsMetrics := probeTrafficSimMetrics(ctx, ch, agentIDs, probeID, from)
+		log.Debugf("[Analysis] Probe %d AGENT: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
+			probeID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
 		if tsMetrics.SampleCount > 0 {
 			// If PING data was empty, use TrafficSim as primary metrics
 			if metrics.SampleCount == 0 {

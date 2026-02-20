@@ -499,4 +499,92 @@ watch(() => props.probeId, fetchAnalysis)
 .evidence-item { padding: 1px 0; }
 .finding-steps { margin-top: 8px; font-size: 12px; }
 .finding-steps ol { padding-left: 18px; margin-bottom: 0; color: var(--text-muted, #aaa); }
+
+/* ===== LIGHT theme overrides ===== */
+[data-theme="light"] .direction-card {
+  background: #f9fafb;
+}
+[data-theme="light"] .direction-label {
+  color: #1f2937;
+}
+[data-theme="light"] .mos-badge {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+[data-theme="light"] .metric-header {
+  color: #6b7280;
+  border-bottom-color: #e5e7eb;
+}
+[data-theme="light"] .metric-label {
+  color: #6b7280;
+  border-bottom-color: #f3f4f6;
+}
+[data-theme="light"] .metric-value {
+  color: #1f2937;
+  border-bottom-color: #f3f4f6;
+}
+[data-theme="light"] .vector-bar-track {
+  background: #e5e7eb;
+}
+[data-theme="light"] .vector-label {
+  color: #6b7280;
+}
+[data-theme="light"] .vector-score {
+  color: #1f2937;
+}
+[data-theme="light"] .path-stat {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+[data-theme="light"] .stat-value {
+  color: #1f2937;
+}
+[data-theme="light"] .stat-label {
+  color: #6b7280;
+}
+[data-theme="light"] .signal-card {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+[data-theme="light"] .signal-title {
+  color: #1f2937;
+}
+[data-theme="light"] .signal-evidence {
+  color: #6b7280;
+}
+[data-theme="light"] .signal-meta {
+  color: #9ca3af;
+}
+[data-theme="light"] .signal-type {
+  background: #e5e7eb;
+}
+[data-theme="light"] .finding-card {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+[data-theme="light"] .finding-title {
+  color: #1f2937;
+}
+[data-theme="light"] .finding-category {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+[data-theme="light"] .finding-summary {
+  color: #4b5563;
+}
+[data-theme="light"] .finding-evidence {
+  color: #6b7280;
+}
+[data-theme="light"] .finding-steps ol {
+  color: #4b5563;
+}
+[data-theme="light"] .tab-btn {
+  color: #6b7280;
+}
+[data-theme="light"] .tab-btn:hover {
+  color: #1f2937;
+}
+[data-theme="light"] .analysis-tabs {
+  border-bottom-color: #e5e7eb;
+}
 </style>

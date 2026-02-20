@@ -20,7 +20,23 @@ export const AuthService = {
         return data;
     },
     async requestPasswordReset(email: string) {
-        const { data } = await request.post<{ ok: boolean }>("/auth/reset-password", { email });
+        const { data } = await request.post<{ success: boolean; message: string }>("/auth/forgot-password", { email });
+        return data;
+    },
+    async completePasswordReset(token: string, newPassword: string) {
+        const { data } = await request.post<{ success: boolean; message: string }>("/auth/reset-password", { token, new_password: newPassword });
+        return data;
+    },
+    async verifyEmail(token: string) {
+        const { data } = await request.post<{ success: boolean; message: string }>("/auth/verify-email", { token });
+        return data;
+    },
+    async resendVerification() {
+        const { data } = await request.post<{ success: boolean; message: string }>("/auth/resend-verification");
+        return data;
+    },
+    async getMe() {
+        const { data } = await request.get<{ id: number; email: string; name: string; role: string; verified: boolean }>("/auth/me");
         return data;
     },
 };

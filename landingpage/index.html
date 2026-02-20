@@ -55,14 +55,14 @@
             <h1>Network Monitoring<br><span class="gradient-text">Without the Price Tag</span></h1>
             <p class="hero-subtitle">
                 The open-source alternative to Obkio (~$300 CAD/mo) and Kentik (~$2,000+/mo).<br>
-                MTR traceroutes, distributed agents, real-time dashboards. Forever free.
+                Try free instantly, self-host for full control, or let us manage it for you.
             </p>
             <div class="hero-actions">
-                <a href="#get-started" class="btn btn-primary btn-lg">
-                    <i class="bi bi-rocket-takeoff"></i> Deploy Now
+                <a href="https://app.netwatcher.io" class="btn btn-primary btn-lg" target="_blank">
+                    <i class="bi bi-lightning-charge"></i> Try Free
                 </a>
-                <a href="https://app.netwatcher.io" class="btn btn-outline btn-lg" target="_blank">
-                    <i class="bi bi-box-arrow-up-right"></i> Try Live Demo
+                <a href="#get-started" class="btn btn-outline btn-lg">
+                    <i class="bi bi-server"></i> Self-Host
                 </a>
                 <a href="demo.html" class="btn btn-outline btn-lg">
                     <i class="bi bi-play-circle"></i> See Screenshots
@@ -78,8 +78,8 @@
                     <span class="stat-label">Agents</span>
                 </div>
                 <div class="stat">
-                    <span class="stat-value">100%</span>
-                    <span class="stat-label">Your Data</span>
+                    <span class="stat-value">&lt;1 min</span>
+                    <span class="stat-label">To Start</span>
                 </div>
             </div>
         </div>
@@ -385,10 +385,12 @@
     <section id="pricing" class="section section-dark">
         <div class="container">
             <h2 class="section-title">Simple Pricing</h2>
-            <p class="section-subtitle">Free hosted tier, unlimited self-hosting, or managed private instances</p>
+            <p class="section-subtitle">Start free in seconds, self-host for full control, or let us manage it for you
+            </p>
 
             <div class="pricing-grid pricing-grid-3">
-                <div class="pricing-card">
+                <div class="pricing-card pricing-featured">
+                    <div class="pricing-badge">Most Popular</div>
                     <div class="pricing-header">
                         <h3>Free Forever</h3>
                         <div class="pricing-price">
@@ -402,16 +404,15 @@
                         <li><i class="bi bi-check-circle-fill"></i> Up to 10 users</li>
                         <li><i class="bi bi-check-circle-fill"></i> 200 probes per agent</li>
                         <li><i class="bi bi-check-circle-fill"></i> Full feature access</li>
-                        <li><i class="bi bi-dash"></i> Community support only</li>
+                        <li><i class="bi bi-check-circle-fill"></i> No credit card required</li>
                         <li class="pricing-support-note"><i class="bi bi-info-circle"></i> Paid support available hourly
                         </li>
                     </ul>
-                    <a href="https://app.netwatcher.io" class="btn btn-outline btn-block" target="_blank">Get
-                        Started</a>
+                    <a href="https://app.netwatcher.io" class="btn btn-primary btn-block" target="_blank">Start Free</a>
                 </div>
 
-                <div class="pricing-card pricing-featured">
-                    <div class="pricing-badge">Unlimited</div>
+                <div class="pricing-card">
+                    <div class="pricing-badge pricing-badge-alt">Open Source</div>
                     <div class="pricing-header">
                         <h3>Self-Hosted</h3>
                         <div class="pricing-price">
@@ -429,30 +430,29 @@
                         <li class="pricing-support-note"><i class="bi bi-info-circle"></i> Paid support available hourly
                         </li>
                     </ul>
-                    <a href="#get-started" class="btn btn-primary btn-block">Deploy Now</a>
+                    <a href="#get-started" class="btn btn-outline btn-block">Deploy Now</a>
                 </div>
 
                 <div class="pricing-card">
-                    <div class="pricing-badge pricing-badge-alt">Managed</div>
+                    <div class="pricing-badge pricing-badge-pro">Pro</div>
                     <div class="pricing-header">
-                        <h3>Private Instance</h3>
+                        <h3>Managed Cloud</h3>
                         <div class="pricing-price">
-                            <span class="price-amount">Custom</span>
-                            <span class="price-period">pricing</span>
+                            <span class="price-amount">$149</span>
+                            <span class="price-period">/month</span>
                         </div>
                     </div>
                     <ul class="pricing-features">
-                        <li><i class="bi bi-check-circle-fill"></i> We host it for you</li>
+                        <li><i class="bi bi-check-circle-fill"></i> We host & manage everything</li>
                         <li><i class="bi bi-check-circle-fill"></i> Unlimited agents</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Unlimited users</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Unlimited probes</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Unlimited users & probes</li>
                         <li><i class="bi bi-check-circle-fill"></i> Automatic updates & backups</li>
-                        <li><i class="bi bi-check-circle-fill"></i> Private dedicated instance</li>
-                        <li class="pricing-highlight"><i class="bi bi-arrow-right-circle"></i> Based on storage &
-                            traffic</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Priority support</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Custom domain available</li>
+                        <li class="pricing-highlight"><i class="bi bi-shield-check"></i> SLA available on request</li>
                     </ul>
-                    <a href="mailto:hello@netwatcher.io?subject=Private%20Instance%20Inquiry"
-                        class="btn btn-outline btn-block">Contact Us</a>
+                    <a href="mailto:hello@netwatcher.io?subject=Managed%20Cloud%20Inquiry"
+                        class="btn btn-outline btn-block">Get Started</a>
                 </div>
             </div>
 
@@ -548,10 +548,16 @@ docker-compose up -d
                         <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE" target="_blank">License
                             (AGPL-3.0)</a>
                     </div>
+                    <div class="footer-column">
+                        <h4>Legal</h4>
+                        <a href="privacy.html">Privacy Policy</a>
+                        <a href="terms.html">Terms of Service</a>
+                    </div>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2026 NetWatcher OSS. Open source under AGPL-3.0.</p>
+                <p>&copy; 2026 NetWatcher OSS. Open source under AGPL-3.0. <a href="privacy.html">Privacy</a> · <a
+                        href="terms.html">Terms</a></p>
             </div>
         </div>
     </footer>

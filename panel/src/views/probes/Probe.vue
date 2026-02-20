@@ -1919,7 +1919,7 @@ const { connected: wsConnected } = useProbeSubscription(
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1050;
+  z-index: 9999;
   padding: 1rem;
 }
 .analysis-modal-container {

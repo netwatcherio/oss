@@ -3,6 +3,7 @@ package email
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -96,7 +97,7 @@ func uintToStr(v uint) string {
 	if v == 0 {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimPrefix(string(rune(v)), ""), "0")
+	return strconv.FormatUint(uint64(v), 10)
 }
 
 // DefaultInviteTemplate returns the default invite email template
