@@ -63,9 +63,9 @@ type Agent struct {
 	PSKHash string `gorm:"size:255" json:"-"` // bcrypt hash of server-generated PSK
 
 	// TrafficSim server configuration (per-agent, not per-probe)
-	TrafficSimEnabled bool   `gorm:"default:false" json:"trafficsim_enabled"`
-	TrafficSimHost    string `gorm:"size:64;default:0.0.0.0" json:"trafficsim_host"`
-	TrafficSimPort    int    `gorm:"default:5000" json:"trafficsim_port"`
+	TrafficSimEnabled bool   `gorm:"column:trafficsim_enabled;default:false" json:"trafficsim_enabled"`
+	TrafficSimHost    string `gorm:"column:trafficsim_host;size:64;default:0.0.0.0" json:"trafficsim_host"`
+	TrafficSimPort    int    `gorm:"column:trafficsim_port;default:5000" json:"trafficsim_port"`
 }
 
 // -------------------- Auth placeholders in separate tables --------------------
