@@ -31,6 +31,7 @@ const isDark = ref(themeService.getTheme() === 'dark');
 
 // Modal state for MTR detail view
 const showMtrModal = ref(false);
+const showAnalysisModal = ref(false);
 const selectedNode = ref<{ id: string; hostname?: string; ip?: string; hopNumber: number } | null>(null);
 
 const onNodeSelect = (node: any) => {
@@ -1199,6 +1200,15 @@ const { connected: wsConnected } = useProbeSubscription(
         :title="state.title"
         subtitle="information about this target">
       <div v-if="state.ready" class="d-flex gap-2 align-items-center date-picker-wrapper">
+        <button
+          class="btn btn-sm ai-analysis-toggle"
+          :class="showAnalysisModal ? 'active' : ''"
+          @click="showAnalysisModal = !showAnalysisModal"
+          title="AI Analysis"
+        >
+          <i class="bi bi-cpu me-1"></i>
+          AI Analysis
+        </button>
         <VueDatePicker 
           v-model="state.timeRange"
           @update:model-value="onTimeRangeUpdate"
@@ -1619,6 +1629,25 @@ const { connected: wsConnected } = useProbeSubscription(
     :mtr-results="state.selectedMtrData.length > 0 ? state.selectedMtrData : state.mtrData" 
     @close="closeMtrModal" 
   />
+
+  <!-- AI Analysis Slide-out Panel -->
+  <Transition name="slide-panel">
+    <div v-if="showAnalysisModal && state.probe?.id && workspaceIdRef" class="analysis-panel-overlay" @click.self="showAnalysisModal = false">
+      <div class="analysis-panel">
+        <div class="analysis-panel-header">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-cpu"></i>
+            <h6 class="mb-0">AI Analysis</h6>
+            <small class="text-muted">{{ state.title }}</small>
+          </div>
+          <button class="btn btn-sm btn-close" @click="showAnalysisModal = false"></button>
+        </div>
+        <div class="analysis-panel-body">
+          <ProbeAnalysisView :workspace-id="workspaceIdRef" :probe-id="state.probe.id" />
+        </div>
+      </div>
+    </div>
+  </Transition>
 </div>
 </template>
 
@@ -1871,6 +1900,86 @@ const { connected: wsConnected } = useProbeSubscription(
 
 :global(.dp__range_between) {
   background: rgba(59, 130, 246, 0.15) !important;
+}
+
+/* AI Analysis Toggle Button */
+.ai-analysis-toggle {
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-color, #e9ecef);
+  color: var(--text-primary, #212529);
+  font-weight: 500;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.ai-analysis-toggle:hover {
+  border-color: var(--bs-primary);
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), 0.05);
+}
+.ai-analysis-toggle.active {
+  background: var(--bs-primary);
+  border-color: var(--bs-primary);
+  color: #fff;
+}
+
+/* AI Analysis Slide-out Panel */
+.analysis-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 1050;
+  display: flex;
+  justify-content: flex-end;
+}
+.analysis-panel {
+  width: min(520px, 90vw);
+  height: 100vh;
+  background: var(--bg-card, #fff);
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.analysis-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e9ecef);
+  background: linear-gradient(135deg, var(--bs-primary) 0%, #4a9eff 100%);
+  color: #fff;
+}
+.analysis-panel-header h6 { color: #fff; }
+.analysis-panel-header .text-muted { color: rgba(255,255,255,0.7) !important; }
+.analysis-panel-header .btn-close { filter: brightness(0) invert(1); }
+.analysis-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+}
+
+/* Slide-panel transition */
+.slide-panel-enter-active,
+.slide-panel-leave-active {
+  transition: opacity 0.25s ease;
+}
+.slide-panel-enter-active .analysis-panel,
+.slide-panel-leave-active .analysis-panel {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slide-panel-enter-from,
+.slide-panel-leave-to {
+  opacity: 0;
+}
+.slide-panel-enter-from .analysis-panel {
+  transform: translateX(100%);
+}
+.slide-panel-leave-to .analysis-panel {
+  transform: translateX(100%);
 }
 
 </style>
