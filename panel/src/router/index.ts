@@ -26,6 +26,7 @@ import EditAgent from '@/views/agent/EditAgent.vue'
 import DeactivateAgent from '@/views/agent/DeactivateAgent.vue'
 import ProbesEdit from '@/views/agent/ProbesEdit.vue'
 import DeleteAgent from '@/views/agent/DeleteAgent.vue'
+import AgentSetup from '@/views/agent/AgentSetup.vue'
 import Speedtests from '@/views/agent/Speedtests.vue'
 import NewSpeedtest from '@/views/agent/NewSpeedtest.vue'
 
@@ -208,6 +209,9 @@ const routes: RouteRecordRaw[] = [
                                 children: [
                                     // agent overview (any member)
                                     { path: '', name: 'agent', component: Agent, props: true },
+
+                                    // agent setup (USER+ — shown after creation)
+                                    { path: 'setup', name: 'agentSetup', component: AgentSetup, props: true, meta: { requiresRole: 'USER' } },
 
                                     // edit agent (USER+)
                                     {

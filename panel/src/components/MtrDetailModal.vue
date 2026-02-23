@@ -230,8 +230,19 @@ const filteredResults = computed(() => {
     return sorted.filter(result => {
       const payload = result.payload as MtrResult;
       return payload?.report?.hops?.some(hop => 
-        hop.hosts?.some(host => host.ip === props.node?.ip)
+        hop.hosts?.some(host =>
+          host.ip === props.node?.ip ||
+          (props.node?.hostname && host.hostname === props.node?.hostname)
+        )
       );
+    });
+  } else if (props.node && props.node.id?.startsWith('unknown-hop-')) {
+    // Unknown hop — match traces that have no hosts at the same hop number
+    const hopNum = props.node.hopNumber;
+    return sorted.filter(result => {
+      const payload = result.payload as MtrResult;
+      const hop = payload?.report?.hops?.[hopNum - 1];
+      return hop && (!hop.hosts || hop.hosts.length === 0);
     });
   }
   

@@ -1414,7 +1414,7 @@ const { connected: wsConnected } = useProbeSubscription(
                     <NetworkMap 
                       :key="`mtr-map-${index}-${activeTabIndex}`"
                       :mtrResults="transformMtrDataMulti(pair.mtrData)"
-                      @nodeSelect="onNodeSelect"
+                      @nodeSelect="(node: any) => { state.selectedMtrData = pair.mtrData; onNodeSelect(node); }"
                     />
                     <div class="mtr-help-text">
                       <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
