@@ -91,6 +91,9 @@ const loadingState = reactive<LoadingState>({
   networkInfo: true
 })
 
+// Active tab for the new layout
+const activeTab = ref<'overview' | 'probes' | 'system'>('overview')
+
 // Overall loading computed
 const isInitializing = computed(() => {
   return loadingState.agent || loadingState.workspace
@@ -1125,7 +1128,199 @@ onMounted(async () => {
     </div>
 
     <div v-else class="agent-content">
-      <!-- Probes Section -->
+      <!-- Tab Navigation -->
+      <div class="agent-tabs">
+        <button type="button" class="tab-btn" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'"><i class="bi bi-grid-3x3-gap"></i> Overview</button>
+        <button type="button" class="tab-btn" :class="{ active: activeTab === 'probes' }" @click="activeTab = 'probes'"><i class="bi bi-diagram-2"></i> Probes <span class="tab-badge" v-if="!loadingState.probes">{{ totalProbesCount }}</span></button>
+        <button type="button" class="tab-btn" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'"><i class="bi bi-cpu"></i> System</button>
+      </div>
+
+      <!-- OVERVIEW TAB - Network & General Information -->
+      <div v-show="activeTab === 'overview'" class="tab-panel">
+        <!-- Quick Stats Cards -->
+        <div class="overview-stats">
+          <div class="stat-card" :class="isOnline ? 'online' : 'offline'">
+            <div class="stat-icon"><i class="bi" :class="isOnline ? 'bi-wifi' : 'bi-wifi-off'"></i></div>
+            <div class="stat-info">
+              <span class="stat-value">{{ isOnline ? 'Online' : 'Offline' }}</span>
+              <span class="stat-label">Connection</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="bi bi-clock-history"></i></div>
+            <div class="stat-info">
+              <span class="stat-value">{{ hasSystemData ? since(state.systemInfo.hostInfo?.boot_time + "", false) : 'N/A' }}</span>
+              <span class="stat-label">Uptime</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="bi bi-pc-display"></i></div>
+            <div class="stat-info">
+              <span class="stat-value">{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
+              <span class="stat-label">Hostname</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="bi bi-ethernet"></i></div>
+            <div class="stat-info">
+              <span class="stat-value">{{ state.networkInfo.interfaces?.length || 0 }}</span>
+              <span class="stat-label">Interfaces</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Network Information Grid -->
+        <div class="info-grid mt-4">
+          <!-- Network Information Card -->
+          <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo}">
+            <div class="card-header">
+              <h5 class="card-title"><i class="bi bi-globe2"></i> Network Information</h5>
+              <div class="connection-status" v-if="!loadingState.networkInfo">
+                <span class="status-dot" :class="isOnline ? 'online' : 'offline'"></span>
+                <span class="status-text">{{ isOnline ? 'Connected' : 'Offline' }}</span>
+              </div>
+            </div>
+            <div class="card-content">
+              <div class="info-row" v-if="hasNetworkData">
+                <span class="info-label"><i class="bi bi-clock-history"></i> Last updated</span>
+                <span class="info-value"><span>{{ since(state.networkInfo.timestamp, true) }}</span></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label"><i class="bi bi-pc-display"></i> Hostname</span>
+                <span class="info-value">
+                  <span v-if="loadingState.systemInfo" class="skeleton-text">--------------------</span>
+                  <span v-else class="hostname-value">{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
+                </span>
+              </div>
+              <div class="info-row copyable">
+                <span class="info-label"><i class="bi bi-cloud"></i> Public IP</span>
+                <div class="info-value-with-copy">
+                  <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
+                  <template v-else>
+                    <span class="ip-value">{{ state.networkInfo.public_address || 'Unknown' }}</span>
+                    <button v-if="state.networkInfo.public_address" class="copy-btn" @click.stop="copyToClipboard(state.networkInfo.public_address, 'publicIp')" :class="{ copied: copiedField === 'publicIp' }" :title="copiedField === 'publicIp' ? 'Copied!' : 'Copy to clipboard'">
+                      <i :class="copiedField === 'publicIp' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <div class="info-row">
+                <span class="info-label"><i class="bi bi-building"></i> ISP</span>
+                <span class="info-value">
+                  <span v-if="loadingState.networkInfo" class="skeleton-text">-------------------------</span>
+                  <span v-else class="isp-value">{{ state.networkInfo.internet_provider || 'Unknown' }}</span>
+                </span>
+              </div>
+              <div class="info-row copyable">
+                <span class="info-label"><i class="bi bi-router"></i> Gateway</span>
+                <div class="info-value-with-copy">
+                  <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
+                  <template v-else>
+                    <span class="ip-value">{{ state.networkInfo.default_gateway || 'Unknown' }}</span>
+                    <button v-if="state.networkInfo.default_gateway" class="copy-btn" @click.stop="copyToClipboard(state.networkInfo.default_gateway, 'gateway')" :class="{ copied: copiedField === 'gateway' }" :title="copiedField === 'gateway' ? 'Copied!' : 'Copy to clipboard'">
+                      <i :class="copiedField === 'gateway' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <div class="info-row local-ips-section">
+                <span class="info-label"><i class="bi bi-hdd-network"></i> Local IPs</span>
+                <div class="info-value local-ips-list">
+                  <div v-if="loadingState.systemInfo" class="skeleton-text">---------------</div>
+                  <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.ip" class="ip-chips">
+                    <span v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.ip)" :key="ip" class="ip-chip" @click="copyToClipboard(ip, `localIp-${ip}`)" :class="{ copied: copiedField === `localIp-${ip}` }" :title="copiedField === `localIp-${ip}` ? 'Copied!' : 'Click to copy'">{{ ip }} <i :class="copiedField === `localIp-${ip}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i></span>
+                  </div>
+                  <div v-else class="text-muted">No IPs found</div>
+                </div>
+              </div>
+              <div class="info-row" v-if="hasNetworkData && state.networkInfo.lat && state.networkInfo.long">
+                <span class="info-label"><i class="bi bi-geo-alt"></i> Location</span>
+                <span class="info-value location-value">
+                  <a :href="`https://maps.google.com/?q=${state.networkInfo.lat},${state.networkInfo.long}`" target="_blank" class="location-link" title="View on Google Maps">
+                    <i class="bi bi-pin-map"></i> {{ parseFloat(String(state.networkInfo.lat)).toFixed(4) }}, {{ parseFloat(String(state.networkInfo.long)).toFixed(4) }}
+                  </a>
+                </span>
+              </div>
+            </div>
+            <div class="card-footer" v-if="state.agent.id">
+              <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-primary"><i class="bi bi-speedometer2"></i> Run Speedtest</router-link>
+            </div>
+          </div>
+
+          <!-- Network Interfaces Card -->
+          <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo && loadingState.systemInfo}">
+            <div class="card-header">
+              <h5 class="card-title"><i class="bi bi-ethernet"></i> Network Interfaces</h5>
+              <span v-if="hasP11Interfaces" class="badge bg-success">{{ state.networkInfo.interfaces.length }} interfaces</span>
+              <span v-else-if="!loadingState.systemInfo && hasSystemData && state.systemInfo?.hostInfo?.mac" class="badge bg-primary">{{ Object.keys(state.systemInfo.hostInfo.mac).length }} detected</span>
+            </div>
+            <div class="card-content interfaces-content">
+              <div v-if="loadingState.networkInfo && loadingState.systemInfo" class="interfaces-loading">
+                <div v-for="i in 2" :key="`iface-skeleton-${i}`" class="interface-item skeleton">
+                  <div class="interface-icon skeleton-box"></div>
+                  <div class="interface-info">
+                    <div class="skeleton-text" style="width: 80px; height: 16px;"></div>
+                    <div class="skeleton-text" style="width: 140px; height: 14px;"></div>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="hasP11Interfaces" class="interfaces-list p11-interfaces">
+                <div v-for="iface in state.networkInfo.interfaces" :key="iface.name" class="interface-item p11" :class="{ 'is-default': iface.is_default }">
+                  <div class="interface-icon" :class="iface.type || 'unknown'"><i :class="getInterfaceIcon(iface.name)"></i></div>
+                  <div class="interface-details">
+                    <div class="interface-header">
+                      <span class="interface-name">{{ iface.name }}</span>
+                      <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
+                      <span v-if="iface.type" class="badge bg-secondary ms-1">{{ iface.type }}</span>
+                    </div>
+                    <div v-if="iface.mac" class="interface-mac"><code>{{ iface.mac }}</code><span class="vendor-name">{{ getVendorSync(iface.mac) }}</span></div>
+                    <div v-if="iface.ipv4?.length" class="interface-ips">
+                      <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
+                    </div>
+                    <div v-if="iface.gateway" class="interface-gateway"><i class="bi bi-signpost-2"></i> Gateway: {{ iface.gateway }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="hasSystemData && state.systemInfo?.hostInfo?.mac" class="interfaces-list">
+                <div v-for="(mac, iface) in state.systemInfo.hostInfo.mac" :key="iface" class="interface-item" @click="copyToClipboard(mac, `mac-${iface}`)" :class="{ copied: copiedField === `mac-${iface}` }" :title="copiedField === `mac-${iface}` ? 'Copied!' : 'Click to copy MAC address'">
+                  <div class="interface-icon" :class="getInterfaceType(String(iface))"><i :class="getInterfaceIcon(String(iface))"></i></div>
+                  <div class="interface-info">
+                    <div class="interface-name">{{ iface }}</div>
+                    <div class="interface-mac"><code>{{ mac }}</code><span class="vendor-name">{{ getVendorSync(mac) }}</span></div>
+                  </div>
+                  <div class="copy-indicator"><i :class="copiedField === `mac-${iface}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i></div>
+                </div>
+              </div>
+              <div v-else class="empty-interfaces"><i class="bi bi-ethernet"></i><span>No network interfaces detected</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Routing Table -->
+        <div v-if="hasP11Routes" class="card glass mt-4">
+          <div class="card-header">
+            <h5><i class="bi bi-signpost-split"></i> Routing Table</h5>
+            <span class="badge bg-info">{{ state.networkInfo.routes.length }} routes</span>
+          </div>
+          <div class="card-content routes-content">
+            <table class="routes-table">
+              <thead><tr><th>Destination</th><th>Gateway</th><th>Interface</th><th>Metric</th></tr></thead>
+              <tbody>
+                <tr v-for="(route, idx) in state.networkInfo.routes.slice(0, 10)" :key="idx" :class="{ 'default-route': route.destination === '0.0.0.0/0' }">
+                  <td><code>{{ route.destination }}</code></td>
+                  <td>{{ route.gateway || 'on-link' }}</td>
+                  <td>{{ route.interface }}</td>
+                  <td>{{ route.metric }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="state.networkInfo.routes.length > 10" class="routes-more">+{{ state.networkInfo.routes.length - 10 }} more routes</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROBES TAB -->
+      <div v-show="activeTab === 'probes'" class="tab-panel">
       <div class="content-section probes-section">
         <div class="section-header">
           <h5 class="section-title">
@@ -1230,108 +1425,13 @@ onMounted(async () => {
             <i class="bi bi-plus-lg"></i> Create Probe
           </router-link>
         </div>
-      </div>
-
-      <!-- System Information Grid -->
-      <div class="info-grid">
-        <!-- Network Information - Enhanced -->
-        <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo}">
-          <div class="card-header">
-            <h5 class="card-title">
-              <i class="bi bi-globe2"></i>
-              Network Information
-            </h5>
-            <div class="connection-status" v-if="!loadingState.networkInfo">
-              <span class="status-dot" :class="isOnline ? 'online' : 'offline'"></span>
-              <span class="status-text">{{ isOnline ? 'Connected' : 'Offline' }}</span>
-            </div>
-          </div>
-          <div class="card-content">
-            <div class="info-row" v-if="hasNetworkData">
-              <span class="info-label"><i class="bi bi-clock-history"></i> Last updated</span>
-              <span class="info-value">
-                <span>{{ since(state.networkInfo.timestamp, true) }}</span>
-              </span>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-pc-display"></i> Hostname</span>
-              <span class="info-value">
-                <span v-if="loadingState.systemInfo" class="skeleton-text">--------------------</span>
-                <span v-else class="hostname-value">{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
-              </span>
-            </div>
-            <div class="info-row copyable">
-              <span class="info-label"><i class="bi bi-cloud"></i> Public IP</span>
-              <div class="info-value-with-copy">
-                <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
-                <template v-else>
-                  <span class="ip-value">{{ state.networkInfo.public_address || 'Unknown' }}</span>
-                  <button 
-                    v-if="state.networkInfo.public_address"
-                    class="copy-btn" 
-                    @click.stop="copyToClipboard(state.networkInfo.public_address, 'publicIp')"
-                    :class="{ copied: copiedField === 'publicIp' }"
-                    :title="copiedField === 'publicIp' ? 'Copied!' : 'Copy to clipboard'"
-                  >
-                    <i :class="copiedField === 'publicIp' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                  </button>
-                </template>
-              </div>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-building"></i> ISP</span>
-              <span class="info-value">
-                <span v-if="loadingState.networkInfo" class="skeleton-text">-------------------------</span>
-                <span v-else class="isp-value">{{ state.networkInfo.internet_provider || 'Unknown' }}</span>
-              </span>
-            </div>
-            <div class="info-row copyable">
-              <span class="info-label"><i class="bi bi-router"></i> Gateway</span>
-              <div class="info-value-with-copy">
-                <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
-                <template v-else>
-                  <span class="ip-value">{{ state.networkInfo.default_gateway || 'Unknown' }}</span>
-                  <button 
-                    v-if="state.networkInfo.default_gateway"
-                    class="copy-btn" 
-                    @click.stop="copyToClipboard(state.networkInfo.default_gateway, 'gateway')"
-                    :class="{ copied: copiedField === 'gateway' }"
-                    :title="copiedField === 'gateway' ? 'Copied!' : 'Copy to clipboard'"
-                  >
-                    <i :class="copiedField === 'gateway' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                  </button>
-                </template>
-              </div>
-            </div>
-            <div class="info-row local-ips-section">
-              <span class="info-label"><i class="bi bi-hdd-network"></i> Local IPs</span>
-              <div class="info-value local-ips-list">
-                <div v-if="loadingState.systemInfo" class="skeleton-text">---------------</div>
-                <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.ip" class="ip-chips">
-                  <span 
-                    v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.ip)" 
-                    :key="ip" 
-                    class="ip-chip"
-                    @click="copyToClipboard(ip, `localIp-${ip}`)"
-                    :class="{ copied: copiedField === `localIp-${ip}` }"
-                    :title="copiedField === `localIp-${ip}` ? 'Copied!' : 'Click to copy'"
-                  >
-                    {{ ip }}
-                    <i :class="copiedField === `localIp-${ip}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                  </span>
-                </div>
-                <div v-else class="text-muted">No IPs found</div>
-              </div>
-            </div>
-          </div>
-          <div class="card-footer" v-if="state.agent.id">
-            <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-speedometer2"></i> Run Speedtest
-            </router-link>
-          </div>
-        </div>
+      </div></div>
 
 
+
+      <!-- SYSTEM TAB - Hardware & OS Information Only -->
+      <div v-show="activeTab === 'system'" class="tab-panel">
+        <div class="info-grid">
         <!-- System Resources - Enhanced -->
         <div class="info-card enhanced" :class="{'loading': loadingState.systemInfo}">
           <div class="card-header">
@@ -1526,132 +1626,7 @@ onMounted(async () => {
         </div>
 
 
-        <!-- Network Interfaces - Consolidated (rich data preferred, fallback to SYSINFO) -->
-        <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo && loadingState.systemInfo}">
-          <div class="card-header">
-            <h5 class="card-title">
-              <i class="bi bi-ethernet"></i>
-              Network Interfaces
-            </h5>
-            <span v-if="hasP11Interfaces" class="badge bg-success">
-              {{ state.networkInfo.interfaces.length }} interfaces
-            </span>
-            <span v-else-if="!loadingState.systemInfo && hasSystemData && state.systemInfo?.hostInfo?.mac" class="badge bg-primary">
-              {{ Object.keys(state.systemInfo.hostInfo.mac).length }} detected
-            </span>
-          </div>
-          <div class="card-content interfaces-content">
-            <!-- Loading State -->
-            <div v-if="loadingState.networkInfo && loadingState.systemInfo" class="interfaces-loading">
-              <div v-for="i in 2" :key="`iface-skeleton-${i}`" class="interface-item skeleton">
-                <div class="interface-icon skeleton-box"></div>
-                <div class="interface-info">
-                  <div class="skeleton-text" style="width: 80px; height: 16px;"></div>
-                  <div class="skeleton-text" style="width: 140px; height: 14px;"></div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- Rich Interface Data (from NETINFO) -->
-            <div v-else-if="hasP11Interfaces" class="interfaces-list p11-interfaces">
-              <div 
-                v-for="iface in state.networkInfo.interfaces" 
-                :key="iface.name" 
-                class="interface-item p11"
-                :class="{ 'is-default': iface.is_default }"
-              >
-                <div class="interface-icon" :class="iface.type || 'unknown'">
-                  <i :class="getInterfaceIcon(iface.name)"></i>
-                </div>
-                <div class="interface-details">
-                  <div class="interface-header">
-                    <span class="interface-name">{{ iface.name }}</span>
-                    <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
-                    <span v-if="iface.type" class="badge bg-secondary ms-1">{{ iface.type }}</span>
-                  </div>
-                  <div v-if="iface.mac" class="interface-mac">
-                    <code>{{ iface.mac }}</code>
-                    <span class="vendor-name">{{ getVendorSync(iface.mac) }}</span>
-                  </div>
-                  <div v-if="iface.ipv4?.length" class="interface-ips">
-                    <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
-                  </div>
-                  <div v-if="iface.gateway" class="interface-gateway">
-                    <i class="bi bi-signpost-2"></i>
-                    Gateway: {{ iface.gateway }}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- Legacy Fallback (from SYSINFO) -->
-            <div v-else-if="hasSystemData && state.systemInfo?.hostInfo?.mac" class="interfaces-list">
-              <div 
-                v-for="(mac, iface) in state.systemInfo.hostInfo.mac" 
-                :key="iface" 
-                class="interface-item"
-                @click="copyToClipboard(mac, `mac-${iface}`)"
-                :class="{ copied: copiedField === `mac-${iface}` }"
-                :title="copiedField === `mac-${iface}` ? 'Copied!' : 'Click to copy MAC address'"
-              >
-                <div class="interface-icon" :class="getInterfaceType(String(iface))">
-                  <i :class="getInterfaceIcon(String(iface))"></i>
-                </div>
-                <div class="interface-info">
-                  <div class="interface-name">{{ iface }}</div>
-                  <div class="interface-mac">
-                    <code>{{ mac }}</code>
-                    <span class="vendor-name">{{ getVendorSync(mac) }}</span>
-                  </div>
-                </div>
-                <div class="copy-indicator">
-                  <i :class="copiedField === `mac-${iface}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                </div>
-              </div>
-            </div>
-            
-            <!-- Empty State -->
-            <div v-else class="empty-interfaces">
-              <i class="bi bi-ethernet"></i>
-              <span>No network interfaces detected</span>
-            </div>
-          </div>
         </div>
-
-        <!-- Routing Table -->
-        <div v-if="hasP11Routes" class="card glass">
-          <div class="card-header">
-            <h5>
-              <i class="bi bi-signpost-split"></i>
-              Routing Table
-            </h5>
-            <span class="badge bg-info">{{ state.networkInfo.routes.length }} routes</span>
-          </div>
-          <div class="card-content routes-content">
-            <table class="routes-table">
-              <thead>
-                <tr>
-                  <th>Destination</th>
-                  <th>Gateway</th>
-                  <th>Interface</th>
-                  <th>Metric</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(route, idx) in state.networkInfo.routes.slice(0, 10)" :key="idx" :class="{ 'default-route': route.destination === '0.0.0.0/0' }">
-                  <td><code>{{ route.destination }}</code></td>
-                  <td>{{ route.gateway || 'on-link' }}</td>
-                  <td>{{ route.interface }}</td>
-                  <td>{{ route.metric }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="state.networkInfo.routes.length > 10" class="routes-more">
-              +{{ state.networkInfo.routes.length - 10 }} more routes
-            </div>
-          </div>
-        </div>
-
       </div>
     </div>
   </div>
@@ -3602,4 +3577,28 @@ onMounted(async () => {
   color: #6b7280 !important;
   background: rgba(255, 255, 255, 0.02) !important;
 }
+
+/* Agent Tabs */
+.agent-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; padding: 0.25rem; background: var(--bs-secondary-bg); border-radius: 12px; border: 1px solid var(--bs-border-color); }
+.tab-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem 1rem; border: none; border-radius: 10px; background: transparent; color: var(--bs-secondary-color); font-weight: 500; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.tab-btn:hover { color: var(--bs-body-color); background: var(--bs-tertiary-bg); }
+.tab-btn.active { background: var(--bs-body-bg); color: var(--bs-body-color); box-shadow: 0 2px 8px rgba(var(--bs-dark-rgb), 0.1); font-weight: 600; }
+.tab-badge { padding: 0.125rem 0.5rem; background: var(--bs-primary); color: var(--bs-white); border-radius: 999px; font-size: 0.7rem; font-weight: 600; margin-left: 0.25rem; }
+.tab-panel { animation: fade-in 0.2s ease-out; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Overview Stats */
+.overview-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.stat-card { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: 12px; transition: all 0.2s; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.stat-card.online { border-left: 3px solid var(--bs-success); }
+.stat-card.offline { border-left: 3px solid var(--bs-danger); }
+.stat-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--bs-secondary-bg); border-radius: 10px; color: var(--bs-primary); font-size: 1.25rem; }
+.stat-card.online .stat-icon { background: rgba(var(--bs-success-rgb), 0.1); color: var(--bs-success); }
+.stat-card.offline .stat-icon { background: rgba(var(--bs-danger-rgb), 0.1); color: var(--bs-danger); }
+.stat-info { display: flex; flex-direction: column; min-width: 0; }
+.stat-value { font-weight: 600; font-size: 0.95rem; color: var(--bs-body-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-label { font-size: 0.75rem; color: var(--bs-secondary-color); text-transform: uppercase; letter-spacing: 0.5px; }
+
+@media (max-width: 640px) { .agent-tabs { flex-wrap: wrap; } .tab-btn { flex: 1 1 calc(50% - 0.25rem); padding: 0.625rem 0.5rem; font-size: 0.8rem; } .overview-stats { grid-template-columns: repeat(2, 1fr); } }
 </style>

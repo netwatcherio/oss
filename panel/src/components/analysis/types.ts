@@ -108,22 +108,22 @@ export interface WorkspaceAnalysis {
     generated_at: string
 }
 
-// Status color mapping
+// Status color mapping using Bootstrap CSS variables
 export const statusColors: Record<string, { bg: string; text: string; icon: string }> = {
-    healthy: { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', icon: 'bi-check-circle-fill' },
-    degraded: { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', icon: 'bi-exclamation-triangle-fill' },
-    outage: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', icon: 'bi-x-octagon-fill' },
-    unknown: { bg: 'rgba(107, 114, 128, 0.15)', text: '#6b7280', icon: 'bi-question-circle-fill' },
+    healthy: { bg: 'rgba(var(--bs-success-rgb), 0.15)', text: 'var(--bs-success)', icon: 'bi-check-circle-fill' },
+    degraded: { bg: 'rgba(var(--bs-warning-rgb), 0.15)', text: 'var(--bs-warning)', icon: 'bi-exclamation-triangle-fill' },
+    outage: { bg: 'rgba(var(--bs-danger-rgb), 0.15)', text: 'var(--bs-danger)', icon: 'bi-x-octagon-fill' },
+    unknown: { bg: 'rgba(var(--bs-secondary-rgb), 0.15)', text: 'var(--bs-secondary)', icon: 'bi-question-circle-fill' },
 }
 
-// Grade color mapping for consistent UI theming
+// Grade color mapping for consistent UI theming using Bootstrap variables
 export const gradeColors: Record<string, { bg: string; text: string; border: string }> = {
-    excellent: { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', border: '#10b981' },
-    good: { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', border: '#3b82f6' },
-    fair: { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: '#f59e0b' },
-    poor: { bg: 'rgba(249, 115, 22, 0.15)', text: '#f97316', border: '#f97316' },
-    critical: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: '#ef4444' },
-    unknown: { bg: 'rgba(107, 114, 128, 0.15)', text: '#6b7280', border: '#6b7280' },
+    excellent: { bg: 'rgba(var(--bs-success-rgb), 0.15)', text: 'var(--bs-success)', border: 'var(--bs-success)' },
+    good: { bg: 'rgba(var(--bs-primary-rgb), 0.15)', text: 'var(--bs-primary)', border: 'var(--bs-primary)' },
+    fair: { bg: 'rgba(var(--bs-warning-rgb), 0.15)', text: 'var(--bs-warning)', border: 'var(--bs-warning)' },
+    poor: { bg: 'rgba(var(--bs-warning-rgb), 0.25)', text: 'var(--bs-warning)', border: 'var(--bs-warning)' },
+    critical: { bg: 'rgba(var(--bs-danger-rgb), 0.15)', text: 'var(--bs-danger)', border: 'var(--bs-danger)' },
+    unknown: { bg: 'rgba(var(--bs-secondary-rgb), 0.15)', text: 'var(--bs-secondary)', border: 'var(--bs-secondary)' },
 }
 
 // Severity icon mapping

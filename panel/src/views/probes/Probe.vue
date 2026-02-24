@@ -1889,32 +1889,36 @@ const { connected: wsConnected } = useProbeSubscription(
 
 /* AI Analysis Toggle Button */
 .ai-analysis-toggle {
-  background: var(--color-background, #1a1a2e);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
-  color: var(--color-text-muted, #888);
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
+  color: var(--bs-secondary-color);
   font-weight: 500;
-  font-size: 0.8rem;
-  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
   border-radius: 0.5rem;
   transition: all 0.2s ease;
   white-space: nowrap;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .ai-analysis-toggle:hover {
-  border-color: var(--bs-primary, #6366f1);
-  color: var(--color-text, #fff);
+  border-color: var(--bs-primary);
+  color: var(--bs-primary);
+  background: var(--bs-primary-bg-subtle);
 }
 .ai-analysis-toggle.active {
-  background: var(--bs-primary, #6366f1);
-  border-color: var(--bs-primary, #6366f1);
-  color: #fff;
+  background: var(--bs-primary);
+  border-color: var(--bs-primary);
+  color: var(--bs-white);
 }
 
 /* AI Analysis Modal */
 .analysis-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(var(--bs-dark-rgb), 0.5);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1923,37 +1927,38 @@ const { connected: wsConnected } = useProbeSubscription(
   padding: 1rem;
 }
 .analysis-modal-container {
-  background: var(--color-background, #1a1a2e);
-  border-radius: 12px;
+  background: var(--bs-body-bg);
+  border-radius: 16px;
   width: 100%;
-  max-width: 640px;
+  max-width: 700px;
   max-height: 85vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  box-shadow: 0 24px 64px rgba(var(--bs-dark-rgb), 0.3);
+  border: 1px solid var(--bs-border-color);
 }
 .analysis-modal-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
 }
 .analysis-modal-header h3 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
-  color: var(--color-text, #fff);
+  color: var(--bs-body-color);
   display: flex;
   align-items: center;
   gap: 0.5rem;
   white-space: nowrap;
 }
 .analysis-modal-subtitle {
-  font-size: 0.8rem;
-  color: var(--color-text-muted, #888);
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1962,22 +1967,27 @@ const { connected: wsConnected } = useProbeSubscription(
 .analysis-modal-header .close-btn {
   background: transparent;
   border: none;
-  color: var(--color-text-muted, #888);
+  color: var(--bs-secondary-color);
   padding: 0.5rem;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: all 0.2s;
   margin-left: auto;
   flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .analysis-modal-header .close-btn:hover {
-  color: var(--color-text, #fff);
-  background: rgba(255,255,255,0.1);
+  color: var(--bs-body-color);
+  background: var(--bs-secondary-bg);
 }
 .analysis-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 1.25rem;
+  padding: 1.5rem;
 }
 
 /* Modal fade transition */
@@ -2000,33 +2010,8 @@ const { connected: wsConnected } = useProbeSubscription(
   transform: scale(0.95);
 }
 
-/* ===== LIGHT theme overrides for AI Analysis ===== */
-[data-theme="light"] .ai-analysis-toggle {
-  background: #ffffff;
-  border-color: #d1d5db;
-  color: #6b7280;
-}
-[data-theme="light"] .ai-analysis-toggle:hover {
-  border-color: var(--bs-primary, #6366f1);
-  color: #1f2937;
-}
-[data-theme="light"] .analysis-modal-container {
-  background: #ffffff;
-  border-color: #e5e7eb;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
-}
-[data-theme="light"] .analysis-modal-header {
-  border-bottom-color: #e5e7eb;
-}
-[data-theme="light"] .analysis-modal-header h3 {
-  color: #1f2937;
-}
-[data-theme="light"] .analysis-modal-subtitle {
-  color: #6b7280;
-}
-[data-theme="light"] .analysis-modal-header .close-btn {
-  color: #9ca3af;
-}
+/* ===== Theme now uses Bootstrap CSS variables ===== */
+/* Light/dark mode handled automatically via Bootstrap variables */
 [data-theme="light"] .analysis-modal-header .close-btn:hover {
   color: #1f2937;
   background: rgba(0, 0, 0, 0.05);

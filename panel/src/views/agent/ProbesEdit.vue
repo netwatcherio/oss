@@ -907,7 +907,7 @@ const hasSelectedAgentProbes = computed(() => {
 
 .skeleton-text {
   display: inline-block;
-  background: #e5e7eb;
+  background: var(--bs-secondary-bg);
   border-radius: 4px;
   position: relative;
   overflow: hidden;
@@ -920,12 +920,12 @@ const hasSelectedAgentProbes = computed(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(var(--bs-body-bg-rgb), 0.4), transparent);
   animation: skeleton-shimmer 1.5s infinite;
 }
 
 .skeleton-box {
-  background: #e5e7eb;
+  background: var(--bs-secondary-bg);
   position: relative;
   overflow: hidden;
   width: 100%;
@@ -939,7 +939,7 @@ const hasSelectedAgentProbes = computed(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(var(--bs-body-bg-rgb), 0.4), transparent);
   animation: skeleton-shimmer 1.5s infinite;
 }
 
@@ -962,7 +962,7 @@ const hasSelectedAgentProbes = computed(() => {
 .skeleton-badge {
   width: 80px;
   height: 28px;
-  background: #e5e7eb;
+  background: var(--bs-secondary-bg);
   border-radius: 999px;
   position: relative;
   overflow: hidden;
@@ -975,14 +975,14 @@ const hasSelectedAgentProbes = computed(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(var(--bs-body-bg-rgb), 0.4), transparent);
   animation: skeleton-shimmer 1.5s infinite;
 }
 
 .skeleton-action {
   width: 36px;
   height: 36px;
-  background: #e5e7eb;
+  background: var(--bs-secondary-bg);
   border-radius: 6px;
   position: relative;
   overflow: hidden;
@@ -995,15 +995,15 @@ const hasSelectedAgentProbes = computed(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(var(--bs-body-bg-rgb), 0.4), transparent);
   animation: skeleton-shimmer 1.5s infinite;
 }
 
 /* Filters Section */
 .filters-section {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
   padding: 1.25rem;
 }
 
@@ -1025,23 +1025,25 @@ const hasSelectedAgentProbes = computed(() => {
   left: 1rem;
   top: 50%;
   transform: translateY(-50%);
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   pointer-events: none;
 }
 
 .search-input {
   padding-left: 2.75rem;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
 }
 
 .search-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.15);
 }
 
 .search-input:disabled {
-  background: #f9fafb;
+  background: var(--bs-secondary-bg);
   cursor: not-allowed;
 }
 
@@ -1050,18 +1052,20 @@ const hasSelectedAgentProbes = computed(() => {
 }
 
 .type-filter .form-select {
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
 }
 
 .type-filter .form-select:disabled {
-  background: #f9fafb;
+  background: var(--bs-secondary-bg);
   cursor: not-allowed;
 }
 
 .stats-row {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
@@ -1069,11 +1073,13 @@ const hasSelectedAgentProbes = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.375rem 0.875rem;
-  background: #f3f4f6;
+  padding: 0.5rem 1rem;
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 999px;
   font-size: 0.875rem;
-  color: #4b5563;
+  color: var(--bs-body-color);
+  font-weight: 500;
 }
 
 .stat-chip.loading {
@@ -1082,14 +1088,14 @@ const hasSelectedAgentProbes = computed(() => {
 
 .stat-chip i {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
 }
 
 /* Empty States */
 .empty-state-card {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
   padding: 4rem 2rem;
 }
 
@@ -1099,18 +1105,19 @@ const hasSelectedAgentProbes = computed(() => {
 
 .empty-state i {
   font-size: 3rem;
-  color: #e5e7eb;
+  color: var(--bs-secondary-color);
   margin-bottom: 1rem;
+  opacity: 0.5;
 }
 
 .empty-state h5 {
-  color: #1f2937;
+  color: var(--bs-body-color);
   margin-bottom: 0.5rem;
   font-weight: 600;
 }
 
 .empty-state p {
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   margin-bottom: 1.5rem;
 }
 
@@ -1122,9 +1129,9 @@ const hasSelectedAgentProbes = computed(() => {
 }
 
 .probe-section {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
   padding: 1.25rem;
 }
 
@@ -1135,49 +1142,54 @@ const hasSelectedAgentProbes = computed(() => {
   margin: 0 0 1rem 0;
   font-size: 1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--bs-body-color);
 }
 
 .section-title i {
-  color: #6b7280;
+  color: var(--bs-secondary-color);
 }
 
 .section-count {
   margin-left: auto;
-  padding: 0.125rem 0.5rem;
-  background: #f3f4f6;
+  padding: 0.25rem 0.625rem;
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 999px;
   font-size: 0.75rem;
-  font-weight: 500;
-  color: #6b7280;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
 }
 
 /* Probes Grid */
 .probes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 1rem;
 }
 
 .probe-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
   padding: 1.25rem;
-  background: white;
-  transition: all 0.2s;
+  background: var(--bs-body-bg);
+  transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .probe-card:hover:not(.skeleton) {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(var(--bs-dark-rgb), 0.1);
   transform: translateY(-2px);
+  border-color: var(--bs-border-color-translucent);
 }
 
 .probe-card.built-in {
-  background: #f9fafb;
+  background: var(--bs-secondary-bg);
+  border-style: dashed;
 }
 
 .probe-card.server {
-  background: #f0f9ff;
+  background: rgba(var(--bs-info-rgb), 0.05);
+  border-color: rgba(var(--bs-info-rgb), 0.2);
 }
 
 .probe-card.skeleton {
@@ -1202,41 +1214,41 @@ const hasSelectedAgentProbes = computed(() => {
   flex-shrink: 0;
 }
 
-/* Icon Colors */
+/* Icon Colors - Using Bootstrap semantic colors */
 .icon-blue {
-  background: #3b82f6;
+  background: var(--bs-primary);
 }
 
 .icon-green {
-  background: #10b981;
+  background: var(--bs-success);
 }
 
 .icon-purple {
-  background: #8b5cf6;
+  background: var(--bs-indigo);
 }
 
 .icon-orange {
-  background: #f59e0b;
+  background: var(--bs-orange);
 }
 
 .icon-red {
-  background: #ef4444;
+  background: var(--bs-danger);
 }
 
 .icon-teal {
-  background: #14b8a6;
+  background: var(--bs-teal);
 }
 
 .icon-cyan {
-  background: #06b6d4;
+  background: var(--bs-info);
 }
 
 .icon-indigo {
-  background: #6366f1;
+  background: var(--bs-indigo);
 }
 
 .icon-gray {
-  background: #6b7280;
+  background: var(--bs-secondary);
 }
 
 .probe-info {
@@ -1246,16 +1258,18 @@ const hasSelectedAgentProbes = computed(() => {
 
 .probe-type {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--bs-body-color);
   line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .probe-description {
-  margin: 0.25rem 0 0 0;
-  font-size: 0.813rem;
-  color: #6b7280;
+  margin: 0.375rem 0 0 0;
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
   line-height: 1.4;
 }
 
@@ -1263,35 +1277,36 @@ const hasSelectedAgentProbes = computed(() => {
 .probe-targets {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.375rem;
-  margin-top: 0.5rem;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
 }
 
 /* Target pill base styles */
 .target-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
   border-radius: 999px;
   font-size: 0.75rem;
   max-width: 220px;
   cursor: default;
   transition: all 0.15s ease;
+  border: 1px solid transparent;
 }
 
 .target-pill:hover {
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(var(--bs-dark-rgb), 0.08);
 }
 
 .target-pill i {
-  font-size: 0.625rem;
+  font-size: 0.7rem;
   flex-shrink: 0;
 }
 
 .target-type {
-  font-weight: 500;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -1301,34 +1316,45 @@ const hasSelectedAgentProbes = computed(() => {
   white-space: nowrap;
 }
 
-/* Agent targets - blue theme */
+/* Agent targets - primary theme */
 .target-agent {
-  background: #dbeafe;
-  color: #1e40af;
+  background: rgba(var(--bs-primary-rgb), 0.1);
+  color: var(--bs-primary-text-emphasis);
+  border-color: rgba(var(--bs-primary-rgb), 0.2);
 }
 
 .target-agent i {
-  color: #3b82f6;
+  color: var(--bs-primary);
 }
 
-/* Group targets - purple theme */
+/* Group targets - info theme */
 .target-group {
-  background: #ede9fe;
-  color: #5b21b6;
+  background: rgba(var(--bs-info-rgb), 0.1);
+  color: var(--bs-info-text-emphasis);
+  border-color: rgba(var(--bs-info-rgb), 0.2);
 }
 
 .target-group i {
-  color: #7c3aed;
+  color: var(--bs-info);
 }
 
-/* Literal targets - gray/neutral theme */
+/* Literal targets - secondary/neutral theme */
 .target-literal {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color);
 }
 
 .target-literal i {
-  color: #6b7280;
+  color: var(--bs-secondary-color);
+}
+
+/* Target more indicator */
+.target-more {
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-secondary-color);
+  border-color: var(--bs-border-color);
+  font-weight: 500;
 }
 
 /* Legacy single target display (keep for backward compatibility) */
@@ -1338,26 +1364,27 @@ const hasSelectedAgentProbes = computed(() => {
   gap: 0.375rem;
   margin-top: 0.5rem;
   font-size: 0.813rem;
-  color: #4b5563;
+  color: var(--bs-body-color);
 }
 
 .probe-target i {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--bs-secondary-color);
 }
 
 .target-label {
   font-weight: 500;
-  color: #374151;
+  color: var(--bs-body-color);
 }
 
 .target-value {
-  padding: 0.125rem 0.5rem;
-  background: #e5e7eb;
+  padding: 0.25rem 0.5rem;
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 4px;
   font-family: monospace;
   font-size: 0.75rem;
-  color: #1f2937;
+  color: var(--bs-body-color);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1373,20 +1400,22 @@ const hasSelectedAgentProbes = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 0.75rem;
+  padding: 0.375rem 0.75rem;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 500;
 }
 
 .badge-secondary {
-  background: #e5e7eb;
-  color: #4b5563;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  border: 1px solid var(--bs-border-color);
 }
 
 .badge-primary {
-  background: #dbeafe;
-  color: #1e40af;
+  background: rgba(var(--bs-primary-rgb), 0.1);
+  color: var(--bs-primary);
+  border: 1px solid rgba(var(--bs-primary-rgb), 0.2);
 }
 
 .badge i {
@@ -1394,20 +1423,36 @@ const hasSelectedAgentProbes = computed(() => {
 }
 
 /* Probe Actions */
+.probe-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .probe-action {
   padding: 0.5rem;
-  border-radius: 6px;
-  color: #6b7280;
+  border-radius: 8px;
+  color: var(--bs-secondary-color);
   transition: all 0.2s;
   text-decoration: none;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
 }
 
 .probe-action:hover {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger);
+  border-color: var(--bs-danger-border-subtle);
+}
+
+.probe-action.info:hover {
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary);
+  border-color: var(--bs-primary-border-subtle);
 }
 
 /* Disabled state */

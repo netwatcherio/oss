@@ -1447,20 +1447,22 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   position: absolute;
   top: 80px;
   right: 20px;
-  background: var(--map-panel-bg);
-  border: 1px solid var(--map-control-border);
-  border-radius: 10px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
   padding: 16px;
-  min-width: 220px;
-  box-shadow: 0 8px 24px rgba(var(--bs-dark-rgb), 0.15);
+  min-width: 240px;
+  max-width: 320px;
+  box-shadow: 0 8px 32px rgba(var(--bs-dark-rgb), 0.2);
   z-index: 100;
 }
 
 .node-detail-panel h4 {
   margin: 0 0 12px 0;
-  color: var(--map-title-color);
+  color: var(--bs-body-color);
   font-size: 1rem;
   padding-right: 24px;
+  font-weight: 600;
 }
 
 .panel-header {
@@ -1531,11 +1533,11 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .detail-row .label {
-  color: var(--map-text-muted);
+  color: var(--bs-secondary-color);
 }
 
 .detail-row .value {
-  color: var(--map-value-color);
+  color: var(--bs-body-color);
   font-weight: 500;
 }
 
@@ -1563,7 +1565,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .detail-section {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--map-border);
+  border-top: 1px solid var(--bs-border-color);
 }
 
 .section-title {
@@ -1572,7 +1574,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--map-text-muted);
+  color: var(--bs-secondary-color);
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -1600,7 +1602,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .route-path {
-  color: var(--map-value-color);
+  color: var(--bs-body-color);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1622,7 +1624,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 /* Shared agents */
 .shared-agents {
   font-size: 12px;
-  color: var(--map-value-color);
+  color: var(--bs-body-color);
   line-height: 1.6;
 }
 
@@ -1638,16 +1640,16 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 
 /* Destinations Panel */
 .destinations-panel {
-  border-top: 1px solid var(--map-border);
+  border-top: 1px solid var(--bs-border-color);
   padding: 16px 20px;
-  background: var(--map-header-bg);
+  background: var(--bs-tertiary-bg);
 }
 
 .destinations-panel .panel-title {
   margin: 0 0 12px 0;
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--map-title-color);
+  color: var(--bs-body-color);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1667,11 +1669,11 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .destinations-table td {
   padding: 10px 12px;
   text-align: left;
-  border-bottom: 1px solid var(--map-border);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 
 .destinations-table th {
-  color: var(--map-text-muted);
+  color: var(--bs-secondary-color);
   font-weight: 500;
   font-size: 11px;
   text-transform: uppercase;
@@ -1684,7 +1686,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .destinations-table tbody tr:hover {
-  background: var(--map-control-hover-bg);
+  background: var(--bs-tertiary-bg);
 }
 
 .dest-row .target-cell {
@@ -1693,7 +1695,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 
 .dest-row .target-name {
   font-weight: 500;
-  color: var(--map-title-color);
+  color: var(--bs-body-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1702,7 +1704,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .dest-row .target-ip {
   font-family: monospace;
   font-size: 11px;
-  color: var(--map-text-muted);
+  color: var(--bs-secondary-color);
 }
 
 .status-indicator {

@@ -204,9 +204,10 @@ onMounted(() => {
                             <button 
                                 v-for="opt in expiryOptions" 
                                 :key="opt.value"
+                                type="button"
                                 class="expiry-btn"
                                 :class="{ active: expiryOption === opt.value }"
-                                @click="expiryOption = opt.value"
+                                @click.stop="expiryOption = opt.value"
                             >
                                 {{ opt.label }}
                             </button>
@@ -312,41 +313,42 @@ onMounted(() => {
 .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(var(--bs-dark-rgb), 0.6);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 9999;
     padding: 1rem;
 }
 
 .modal-container {
-    background: var(--color-background, #1a1a2e);
-    border-radius: 12px;
+    background: var(--bs-body-bg);
+    border-radius: 16px;
     width: 100%;
     max-width: 560px;
     max-height: 90vh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    box-shadow: 0 24px 64px rgba(var(--bs-dark-rgb), 0.3);
+    border: 1px solid var(--bs-border-color);
 }
 
 .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg);
 }
 
 .modal-header h3 {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: 1.15rem;
     font-weight: 600;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -355,16 +357,21 @@ onMounted(() => {
 .close-btn {
     background: transparent;
     border: none;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
     padding: 0.5rem;
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: 8px;
     transition: all 0.2s;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .close-btn:hover {
-    color: var(--color-text, #fff);
-    background: rgba(255,255,255,0.1);
+    color: var(--bs-body-color);
+    background: var(--bs-secondary-bg);
 }
 
 .modal-body {
@@ -377,7 +384,7 @@ onMounted(() => {
 
 /* Alerts */
 .alert {
-    padding: 0.75rem 1rem;
+    padding: 0.875rem 1rem;
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -386,23 +393,23 @@ onMounted(() => {
 }
 
 .alert-danger {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: rgba(var(--bs-danger-rgb), 0.1);
+    color: var(--bs-danger);
+    border: 1px solid rgba(var(--bs-danger-rgb), 0.3);
 }
 
 .alert-success {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: rgba(var(--bs-success-rgb), 0.1);
+    color: var(--bs-success);
+    border: 1px solid rgba(var(--bs-success-rgb), 0.3);
 }
 
 /* Generated Link */
 .generated-link-section {
-    background: rgba(99, 102, 241, 0.1);
-    border: 1px solid rgba(99, 102, 241, 0.3);
-    border-radius: 10px;
-    padding: 1rem;
+    background: rgba(var(--bs-primary-rgb), 0.08);
+    border: 1px solid rgba(var(--bs-primary-rgb), 0.3);
+    border-radius: 12px;
+    padding: 1.25rem;
 }
 
 .generated-link-section label {
@@ -411,7 +418,7 @@ onMounted(() => {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: #6366f1;
+    color: var(--bs-primary);
     margin-bottom: 0.5rem;
 }
 
@@ -422,20 +429,20 @@ onMounted(() => {
 
 .link-input {
     flex: 1;
-    background: var(--color-background-soft, #0f0f1a);
-    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
-    border-radius: 6px;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 8px;
     padding: 0.625rem 0.75rem;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
     font-family: monospace;
     font-size: 0.8rem;
 }
 
 .copy-btn {
-    background: #6366f1;
-    color: white;
+    background: var(--bs-primary);
+    color: var(--bs-white);
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 0.625rem 1rem;
     cursor: pointer;
     display: flex;
@@ -446,17 +453,17 @@ onMounted(() => {
 }
 
 .copy-btn:hover {
-    background: #4f46e5;
+    background: color-mix(in srgb, var(--bs-primary) 85%, black);
 }
 
 .copy-btn.copied {
-    background: #22c55e;
+    background: var(--bs-success);
 }
 
 .link-note {
     margin: 0.75rem 0 0;
     font-size: 0.8rem;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
     display: flex;
     align-items: flex-start;
     gap: 0.375rem;
@@ -464,16 +471,16 @@ onMounted(() => {
 
 /* Create Section */
 .create-section {
-    background: var(--color-background-soft, rgba(255,255,255,0.03));
-    border-radius: 10px;
-    padding: 1rem;
+    background: var(--bs-secondary-bg);
+    border-radius: 12px;
+    padding: 1.25rem;
 }
 
 .create-section h4 {
     margin: 0 0 1rem;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
 }
 
 .form-group {
@@ -482,9 +489,9 @@ onMounted(() => {
 
 .form-group label {
     display: block;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 500;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
     margin-bottom: 0.5rem;
 }
 
@@ -495,25 +502,29 @@ onMounted(() => {
 }
 
 .expiry-btn {
-    background: var(--color-background, #1a1a2e);
-    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
-    color: var(--color-text-muted, #888);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
     padding: 0.5rem 0.875rem;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 0.8rem;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .expiry-btn:hover {
-    border-color: #6366f1;
-    color: var(--color-text, #fff);
+    border-color: var(--bs-primary);
+    color: var(--bs-primary);
+    background: var(--bs-primary-bg-subtle);
 }
 
 .expiry-btn.active {
-    background: #6366f1;
-    border-color: #6366f1;
-    color: white;
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: var(--bs-white);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.3);
+    font-weight: 600;
+    transform: translateY(-1px);
 }
 
 .custom-expiry {
@@ -528,7 +539,7 @@ onMounted(() => {
 }
 
 .expiry-unit {
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
     font-size: 0.875rem;
 }
 
@@ -542,11 +553,11 @@ onMounted(() => {
 .checkbox-label input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: #6366f1;
+    accent-color: var(--bs-primary);
 }
 
 .checkbox-label span {
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
 }
 
 .password-input {
@@ -554,22 +565,23 @@ onMounted(() => {
 }
 
 .form-control {
-    background: var(--color-background, #1a1a2e);
-    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
-    border-radius: 6px;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 8px;
     padding: 0.625rem 0.75rem;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
     width: 100%;
 }
 
 .form-control:focus {
     outline: none;
-    border-color: #6366f1;
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), 0.15);
 }
 
 .create-btn {
     width: 100%;
-    padding: 0.75rem;
+    padding: 0.875rem;
     font-weight: 500;
     display: flex;
     align-items: center;
@@ -578,17 +590,17 @@ onMounted(() => {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    color: white;
+    background: var(--bs-primary);
+    color: var(--bs-white);
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .btn-primary:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 12px rgba(var(--bs-primary-rgb), 0.4);
 }
 
 .btn-primary:disabled {
@@ -599,9 +611,9 @@ onMounted(() => {
 /* Existing Links */
 .existing-links-section h4 {
     margin: 0 0 0.75rem;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
 }
 
 .share-links-list {
@@ -614,10 +626,15 @@ onMounted(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: var(--color-background-soft, rgba(255,255,255,0.03));
-    border: 1px solid var(--color-border, rgba(255,255,255,0.1));
-    border-radius: 8px;
-    padding: 0.75rem;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 0.875rem;
+    transition: all 0.15s;
+}
+
+.share-link-item:hover {
+    border-color: var(--bs-border-color-translucent);
 }
 
 .share-link-item.expired {
@@ -638,12 +655,12 @@ onMounted(() => {
 
 .link-token code {
     font-size: 0.8rem;
-    color: var(--color-text, #fff);
+    color: var(--bs-body-color);
 }
 
 .badge-password {
-    background: rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
+    background: rgba(var(--bs-warning-rgb), 0.15);
+    color: var(--bs-warning);
     padding: 0.125rem 0.5rem;
     border-radius: 4px;
     font-size: 0.7rem;
@@ -657,7 +674,7 @@ onMounted(() => {
     flex-wrap: wrap;
     gap: 0.75rem;
     font-size: 0.75rem;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
 }
 
 .link-expiry, .link-views, .link-created {
@@ -667,33 +684,34 @@ onMounted(() => {
 }
 
 .text-danger {
-    color: #ef4444 !important;
+    color: var(--bs-danger) !important;
 }
 
 .revoke-btn {
     background: transparent;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
+    border: 1px solid rgba(var(--bs-danger-rgb), 0.3);
+    color: var(--bs-danger);
     padding: 0.5rem;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .revoke-btn:hover {
-    background: rgba(239, 68, 68, 0.15);
+    background: rgba(var(--bs-danger-rgb), 0.1);
 }
 
 /* No Links State */
 .no-links {
     text-align: center;
     padding: 2rem;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
 }
 
 .no-links i {
     font-size: 2rem;
     margin-bottom: 0.5rem;
+    color: var(--bs-secondary-color);
     opacity: 0.5;
 }
 
@@ -705,7 +723,7 @@ onMounted(() => {
 .loading-state {
     text-align: center;
     padding: 1.5rem;
-    color: var(--color-text-muted, #888);
+    color: var(--bs-secondary-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -720,13 +738,6 @@ onMounted(() => {
 
 .spin {
     animation: spin 1s linear infinite;
-}
-
-/* ==================== LIGHT THEME ==================== */
-[data-theme="light"] .modal-container {
-    background: #ffffff;
-    border-color: #e5e7eb;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
 }
 
 [data-theme="light"] .modal-header {
