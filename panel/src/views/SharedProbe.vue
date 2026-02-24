@@ -1233,13 +1233,13 @@ watch(
 <style scoped>
 .shared-probe-page {
     min-height: 100vh;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    color: #e2e8f0;
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
 }
 
 .shared-header {
-    background: rgba(15, 23, 42, 0.9);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
     padding: 1rem 1.5rem;
     position: sticky;
     top: 0;
@@ -1264,9 +1264,9 @@ watch(
 }
 
 .back-btn {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--bs-secondary-bg);
     border: none;
-    color: #e2e8f0;
+    color: var(--bs-body-color);
     padding: 0.5rem 0.75rem;
     border-radius: 6px;
     cursor: pointer;
@@ -1275,12 +1275,12 @@ watch(
 }
 
 .back-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bs-tertiary-bg);
 }
 
 .badge {
-    background: linear-gradient(135deg, #3b82f6, #10b981);
-    color: white;
+    background: var(--bs-primary);
+    color: var(--bs-white);
     padding: 0.25rem 0.75rem;
     border-radius: 4px;
     font-size: 0.75rem;
@@ -1300,15 +1300,15 @@ watch(
     width: 2.5rem;
     height: 2.5rem;
     border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: #e2e8f0;
+    background: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .theme-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bs-tertiary-bg);
 }
 
 .theme-toggle-btn i {
@@ -1354,9 +1354,9 @@ watch(
 }
 
 .reload-btn {
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    color: #3b82f6;
+    background: rgba(var(--bs-primary-rgb), 0.1);
+    border: 1px solid rgba(var(--bs-primary-rgb), 0.3);
+    color: var(--bs-primary);
     padding: 0.4rem 0.6rem;
     border-radius: 6px;
     cursor: pointer;
@@ -1365,8 +1365,8 @@ watch(
 }
 
 .reload-btn:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.2);
-    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(var(--bs-primary-rgb), 0.2);
+    border-color: rgba(var(--bs-primary-rgb), 0.5);
 }
 
 .reload-btn:disabled {
@@ -1382,7 +1382,7 @@ watch(
 
 .error-state i {
     font-size: 3rem;
-    color: #ef4444;
+    color: var(--bs-danger);
     margin-bottom: 1rem;
 }
 
@@ -1392,8 +1392,8 @@ watch(
     gap: 0.5rem;
     margin-top: 1rem;
     padding: 0.75rem 1.5rem;
-    background: rgba(59, 130, 246, 0.2);
-    color: #93c5fd;
+    background: rgba(var(--bs-primary-rgb), 0.2);
+    color: var(--bs-primary);
     border: none;
     border-radius: 8px;
     cursor: pointer;
@@ -1401,7 +1401,7 @@ watch(
 }
 
 .back-link:hover {
-    background: rgba(59, 130, 246, 0.3);
+    background: rgba(var(--bs-primary-rgb), 0.3);
 }
 
 /* Password State */
@@ -1412,8 +1412,8 @@ watch(
 }
 
 .password-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 12px;
     padding: 2.5rem;
     text-align: center;
@@ -1424,7 +1424,7 @@ watch(
 .password-icon {
     width: 64px;
     height: 64px;
-    background: rgba(59, 130, 246, 0.2);
+    background: rgba(var(--bs-primary-rgb), 0.2);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -1434,7 +1434,7 @@ watch(
 
 .password-icon i {
     font-size: 1.75rem;
-    color: #93c5fd;
+    color: var(--bs-primary);
 }
 
 .password-form {
@@ -1444,15 +1444,15 @@ watch(
 .password-input {
     width: 100%;
     padding: 0.875rem 1rem;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 8px;
-    color: #fff;
+    color: var(--bs-body-color);
     font-size: 1rem;
 }
 
 .password-error {
-    color: #f87171;
+    color: var(--bs-danger);
     font-size: 0.875rem;
     margin-top: 0.75rem;
     display: flex;
@@ -1464,10 +1464,10 @@ watch(
 .password-submit {
     width: 100%;
     padding: 0.875rem;
-    background: linear-gradient(135deg, #3b82f6, #10b981);
+    background: var(--bs-primary);
     border: none;
     border-radius: 8px;
-    color: white;
+    color: var(--bs-white);
     font-weight: 600;
     cursor: pointer;
     margin-top: 1rem;
@@ -1480,7 +1480,7 @@ watch(
 
 .password-submit:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    box-shadow: 0 4px 12px rgba(var(--bs-primary-rgb), 0.4);
 }
 
 /* Probe Content */
@@ -1491,8 +1491,8 @@ watch(
 }
 
 .probe-header-section {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 12px;
     padding: 1.5rem;
 }
@@ -1505,8 +1505,8 @@ watch(
 }
 
 .date-picker-wrapper :deep(.dp__input) {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     color: #e2e8f0;
     border-radius: 8px;
     padding: 0.5rem 1rem;
@@ -1540,10 +1540,10 @@ watch(
     flex-shrink: 0;
 }
 
-.probe-icon.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
-.probe-icon.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
-.probe-icon.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-.probe-icon.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+.probe-icon.agent { background: rgba(var(--bs-danger-rgb), 0.2); color: var(--bs-danger); }
+.probe-icon.ping { background: rgba(var(--bs-success-rgb), 0.2); color: var(--bs-success); }
+.probe-icon.mtr { background: rgba(var(--bs-primary-rgb), 0.2); color: var(--bs-primary); }
+.probe-icon.trafficsim { background: rgba(var(--bs-info-rgb), 0.2); color: var(--bs-info); }
 
 .probe-title-info h1 {
     margin: 0 0 0.5rem;
@@ -1569,10 +1569,10 @@ watch(
     text-transform: uppercase;
 }
 
-.probe-type-badge.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
-.probe-type-badge.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-.probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
-.probe-type-badge.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+.probe-type-badge.ping { background: rgba(var(--bs-success-rgb), 0.2); color: var(--bs-success); }
+.probe-type-badge.mtr { background: rgba(var(--bs-primary-rgb), 0.2); color: var(--bs-primary); }
+.probe-type-badge.trafficsim { background: rgba(var(--bs-info-rgb), 0.2); color: var(--bs-info); }
+.probe-type-badge.agent { background: rgba(var(--bs-danger-rgb), 0.2); color: var(--bs-danger); }
 
 .probe-interval {
     font-size: 0.875rem;
@@ -2029,20 +2029,20 @@ watch(
     color: #2563eb;
 }
 
-[data-theme="light"] .probe-icon.agent { background: rgba(236, 72, 153, 0.1); color: #db2777; }
-[data-theme="light"] .probe-icon.ping { background: rgba(34, 197, 94, 0.1); color: #15803d; }
-[data-theme="light"] .probe-icon.mtr { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
-[data-theme="light"] .probe-icon.trafficsim { background: rgba(168, 85, 247, 0.1); color: #7c3aed; }
+[data-theme="light"] .probe-icon.agent { background: rgba(var(--bs-danger-rgb), 0.1); color: var(--bs-danger); }
+[data-theme="light"] .probe-icon.ping { background: rgba(var(--bs-success-rgb), 0.1); color: var(--bs-success); }
+[data-theme="light"] .probe-icon.mtr { background: rgba(var(--bs-primary-rgb), 0.1); color: var(--bs-primary); }
+[data-theme="light"] .probe-icon.trafficsim { background: rgba(var(--bs-info-rgb), 0.1); color: var(--bs-info); }
 
 [data-theme="light"] .probe-type-badge {
     background: rgba(107, 114, 128, 0.1);
     color: #6b7280;
 }
 
-[data-theme="light"] .probe-type-badge.ping { background: rgba(34, 197, 94, 0.1); color: #15803d; }
-[data-theme="light"] .probe-type-badge.mtr { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
-[data-theme="light"] .probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.1); color: #7c3aed; }
-[data-theme="light"] .probe-type-badge.agent { background: rgba(236, 72, 153, 0.1); color: #db2777; }
+[data-theme="light"] .probe-type-badge.ping { background: rgba(var(--bs-success-rgb), 0.1); color: var(--bs-success); }
+[data-theme="light"] .probe-type-badge.mtr { background: rgba(var(--bs-primary-rgb), 0.1); color: var(--bs-primary); }
+[data-theme="light"] .probe-type-badge.trafficsim { background: rgba(var(--bs-info-rgb), 0.1); color: var(--bs-info); }
+[data-theme="light"] .probe-type-badge.agent { background: rgba(var(--bs-danger-rgb), 0.1); color: var(--bs-danger); }
 
 [data-theme="light"] .probe-interval {
     color: #6b7280;

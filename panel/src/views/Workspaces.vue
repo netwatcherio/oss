@@ -228,16 +228,33 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Mobile-first responsive grid */
 .workspace-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+/* Tablet: 2 columns */
+@media (min-width: 640px) {
+  .workspace-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Desktop: auto-fill with minmax */
+@media (min-width: 1024px) {
+  .workspace-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
 }
 
 .workspace-card {
   text-decoration: none;
   color: inherit;
   transition: transform 0.15s, box-shadow 0.15s;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
 }
 
 .workspace-card:hover {
@@ -260,10 +277,16 @@ onMounted(async () => {
 
 .stats-row {
   display: flex;
-  gap: 1.5rem;
+  gap: 1rem;
   flex-wrap: wrap;
   padding-top: 0.75rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+@media (min-width: 640px) {
+  .stats-row {
+    gap: 1.5rem;
+  }
 }
 
 .stat-item {
@@ -271,7 +294,7 @@ onMounted(async () => {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--bs-secondary-color);
 }
 
 .stat-item i {
@@ -290,16 +313,17 @@ onMounted(async () => {
 
 .empty-icon {
   font-size: 4rem;
-  color: #ddd;
+  color: var(--bs-border-color);
 }
 
-@media (max-width: 576px) {
-  .workspace-grid {
-    grid-template-columns: 1fr;
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .workspace-card {
+    transition: none;
   }
   
-  .stats-row {
-    gap: 1rem;
+  .workspace-card:hover {
+    transform: none;
   }
 }
 </style>

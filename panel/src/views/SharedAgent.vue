@@ -5,6 +5,7 @@ import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
 import { groupProbesByTarget, type ProbeGroupByTarget } from '@/utils/probeGrouping';
 import { themeService, type Theme } from '@/services/themeService';
+import PageContainer from '@/components/PageContainer.vue';
 
 const route = useRoute();
 const token = computed(() => route.params.token as string);
@@ -257,213 +258,217 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="shared-agent-page">
+    <div class="shared-agent-page" :data-theme="currentTheme">
         <!-- Header -->
         <header class="shared-header">
-            <div class="header-content">
-                <div class="brand">
-                    <i class="bi bi-eye"></i>
-                    <span>NetWatcher</span>
-                    <span class="badge">Shared View</span>
+            <PageContainer size="full">
+                <div class="header-content">
+                    <div class="brand">
+                        <i class="bi bi-eye"></i>
+                        <span class="brand-text">NetWatcher</span>
+                        <span class="badge">Shared View</span>
+                    </div>
+                    <div class="header-actions">
+                        <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+                            <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
+                        </button>
+                    </div>
                 </div>
-                <div class="header-actions">
-                    <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
-                        <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
-                    </button>
-                </div>
-            </div>
+            </PageContainer>
         </header>
         
         <main class="shared-main">
-            <!-- Loading State -->
-            <div v-if="loading" class="loading-state">
-                <i class="bi bi-arrow-repeat spin"></i>
-                <p>Loading shared agent...</p>
-            </div>
-            
-            <!-- Error State -->
-            <div v-else-if="error" class="error-state">
-                <i class="bi bi-exclamation-triangle"></i>
-                <h2>Unable to Access</h2>
-                <p>{{ error }}</p>
-            </div>
-            
-            <!-- Expired State -->
-            <div v-else-if="expired" class="expired-state">
-                <i class="bi bi-clock-history"></i>
-                <h2>Link Expired</h2>
-                <p>This share link expired on {{ expiresAt ? formatDate(expiresAt) : 'an unknown date' }}.</p>
-                <p class="subtext">Contact the link owner to request a new share link.</p>
-            </div>
-            
-            <!-- Password Required -->
-            <div v-else-if="requiresPassword" class="password-state">
-                <div class="password-card">
-                    <i class="bi bi-lock"></i>
-                    <h2>Password Protected</h2>
-                    <p>This share link requires a password to access.</p>
+            <PageContainer size="default">
+                <!-- Loading State -->
+                <div v-if="loading" class="loading-state">
+                    <i class="bi bi-arrow-repeat spin"></i>
+                    <p>Loading shared agent...</p>
+                </div>
+                
+                <!-- Error State -->
+                <div v-else-if="error" class="error-state">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <h2>Unable to Access</h2>
+                    <p>{{ error }}</p>
+                </div>
+                
+                <!-- Expired State -->
+                <div v-else-if="expired" class="expired-state">
+                    <i class="bi bi-clock-history"></i>
+                    <h2>Link Expired</h2>
+                    <p>This share link expired on {{ expiresAt ? formatDate(expiresAt) : 'an unknown date' }}.</p>
+                    <p class="subtext">Contact the link owner to request a new share link.</p>
+                </div>
+                
+                <!-- Password Required -->
+                <div v-else-if="requiresPassword" class="password-state">
+                    <div class="password-card">
+                        <i class="bi bi-lock"></i>
+                        <h2>Password Protected</h2>
+                        <p>This share link requires a password to access.</p>
+                        
+                        <form @submit.prevent="submitPassword" class="password-form">
+                            <div v-if="passwordError" class="password-error">
+                                <i class="bi bi-exclamation-circle"></i>
+                                {{ passwordError }}
+                            </div>
+                            <input 
+                                type="password" 
+                                v-model="passwordInput"
+                                placeholder="Enter password"
+                                class="password-input"
+                                autofocus
+                            />
+                            <button type="submit" class="password-btn" :disabled="!passwordInput">
+                                <i class="bi bi-unlock"></i>
+                                Access Agent
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Agent Data -->
+                <div v-else-if="agent" class="agent-content">
+                    <!-- Expiry Warning -->
+                    <div v-if="expiresAt" class="expiry-notice">
+                        <i class="bi bi-clock"></i>
+                        This link expires {{ formatExpiry(expiresAt) }}
+                    </div>
                     
-                    <form @submit.prevent="submitPassword" class="password-form">
-                        <div v-if="passwordError" class="password-error">
-                            <i class="bi bi-exclamation-circle"></i>
-                            {{ passwordError }}
+                    <!-- Speedtest Capability Notice -->
+                    <div v-if="allowSpeedtest" class="speedtest-notice">
+                        <i class="bi bi-speedometer2"></i>
+                        Short-term share: Speedtest capability enabled
+                    </div>
+                    
+                    <!-- Agent Header -->
+                    <div class="agent-header">
+                        <div class="agent-info">
+                            <h1>{{ agent.name }}</h1>
+                            <p v-if="agent.description">{{ agent.description }}</p>
+                            <p v-if="agent.location" class="location">
+                                <i class="bi bi-geo-alt"></i>
+                                {{ agent.location }}
+                            </p>
                         </div>
-                        <input 
-                            type="password" 
-                            v-model="passwordInput"
-                            placeholder="Enter password"
-                            class="password-input"
-                            autofocus
-                        />
-                        <button type="submit" class="password-btn" :disabled="!passwordInput">
-                            <i class="bi bi-unlock"></i>
-                            Access Agent
-                        </button>
-                    </form>
-                </div>
-            </div>
-            
-            <!-- Agent Data -->
-            <div v-else-if="agent" class="agent-content">
-                <!-- Expiry Warning -->
-                <div v-if="expiresAt" class="expiry-notice">
-                    <i class="bi bi-clock"></i>
-                    This link expires {{ formatExpiry(expiresAt) }}
-                </div>
-                
-                <!-- Speedtest Capability Notice -->
-                <div v-if="allowSpeedtest" class="speedtest-notice">
-                    <i class="bi bi-speedometer2"></i>
-                    Short-term share: Speedtest capability enabled
-                </div>
-                
-                <!-- Agent Header -->
-                <div class="agent-header">
-                    <div class="agent-info">
-                        <h1>{{ agent.name }}</h1>
-                        <p v-if="agent.description">{{ agent.description }}</p>
-                        <p v-if="agent.location" class="location">
-                            <i class="bi bi-geo-alt"></i>
-                            {{ agent.location }}
-                        </p>
-                    </div>
-                    <div class="agent-status" :style="{ '--status-color': getStatusColor(getAgentStatus(agent)) }">
-                        <span class="status-dot"></span>
-                        {{ getStatusLabel(getAgentStatus(agent)) }}
-                    </div>
-                </div>
-                
-                <!-- Agent Details Card -->
-                <div class="info-grid">
-                    <div class="info-card">
-                        <div class="info-label">Public IP</div>
-                        <div class="info-value">{{ agent.public_ip || 'N/A' }}</div>
-                    </div>
-                    <div class="info-card">
-                        <div class="info-label">Version</div>
-                        <div class="info-value">{{ agent.version || 'N/A' }}</div>
-                    </div>
-                    <div class="info-card">
-                        <div class="info-label">Last Seen</div>
-                        <div class="info-value">{{ agent.last_seen_at ? since(agent.last_seen_at, true) : 'Never' }}</div>
-                    </div>
-                    <div class="info-card">
-                        <div class="info-label">Status</div>
-                        <div class="info-value">{{ agent.initialized ? 'Initialized' : 'Pending Setup' }}</div>
-                    </div>
-                </div>
-                
-                <!-- Probes Section - Grouped like Agent.vue -->
-                <div class="probes-section">
-                    <h2>
-                        <i class="bi bi-diagram-3"></i>
-                        Active Probes
-                        <span class="probe-count">{{ probes.length }}</span>
-                    </h2>
-                    
-                    <div v-if="targetGroups.length === 0 && probes.length === 0" class="no-probes">
-                        <i class="bi bi-inbox"></i>
-                        <p>No probes configured for this agent.</p>
+                        <div class="agent-status" :style="{ '--status-color': getStatusColor(getAgentStatus(agent)) }">
+                            <span class="status-dot"></span>
+                            {{ getStatusLabel(getAgentStatus(agent)) }}
+                        </div>
                     </div>
                     
-                    <!-- Grouped Probes Display (static cards like Agent.vue) -->
-                    <div v-else-if="targetGroups.length > 0" class="probes-grid">
-                        <router-link 
-                            v-for="g in targetGroups" 
-                            :key="g.key" 
-                            :to="{ name: 'sharedProbe', params: { token, probeId: g.probes[0]?.id } }"
-                            class="probe-card"
-                        >
-                            <div class="probe-link">
-                                <div class="probe-header">
-                                    <div class="probe-icon">
-                                        <i :class="g.kind === 'agent' ? 'bi bi-robot' 
-                                            : g.kind === 'host' ? 'bi bi-diagram-2' 
-                                            : 'bi bi-cpu'"></i>
-                                    </div>
-                                </div>
-                                
-                                <div class="probe-content">
-                                    <h6 class="probe-title">
-                                        <span v-if="g.kind==='host'">{{ g.label }}</span>
-                                        <span v-else-if="g.kind==='agent'">{{ agentNames[g.id] || `Agent #${g.id}` }}</span>
-                                        <span v-else>Local Probes</span>
-                                    </h6>
-                                    
-                                    <div class="probe-types">
-                                        <span v-for="t in g.types" :key="t" class="probe-type-badge" :class="t.toLowerCase()">
-                                            {{ t }} ({{ g.perType[t]?.count || 0 }})
-                                        </span>
-                                    </div>
-                                    
-                                    <div class="probe-stats">
-                                        <div class="probe-stat">
-                                            <i class="bi bi-collection"></i>
-                                            <span>{{ g.countProbes }} probe{{ g.countProbes !== 1 ? 's' : '' }}</span>
+                    <!-- Agent Details Card -->
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <div class="info-label">Public IP</div>
+                            <div class="info-value">{{ agent.public_ip || 'N/A' }}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-label">Version</div>
+                            <div class="info-value">{{ agent.version || 'N/A' }}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-label">Last Seen</div>
+                            <div class="info-value">{{ agent.last_seen_at ? since(agent.last_seen_at, true) : 'Never' }}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-label">Status</div>
+                            <div class="info-value">{{ agent.initialized ? 'Initialized' : 'Pending Setup' }}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Probes Section - Grouped like Agent.vue -->
+                    <div class="probes-section">
+                        <h2>
+                            <i class="bi bi-diagram-3"></i>
+                            Active Probes
+                            <span class="probe-count">{{ probes.length }}</span>
+                        </h2>
+                        
+                        <div v-if="targetGroups.length === 0 && probes.length === 0" class="no-probes">
+                            <i class="bi bi-inbox"></i>
+                            <p>No probes configured for this agent.</p>
+                        </div>
+                        
+                        <!-- Grouped Probes Display (static cards like Agent.vue) -->
+                        <div v-else-if="targetGroups.length > 0" class="probes-grid">
+                            <router-link 
+                                v-for="g in targetGroups" 
+                                :key="g.key" 
+                                :to="{ name: 'sharedProbe', params: { token, probeId: g.probes[0]?.id } }"
+                                class="probe-card"
+                            >
+                                <div class="probe-link">
+                                    <div class="probe-header">
+                                        <div class="probe-icon">
+                                            <i :class="g.kind === 'agent' ? 'bi bi-robot' 
+                                                : g.kind === 'host' ? 'bi bi-diagram-2' 
+                                                : 'bi bi-cpu'"></i>
                                         </div>
                                     </div>
+                                    
+                                    <div class="probe-content">
+                                        <h6 class="probe-title">
+                                            <span v-if="g.kind==='host'">{{ g.label }}</span>
+                                            <span v-else-if="g.kind==='agent'">{{ agentNames[g.id] || `Agent #${g.id}` }}</span>
+                                            <span v-else>Local Probes</span>
+                                        </h6>
+                                        
+                                        <div class="probe-types">
+                                            <span v-for="t in g.types" :key="t" class="probe-type-badge" :class="t.toLowerCase()">
+                                                {{ t }} ({{ g.perType[t]?.count || 0 }})
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="probe-stats">
+                                            <div class="probe-stat">
+                                                <i class="bi bi-collection"></i>
+                                                <span>{{ g.countProbes }} probe{{ g.countProbes !== 1 ? 's' : '' }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <i class="bi bi-chevron-right probe-arrow"></i>
                                 </div>
-                                
-                                <i class="bi bi-chevron-right probe-arrow"></i>
-                            </div>
-                        </router-link>
-                    </div>
-                    
-                    <!-- Fallback: Individual probes if grouping returns empty -->
-                    <div v-else class="probes-grid">
-                        <div v-for="probe in probes" :key="probe.id" class="probe-card">
-                            <div class="probe-header">
-                                <span class="probe-type" :class="probe.type?.toLowerCase()">
-                                    {{ probe.type }}
-                                </span>
-                                <span v-if="!probe.enabled" class="probe-disabled">
-                                    Disabled
-                                </span>
-                            </div>
-                            <div class="probe-name">Probe #{{ probe.id }}</div>
-                            <div v-if="probe.targets && probe.targets.length > 0" class="probe-targets">
-                                <span v-for="(target, idx) in probe.targets.slice(0, 3)" :key="idx" class="target-badge">
-                                    {{ target.target || (target.agent_id ? `Agent #${target.agent_id}` : 'N/A') }}
-                                </span>
-                                <span v-if="probe.targets.length > 3" class="more-targets">
-                                    +{{ probe.targets.length - 3 }} more
-                                </span>
-                            </div>
-                            <div class="probe-meta">
-                                <span><i class="bi bi-clock"></i> {{ probe.interval_sec || probe.interval || '?' }}s interval</span>
+                            </router-link>
+                        </div>
+                        
+                        <!-- Fallback: Individual probes if grouping returns empty -->
+                        <div v-else class="probes-grid">
+                            <div v-for="probe in probes" :key="probe.id" class="probe-card">
+                                <div class="probe-header">
+                                    <span class="probe-type" :class="probe.type?.toLowerCase()">
+                                        {{ probe.type }}
+                                    </span>
+                                    <span v-if="!probe.enabled" class="probe-disabled">
+                                        Disabled
+                                    </span>
+                                </div>
+                                <div class="probe-name">Probe #{{ probe.id }}</div>
+                                <div v-if="probe.targets && probe.targets.length > 0" class="probe-targets">
+                                    <span v-for="(target, idx) in probe.targets.slice(0, 3)" :key="idx" class="target-badge">
+                                        {{ target.target || (target.agent_id ? `Agent #${target.agent_id}` : 'N/A') }}
+                                    </span>
+                                    <span v-if="probe.targets.length > 3" class="more-targets">
+                                        +{{ probe.targets.length - 3 }} more
+                                    </span>
+                                </div>
+                                <div class="probe-meta">
+                                    <span><i class="bi bi-clock"></i> {{ probe.interval_sec || probe.interval || '?' }}s interval</span>
+                                </div>
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Footer Notice -->
+                    <div class="shared-footer">
+                        <p>
+                            <i class="bi bi-info-circle"></i>
+                            This is a read-only view. Data updates may be delayed.
+                        </p>
+                    </div>
                 </div>
-                
-                <!-- Footer Notice -->
-                <div class="shared-footer">
-                    <p>
-                        <i class="bi bi-info-circle"></i>
-                        This is a read-only view. Data updates may be delayed.
-                    </p>
-                </div>
-            </div>
+            </PageContainer>
         </main>
     </div>
 </template>
@@ -471,19 +476,17 @@ onUnmounted(() => {
 <style scoped>
 .shared-agent-page {
     min-height: 100vh;
-    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
-    color: #fff;
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
 }
 
 .shared-header {
-    background: rgba(0, 0, 0, 0.3);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 1rem 1.5rem;
+    background: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+    padding: 1rem 0;
 }
 
 .header-content {
-    max-width: 1200px;
-    margin: 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -499,18 +502,20 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: #e2e8f0;
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .theme-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bs-border-color);
 }
 
 .theme-toggle-btn i {
@@ -526,7 +531,7 @@ onUnmounted(() => {
 }
 
 .brand i {
-    color: #3b82f6;
+    color: var(--bs-primary);
 }
 
 .brand .badge {
@@ -541,9 +546,7 @@ onUnmounted(() => {
 }
 
 .shared-main {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem;
+    padding: 2rem 0;
 }
 
 /* Loading State */
@@ -554,7 +557,7 @@ onUnmounted(() => {
     justify-content: center;
     padding: 4rem 2rem;
     text-align: center;
-    color: #888;
+    color: var(--bs-secondary-color);
 }
 
 .loading-state i {
@@ -584,7 +587,7 @@ onUnmounted(() => {
 }
 
 .error-state p, .expired-state p {
-    color: #888;
+    color: var(--bs-secondary-color);
     max-width: 400px;
     margin: 0 auto;
 }
@@ -602,18 +605,19 @@ onUnmounted(() => {
 }
 
 .password-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 12px;
     padding: 2.5rem;
     text-align: center;
     max-width: 400px;
     width: 100%;
+    box-shadow: var(--bs-box-shadow);
 }
 
 .password-card i {
     font-size: 3rem;
-    color: #3b82f6;
+    color: var(--bs-primary);
     margin-bottom: 1rem;
 }
 
@@ -623,7 +627,7 @@ onUnmounted(() => {
 }
 
 .password-card p {
-    color: #888;
+    color: var(--bs-secondary-color);
     font-size: 0.875rem;
     margin-bottom: 1.5rem;
 }
@@ -646,21 +650,22 @@ onUnmounted(() => {
 }
 
 .password-input {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 8px;
     padding: 0.875rem 1rem;
-    color: #fff;
+    color: var(--bs-body-color);
     font-size: 1rem;
 }
 
 .password-input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.25);
 }
 
 .password-btn {
-    background: linear-gradient(135deg, #3b82f6, #10b981);
+    background: var(--bs-primary);
     color: white;
     border: none;
     border-radius: 8px;
@@ -675,8 +680,8 @@ onUnmounted(() => {
 }
 
 .password-btn:hover:not(:disabled) {
+    opacity: 0.9;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 .password-btn:disabled {
@@ -688,7 +693,7 @@ onUnmounted(() => {
 .expiry-notice {
     background: rgba(245, 158, 11, 0.15);
     border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #fbbf24;
+    color: #f59e0b;
     padding: 0.75rem 1rem;
     border-radius: 8px;
     margin-bottom: 1rem;
@@ -701,7 +706,7 @@ onUnmounted(() => {
 .speedtest-notice {
     background: rgba(34, 197, 94, 0.15);
     border: 1px solid rgba(34, 197, 94, 0.3);
-    color: #86efac;
+    color: #22c55e;
     padding: 0.75rem 1rem;
     border-radius: 8px;
     margin-bottom: 1.5rem;
@@ -727,7 +732,7 @@ onUnmounted(() => {
 }
 
 .agent-info p {
-    color: #9ca3af;
+    color: var(--bs-secondary-color);
     margin-bottom: 0.25rem;
 }
 
@@ -741,10 +746,11 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--bs-tertiary-bg);
     padding: 0.5rem 1rem;
     border-radius: 999px;
     font-weight: 500;
+    flex-shrink: 0;
 }
 
 .status-dot {
@@ -758,21 +764,27 @@ onUnmounted(() => {
 /* Info Grid */
 .info-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
     margin-bottom: 2rem;
 }
 
+@media (min-width: 640px) {
+    .info-grid {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+}
+
 .info-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 10px;
     padding: 1rem 1.25rem;
 }
 
 .info-label {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--bs-secondary-color);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 0.375rem;
@@ -794,8 +806,8 @@ onUnmounted(() => {
 }
 
 .probe-count {
-    background: rgba(59, 130, 246, 0.2);
-    color: #93c5fd;
+    background: var(--bs-primary);
+    color: white;
     padding: 0.125rem 0.5rem;
     border-radius: 4px;
     font-size: 0.8rem;
@@ -805,7 +817,10 @@ onUnmounted(() => {
 .no-probes {
     text-align: center;
     padding: 3rem;
-    color: #666;
+    color: var(--bs-secondary-color);
+    background: var(--bs-tertiary-bg);
+    border-radius: 12px;
+    border: 1px dashed var(--bs-border-color);
 }
 
 .no-probes i {
@@ -815,13 +830,25 @@ onUnmounted(() => {
 
 .probes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 1rem;
+    grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+    .probes-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 1024px) {
+    .probes-grid {
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
 }
 
 .probe-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 8px;
     transition: all 0.2s;
     overflow: hidden;
@@ -832,8 +859,8 @@ onUnmounted(() => {
 }
 
 .probe-card:hover {
-    border-color: rgba(59, 130, 246, 0.4);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    border-color: var(--bs-primary);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     transform: translateY(-2px);
 }
 
@@ -852,8 +879,8 @@ onUnmounted(() => {
 .probe-icon {
     width: 2.5rem;
     height: 2.5rem;
-    background: rgba(59, 130, 246, 0.15);
-    color: #93c5fd;
+    background: var(--bs-primary);
+    color: white;
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -866,14 +893,17 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-width: 0;
 }
 
 .probe-title {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #f3f4f6;
     line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .probe-types {
@@ -885,8 +915,8 @@ onUnmounted(() => {
 .probe-type-badge {
     display: inline-block;
     padding: 0.125rem 0.5rem;
-    background: rgba(243, 244, 246, 0.15);
-    color: #9ca3af;
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
     border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 500;
@@ -894,13 +924,13 @@ onUnmounted(() => {
 
 .probe-type-badge.inactive {
     background: rgba(239, 68, 68, 0.2);
-    color: #f87171;
+    color: #ef4444;
 }
 
-.probe-type-badge.ping { background: rgba(34, 197, 94, 0.2); color: #86efac; }
-.probe-type-badge.mtr { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
-.probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
-.probe-type-badge.agent { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+.probe-type-badge.ping { background: rgba(34, 197, 94, 0.2); color: #16a34a; }
+.probe-type-badge.mtr { background: rgba(59, 130, 246, 0.2); color: #2563eb; }
+.probe-type-badge.trafficsim { background: rgba(168, 85, 247, 0.2); color: #9333ea; }
+.probe-type-badge.agent { background: rgba(236, 72, 153, 0.2); color: #db2777; }
 
 .probe-stats {
     display: flex;
@@ -914,7 +944,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 0.5rem;
     font-size: 0.813rem;
-    color: #9ca3af;
+    color: var(--bs-secondary-color);
 }
 
 .probe-stat i {
@@ -922,74 +952,45 @@ onUnmounted(() => {
     width: 1rem;
 }
 
-.probe-status {
-    font-size: 0.875rem;
-}
-
 .probe-arrow {
-    color: #6b7280;
+    color: var(--bs-secondary-color);
     font-size: 1rem;
     margin-left: auto;
     flex-shrink: 0;
 }
 
-.text-warning {
-    color: #f59e0b;
-}
-
-.probe-disabled {
-    background: rgba(239, 68, 68, 0.15);
-    color: #fca5a5;
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.65rem;
-    font-weight: 500;
-}
-
-.probe-name {
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-}
-
-.probe-targets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.375rem;
-    margin-bottom: 0.5rem;
-}
-
-.target-badge {
-    background: rgba(0, 0, 0, 0.3);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    color: #9ca3af;
-}
-
-.more-targets {
-    color: #666;
-    font-size: 0.75rem;
-    padding: 0.25rem;
-}
-
-.probe-meta {
-    font-size: 0.75rem;
-    color: #666;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+/* Mobile Card Adjustments */
+@media (max-width: 639px) {
+    .agent-header {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .agent-status {
+        align-self: flex-start;
+    }
+    
+    .probe-link {
+        padding: 0.875rem;
+    }
+    
+    .probe-icon {
+        width: 2.25rem;
+        height: 2.25rem;
+        font-size: 1rem;
+    }
 }
 
 /* Footer */
 .shared-footer {
     margin-top: 3rem;
     padding-top: 1.5rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid var(--bs-border-color);
     text-align: center;
 }
 
 .shared-footer p {
-    color: #666;
+    color: var(--bs-secondary-color);
     font-size: 0.875rem;
     display: flex;
     align-items: center;
@@ -1007,186 +1008,27 @@ onUnmounted(() => {
     animation: spin 1s linear infinite;
 }
 
-/* Light Theme Support - Comprehensive */
-[data-theme="light"] .shared-agent-page {
-    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-    color: #1f2937;
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+    .spin {
+        animation: none;
+    }
+    
+    .probe-card,
+    .password-btn,
+    .theme-toggle-btn {
+        transition: none;
+    }
 }
 
-[data-theme="light"] .shared-header {
-    background: rgba(255, 255, 255, 0.9);
-    border-bottom-color: #e5e7eb;
-    backdrop-filter: blur(8px);
+/* Dark mode support via data-theme attribute */
+:global([data-theme="dark"]) .password-card,
+:global([data-theme="dark"]) .info-card,
+:global([data-theme="dark"]) .probe-card {
+    background: var(--bs-dark);
 }
 
-[data-theme="light"] .theme-toggle-btn {
-    background: rgba(0, 0, 0, 0.05);
-    color: #6b7280;
-}
-
-[data-theme="light"] .theme-toggle-btn:hover {
-    background: rgba(0, 0, 0, 0.1);
-    color: #1f2937;
-}
-
-[data-theme="light"] .brand {
-    color: #1f2937;
-}
-
-[data-theme="light"] .loading-state,
-[data-theme="light"] .error-state,
-[data-theme="light"] .expired-state {
-    color: #6b7280;
-}
-
-[data-theme="light"] .error-state i {
-    color: #ef4444;
-}
-
-[data-theme="light"] .expired-state i {
-    color: #f59e0b;
-}
-
-[data-theme="light"] .password-state .password-card {
-    background: rgba(255, 255, 255, 0.95);
-    border-color: #e5e7eb;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="light"] .password-card p {
-    color: #6b7280;
-}
-
-[data-theme="light"] .password-input {
-    background: #f9fafb;
-    border-color: #d1d5db;
-    color: #1f2937;
-}
-
-[data-theme="light"] .password-input:focus {
-    border-color: #3b82f6;
-    background: white;
-}
-
-[data-theme="light"] .expiry-notice {
-    background: rgba(245, 158, 11, 0.1);
-    border-color: rgba(245, 158, 11, 0.2);
-    color: #b45309;
-}
-
-[data-theme="light"] .speedtest-notice {
-    background: rgba(34, 197, 94, 0.1);
-    border-color: rgba(34, 197, 94, 0.2);
-    color: #15803d;
-}
-
-[data-theme="light"] .agent-info h1 {
-    color: #1f2937;
-}
-
-[data-theme="light"] .agent-info p {
-    color: #6b7280;
-}
-
-[data-theme="light"] .agent-status {
-    background: rgba(0, 0, 0, 0.03);
-    color: #1f2937;
-}
-
-[data-theme="light"] .info-card {
-    background: rgba(255, 255, 255, 0.9);
-    border-color: #e5e7eb;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="light"] .info-label {
-    color: #6b7280;
-}
-
-[data-theme="light"] .info-value {
-    color: #1f2937;
-}
-
-[data-theme="light"] .probes-section h2 {
-    color: #1f2937;
-}
-
-[data-theme="light"] .probe-count {
-    background: rgba(59, 130, 246, 0.1);
-    color: #2563eb;
-}
-
-[data-theme="light"] .probe-card {
-    background: rgba(255, 255, 255, 0.95);
-    border-color: #e5e7eb;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="light"] .probe-card:hover {
-    border-color: rgba(59, 130, 246, 0.4);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="light"] .probe-icon {
-    background: rgba(59, 130, 246, 0.1);
-    color: #2563eb;
-}
-
-[data-theme="light"] .probe-title {
-    color: #1f2937;
-}
-
-[data-theme="light"] .probe-type-badge {
-    background: rgba(107, 114, 128, 0.1);
-    color: #6b7280;
-}
-
-[data-theme="light"] .probe-type-badge.ping { 
-    background: rgba(34, 197, 94, 0.1); 
-    color: #15803d; 
-}
-
-[data-theme="light"] .probe-type-badge.mtr { 
-    background: rgba(59, 130, 246, 0.1); 
-    color: #2563eb; 
-}
-
-[data-theme="light"] .probe-type-badge.trafficsim { 
-    background: rgba(168, 85, 247, 0.1); 
-    color: #7c3aed; 
-}
-
-[data-theme="light"] .probe-type-badge.agent { 
-    background: rgba(236, 72, 153, 0.1); 
-    color: #db2777; 
-}
-
-[data-theme="light"] .probe-stat {
-    color: #6b7280;
-}
-
-[data-theme="light"] .probe-arrow {
-    color: #9ca3af;
-}
-
-[data-theme="light"] .no-probes {
-    color: #9ca3af;
-}
-
-[data-theme="light"] .target-badge {
-    background: rgba(0, 0, 0, 0.05);
-    color: #6b7280;
-}
-
-[data-theme="light"] .probe-meta {
-    color: #9ca3af;
-}
-
-[data-theme="light"] .shared-footer {
-    border-top-color: #e5e7eb;
-}
-
-[data-theme="light"] .shared-footer p {
-    color: #9ca3af;
+:global([data-theme="dark"]) .shared-header {
+    background: rgba(0, 0, 0, 0.2);
 }
 </style>

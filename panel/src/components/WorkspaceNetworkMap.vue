@@ -543,8 +543,8 @@ class WorkspaceNetworkVisualization {
       .attr('id', 'agent-gradient')
       .attr('x1', '0%').attr('y1', '0%')
       .attr('x2', '0%').attr('y2', '100%');
-    agentGrad.append('stop').attr('offset', '0%').attr('stop-color', '#3b82f6');
-    agentGrad.append('stop').attr('offset', '100%').attr('stop-color', '#1d4ed8');
+    agentGrad.append('stop').attr('offset', '0%').attr('stop-color', 'var(--bs-primary)');
+    agentGrad.append('stop').attr('offset', '100%').attr('stop-color', 'color-mix(in srgb, var(--bs-primary) 70%, black)');
 
     this.g = this.svg.append('g')
       .attr('transform', `translate(${this.margin.left},${this.margin.top})`);
@@ -555,14 +555,14 @@ class WorkspaceNetworkVisualization {
       .attr('class', 'network-tooltip')
       .style('position', 'absolute')
       .style('visibility', 'hidden')
-      .style('background', 'rgba(15, 23, 42, 0.95)')
-      .style('color', 'white')
+      .style('background', 'var(--bs-body-bg)')
+      .style('color', 'var(--bs-body-color)')
       .style('padding', '12px')
       .style('border-radius', '8px')
       .style('font-size', '13px')
       .style('pointer-events', 'none')
       .style('z-index', '1000')
-      .style('box-shadow', '0 4px 12px rgba(0,0,0,0.3)');
+      .style('box-shadow', '0 4px 12px rgba(var(--bs-dark-rgb), 0.15)');
 
     // Zoom
     this.zoom = d3.zoom()
@@ -597,7 +597,7 @@ class WorkspaceNetworkVisualization {
       .data(this.links)
       .enter()
       .append('line')
-      .attr('stroke', '#14b8a6')
+      .attr('stroke', 'var(--bs-info)')
       .attr('stroke-opacity', 0.35)
       .attr('stroke-width', 1);
 
@@ -968,13 +968,13 @@ class WorkspaceNetworkVisualization {
 
     const html = `
       <strong>${typeLabels[d.type || 'hop']}</strong><br/>
-      ${d.label ? `<span style="color:#94a3b8">Label:</span> ${d.label}<br/>` : ''}
-      ${d.ip ? `<span style="color:#94a3b8">IP:</span> ${d.ip}<br/>` : ''}
-      ${d.hostname ? `<span style="color:#94a3b8">Host:</span> ${d.hostname}<br/>` : ''}
-      ${d.hop_number ? `<span style="color:#94a3b8">Hop:</span> #${d.hop_number}<br/>` : ''}
-      <span style="color:#94a3b8">Latency:</span> ${(d.avg_latency || 0).toFixed(2)} ms<br/>
-      <span style="color:#94a3b8">Packet Loss:</span> ${(d.packet_loss || 0).toFixed(1)}%<br/>
-      ${d.path_count ? `<span style="color:#94a3b8">Paths:</span> ${d.path_count}` : ''}
+      ${d.label ? `<span style="color:var(--bs-secondary-color)">Label:</span> ${d.label}<br/>` : ''}
+      ${d.ip ? `<span style="color:var(--bs-secondary-color)">IP:</span> ${d.ip}<br/>` : ''}
+      ${d.hostname ? `<span style="color:var(--bs-secondary-color)">Host:</span> ${d.hostname}<br/>` : ''}
+      ${d.hop_number ? `<span style="color:var(--bs-secondary-color)">Hop:</span> #${d.hop_number}<br/>` : ''}
+      <span style="color:var(--bs-secondary-color)">Latency:</span> ${(d.avg_latency || 0).toFixed(2)} ms<br/>
+      <span style="color:var(--bs-secondary-color)">Packet Loss:</span> ${(d.packet_loss || 0).toFixed(1)}%<br/>
+      ${d.path_count ? `<span style="color:var(--bs-secondary-color)">Paths:</span> ${d.path_count}` : ''}
     `;
 
     this.tooltip.html(html).style('visibility', 'visible');
@@ -994,11 +994,11 @@ class WorkspaceNetworkVisualization {
 
   private createLegend() {
     const legendData = [
-      { color: '#3b82f6', label: 'Agent (Online)', shape: 'circle' },
-      { color: '#8b5cf6', label: 'Destination', shape: 'circle' },
-      { color: '#22c55e', label: 'Excellent', shape: 'rect' },
-      { color: '#eab308', label: 'Fair', shape: 'rect' },
-      { color: '#ef4444', label: 'Critical', shape: 'rect' },
+      { color: 'var(--bs-primary)', label: 'Agent (Online)', shape: 'circle' },
+      { color: 'var(--bs-info)', label: 'Destination', shape: 'circle' },
+      { color: 'var(--bs-success)', label: 'Excellent', shape: 'rect' },
+      { color: 'var(--bs-warning)', label: 'Fair', shape: 'rect' },
+      { color: 'var(--bs-danger)', label: 'Critical', shape: 'rect' },
     ];
 
     const legend = this.svg.append('g')
@@ -1020,7 +1020,7 @@ class WorkspaceNetworkVisualization {
       .attr('x', 22)
       .attr('y', 12)
       .style('font-size', '11px')
-      .style('fill', '#94a3b8')
+      .style('fill', 'var(--bs-secondary-color)')
       .text(d => d.label);
   }
 
@@ -1238,17 +1238,17 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 <style scoped>
 /* Theme variables - defaults to dark mode */
 .workspace-network-map-container {
-  --map-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  --map-border: #334155;
-  --map-header-bg: rgba(15, 23, 42, 0.8);
-  --map-title-color: #e2e8f0;
-  --map-text-muted: #94a3b8;
-  --map-control-bg: #1e293b;
-  --map-control-text: #e2e8f0;
-  --map-control-border: #475569;
-  --map-control-hover-bg: #334155;
-  --map-panel-bg: rgba(15, 23, 42, 0.95);
-  --map-value-color: #e2e8f0;
+  --map-bg: var(--bs-body-bg);
+  --map-border: var(--bs-border-color);
+  --map-header-bg: var(--bs-tertiary-bg);
+  --map-title-color: var(--bs-body-color);
+  --map-text-muted: var(--bs-secondary-color);
+  --map-control-bg: var(--bs-secondary-bg);
+  --map-control-text: var(--bs-body-color);
+  --map-control-border: var(--bs-border-color);
+  --map-control-hover-bg: var(--bs-tertiary-bg);
+  --map-panel-bg: var(--bs-body-bg);
+  --map-value-color: var(--bs-body-color);
   
   position: relative;
   background: var(--map-bg);
@@ -1259,18 +1259,19 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 /* Light mode overrides - use :root to check document theme */
+/* Light mode uses same Bootstrap variables */
 :root[data-theme="light"] .workspace-network-map-container {
-  --map-bg: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  --map-border: #cbd5e1;
-  --map-header-bg: rgba(248, 250, 252, 0.9);
-  --map-title-color: #1e293b;
-  --map-text-muted: #64748b;
-  --map-control-bg: #ffffff;
-  --map-control-text: #334155;
-  --map-control-border: #cbd5e1;
-  --map-control-hover-bg: #f1f5f9;
-  --map-panel-bg: rgba(255, 255, 255, 0.98);
-  --map-value-color: #1e293b;
+  --map-bg: var(--bs-body-bg);
+  --map-border: var(--bs-border-color);
+  --map-header-bg: var(--bs-tertiary-bg);
+  --map-title-color: var(--bs-body-color);
+  --map-text-muted: var(--bs-secondary-color);
+  --map-control-bg: var(--bs-secondary-bg);
+  --map-control-text: var(--bs-body-color);
+  --map-control-border: var(--bs-border-color);
+  --map-control-hover-bg: var(--bs-tertiary-bg);
+  --map-panel-bg: var(--bs-body-bg);
+  --map-value-color: var(--bs-body-color);
 }
 
 .map-header {
@@ -1295,13 +1296,13 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .map-title i {
-  color: #3b82f6;
+  color: var(--bs-primary);
 }
 
 .live-badge {
   font-size: 0.7rem;
-  background: #22c55e;
-  color: white;
+  background: var(--bs-success);
+  color: var(--bs-white);
   padding: 3px 8px;
   border-radius: 12px;
   display: inline-flex;
@@ -1314,8 +1315,8 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 @keyframes badge-pulse {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-  50% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(var(--bs-success-rgb), 0.7); }
+  50% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(var(--bs-success-rgb), 0); }
   100% { transform: scale(1); }
 }
 
@@ -1399,8 +1400,8 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .layout-btn.active {
-  background: #3b82f6;
-  color: white;
+  background: var(--bs-primary);
+  color: var(--bs-white);
 }
 
 .layout-btn:hover:not(.active) {
@@ -1436,7 +1437,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   width: 40px;
   height: 40px;
   border: 3px solid var(--map-border);
-  border-top-color: #3b82f6;
+  border-top-color: var(--bs-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 16px;
@@ -1451,7 +1452,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   border-radius: 10px;
   padding: 16px;
   min-width: 220px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  box-shadow: 0 8px 24px rgba(var(--bs-dark-rgb), 0.15);
   z-index: 100;
 }
 
@@ -1505,17 +1506,17 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 
 .panel-btn:hover {
   color: var(--map-title-color);
-  background: rgba(255,255,255,0.05);
+  background: var(--bs-tertiary-bg);
 }
 
 .panel-btn.active {
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.15);
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), 0.15);
 }
 
 .panel-btn.close:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--bs-danger);
+  background: rgba(var(--bs-danger-rgb), 0.15);
 }
 
 .panel-content {
@@ -1549,14 +1550,14 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   text-transform: uppercase;
 }
 
-.badge-agent { background: #3b82f6; }
-.badge-hop { background: #64748b; }
-.badge-destination { background: #8b5cf6; }
+.badge-agent { background: var(--bs-primary); }
+.badge-hop { background: var(--bs-secondary); }
+.badge-destination { background: var(--bs-info); }
 
-.text-success { color: #22c55e !important; }
-.text-warning { color: #eab308 !important; }
-.text-danger { color: #ef4444 !important; }
-.text-muted { color: #64748b !important; }
+.text-success { color: var(--bs-success) !important; }
+.text-warning { color: var(--bs-warning) !important; }
+.text-danger { color: var(--bs-danger) !important; }
+.text-muted { color: var(--bs-secondary) !important; }
 
 /* Detail sections */
 .detail-section {
@@ -1593,7 +1594,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  background: rgba(59, 130, 246, 0.08);
+  background: rgba(var(--bs-primary-rgb), 0.08);
   border-radius: 6px;
   font-size: 12px;
 }
@@ -1609,8 +1610,8 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 
 .route-count {
   flex-shrink: 0;
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  background: rgba(var(--bs-primary-rgb), 0.2);
+  color: var(--bs-primary);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 10px;
@@ -1712,9 +1713,9 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   height: 24px;
 }
 
-.status-indicator.status-healthy i { color: #22c55e; }
-.status-indicator.status-degraded i { color: #eab308; }
-.status-indicator.status-critical i { color: #ef4444; }
+.status-indicator.status-healthy i { color: var(--bs-success); }
+.status-indicator.status-degraded i { color: var(--bs-warning); }
+.status-indicator.status-critical i { color: var(--bs-danger); }
 
 .probe-badge {
   display: inline-block;
@@ -1726,9 +1727,9 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   text-transform: uppercase;
 }
 
-.probe-mtr { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-.probe-ping { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-.probe-trafficsim { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+.probe-mtr { background: rgba(var(--bs-primary-rgb), 0.2); color: var(--bs-primary); }
+.probe-ping { background: rgba(var(--bs-success-rgb), 0.2); color: var(--bs-success); }
+.probe-trafficsim { background: rgba(var(--bs-info-rgb), 0.2); color: var(--bs-info); }
 
 .text-center { text-align: center; }
 </style>

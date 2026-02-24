@@ -125,8 +125,10 @@ const targetPopoverStyle = computed(() => {
   const popupMaxHeight = 400
   const padding = 16
   
-  // Calculate left position, keeping popup within viewport
-  let left = rect.left
+  // Center horizontally relative to the header cell
+  let left = rect.left + (rect.width / 2) - (popupWidth / 2)
+  
+  // Keep within viewport bounds
   if (left + popupWidth > globalThis.innerWidth - padding) {
     left = globalThis.innerWidth - popupWidth - padding
   }
@@ -135,10 +137,10 @@ const targetPopoverStyle = computed(() => {
   }
   
   // Calculate top position - prefer below, but flip if no room
-  let top = rect.bottom + 8
+  let top = rect.bottom + 12
   if (top + popupMaxHeight > globalThis.innerHeight - padding) {
     // Try above
-    top = rect.top - popupMaxHeight - 8
+    top = rect.top - popupMaxHeight - 12
     if (top < padding) {
       // Just pin to bottom of viewport
       top = globalThis.innerHeight - popupMaxHeight - padding
@@ -159,14 +161,17 @@ const sourcePopoverStyle = computed(() => {
   const popupMaxHeight = 400
   const padding = 16
   
-  let left = rect.right + 8
+  // Position to the right of the row header by default
+  let left = rect.right + 12
+  // If not enough room on right, position to the left
   if (left + popupWidth > globalThis.innerWidth - padding) {
-    left = rect.left - popupWidth - 8
+    left = rect.left - popupWidth - 12
   }
   if (left < padding) {
     left = padding
   }
   
+  // Align top with the row header, but keep in viewport
   let top = rect.top
   if (top + popupMaxHeight > globalThis.innerHeight - padding) {
     top = globalThis.innerHeight - popupMaxHeight - padding
@@ -178,6 +183,48 @@ const sourcePopoverStyle = computed(() => {
   return {
     top: `${top}px`,
     left: `${left}px`
+  }
+})
+
+// Cell popover positioning - smart positioning to stay in viewport
+const cellPopoverStyle = computed(() => {
+  if (!selectedCell.value) return {}
+  const rect = selectedCell.value.rect
+  const popupWidth = 320
+  const popupHeight = 200
+  const padding = 16
+  
+  // Center horizontally relative to the cell
+  let left = rect.left + (rect.width / 2) - (popupWidth / 2)
+  
+  // Keep within viewport bounds
+  if (left + popupWidth > globalThis.innerWidth - padding) {
+    left = globalThis.innerWidth - popupWidth - padding
+  }
+  if (left < padding) {
+    left = padding
+  }
+  
+  // Position below the cell by default
+  let top = rect.bottom + 12
+  let position = 'below'
+  
+  // If not enough room below, flip to above
+  if (top + popupHeight > globalThis.innerHeight - padding) {
+    top = rect.top - popupHeight - 12
+    position = 'above'
+    
+    // If still not enough room, pin to bottom of viewport
+    if (top < padding) {
+      top = globalThis.innerHeight - popupHeight - padding
+      position = 'below'
+    }
+  }
+  
+  return {
+    top: `${top}px`,
+    left: `${left}px`,
+    '--arrow-position': position
   }
 })
 
@@ -328,11 +375,10 @@ onUnmounted(() => {
       <div 
         v-if="selectedCell" 
         class="matrix-popover"
-        :style="{
-          top: `${selectedCell.rect.bottom + 8}px`,
-          left: `${selectedCell.rect.left}px`
-        }"
+        :class="cellPopoverStyle['--arrow-position']"
+        :style="cellPopoverStyle"
       >
+        <div class="popover-arrow"></div>
         <div class="popover-header">
           <div class="route-info">
             <span class="source">{{ selectedCell.entry.source_agent_name }}</span>
@@ -551,9 +597,9 @@ onUnmounted(() => {
 
 <style scoped>
 .connectivity-matrix-container {
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid var(--bs-border-color, #dee2e6);
-  border-radius: 8px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
   padding: 1.5rem;
   position: relative;
 }
@@ -574,6 +620,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  color: var(--bs-body-color);
 }
 
 .controls {
@@ -583,8 +630,8 @@ onUnmounted(() => {
 }
 
 .control-btn {
-  background: var(--bs-secondary-bg, #e9ecef);
-  border: 1px solid var(--bs-border-color, #dee2e6);
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 6px;
   padding: 0.5rem 1rem;
   cursor: pointer;
@@ -592,11 +639,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
+  color: var(--bs-body-color);
   transition: all 0.2s;
+  min-height: 40px;
 }
 
 .control-btn:hover:not(:disabled) {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-secondary-bg);
+  border-color: var(--bs-primary);
 }
 
 .control-btn:disabled {
@@ -605,11 +655,13 @@ onUnmounted(() => {
 }
 
 .control-select {
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid var(--bs-border-color, #dee2e6);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
+  color: var(--bs-body-color);
+  min-height: 40px;
 }
 
 .spin {
@@ -625,14 +677,14 @@ onUnmounted(() => {
 .loading-state, .error-state, .empty-state {
   text-align: center;
   padding: 3rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 
 .loading-state .spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid var(--bs-border-color, #dee2e6);
-  border-top-color: var(--bs-primary, #0d6efd);
+  border: 3px solid var(--bs-border-color);
+  border-top-color: var(--bs-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin: 0 auto 1rem;
@@ -644,13 +696,15 @@ onUnmounted(() => {
   display: block;
 }
 
-.error-state i { color: var(--bs-danger, #dc3545); }
-.empty-state i { color: var(--bs-secondary, #6c757d); }
+.error-state i { color: var(--bs-danger); }
+.empty-state i { color: var(--bs-secondary-color); }
 
 /* Matrix Grid */
 .matrix-wrapper {
   overflow-x: auto;
   position: relative;
+  border-radius: 8px;
+  border: 1px solid var(--bs-border-color);
 }
 
 .matrix-grid {
@@ -658,21 +712,19 @@ onUnmounted(() => {
   /* Use explicit repeat value - --num-cols includes the row header column */
   grid-template-columns: 180px repeat(calc(var(--num-cols) - 1), minmax(60px, 100px));
   gap: 0;
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid var(--bs-border-color, #dee2e6);
-  border-radius: 8px;
+  background: var(--bs-body-bg);
   overflow: hidden;
   min-width: max-content;
 }
 
 .matrix-corner {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
   padding: 0.75rem;
   position: sticky;
   left: 0;
   z-index: 2;
-  border-bottom: 2px solid var(--bs-border-color, #dee2e6);
-  border-right: 2px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 2px solid var(--bs-border-color);
+  border-right: 2px solid var(--bs-border-color);
   min-height: 100px;
   display: flex;
   align-items: flex-end;
@@ -681,14 +733,14 @@ onUnmounted(() => {
 
 .corner-label {
   font-size: 0.65rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .matrix-header-cell {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
   padding: 0.5rem 0.25rem;
   text-align: center;
   font-weight: 500;
@@ -700,14 +752,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 0.25rem;
-  border-bottom: 2px solid var(--bs-border-color, #dee2e6);
-  border-right: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 2px solid var(--bs-border-color);
+  border-right: 1px solid var(--bs-border-color);
   cursor: default;
   transition: background-color 0.15s;
 }
 
 .matrix-header-cell:hover {
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
 }
 
 .header-content {
@@ -722,7 +774,7 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.75rem;
-  color: var(--bs-body-color, #212529);
+  color: var(--bs-body-color);
 }
 
 .header-content i {
@@ -740,23 +792,23 @@ onUnmounted(() => {
   text-transform: uppercase;
   padding: 0.125rem 0.375rem;
   border-radius: 3px;
-  background: var(--bs-secondary-bg, #e9ecef);
-  color: var(--bs-secondary-color, #6c757d);
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
 
 .agent-target .header-content {
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
 }
 
 .agent-target .header-type-badge {
-  background: rgba(13, 110, 253, 0.1);
-  color: var(--bs-primary, #0d6efd);
+  background: rgba(var(--bs-primary-rgb), 0.1);
+  color: var(--bs-primary);
 }
 
 .matrix-row-header {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
   padding: 0.5rem 0.75rem;
   font-weight: 500;
   font-size: 0.75rem;
@@ -766,8 +818,8 @@ onUnmounted(() => {
   position: sticky;
   left: 0;
   z-index: 1;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
-  border-right: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
+  border-right: 1px solid var(--bs-border-color);
   min-height: 50px;
 }
 
@@ -777,15 +829,15 @@ onUnmounted(() => {
 
 .offline-badge {
   font-size: 0.6rem;
-  background: var(--bs-danger, #dc3545);
-  color: white;
+  background: var(--bs-danger);
+  color: var(--bs-white);
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
   margin-left: auto;
 }
 
 .matrix-data-cell {
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   padding: 0.25rem;
   display: flex;
   align-items: center;
@@ -793,25 +845,25 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background-color 0.2s;
   min-height: 50px;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
-  border-right: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
+  border-right: 1px solid var(--bs-border-color);
 }
 
 .matrix-data-cell:hover {
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
 }
 
 .self-cell {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
   cursor: default;
 }
 
 .self-cell:hover {
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
 }
 
 .self-indicator {
-  color: var(--bs-secondary, #6c757d);
+  color: var(--bs-secondary);
   font-size: 1.25rem;
 }
 
@@ -828,33 +880,94 @@ onUnmounted(() => {
 .matrix-popover {
   position: fixed;
   z-index: 1000;
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid var(--bs-border-color, #dee2e6);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(var(--bs-dark-rgb), 0.2);
   min-width: 280px;
-  max-width: 350px;
+  max-width: 340px;
+  animation: popover-in 0.15s ease-out;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.popover-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+.matrix-popover.below .popover-arrow {
+  top: -6px;
+  left: 50%;
+  margin-left: -6px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.matrix-popover.above .popover-arrow {
+  bottom: -6px;
+  left: 50%;
+  margin-left: -6px;
+  border-left: none;
+  border-top: none;
 }
 
 .popover-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
-  background: var(--bs-tertiary-bg, #f8f9fa);
-  border-radius: 8px 8px 0 0;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+  border-radius: 12px 12px 0 0;
+  gap: 0.5rem;
 }
 
 .route-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem;
   font-weight: 500;
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+  line-height: 1.4;
 }
 
-.route-info .source { color: var(--bs-primary, #0d6efd); }
-.route-info .target { color: var(--bs-success, #198754); }
+.route-info .source { 
+  color: var(--bs-primary); 
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-info .target { 
+  color: var(--bs-success); 
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-info i {
+  color: var(--bs-secondary-color);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
 
 .close-btn {
   background: none;
@@ -863,7 +976,20 @@ onUnmounted(() => {
   padding: 0.25rem;
   font-size: 1.25rem;
   line-height: 1;
-  color: var(--bs-secondary, #6c757d);
+  color: var(--bs-secondary-color);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.close-btn:hover {
+  background: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
 }
 
 .popover-body {
@@ -871,12 +997,15 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .probe-stats {
-  background: var(--bs-secondary-bg, #e9ecef);
-  padding: 0.75rem;
-  border-radius: 6px;
+  background: var(--bs-secondary-bg);
+  padding: 0.875rem;
+  border-radius: 8px;
+  border: 1px solid var(--bs-border-color-translucent);
 }
 
 .probe-header {
@@ -893,9 +1022,9 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-.probe-type.type-mtr { background: #e0e7ff; color: #3730a3; }
-.probe-type.type-ping { background: #d1fae5; color: #065f46; }
-.probe-type.type-trafficsim { background: #fef3c7; color: #92400e; }
+.probe-type.type-mtr { background: var(--bs-info-bg-subtle); color: var(--bs-info-text-emphasis); }
+.probe-type.type-ping { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+.probe-type.type-trafficsim { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
 
 .probe-status {
   font-size: 0.7rem;
@@ -905,33 +1034,57 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-.probe-status.status-healthy { background: #d1fae5; color: #065f46; }
-.probe-status.status-degraded { background: #fef3c7; color: #92400e; }
-.probe-status.status-critical { background: #fee2e2; color: #991b1b; }
-.probe-status.status-unknown { background: #e5e7eb; color: #4b5563; }
+.probe-status.status-healthy { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+.probe-status.status-degraded { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+.probe-status.status-critical { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+.probe-status.status-unknown { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
 
 .metrics {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
 .metric {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.375rem;
   font-size: 0.8rem;
-  color: var(--bs-body-color, #212529);
+  color: var(--bs-body-color);
+  background: var(--bs-body-bg);
+  padding: 0.375rem 0.625rem;
+  border-radius: 6px;
+  border: 1px solid var(--bs-border-color-translucent);
 }
 
-.metric.warning { color: var(--bs-warning, #ffc107); }
-.metric.critical { color: var(--bs-danger, #dc3545); }
+.metric i {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+}
+
+.metric.warning { 
+  color: var(--bs-warning);
+  border-color: rgba(var(--bs-warning-rgb), 0.3);
+  background: rgba(var(--bs-warning-rgb), 0.1);
+}
+.metric.critical { 
+  color: var(--bs-danger);
+  border-color: rgba(var(--bs-danger-rgb), 0.3);
+  background: rgba(var(--bs-danger-rgb), 0.1);
+}
 
 .popover-footer {
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  padding: 0.875rem 1rem;
+  border-top: 1px solid var(--bs-border-color);
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.popover-footer .btn {
+  font-size: 0.8rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
 }
 
 /* Legend */
@@ -940,10 +1093,10 @@ onUnmounted(() => {
   gap: 1.5rem;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
   flex-wrap: wrap;
   font-size: 0.8rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 
 .legend-item {
@@ -958,10 +1111,10 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 
-.legend-bubble.status-healthy { background: #10b981; }
-.legend-bubble.status-degraded { background: #f59e0b; }
-.legend-bubble.status-critical { background: #ef4444; }
-.legend-bubble.status-unknown { background: #9ca3af; }
+.legend-bubble.status-healthy { background: var(--bs-success); }
+.legend-bubble.status-degraded { background: var(--bs-warning); }
+.legend-bubble.status-critical { background: var(--bs-danger); }
+.legend-bubble.status-unknown { background: var(--bs-secondary); }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -979,8 +1132,8 @@ onUnmounted(() => {
 
 /* Selected header state */
 .matrix-header-cell.selected {
-  background: var(--bs-primary-bg-subtle, #cfe2ff);
-  box-shadow: inset 0 0 0 2px var(--bs-primary, #0d6efd);
+  background: var(--bs-primary-bg-subtle);
+  box-shadow: inset 0 0 0 2px var(--bs-primary);
 }
 
 .matrix-header-cell {
@@ -991,14 +1144,15 @@ onUnmounted(() => {
 .target-popover {
   position: fixed;
   z-index: 1001;
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid var(--bs-border-color, #dee2e6);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 32px rgba(var(--bs-dark-rgb), 0.2);
   min-width: 320px;
   max-width: 400px;
   max-height: 80vh;
   overflow: hidden;
+  animation: popover-in 0.15s ease-out;
 }
 
 .target-info {
@@ -1009,7 +1163,7 @@ onUnmounted(() => {
 
 .target-info > i {
   font-size: 1.5rem;
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
 }
 
 .target-details {
@@ -1024,12 +1178,12 @@ onUnmounted(() => {
 
 .target-type-label {
   font-size: 0.7rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   text-transform: uppercase;
 }
 
 .target-type-label.agent-match {
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
   background: rgba(13, 110, 253, 0.1);
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
@@ -1041,13 +1195,13 @@ onUnmounted(() => {
 
 .target-summary {
   padding: 0.5rem 0;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
   margin-bottom: 0.5rem;
 }
 
 .summary-label {
   font-size: 0.8rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 
 .target-entries {
@@ -1063,7 +1217,7 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0.5rem 0.75rem;
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
   border-radius: 6px;
 }
 
@@ -1098,15 +1252,15 @@ onUnmounted(() => {
   cursor: default;
 }
 
-.mini-bubble.status-healthy { background: linear-gradient(135deg, #10b981, #059669); }
-.mini-bubble.status-degraded { background: linear-gradient(135deg, #f59e0b, #d97706); }
-.mini-bubble.status-critical { background: linear-gradient(135deg, #ef4444, #dc2626); }
-.mini-bubble.status-unknown { background: linear-gradient(135deg, #9ca3af, #6b7280); }
+.mini-bubble.status-healthy { background: linear-gradient(135deg, var(--bs-success), color-mix(in srgb, var(--bs-success) 70%, black)); }
+.mini-bubble.status-degraded { background: linear-gradient(135deg, var(--bs-warning), color-mix(in srgb, var(--bs-warning) 70%, black)); }
+.mini-bubble.status-critical { background: linear-gradient(135deg, var(--bs-danger), color-mix(in srgb, var(--bs-danger) 70%, black)); }
+.mini-bubble.status-unknown { background: linear-gradient(135deg, var(--bs-secondary), color-mix(in srgb, var(--bs-secondary) 70%, black)); }
 
 .no-entries {
   text-align: center;
   padding: 1rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   font-size: 0.85rem;
 }
 
@@ -1117,21 +1271,21 @@ onUnmounted(() => {
 }
 
 .matrix-row-header:hover {
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
 }
 
 .matrix-row-header.selected {
-  background: var(--bs-primary-bg-subtle, #cfe2ff);
-  box-shadow: inset 0 0 0 2px var(--bs-primary, #0d6efd);
+  background: var(--bs-primary-bg-subtle);
+  box-shadow: inset 0 0 0 2px var(--bs-primary);
 }
 
 /* Agent-to-agent cell highlighting */
 .matrix-data-cell.agent-to-agent {
-  background: color-mix(in srgb, var(--bs-primary, #0d6efd) 5%, var(--bs-body-bg, #fff));
+  background: color-mix(in srgb, var(--bs-primary) 5%, var(--bs-body-bg));
 }
 
 .matrix-data-cell.agent-to-agent:hover {
-  background: color-mix(in srgb, var(--bs-primary, #0d6efd) 12%, var(--bs-body-bg, #fff));
+  background: color-mix(in srgb, var(--bs-primary) 12%, var(--bs-body-bg));
 }
 
 .matrix-data-cell.has-return-path {
@@ -1144,7 +1298,7 @@ onUnmounted(() => {
   top: 2px;
   right: 2px;
   font-size: 0.55rem;
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
   opacity: 0.7;
 }
 
@@ -1159,12 +1313,12 @@ onUnmounted(() => {
   gap: 0.25rem;
   margin-top: 0.375rem;
   padding-top: 0.375rem;
-  border-top: 1px dashed var(--bs-border-color, #dee2e6);
+  border-top: 1px dashed var(--bs-border-color);
 }
 
 .return-label {
   font-size: 0.65rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -1176,7 +1330,7 @@ onUnmounted(() => {
 
 /* Bidirectional entry styling */
 .bidirectional-entry {
-  border-left: 3px solid var(--bs-primary, #0d6efd);
+  border-left: 3px solid var(--bs-primary);
 }
 
 /* Agent badge */
@@ -1186,7 +1340,7 @@ onUnmounted(() => {
   padding: 0.1rem 0.3rem;
   border-radius: 3px;
   background: rgba(13, 110, 253, 0.1);
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
   font-weight: 600;
   margin-left: 0.25rem;
 }
@@ -1194,7 +1348,7 @@ onUnmounted(() => {
 /* Legend icon */
 .legend-icon {
   font-size: 0.85rem;
-  color: var(--bs-primary, #0d6efd);
+  color: var(--bs-primary);
 }
 
 /* Source popover adjustments */
@@ -1262,7 +1416,7 @@ onUnmounted(() => {
 
 [data-theme="dark"] .agent-target .header-type-badge {
   background: rgba(59, 130, 246, 0.2) !important;
-  color: #60a5fa !important;
+  color: var(--bs-primary) !important;
 }
 
 [data-theme="dark"] .control-btn {
@@ -1299,37 +1453,37 @@ onUnmounted(() => {
 
 [data-theme="dark"] .probe-type.type-mtr {
   background: rgba(99, 102, 241, 0.2) !important;
-  color: #a5b4fc !important;
+  color: var(--bs-info) !important;
 }
 
 [data-theme="dark"] .probe-type.type-ping {
   background: rgba(16, 185, 129, 0.2) !important;
-  color: #6ee7b7 !important;
+  color: var(--bs-success) !important;
 }
 
 [data-theme="dark"] .probe-type.type-trafficsim {
   background: rgba(245, 158, 11, 0.2) !important;
-  color: #fcd34d !important;
+  color: var(--bs-warning) !important;
 }
 
 [data-theme="dark"] .probe-status.status-healthy {
   background: rgba(16, 185, 129, 0.2) !important;
-  color: #6ee7b7 !important;
+  color: var(--bs-success) !important;
 }
 
 [data-theme="dark"] .probe-status.status-degraded {
   background: rgba(245, 158, 11, 0.2) !important;
-  color: #fcd34d !important;
+  color: var(--bs-warning) !important;
 }
 
 [data-theme="dark"] .probe-status.status-critical {
   background: rgba(239, 68, 68, 0.2) !important;
-  color: #fca5a5 !important;
+  color: var(--bs-danger) !important;
 }
 
 [data-theme="dark"] .probe-status.status-unknown {
   background: rgba(107, 114, 128, 0.3) !important;
-  color: #9ca3af !important;
+  color: var(--bs-secondary) !important;
 }
 
 [data-theme="dark"] .matrix-header-cell.selected,

@@ -12,6 +12,9 @@ const session = core.session()
 const currentTheme = ref<Theme>(themeService.getTheme());
 const alertCount = ref(0);
 const isSiteAdmin = computed(() => session.user?.role === 'SITE_ADMIN');
+const mobileMenuOpen = ref(false);
+const isScrolled = ref(false);
+
 let unsubscribe: (() => void) | null = null;
 let alertPollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -31,25 +34,54 @@ onMounted(() => {
   fetchAlertCount();
   // Poll every 30 seconds for updates
   alertPollInterval = setInterval(fetchAlertCount, 30000);
+  
+  // Track scroll for navbar styling
+  window.addEventListener('scroll', handleScroll);
 });
 
 onUnmounted(() => {
   if (unsubscribe) unsubscribe();
   if (alertPollInterval) clearInterval(alertPollInterval);
+  window.removeEventListener('scroll', handleScroll);
 });
+
+function handleScroll() {
+  isScrolled.value = window.scrollY > 10;
+}
 
 function toggleTheme() {
   themeService.toggle();
 }
 
+function toggleMobileMenu() {
+  mobileMenuOpen.value = !mobileMenuOpen.value;
+  // Prevent body scroll when menu is open
+  document.body.style.overflow = mobileMenuOpen.value ? 'hidden' : '';
+}
+
+function closeMobileMenu() {
+  mobileMenuOpen.value = false;
+  document.body.style.overflow = '';
+}
+
 function logout() {
+  closeMobileMenu();
   clearSession()
   router.push("/auth/login")
 }
+
+// Navigation items for mobile menu
+const navItems = computed(() => [
+  { to: '/', icon: 'bi-house', label: 'Home' },
+  { to: '/workspaces', icon: 'bi-grid', label: 'Workspaces' },
+  { to: '/lookup', icon: 'bi-search', label: 'IP Lookup' },
+  { to: '/workspaces/alerts', icon: 'bi-bell', label: 'Alerts', badge: alertCount.value },
+  ...(isSiteAdmin.value ? [{ to: '/admin', icon: 'bi-shield-lock', label: 'Admin' }] : []),
+]);
 </script>
 
 <template>
-  <nav class="navbar">
+  <nav class="navbar" :class="{ 'scrolled': isScrolled, 'mobile-open': mobileMenuOpen }">
     <div class="container-fluid">
       <!-- Logo Section -->
       <router-link to="/" class="navbar-brand">
@@ -57,8 +89,8 @@ function logout() {
         <span class="brand-text">netwatcher.io</span>
       </router-link>
 
-      <!-- Right Side Actions -->
-      <div class="navbar-actions">
+      <!-- Desktop Actions -->
+      <div class="navbar-actions d-none d-lg-flex">
         <!-- Theme Toggle -->
         <button class="nav-icon-btn" title="Toggle theme" @click="toggleTheme">
           <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
@@ -119,7 +151,88 @@ function logout() {
           </ul>
         </div>
       </div>
+      
+      <!-- Mobile Menu Toggle -->
+      <button 
+        class="mobile-menu-toggle d-lg-none" 
+        @click="toggleMobileMenu"
+        :aria-label="mobileMenuOpen ? 'Close menu' : 'Open menu'"
+        :aria-expanded="mobileMenuOpen"
+      >
+        <div class="hamburger" :class="{ 'active': mobileMenuOpen }">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </button>
     </div>
+    
+    <!-- Mobile Menu Drawer -->
+    <Transition name="slide-down">
+      <div v-if="mobileMenuOpen" class="mobile-drawer d-lg-none">
+        <div class="mobile-drawer-content">
+          <!-- Mobile User Info -->
+          <div class="mobile-user-section">
+            <div class="user-avatar mobile">
+              <i class="bi bi-person"></i>
+            </div>
+            <div class="mobile-user-info">
+              <span class="mobile-user-name">{{ session.user?.name }}</span>
+              <span class="mobile-user-role">Administrator</span>
+            </div>
+          </div>
+          
+          <hr class="mobile-divider">
+          
+          <!-- Mobile Nav Items -->
+          <nav class="mobile-nav">
+            <router-link 
+              v-for="item in navItems" 
+              :key="item.to"
+              :to="item.to" 
+              class="mobile-nav-item"
+              @click="closeMobileMenu"
+            >
+              <i :class="item.icon"></i>
+              <span>{{ item.label }}</span>
+              <span v-if="item.badge" class="mobile-badge">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+            </router-link>
+          </nav>
+          
+          <hr class="mobile-divider">
+          
+          <!-- Mobile Actions -->
+          <div class="mobile-actions">
+            <button class="mobile-action-btn" @click="toggleTheme">
+              <i :class="currentTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon'"></i>
+              <span>{{ currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode' }}</span>
+            </button>
+            
+            <router-link to="/profile" class="mobile-action-btn" @click="closeMobileMenu">
+              <i class="bi bi-gear"></i>
+              <span>Settings</span>
+            </router-link>
+          </div>
+          
+          <hr class="mobile-divider">
+          
+          <!-- Mobile Logout -->
+          <button class="mobile-logout" @click="logout">
+            <i class="bi bi-box-arrow-right"></i>
+            <span>Logout</span>
+          </button>
+        </div>
+      </div>
+    </Transition>
+    
+    <!-- Mobile Overlay -->
+    <Transition name="fade">
+      <div 
+        v-if="mobileMenuOpen" 
+        class="mobile-overlay d-lg-none"
+        @click="closeMobileMenu"
+      ></div>
+    </Transition>
   </nav>
 </template>
 
@@ -129,10 +242,15 @@ function logout() {
   position: sticky;
   top: 0;
   z-index: 1030;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--bs-body-bg);
+  border-bottom: 1px solid var(--bs-border-color);
   padding: 0.75rem 0;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.navbar.scrolled {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .container-fluid {
@@ -148,20 +266,20 @@ function logout() {
   align-items: center;
   gap: 0.75rem;
   text-decoration: none;
-  color: #1f2937;
+  color: var(--bs-body-color);
   font-weight: 600;
   font-size: 1.25rem;
   transition: all 0.2s;
 }
 
 .navbar-brand:hover {
-  color: #3b82f6;
+  color: var(--bs-primary);
   transform: translateY(-1px);
 }
 
 .brand-icon {
   font-size: 1.5rem;
-  color: #3b82f6;
+  color: var(--bs-primary);
   transition: transform 0.2s;
 }
 
@@ -187,19 +305,21 @@ function logout() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   border-radius: 8px;
   transition: all 0.2s;
   cursor: pointer;
 }
 
 .nav-icon-btn:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
 }
 
 .nav-icon-btn i {
@@ -235,7 +355,7 @@ function logout() {
 .nav-divider {
   width: 1px;
   height: 2rem;
-  background: #e5e7eb;
+  background: var(--bs-border-color);
   margin: 0 0.5rem;
 }
 
@@ -257,19 +377,26 @@ function logout() {
 }
 
 .user-menu-btn:hover {
-  background: #f3f4f6;
+  background: var(--bs-tertiary-bg);
 }
 
 .user-avatar {
   width: 2.25rem;
   height: 2.25rem;
-  background: #3b82f6;
+  min-width: 2.25rem;
+  background: var(--bs-primary);
   color: white;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1rem;
+}
+
+.user-avatar.mobile {
+  width: 3rem;
+  height: 3rem;
+  font-size: 1.25rem;
 }
 
 .user-info {
@@ -282,27 +409,27 @@ function logout() {
 .user-name {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--bs-body-color);
   line-height: 1.25;
   text-transform: capitalize;
 }
 
 .user-role {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   line-height: 1;
 }
 
 .dropdown-indicator {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--bs-secondary-color);
   margin-left: 0.25rem;
 }
 
 /* Dropdown Menu */
 .dropdown-menu {
   margin-top: 0.5rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--bs-border-color);
   border-radius: 8px;
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   padding: 0.5rem;
@@ -316,13 +443,13 @@ function logout() {
   padding: 0.625rem 0.875rem;
   border-radius: 6px;
   font-size: 0.875rem;
-  color: #374151;
+  color: var(--bs-body-color);
   transition: all 0.2s;
 }
 
 .dropdown-item:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
 }
 
 .dropdown-item i {
@@ -342,109 +469,280 @@ function logout() {
 
 .dropdown-divider {
   margin: 0.5rem 0;
-  border-color: #e5e7eb;
+  border-color: var(--bs-border-color);
 }
 
-/* Mobile Responsiveness */
+/* Mobile Menu Toggle */
+.mobile-menu-toggle {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 1031;
+}
+
+.hamburger {
+  width: 24px;
+  height: 18px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hamburger span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--bs-body-color);
+  border-radius: 2px;
+  transition: all 0.3s ease;
+  transform-origin: center;
+}
+
+.hamburger.active span:nth-child(1) {
+  transform: translateY(8px) rotate(45deg);
+}
+
+.hamburger.active span:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+
+.hamburger.active span:nth-child(3) {
+  transform: translateY(-8px) rotate(-45deg);
+}
+
+/* Mobile Drawer */
+.mobile-drawer {
+  position: fixed;
+  top: 65px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bs-body-bg);
+  z-index: 1030;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-drawer-content {
+  padding: 1.5rem;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.mobile-user-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.mobile-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mobile-user-name {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+}
+
+.mobile-user-role {
+  font-size: 0.875rem;
+  color: var(--bs-secondary-color);
+}
+
+.mobile-divider {
+  border: none;
+  border-top: 1px solid var(--bs-border-color);
+  margin: 1rem 0;
+}
+
+.mobile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  color: var(--bs-body-color);
+  text-decoration: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.mobile-nav-item:hover,
+.mobile-nav-item.router-link-active {
+  background: var(--bs-primary);
+  color: white;
+}
+
+.mobile-nav-item i {
+  font-size: 1.25rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.mobile-badge {
+  margin-left: auto;
+  background: #ef4444;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.mobile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mobile-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--bs-body-color);
+  font-size: 1rem;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.mobile-action-btn:hover {
+  background: var(--bs-tertiary-bg);
+}
+
+.mobile-action-btn i {
+  font-size: 1.25rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.mobile-logout {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: none;
+  color: #ef4444;
+  font-size: 1rem;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.mobile-logout:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.mobile-logout i {
+  font-size: 1.25rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+/* Mobile Overlay */
+.mobile-overlay {
+  position: fixed;
+  top: 65px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1029;
+  backdrop-filter: blur(4px);
+}
+
+/* Transitions */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-20px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu-toggle,
+  .hamburger span,
+  .navbar,
+  .nav-icon-btn,
+  .mobile-nav-item,
+  .mobile-action-btn,
+  .mobile-logout {
+    transition: none !important;
+  }
+  
+  .slide-down-enter-active,
+  .slide-down-leave-active,
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none !important;
+  }
+}
+
+/* Mobile Responsiveness (576px and below) */
 @media (max-width: 576px) {
   .container-fluid {
     padding: 0 1rem;
   }
   
   .brand-text {
-    display: none;
-  }
-  
-  .navbar-brand {
-    gap: 0;
+    font-size: 1.1rem;
   }
   
   .brand-icon {
-    font-size: 1.75rem;
-  }
-  
-  .user-info {
-    display: none;
-  }
-  
-  .dropdown-indicator {
-    display: none;
-  }
-  
-  .user-menu-btn {
-    padding: 0;
-  }
-  
-  .navbar-actions {
-    gap: 0.5rem;
+    font-size: 1.5rem;
   }
 }
 
+/* Tablet adjustments (768px and below) */
 @media (max-width: 768px) {
   .user-role {
     display: none;
   }
-}
-
-/* Dark Mode Support - controlled via data-theme attribute */
-:global([data-theme="dark"]) .navbar {
-  background: #1f2937;
-  border-bottom-color: #374151;
-}
-
-:global([data-theme="dark"]) .navbar-brand {
-  color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .navbar-brand:hover {
-  color: #60a5fa;
-}
-
-:global([data-theme="dark"]) .nav-icon-btn {
-  color: #9ca3af;
-}
-
-:global([data-theme="dark"]) .admin-btn {
-  color: #a78bfa;
-}
-
-:global([data-theme="dark"]) .admin-btn:hover {
-  background: rgba(167, 139, 250, 0.15);
-  color: #c4b5fd;
-}
-
-:global([data-theme="dark"]) .nav-icon-btn:hover {
-  background: #374151;
-  color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .nav-divider {
-  background: #374151;
-}
-
-:global([data-theme="dark"]) .user-menu-btn:hover {
-  background: #374151;
-}
-
-:global([data-theme="dark"]) .user-name {
-  color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .user-role {
-  color: #9ca3af;
-}
-
-:global([data-theme="dark"]) .dropdown-menu {
-  background: #1f2937;
-  border-color: #374151;
-}
-
-:global([data-theme="dark"]) .dropdown-item {
-  color: #d1d5db;
-}
-
-:global([data-theme="dark"]) .dropdown-item:hover {
-  background: #374151;
-  color: #f9fafb;
 }
 </style>

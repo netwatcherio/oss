@@ -1803,28 +1803,48 @@ onMounted(async () => {
   font-size: 0.5rem;
 }
 
-/* Quick Stats */
+/* Mobile-first Quick Stats */
 .quick-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
   margin-bottom: 1.5rem;
 }
 
+@media (min-width: 640px) {
+  .quick-stats {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+}
+
 .stat-item {
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
   border-radius: 8px;
-  padding: 1.25rem;
+  padding: 1rem;
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   transition: all 0.2s;
+}
+
+@media (min-width: 640px) {
+  .stat-item {
+    padding: 1.25rem;
+    gap: 1rem;
+  }
 }
 
 .stat-item:hover:not(.loading) {
   transform: translateY(-2px);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-item:hover:not(.loading) {
+    transform: none;
+  }
 }
 
 .stat-icon {
@@ -1910,20 +1930,58 @@ onMounted(async () => {
   color: #6b7280;
 }
 
-/* Probes Grid */
-.probes-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 1rem;
-  padding: 1.25rem;
+/* Content Sections */
+.agent-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
+.content-section {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .section-header {
+    padding: 1.25rem;
+  }
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.section-title i {
+  color: var(--bs-secondary-color);
+}
+
+/* Probes Grid - mobile first (defined in responsive section above) */
 .probe-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--bs-border-color);
   border-radius: 8px;
   transition: all 0.2s;
   overflow: hidden;
-  background: white;
+  background: var(--bs-body-bg);
 }
 
 .probe-card:hover:not(.skeleton) {
@@ -2233,45 +2291,103 @@ onMounted(async () => {
   color: #dc2626;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .quick-stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* Mobile-first Responsive Adjustments */
 
+/* Info grid - single column on mobile */
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
   .info-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .probes-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .info-row {
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .info-label {
-    min-width: auto;
-  }
-
-  .info-value {
-    text-align: left;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 1.5rem;
   }
 }
 
+/* Probes grid - mobile first */
+.probes-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  .probes-grid {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 1.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .probes-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
+
+/* Info rows - stack on mobile */
+.info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+@media (min-width: 640px) {
+  .info-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+}
+
+.info-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+  min-width: auto;
+}
+
+@media (min-width: 640px) {
+  .info-label {
+    min-width: 120px;
+  }
+}
+
+.info-value {
+  font-size: 0.875rem;
+  color: #1f2937;
+  font-family: monospace;
+  text-align: left;
+  flex: 1;
+}
+
+@media (min-width: 640px) {
+  .info-value {
+    text-align: right;
+  }
+}
+
+/* Mobile-specific adjustments */
 @media (max-width: 576px) {
   .quick-stats {
     grid-template-columns: 1fr;
   }
 
   .stat-item {
-    padding: 1rem;
+    padding: 0.875rem;
   }
-
-  .probes-grid {
-    padding: 1rem;
+  
+  .progress-ring-container {
+    width: 56px;
+    height: 56px;
+  }
+  
+  .ring-icon {
+    font-size: 1rem;
   }
 }
 
