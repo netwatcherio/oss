@@ -60,6 +60,9 @@ func main() {
 		log.WithError(err).Fatal("clickhouse cache tables migrate failed")
 	}
 
+	// Start the ClickHouse batch writer (reduces data-part fragmentation)
+	probe.InitBatchWriter(ch)
+
 	// ---- Email Worker ----
 	smtpConfig := email.LoadSMTPConfigFromEnv()
 	emailWorker := email.NewWorker(db, smtpConfig)
@@ -152,6 +155,7 @@ func main() {
 		<-sigCh
 		log.Info("Shutting down...")
 		cleanupCancel()
+		probe.StopBatchWriter() // flush remaining CH records
 		emailWorker.Stop()
 		if geoStore != nil {
 			geoStore.Close()

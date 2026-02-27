@@ -128,37 +128,192 @@ func MigrateCHWithDefaults(ctx context.Context, ch *sql.DB) error {
 	return MigrateCH(ctx, ch, 90)
 }
 
+// ---- Batch Writer ----
+
+// chRecord is a pre-serialized row ready for batch insertion.
+type chRecord struct {
+	CreatedAt       time.Time
+	ReceivedAt      time.Time
+	Kind            string
+	ProbeID         uint64
+	ProbeAgentID    uint64
+	AgentID         uint64
+	Triggered       bool
+	TriggeredReason string
+	Target          string
+	TargetAgent     uint64
+	PayloadRaw      string
+}
+
+// CHBatchWriter buffers probe data rows and flushes them in batches to
+// ClickHouse, dramatically reducing the number of data parts created.
+type CHBatchWriter struct {
+	ch       *sql.DB
+	records  chan chRecord
+	done     chan struct{}
+	maxBatch int
+	interval time.Duration
+}
+
+const (
+	defaultBatchSize     = 50
+	defaultFlushInterval = 2 * time.Second
+	batchChanSize        = 2000 // buffer up to 2 000 records before blocking
+)
+
+// globalBatchWriter is the package-level singleton initialised at startup.
+var globalBatchWriter *CHBatchWriter
+
+// InitBatchWriter creates and starts the global batch writer.
+// Call this once at startup, after MigrateCH.
+func InitBatchWriter(ch *sql.DB) {
+	w := &CHBatchWriter{
+		ch:       ch,
+		records:  make(chan chRecord, batchChanSize),
+		done:     make(chan struct{}),
+		maxBatch: defaultBatchSize,
+		interval: defaultFlushInterval,
+	}
+	globalBatchWriter = w
+	go w.loop()
+	log.Info("ClickHouse batch writer started")
+}
+
+// StopBatchWriter signals the writer to flush remaining records and stop.
+func StopBatchWriter() {
+	if globalBatchWriter == nil {
+		return
+	}
+	close(globalBatchWriter.records)
+	<-globalBatchWriter.done // wait for final flush
+	log.Info("ClickHouse batch writer stopped")
+}
+
+// enqueue adds a record to the batch buffer. Non-blocking as long as the
+// channel has capacity; blocks if the buffer is full (back-pressure).
+func (w *CHBatchWriter) enqueue(r chRecord) {
+	w.records <- r
+}
+
+// loop is the background goroutine that reads from the channel and
+// flushes in batches.
+func (w *CHBatchWriter) loop() {
+	defer close(w.done)
+
+	buf := make([]chRecord, 0, w.maxBatch)
+	ticker := time.NewTicker(w.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case r, ok := <-w.records:
+			if !ok {
+				// Channel closed — flush remaining and exit
+				if len(buf) > 0 {
+					w.flush(buf)
+				}
+				return
+			}
+			buf = append(buf, r)
+			if len(buf) >= w.maxBatch {
+				w.flush(buf)
+				buf = buf[:0]
+			}
+		case <-ticker.C:
+			if len(buf) > 0 {
+				w.flush(buf)
+				buf = buf[:0]
+			}
+		}
+	}
+}
+
+// flush writes a batch of records with a single multi-row INSERT.
+func (w *CHBatchWriter) flush(batch []chRecord) {
+	if len(batch) == 0 {
+		return
+	}
+
+	// Build multi-row VALUES
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO probe_data
+(created_at, received_at, type, probe_id, probe_agent_id, agent_id,
+ triggered, triggered_reason, target, target_agent, payload_raw) VALUES `)
+
+	args := make([]any, 0, len(batch)*11)
+	for i, r := range batch {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		args = append(args,
+			r.CreatedAt, r.ReceivedAt, r.Kind,
+			r.ProbeID, r.ProbeAgentID, r.AgentID,
+			r.Triggered, r.TriggeredReason,
+			r.Target, r.TargetAgent, r.PayloadRaw,
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := w.ch.ExecContext(ctx, sb.String(), args...); err != nil {
+		log.WithError(err).Errorf("CH batch flush failed (%d records)", len(batch))
+		return
+	}
+	log.Debugf("CH batch flush: %d records", len(batch))
+}
+
 // SaveRecordCH inserts one probe event row.
-// SaveRecordCH inserts one probe event row.
+// If the global batch writer is running the record is enqueued for
+// batched insertion; otherwise it falls back to a direct INSERT.
 func SaveRecordCH(ctx context.Context, ch *sql.DB, data ProbeData, kind string, payload any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
+	created := data.CreatedAt
+	if created.IsZero() {
+		created = time.Now().UTC()
+	}
+	received := data.ReceivedAt
+	if received.IsZero() {
+		received = time.Now().UTC()
+	}
+
+	rec := chRecord{
+		CreatedAt:       created,
+		ReceivedAt:      received,
+		Kind:            kind,
+		ProbeID:         uint64(data.ProbeID),
+		ProbeAgentID:    uint64(data.ProbeAgentID),
+		AgentID:         uint64(data.AgentID),
+		Triggered:       data.Triggered,
+		TriggeredReason: data.TriggeredReason,
+		Target:          data.Target,
+		TargetAgent:     uint64(data.TargetAgent),
+		PayloadRaw:      string(raw),
+	}
+
+	// Use batch writer if available, otherwise direct INSERT
+	if globalBatchWriter != nil {
+		globalBatchWriter.enqueue(rec)
+		return nil
+	}
+
+	// Fallback: direct single-row INSERT (for tests / one-off scripts)
 	const ins = `
 INSERT INTO probe_data
 (created_at, received_at, type, probe_id, probe_agent_id, agent_id,
  triggered, triggered_reason, target, target_agent, payload_raw)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
-	created := data.CreatedAt
-	if created.IsZero() {
-		created = time.Now().UTC()
-	}
-
-	received := data.ReceivedAt
-	if received.IsZero() {
-		received = time.Now().UTC()
-	}
-
 	_, err = ch.ExecContext(ctx, ins,
-		created, received, kind,
-		uint64(data.ProbeID), uint64(data.ProbeAgentID), uint64(data.AgentID),
-		data.Triggered, /* <— pass bool, not uint8 */
-		data.TriggeredReason,
-		data.Target, uint64(data.TargetAgent),
-		string(raw),
+		rec.CreatedAt, rec.ReceivedAt, rec.Kind,
+		rec.ProbeID, rec.ProbeAgentID, rec.AgentID,
+		rec.Triggered, rec.TriggeredReason,
+		rec.Target, rec.TargetAgent, rec.PayloadRaw,
 	)
 	return err
 }
