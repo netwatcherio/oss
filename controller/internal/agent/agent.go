@@ -26,6 +26,7 @@ var (
 	ErrSignatureFailed = errors.New("signature verification failed")
 	ErrInvalidPSK      = errors.New("invalid psk")
 	ErrAgentDeleted    = errors.New("agent deleted") // Agent was soft-deleted from panel
+	ErrServerError     = errors.New("server error")  // Transient DB/infrastructure failure
 )
 
 // -------------------- Agent (updated to your new struct) --------------------
@@ -396,6 +397,8 @@ func GetPendingPIN(ctx context.Context, db *gorm.DB, workspaceID, agentID uint) 
 
 // AuthenticateWithPSK verifies the provided plaintext PSK against the stored bcrypt hash.
 // Returns ErrAgentDeleted if the agent was soft-deleted (should trigger 410 Gone response).
+// Returns ErrServerError for transient DB failures (should trigger 503, NOT 401).
+// Returns ErrInvalidPSK only when the PSK is genuinely wrong.
 func AuthenticateWithPSK(ctx context.Context, db *gorm.DB, workspaceID, agentID uint, psk string) (*Agent, error) {
 	// First check if agent exists but is soft-deleted
 	if deleted, err := IsAgentSoftDeleted(ctx, db, workspaceID, agentID); err == nil && deleted {
@@ -404,7 +407,12 @@ func AuthenticateWithPSK(ctx context.Context, db *gorm.DB, workspaceID, agentID 
 
 	a, err := GetAgentByWorkspaceAndID(ctx, db, workspaceID, agentID)
 	if err != nil {
-		return nil, err
+		// ErrNotFound means agent doesn't exist → invalid PSK is appropriate
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrInvalidPSK
+		}
+		// Any other error (DB connection failure, storage full, etc.) is transient
+		return nil, fmt.Errorf("%w: %v", ErrServerError, err)
 	}
 	if a.PSKHash == "" {
 		return nil, ErrInvalidPSK

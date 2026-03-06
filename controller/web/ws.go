@@ -94,6 +94,13 @@ func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
 				ctx.StatusCode(http.StatusGone) // 410 Gone
 				return errors.New("agent_deleted: agent has been removed from workspace")
 			}
+			// Check for transient server errors (DB down, storage full, etc.)
+			// Return 503 so agents know to retry instead of deactivating
+			if errors.Is(err, agent.ErrServerError) {
+				log.Warnf("WS: Agent %d/%d auth failed due to server error: %v", wsID64, agID64, err)
+				ctx.StatusCode(http.StatusServiceUnavailable) // 503
+				return errors.New("service unavailable: server error")
+			}
 			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid psk")
 		}

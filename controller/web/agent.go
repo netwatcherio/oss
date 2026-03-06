@@ -62,6 +62,14 @@ func agentAuth(api iris.Party, db *gorm.DB) {
 					_ = ctx.JSON(agentLoginResponse{Status: "deleted", Error: "agent_deleted"})
 					return
 				}
+				// Check for transient server errors (DB down, storage full, etc.)
+				// Return 503 so agents know to retry instead of deactivating
+				if errors.Is(err, agent.ErrServerError) {
+					log.Warnf("Agent %d/%d login failed due to server error: %v", req.WorkspaceID, req.AgentID, err)
+					ctx.StatusCode(http.StatusServiceUnavailable) // 503
+					_ = ctx.JSON(agentLoginResponse{Error: "server_error"})
+					return
+				}
 				ctx.StatusCode(http.StatusUnauthorized)
 				_ = ctx.JSON(agentLoginResponse{Error: "invalid_psk"})
 				return
