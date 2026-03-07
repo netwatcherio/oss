@@ -4,35 +4,29 @@ import (
 	"netwatcher-controller/internal/admin"
 	"netwatcher-controller/internal/users"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 // AdminMiddleware checks if the authenticated user has SITE_ADMIN role.
 // Must be used after JWTMiddleware.
-func AdminMiddleware(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func AdminMiddleware(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		// Get user from context (set by JWTMiddleware)
-		userVal := ctx.Values().Get("user")
+		userVal := c.Locals("user")
 		if userVal == nil {
-			ctx.StatusCode(iris.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		user, ok := userVal.(*users.User)
 		if !ok {
-			ctx.StatusCode(iris.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
-			return
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid user context"})
 		}
 
 		if !admin.IsSiteAdmin(user) {
-			ctx.StatusCode(iris.StatusForbidden)
-			_ = ctx.JSON(iris.Map{"error": "site admin access required"})
-			return
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "site admin access required"})
 		}
 
-		ctx.Next()
+		return c.Next()
 	}
 }

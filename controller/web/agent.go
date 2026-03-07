@@ -6,7 +6,7 @@ import (
 	"netwatcher-controller/internal/agent"
 	"time"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -32,87 +32,68 @@ type agentLoginResponse struct {
 
 // Call this from your router setup, e.g.:
 //
-//	api := app.Party("/api")
+//	api := app.Group("/api")
 //	agentAuth(api, r.DB)
-func agentAuth(api iris.Party, db *gorm.DB) {
+func agentAuth(api fiber.Router, db *gorm.DB) {
 	// Base: /agent
-	base := api.Party("/agent")
+	base := api.Group("/agent")
 
 	// POST /agent or /agent/login - both work for agent authentication
-	loginHandler := func(ctx iris.Context) {
-		ctx.ContentType("application/json")
+	loginHandler := func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "application/json")
 
 		var req agentLoginRequest
-		_ = ctx.ReadJSON(&req) // ignore error; fields are optional
-
-		/*		if workspaceID == 0 || agentID == 0 {
-				ctx.StatusCode(http.StatusBadRequest)
-				_ = ctx.JSON(agentLoginResponse{Error: "workspaceId_and_agentId_required"})
-				return
-			}*/
+		_ = c.BodyParser(&req) // ignore error; fields are optional
 
 		// 1) Prefer PSK if provided
 		if req.PSK != "" {
-			a, err := agent.AuthenticateWithPSK(ctx, db, req.WorkspaceID, req.AgentID, req.PSK)
+			a, err := agent.AuthenticateWithPSK(c.UserContext(), db, req.WorkspaceID, req.AgentID, req.PSK)
 			if err != nil {
 				// Check if agent was deleted - return 410 Gone to signal permanent removal
 				if errors.Is(err, agent.ErrAgentDeleted) {
 					log.Infof("Agent %d/%d attempted login after deletion - returning 410", req.WorkspaceID, req.AgentID)
-					ctx.StatusCode(http.StatusGone) // 410 Gone
-					_ = ctx.JSON(agentLoginResponse{Status: "deleted", Error: "agent_deleted"})
-					return
+					return c.Status(http.StatusGone).JSON(agentLoginResponse{Status: "deleted", Error: "agent_deleted"})
 				}
 				// Check for transient server errors (DB down, storage full, etc.)
 				// Return 503 so agents know to retry instead of deactivating
 				if errors.Is(err, agent.ErrServerError) {
 					log.Warnf("Agent %d/%d login failed due to server error: %v", req.WorkspaceID, req.AgentID, err)
-					ctx.StatusCode(http.StatusServiceUnavailable) // 503
-					_ = ctx.JSON(agentLoginResponse{Error: "server_error"})
-					return
+					return c.Status(http.StatusServiceUnavailable).JSON(agentLoginResponse{Error: "server_error"})
 				}
-				ctx.StatusCode(http.StatusUnauthorized)
-				_ = ctx.JSON(agentLoginResponse{Error: "invalid_psk"})
-				return
+				return c.Status(http.StatusUnauthorized).JSON(agentLoginResponse{Error: "invalid_psk"})
 			}
 			// Lightweight heartbeat
-			if err := agent.UpdateAgentSeen(ctx, db, a.ID, time.Now()); err != nil {
+			if err := agent.UpdateAgentSeen(c.UserContext(), db, a.ID, time.Now()); err != nil {
 				log.WithError(err).Warn("update last seen failed (psk login)")
 			}
-			ctx.StatusCode(http.StatusOK)
-			_ = ctx.JSON(agentLoginResponse{
+			return c.Status(http.StatusOK).JSON(agentLoginResponse{
 				Status: "ok",
 				Agent:  a,
 			})
-			return
 		}
 
 		// 2) No PSK → try PIN bootstrap, if provided
 		if req.PIN != "" {
-			out, err := agent.BootstrapWithPIN(ctx, db, agent.BootstrapWithPINInput{
+			out, err := agent.BootstrapWithPIN(c.UserContext(), db, agent.BootstrapWithPINInput{
 				WorkspaceID: req.WorkspaceID,
 				AgentID:     req.AgentID,
 				PIN:         req.PIN,
 			})
 			if err != nil {
-				ctx.StatusCode(http.StatusUnauthorized)
-				_ = ctx.JSON(agentLoginResponse{Error: "pin_verification_failed"})
-				return
+				return c.Status(http.StatusUnauthorized).JSON(agentLoginResponse{Error: "pin_verification_failed"})
 			}
-			if err := agent.UpdateAgentSeen(ctx, db, out.Agent.ID, time.Now()); err != nil {
+			if err := agent.UpdateAgentSeen(c.UserContext(), db, out.Agent.ID, time.Now()); err != nil {
 				log.WithError(err).Warn("update last seen failed (pin bootstrap)")
 			}
-			ctx.StatusCode(http.StatusOK)
-			_ = ctx.JSON(agentLoginResponse{
+			return c.Status(http.StatusOK).JSON(agentLoginResponse{
 				Status: "success",
 				PSK:    out.PSK, // <-- show once
 				Agent:  out.Agent,
 			})
-			return
 		}
 
 		// 3) Neither PSK nor PIN
-		ctx.StatusCode(http.StatusBadRequest)
-		_ = ctx.JSON(agentLoginResponse{Error: "psk_or_pin_required"})
+		return c.Status(http.StatusBadRequest).JSON(agentLoginResponse{Error: "psk_or_pin_required"})
 	}
 
 	// Register handler on both routes for compatibility

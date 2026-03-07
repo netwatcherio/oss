@@ -9,13 +9,13 @@ import (
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/oui"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
-// RegisterRoutes mounts all Iris routes using your internal/* packages.
-func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store) {
+// RegisterRoutes mounts all Fiber routes using your internal/* packages.
+func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store) {
 	// Load limits configuration from environment
 	limitsConfig := limits.LoadFromEnv()
 
@@ -41,21 +41,21 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	RegisterRawShareWS(app, db)
 
 	// ----- Protected (JWT) -----
-	api := app.Party("/")
+	api := app.Group("/")
 	api.Use(JWTMiddleware(db))
 
 	panelWorkspaces(api, db, emailStore, limitsConfig) // /workspaces/*
-	panelProbes(api, db, limitsConfig)                 // /workspaces/{id}/agents/{agentID}/probes/*
+	panelProbes(api, db, limitsConfig)                 // /workspaces/:id/agents/:agentID/probes/*
 	panelAgents(api, db, ch, limitsConfig)
 	panelProbeData(api, db, ch)
-	panelSpeedtest(api, db, ch)    // /workspaces/{id}/agents/{agentID}/speedtest-*
+	panelSpeedtest(api, db, ch)    // /workspaces/:id/agents/:agentID/speedtest-*
 	panelGeoIP(api, geoStore, ch)  // /geoip/*
 	panelWhois(api, ch)            // /whois/*
 	panelLookup(api, geoStore, ch) // /lookup/*
 	panelOUI(api, ouiStore)        // /lookup/oui/*
-	panelAlerts(api, db)           // /alerts/* and /workspaces/{id}/alert-rules/*
-	panelShareLinks(api, db)       // /workspaces/{id}/agents/{agentID}/share-links/*
-	panelAnalysis(api, db, ch)     // /workspaces/{id}/analysis/*
+	panelAlerts(api, db)           // /alerts/* and /workspaces/:id/alert-rules/*
+	panelShareLinks(api, db)       // /workspaces/:id/agents/:agentID/share-links/*
+	panelAnalysis(api, db, ch)     // /workspaces/:id/analysis/*
 
 	// Admin panel routes (requires SITE_ADMIN role)
 	RegisterAdminRoutes(api, db)
@@ -64,5 +64,5 @@ func RegisterRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB, emailStore *
 	RegisterShareRoutes(app, db, ch)
 
 	// Health
-	app.Get("/healthz", func(ctx iris.Context) { _ = ctx.JSON(iris.Map{"ok": true}) })
+	app.Get("/healthz", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
 }

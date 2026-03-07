@@ -10,7 +10,6 @@ import (
 
 	"netwatcher-controller/internal/geoip"
 
-	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -50,13 +49,11 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// GetClientIP extracts the real client IP from an Iris context.
-// It checks X-Forwarded-For and X-Real-IP headers when behind a trusted proxy.
+// GetClientIPFromHeaders extracts the real client IP from request parameters.
+// remoteAddr is the direct connection address, forwardedFor is X-Forwarded-For header,
+// and realIP is X-Real-IP header.
 // This is the canonical function for determining a client's public IP.
-func GetClientIP(ctx iris.Context) string {
-	// Get remote address (may include port)
-	remoteAddr := ctx.RemoteAddr()
-
+func GetClientIPFromHeaders(remoteAddr, forwardedFor, realIP string) string {
 	// Strip port if present
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
@@ -64,38 +61,38 @@ func GetClientIP(ctx iris.Context) string {
 		host = remoteAddr
 	}
 
-	remoteIP := net.ParseIP(host)
-	if remoteIP == nil {
+	parsedRemoteIP := net.ParseIP(host)
+	if parsedRemoteIP == nil {
 		// Failed to parse, return raw address
 		return host
 	}
 
 	// If remote IP is not private/trusted, it's the real client
-	if !isPrivateIP(remoteIP) {
-		return remoteIP.String()
+	if !isPrivateIP(parsedRemoteIP) {
+		return parsedRemoteIP.String()
 	}
 
 	// Check X-Forwarded-For header (comma-separated list, leftmost is original client)
-	if forwardedFor := ctx.GetHeader("X-Forwarded-For"); forwardedFor != "" {
+	if forwardedFor != "" {
 		ips := strings.Split(forwardedFor, ",")
 		for _, ip := range ips {
-			parsedIP := net.ParseIP(strings.TrimSpace(ip))
-			if parsedIP != nil && !isPrivateIP(parsedIP) {
-				return parsedIP.String()
+			pIP := net.ParseIP(strings.TrimSpace(ip))
+			if pIP != nil && !isPrivateIP(pIP) {
+				return pIP.String()
 			}
 		}
 	}
 
 	// Check X-Real-IP header (single IP set by proxy)
-	if realIP := ctx.GetHeader("X-Real-IP"); realIP != "" {
-		parsedIP := net.ParseIP(strings.TrimSpace(realIP))
-		if parsedIP != nil && !isPrivateIP(parsedIP) {
-			return parsedIP.String()
+	if realIP != "" {
+		pIP := net.ParseIP(strings.TrimSpace(realIP))
+		if pIP != nil && !isPrivateIP(pIP) {
+			return pIP.String()
 		}
 	}
 
 	// Fallback to remote address
-	return remoteIP.String()
+	return parsedRemoteIP.String()
 }
 
 // ReverseDNS performs a PTR lookup for the given IP address.
@@ -171,11 +168,11 @@ func UnifiedLookup(ctx context.Context, ch *sql.DB, geoStore *geoip.Store, ip st
 	return result, nil
 }
 
-// QuickLookup returns just the client IP without enrichment.
+// QuickLookupByIP returns just the IP without enrichment.
 // Use this for minimal latency when only the IP is needed.
-func QuickLookup(ctx iris.Context) *IPOnlyResult {
+func QuickLookupByIP(ip string) *IPOnlyResult {
 	return &IPOnlyResult{
-		IP:        GetClientIP(ctx),
+		IP:        ip,
 		Timestamp: time.Now(),
 	}
 }

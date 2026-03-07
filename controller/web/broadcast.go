@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/kataras/iris/v12/websocket"
+	"github.com/kataras/neffos"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -14,7 +14,7 @@ type PanelHub struct {
 	mu sync.RWMutex
 
 	// Connections indexed by connection ID
-	connections map[string]*websocket.NSConn
+	connections map[string]*neffos.NSConn
 
 	// Subscriptions: workspaceID -> probeID -> set of connection IDs
 	// probeID of 0 means "all probes in workspace"
@@ -54,14 +54,14 @@ func GetPanelHub() *PanelHub {
 // NewPanelHub creates a new PanelHub instance
 func NewPanelHub() *PanelHub {
 	return &PanelHub{
-		connections:       make(map[string]*websocket.NSConn),
+		connections:       make(map[string]*neffos.NSConn),
 		subscriptions:     make(map[uint]map[uint]map[string]struct{}),
 		connSubscriptions: make(map[string][]subscription),
 	}
 }
 
 // RegisterConnection registers a panel client connection
-func (h *PanelHub) RegisterConnection(connID string, conn *websocket.NSConn) {
+func (h *PanelHub) RegisterConnection(connID string, conn *neffos.NSConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

@@ -5,7 +5,7 @@ import (
 
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 )
 
 // Permission levels for code clarity
@@ -18,103 +18,85 @@ const (
 
 // RequireRole returns middleware that checks if the user has at least the specified role
 // in the workspace identified by the "id" URL parameter.
-func RequireRole(store *workspace.Store, minRole workspace.Role) iris.Handler {
-	return func(ctx iris.Context) {
-		userID := currentUserID(ctx)
+func RequireRole(store *workspace.Store, minRole workspace.Role) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := currentUserID(c)
 		if userID == 0 {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "authentication required"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 		}
 
-		wsID := uintParam(ctx, "id")
+		wsID := uintParam(c, "id")
 		if wsID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "workspace id required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "workspace id required"})
 		}
 
-		if !store.UserHasRole(ctx.Request().Context(), wsID, userID, minRole) {
-			ctx.StatusCode(http.StatusForbidden)
-			_ = ctx.JSON(iris.Map{
+		if !store.UserHasRole(c.UserContext(), wsID, userID, minRole) {
+			return c.Status(http.StatusForbidden).JSON(fiber.Map{
 				"error":         "insufficient permissions",
 				"required_role": string(minRole),
 			})
-			return
 		}
 
-		ctx.Next()
+		return c.Next()
 	}
 }
 
 // RequireWorkspaceAccess is a simpler middleware that only checks if the user
 // has any access to the workspace (any role).
-func RequireWorkspaceAccess(store *workspace.Store) iris.Handler {
-	return func(ctx iris.Context) {
-		userID := currentUserID(ctx)
+func RequireWorkspaceAccess(store *workspace.Store) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := currentUserID(c)
 		if userID == 0 {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "authentication required"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 		}
 
-		wsID := uintParam(ctx, "id")
+		wsID := uintParam(c, "id")
 		if wsID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "workspace id required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "workspace id required"})
 		}
 
-		if !store.UserHasAccess(ctx.Request().Context(), wsID, userID) {
-			ctx.StatusCode(http.StatusForbidden)
-			_ = ctx.JSON(iris.Map{"error": "access denied"})
-			return
+		if !store.UserHasAccess(c.UserContext(), wsID, userID) {
+			return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "access denied"})
 		}
 
-		ctx.Next()
+		return c.Next()
 	}
 }
 
 // RequireAgentRole checks permission for an agent within a workspace.
 // It extracts workspaceId from "id" param and validates the user's role.
-func RequireAgentRole(store *workspace.Store, minRole workspace.Role) iris.Handler {
+func RequireAgentRole(store *workspace.Store, minRole workspace.Role) fiber.Handler {
 	return RequireRole(store, minRole)
 }
 
 // RequireProbeRole checks permission for a probe within a workspace.
 // It extracts workspaceId from "id" param and validates the user's role.
-func RequireProbeRole(store *workspace.Store, minRole workspace.Role) iris.Handler {
+func RequireProbeRole(store *workspace.Store, minRole workspace.Role) fiber.Handler {
 	return RequireRole(store, minRole)
 }
 
 // RequireMemberManagement checks if user can manage members (ADMIN or higher)
 // with additional validation that ADMIN cannot modify OWNER or other ADMINs.
-func RequireMemberManagement(store *workspace.Store) iris.Handler {
-	return func(ctx iris.Context) {
-		userID := currentUserID(ctx)
+func RequireMemberManagement(store *workspace.Store) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := currentUserID(c)
 		if userID == 0 {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "authentication required"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 		}
 
-		wsID := uintParam(ctx, "id")
+		wsID := uintParam(c, "id")
 		if wsID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "workspace id required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "workspace id required"})
 		}
 
 		// Must be at least ADMIN
-		if !store.UserHasRole(ctx.Request().Context(), wsID, userID, workspace.RoleAdmin) {
-			ctx.StatusCode(http.StatusForbidden)
-			_ = ctx.JSON(iris.Map{
+		if !store.UserHasRole(c.UserContext(), wsID, userID, workspace.RoleAdmin) {
+			return c.Status(http.StatusForbidden).JSON(fiber.Map{
 				"error":         "insufficient permissions",
 				"required_role": string(workspace.RoleAdmin),
 			})
-			return
 		}
 
-		ctx.Next()
+		return c.Next()
 	}
 }

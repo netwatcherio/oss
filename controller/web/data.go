@@ -12,183 +12,161 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
 	"netwatcher-controller/internal/probe"
 )
 
-// Wire this similarly to panelProbes:
-// func Register(api iris.Party, pg *gorm.DB, ch *sql.DB) {
-//     panelProbes(api, pg)
-//     panelProbeData(api, pg, ch)
-// }
-
-func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
-	base := api.Party("/workspaces/{id:uint}/probe-data")
+func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
+	base := api.Group("/workspaces/:id/probe-data")
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/network-map
+	// GET /workspaces/:id/network-map
 	// Aggregated network topology map for the workspace
 	// Query: lookback=<minutes, default 15>
 	// ------------------------------------------
-	api.Get("/workspaces/{id:uint}/network-map", func(ctx iris.Context) {
+	api.Get("/workspaces/:id/network-map", func(c *fiber.Ctx) error {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[network-map] PANIC: %v", r)
-				ctx.StatusCode(http.StatusInternalServerError)
-				_ = ctx.JSON(iris.Map{"error": "internal error"})
+				_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
 			}
 		}()
 
-		wID := uintParam(ctx, "id")
-		lookback := intOrDefault(ctx.URLParam("lookback"), 15)
+		wID := uintParam(c, "id")
+		lookback := intOrDefault(c.Query("lookback"), 15)
 
-		mapData, err := probe.GetWorkspaceNetworkMap(ctx.Request().Context(), ch, pg, wID, lookback)
+		mapData, err := probe.GetWorkspaceNetworkMap(c.UserContext(), ch, pg, wID, lookback)
 		if err != nil {
 			log.Printf("[network-map] workspace=%d error: %v", wID, err)
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Explicitly marshal to check for JSON errors
 		jsonBytes, err := json.Marshal(mapData)
 		if err != nil {
 			log.Printf("[network-map] JSON marshal error: %v", err)
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "json serialization failed"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "json serialization failed"})
 		}
 
-		ctx.ContentType("application/json")
-		_, _ = ctx.Write(jsonBytes)
+		c.Set("Content-Type", "application/json")
+		return c.Send(jsonBytes)
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/connectivity-matrix
+	// GET /workspaces/:id/connectivity-matrix
 	// Aggregated connectivity matrix for the workspace
 	// Query: lookback=<minutes, default 15>
 	// ------------------------------------------
-	api.Get("/workspaces/{id:uint}/connectivity-matrix", func(ctx iris.Context) {
+	api.Get("/workspaces/:id/connectivity-matrix", func(c *fiber.Ctx) error {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[connectivity-matrix] PANIC: %v", r)
-				ctx.StatusCode(http.StatusInternalServerError)
-				_ = ctx.JSON(iris.Map{"error": "internal error"})
+				_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
 			}
 		}()
 
-		wID := uintParam(ctx, "id")
-		lookback := intOrDefault(ctx.URLParam("lookback"), 15)
+		wID := uintParam(c, "id")
+		lookback := intOrDefault(c.Query("lookback"), 15)
 
-		matrix, err := probe.GetWorkspaceConnectivityMatrix(ctx.Request().Context(), ch, pg, wID, lookback)
+		matrix, err := probe.GetWorkspaceConnectivityMatrix(c.UserContext(), ch, pg, wID, lookback)
 		if err != nil {
 			log.Printf("[connectivity-matrix] workspace=%d error: %v", wID, err)
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Explicitly marshal to check for JSON errors
 		jsonBytes, err := json.Marshal(matrix)
 		if err != nil {
 			log.Printf("[connectivity-matrix] JSON marshal error: %v", err)
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "json serialization failed"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "json serialization failed"})
 		}
 
-		ctx.ContentType("application/json")
-		_, _ = ctx.Write(jsonBytes)
+		c.Set("Content-Type", "application/json")
+		return c.Send(jsonBytes)
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/find
+	// GET /workspaces/:id/probe-data/find
 	// Flexible finder across ClickHouse with query params mirroring pd.FindParams
 	// ------------------------------------------
-	base.Get("/find", func(ctx iris.Context) {
-		p, bad := readFindParams(ctx)
+	base.Get("/find", func(c *fiber.Ctx) error {
+		p, bad := readFindParams(c)
 		if bad != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": bad.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": bad.Error()})
 		}
-		rows, err := probe.FindProbeData(ctx.Request().Context(), ch, p)
+		rows, err := probe.FindProbeData(c.UserContext(), ch, p)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(rows))
+		return c.JSON(NewListResponse(rows))
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/agents/{agentID}/speedtests
+	// GET /workspaces/:id/probe-data/agents/:agentID/speedtests
 	// Speedtest data for an agent (queries by agent_id + type, NOT probe_id)
 	// This works around historical data having incorrect probe_id values
 	// Query: limit (default 25)
 	// ------------------------------------------
-	base.Get("/agents/{agentID:uint}/speedtests", func(ctx iris.Context) {
-		agentID := uint64(uintParam(ctx, "agentID"))
-		limit := intOrDefault(ctx.URLParam("limit"), 25)
+	base.Get("/agents/:agentID/speedtests", func(c *fiber.Ctx) error {
+		agentID := uint64(uintParam(c, "agentID"))
+		limit := intOrDefault(c.Query("limit"), 25)
 
 		typ := string(probe.TypeSpeedtest)
-		rows, err := probe.FindProbeData(ctx.Request().Context(), ch, probe.FindParams{
+		rows, err := probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
 			Type:    &typ,
 			AgentID: &agentID,
 			Limit:   limit,
 		})
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(rows))
+		return c.JSON(NewListResponse(rows))
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/probes/{probeID}/data
+	// GET /workspaces/:id/probe-data/probes/:probeID/data
 	// Timeseries for one probe (ClickHouse)
 	// Query: from, to, limit, asc=true|false, aggregate=<seconds>, type=PING|TRAFFICSIM, agentId=<uint>
 	// When aggregate > 0, returns time-bucket averaged data to reduce transfer
 	// When agentId is specified, filters by the reporting agent (for AGENT probes with bidirectional data)
 	// ------------------------------------------
-	base.Get("/probes/{probeID:uint}/data", func(ctx iris.Context) {
-		probeID := uint64(uintParam(ctx, "probeID"))
+	base.Get("/probes/:probeID/data", func(c *fiber.Ctx) error {
+		probeID := uint64(uintParam(c, "probeID"))
 
 		// Optional agentId filter - used for AGENT probes to filter by specific reporter
 		var agentID *uint64
-		if v := ctx.URLParam("agentId"); v != "" {
+		if v := c.Query("agentId"); v != "" {
 			if x, ok := parseUint64(v); ok {
 				agentID = &x
 			}
 		}
 
-		from, _ := readTime(ctx.URLParam("from"))
-		to, _ := readTime(ctx.URLParam("to"))
-		limit := intOrDefault(ctx.URLParam("limit"), 0)
-		asc := boolOr(ctx.URLParamDefault("asc", ""), false)
-		aggregateSec := intOrDefault(ctx.URLParam("aggregate"), 0)
-		probeType := ctx.URLParam("type") // "PING" or "TRAFFICSIM"
+		from, _ := readTime(c.Query("from"))
+		to, _ := readTime(c.Query("to"))
+		limit := intOrDefault(c.Query("limit"), 0)
+		asc := boolOr(c.Query("asc", ""), false)
+		aggregateSec := intOrDefault(c.Query("aggregate"), 0)
+		probeType := c.Query("type") // "PING" or "TRAFFICSIM"
 
 		var rows []probe.ProbeData
 		var err error
 
 		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
 			// Use aggregated query for performance
-			rows, err = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, probeID, agentID, probeType, from, to, aggregateSec, limit)
+			rows, err = probe.GetProbeDataAggregated(c.UserContext(), ch, probeID, agentID, probeType, from, to, aggregateSec, limit)
 			// Log aggregation for debugging
 			if err == nil {
-				ctx.Application().Logger().Debugf("[ProbeData] Aggregated query: probeID=%d agentID=%v type=%s aggregate=%ds from=%v to=%v -> %d rows",
+				log.Printf("[ProbeData] Aggregated query: probeID=%d agentID=%v type=%s aggregate=%ds from=%v to=%v -> %d rows",
 					probeID, agentID, probeType, aggregateSec, from, to, len(rows))
 			}
 		} else {
 			// Standard non-aggregated query
-			rows, err = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, probeID, agentID, from, to, asc, limit)
+			rows, err = probe.GetProbeDataByProbe(c.UserContext(), ch, probeID, agentID, from, to, asc, limit)
 			// Log raw query for debugging
 			if err == nil && aggregateSec > 0 {
-				ctx.Application().Logger().Debugf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
+				log.Printf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
 					probeType, probeID, len(rows))
 			}
 			// Post-filter by type if specified
@@ -204,90 +182,74 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		}
 
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(rows))
+		return c.JSON(NewListResponse(rows))
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/latest
+	// GET /workspaces/:id/probe-data/latest
 	// Latest row by type + reporting agent (and optional probe_id)
 	// Query: type=<PING|MTR|...>, agentId=<uint>, probeId=<uint?>
 	// ------------------------------------------
-	base.Get("/latest", func(ctx iris.Context) {
-		typ := ctx.URLParam("type")
+	base.Get("/latest", func(c *fiber.Ctx) error {
+		typ := c.Query("type")
 		if typ == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "type is required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "type is required"})
 		}
-		agentID, ok := parseUint64(ctx.URLParam("agentId"))
+		agentID, ok := parseUint64(c.Query("agentId"))
 		if !ok {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "agentId is required uint"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "agentId is required uint"})
 		}
 		var probeIDPtr *uint64
-		if v := ctx.URLParam("probeId"); v != "" {
+		if v := c.Query("probeId"); v != "" {
 			if pid, ok := parseUint64(v); ok {
 				probeIDPtr = &pid
 			} else {
-				ctx.StatusCode(http.StatusBadRequest)
-				_ = ctx.JSON(iris.Map{"error": "probeId must be uint"})
-				return
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "probeId must be uint"})
 			}
 		}
-		row, err := probe.GetLatestByTypeAndAgent(ctx.Request().Context(), ch, typ, agentID, probeIDPtr)
+		row, err := probe.GetLatestByTypeAndAgent(c.UserContext(), ch, typ, agentID, probeIDPtr)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		if row == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(row)
+		return c.JSON(row)
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/by-target/data
+	// GET /workspaces/:id/probe-data/by-target/data
 	// Timeseries for all probes (optionally filtered by type) that hit a literal target (probe_targets.target).
 	// Query: target=<host|ip[:port]>, type=<PING|... optional>, limit, from, to, latestOnly (bool)
 	// ------------------------------------------
-	base.Get("/by-target/data", func(ctx iris.Context) {
-		target := strings.TrimSpace(ctx.URLParam("target"))
+	base.Get("/by-target/data", func(c *fiber.Ctx) error {
+		target := strings.TrimSpace(c.Query("target"))
 		if target == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "target is required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "target is required"})
 		}
 		var typ *string
-		if t := strings.TrimSpace(ctx.URLParam("type")); t != "" {
+		if t := strings.TrimSpace(c.Query("type")); t != "" {
 			typ = &t
 		}
 
-		from, _ := readTime(ctx.URLParam("from"))
-		to, _ := readTime(ctx.URLParam("to"))
-		limit := intOrDefault(ctx.URLParam("limit"), 0)
-		latestOnly := boolOr(ctx.URLParamDefault("latestOnly", ""), false)
+		from, _ := readTime(c.Query("from"))
+		to, _ := readTime(c.Query("to"))
+		limit := intOrDefault(c.Query("limit"), 0)
+		latestOnly := boolOr(c.Query("latestOnly", ""), false)
 
 		// Lookup matching probes from Postgres
 		probeIDs, err := findProbeIDsByLiteralTarget(context.TODO(), pg, target, typ)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		if len(probeIDs) == 0 {
-			_ = ctx.JSON(iris.Map{
+			return c.JSON(fiber.Map{
 				"target":   target,
 				"probeIds": []uint{},
 				"rows":     []any{},
 			})
-			return
 		}
 
 		// Fetch either latest points or timeseries for each probe_id
@@ -299,25 +261,21 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		out := make([]bundle, 0, len(probeIDs))
 		for _, pid := range probeIDs {
 			if latestOnly {
-				row, err := probe.GetLatest(ctx.Request().Context(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
+				row, err := probe.GetLatest(c.UserContext(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
 				if err != nil {
-					ctx.StatusCode(http.StatusInternalServerError)
-					_ = ctx.JSON(iris.Map{"error": err.Error()})
-					return
+					return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 				}
 				out = append(out, bundle{ProbeID: pid, Latest: row})
 			} else {
-				rows, err := probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(pid), nil, from, to, false, limit)
+				rows, err := probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(pid), nil, from, to, false, limit)
 				if err != nil {
-					ctx.StatusCode(http.StatusInternalServerError)
-					_ = ctx.JSON(iris.Map{"error": err.Error()})
-					return
+					return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 				}
 				out = append(out, bundle{ProbeID: pid, Rows: rows})
 			}
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"target":   target,
 			"probeIds": probeIDs,
 			"bundles":  out,
@@ -325,7 +283,7 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	})
 
 	// ------------------------------------------
-	// GET /workspaces/{id}/probe-data/probes/{probeID}/similar
+	// GET /workspaces/:id/probe-data/probes/:probeID/similar
 	// Discover "like probes" so the UI can combine views:
 	//   - same literal target(s)
 	//   - same target agent(s) (reverse / inter-agent)
@@ -333,21 +291,19 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 	// Optional query: includeSelf=false (default false) to exclude current probe.
 	// Optional query: latest=true to attach latest datapoint for each similar probe.
 	// ------------------------------------------
-	base.Get("/probes/{probeID:uint}/similar", func(ctx iris.Context) {
-		selfID := uintParam(ctx, "probeID")
-		sameType := boolOr(ctx.URLParamDefault("sameType", ""), true)
-		includeSelf := boolOr(ctx.URLParamDefault("includeSelf", ""), false)
-		withLatest := boolOr(ctx.URLParamDefault("latest", ""), false)
+	base.Get("/probes/:probeID/similar", func(c *fiber.Ctx) error {
+		selfID := uintParam(c, "probeID")
+		sameType := boolOr(c.Query("sameType", ""), true)
+		includeSelf := boolOr(c.Query("includeSelf", ""), false)
+		withLatest := boolOr(c.Query("latest", ""), false)
 
 		// Load the reference probe & its targets
-		ref, err := probe.GetByID(ctx.Request().Context(), pg, selfID)
+		ref, err := probe.GetByID(c.UserContext(), pg, selfID)
 		if err != nil || ref == nil {
 			if err == nil {
 				err = errors.New("probe not found")
 			}
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Gather target literals and target agents from ref
@@ -356,19 +312,15 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 		// Find similar by literal targets
 		simLit, err := findProbesByLiteralTargets(context.TODO(), pg, literals, ref.Type, sameType, includeSelf, selfID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		// Find similar by target agents
 		simAgent, err := findProbesByTargetAgents(context.TODO(), pg, agentTargets, ref.Type, sameType, includeSelf, selfID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		resp := iris.Map{
+		resp := fiber.Map{
 			"probe":               ref,
 			"similar_by_target":   simLit,
 			"similar_by_agent_id": simAgent,
@@ -391,71 +343,69 @@ func panelProbeData(api iris.Party, pg *gorm.DB, ch *sql.DB) {
 
 			latest := make([]add, 0, len(ids))
 			for _, pid := range ids {
-				row, err := probe.GetLatest(ctx.Request().Context(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
+				row, err := probe.GetLatest(c.UserContext(), ch, probe.FindParams{ProbeID: uint64Ptr(uint64(pid))})
 				if err != nil {
-					ctx.StatusCode(http.StatusInternalServerError)
-					_ = ctx.JSON(iris.Map{"error": err.Error()})
-					return
+					return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 				}
 				latest = append(latest, add{ProbeID: pid, Latest: row})
 			}
 			resp["latest"] = latest
 		}
 
-		_ = ctx.JSON(resp)
+		return c.JSON(resp)
 	})
 }
 
 // ---------- helpers (parsing & Postgres lookups) ----------
 
-func readFindParams(ctx iris.Context) (probe.FindParams, error) {
+func readFindParams(c *fiber.Ctx) (probe.FindParams, error) {
 	var p probe.FindParams
 
-	if s := ctx.URLParam("type"); s != "" {
+	if s := c.Query("type"); s != "" {
 		p.Type = &s
 	}
-	if v := ctx.URLParam("probeId"); v != "" {
+	if v := c.Query("probeId"); v != "" {
 		if x, ok := parseUint64(v); ok {
 			p.ProbeID = &x
 		} else {
 			return p, errors.New("probeId must be uint")
 		}
 	}
-	if v := ctx.URLParam("agentId"); v != "" {
+	if v := c.Query("agentId"); v != "" {
 		if x, ok := parseUint64(v); ok {
 			p.AgentID = &x
 		} else {
 			return p, errors.New("agentId must be uint")
 		}
 	}
-	if v := ctx.URLParam("probeAgentId"); v != "" {
+	if v := c.Query("probeAgentId"); v != "" {
 		if x, ok := parseUint64(v); ok {
 			p.ProbeAgentID = &x
 		} else {
 			return p, errors.New("probeAgentId must be uint")
 		}
 	}
-	if v := ctx.URLParam("targetAgent"); v != "" {
+	if v := c.Query("targetAgent"); v != "" {
 		if x, ok := parseUint64(v); ok {
 			p.TargetAgent = &x
 		} else {
 			return p, errors.New("targetAgent must be uint")
 		}
 	}
-	if v := ctx.URLParam("targetPrefix"); v != "" {
+	if v := c.Query("targetPrefix"); v != "" {
 		p.TargetPrefix = &v
 	}
-	if v := ctx.URLParam("triggered"); v != "" {
+	if v := c.Query("triggered"); v != "" {
 		p.Triggered = boolPtr(v == "1" || strings.EqualFold(v, "true"))
 	}
-	if t, ok := readTime(ctx.URLParam("from")); ok {
+	if t, ok := readTime(c.Query("from")); ok {
 		p.From = t
 	}
-	if t, ok := readTime(ctx.URLParam("to")); ok {
+	if t, ok := readTime(c.Query("to")); ok {
 		p.To = t
 	}
-	p.Limit = intOrDefault(ctx.URLParam("limit"), 0)
-	p.Ascending = boolOr(ctx.URLParamDefault("asc", ""), false)
+	p.Limit = intOrDefault(c.Query("limit"), 0)
+	p.Ascending = boolOr(c.Query("asc", ""), false)
 
 	return p, nil
 }

@@ -11,81 +11,78 @@ import (
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/lookup"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 // agentAPIMiddleware validates agent PSK from headers.
 // Expects X-Workspace-ID, X-Agent-ID, and X-Agent-PSK headers.
-func agentAPIMiddleware(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		workspaceIDStr := ctx.GetHeader("X-Workspace-ID")
-		agentIDStr := ctx.GetHeader("X-Agent-ID")
-		psk := ctx.GetHeader("X-Agent-PSK")
+func agentAPIMiddleware(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		workspaceIDStr := c.Get("X-Workspace-ID")
+		agentIDStr := c.Get("X-Agent-ID")
+		psk := c.Get("X-Agent-PSK")
 
 		if workspaceIDStr == "" || agentIDStr == "" || psk == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "missing auth headers"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "missing auth headers"})
 		}
 
 		workspaceID, err := strconv.ParseUint(workspaceIDStr, 10, 64)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid workspace_id"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid workspace_id"})
 		}
 
 		agentID, err := strconv.ParseUint(agentIDStr, 10, 64)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid agent_id"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid agent_id"})
 		}
 
 		// Authenticate with PSK
-		a, err := agent.AuthenticateWithPSK(ctx.Request().Context(), db, uint(workspaceID), uint(agentID), psk)
+		a, err := agent.AuthenticateWithPSK(c.UserContext(), db, uint(workspaceID), uint(agentID), psk)
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "invalid_psk"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_psk"})
 		}
 
 		// Store agent in context for downstream handlers
-		ctx.Values().Set("agent", a)
-		ctx.Values().Set("agent_id", a.ID)
-		ctx.Values().Set("workspace_id", a.WorkspaceID)
+		c.Locals("agent", a)
+		c.Locals("agent_id", a.ID)
+		c.Locals("workspace_id", a.WorkspaceID)
 
 		// Update last seen
-		if err := agent.UpdateAgentSeen(ctx.Request().Context(), db, a.ID, time.Now()); err != nil {
+		if err := agent.UpdateAgentSeen(c.UserContext(), db, a.ID, time.Now()); err != nil {
 			log.WithError(err).Warn("failed to update agent last_seen")
 		}
 
-		ctx.Next()
+		return c.Next()
 	}
+}
+
+// fiberClientIP extracts the real client IP from a Fiber context using the shared lookup logic.
+func fiberClientIP(c *fiber.Ctx) string {
+	return lookup.GetClientIPFromHeaders(c.IP(), c.Get("X-Forwarded-For"), c.Get("X-Real-IP"))
 }
 
 // RegisterAgentAPI registers agent-specific API endpoints.
 // These endpoints use PSK-based authentication (header: X-Agent-PSK).
-func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.Store) {
+func RegisterAgentAPI(api fiber.Router, db *gorm.DB, ch *sql.DB, geoStore *geoip.Store) {
 	// All routes under /agent/api require PSK auth
-	agentAPI := api.Party("/agent/api", agentAPIMiddleware(db))
+	agentAPI := api.Group("/agent/api", agentAPIMiddleware(db))
 
 	// GET /agent/api/whoami - Returns the agent's public IP as seen by the controller
 	// This allows agents to discover their public IP without external services.
-	agentAPI.Get("/whoami", func(ctx iris.Context) {
+	agentAPI.Get("/whoami", func(c *fiber.Ctx) error {
 		// CRITICAL: Prevent caching by reverse proxies (Caddy, Nginx, Cloudflare)
 		// This endpoint must always return the unique IP of the current requestor.
 		// Caching here causes "IP Confusion" where Agent B gets Agent A's cached IP.
-		ctx.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		ctx.Header("Pragma", "no-cache")
+		c.Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		c.Set("Pragma", "no-cache")
 
 		// Debug logging for header diagnosis
-		remoteAddr := ctx.RemoteAddr()
-		xForwardedFor := ctx.GetHeader("X-Forwarded-For")
-		xRealIP := ctx.GetHeader("X-Real-IP")
-		cfConnectingIP := ctx.GetHeader("CF-Connecting-IP")
+		remoteAddr := c.IP()
+		xForwardedFor := c.Get("X-Forwarded-For")
+		xRealIP := c.Get("X-Real-IP")
+		cfConnectingIP := c.Get("CF-Connecting-IP")
 
 		log.WithFields(log.Fields{
 			"remote_addr":      remoteAddr,
@@ -94,7 +91,7 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 			"cf_connecting_ip": cfConnectingIP,
 		}).Debug("whoami request headers")
 
-		clientIP := lookup.GetClientIP(ctx)
+		clientIP := fiberClientIP(c)
 		log.WithFields(log.Fields{
 			"resolved_ip":    clientIP,
 			"geo_store_nil":  geoStore == nil,
@@ -102,24 +99,22 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 		}).Info("whoami request received")
 
 		// Quick response with just IP (minimal latency)
-		// Check if quick=true (not just if the parameter exists)
-		quickParam, _ := ctx.URLParamBool("quick")
-		if quickParam {
-			_ = ctx.JSON(lookup.QuickLookup(ctx))
-			return
+		// Check if quick=true
+		quickParam := c.Query("quick")
+		if quickParam == "true" || quickParam == "1" {
+			return c.JSON(lookup.QuickLookupByIP(clientIP))
 		}
 
 		// Full response with GeoIP enrichment
-		result, err := lookup.UnifiedLookup(ctx.Request().Context(), ch, geoStore, clientIP)
+		result, err := lookup.UnifiedLookup(c.UserContext(), ch, geoStore, clientIP)
 		if err != nil {
 			log.WithError(err).Warn("whoami lookup failed")
 			// Still return the IP even if enrichment fails
-			_ = ctx.JSON(iris.Map{
+			return c.JSON(fiber.Map{
 				"ip":        clientIP,
 				"timestamp": time.Now(),
 				"error":     err.Error(),
 			})
-			return
 		}
 
 		// Debug: log what we're returning
@@ -137,26 +132,22 @@ func RegisterAgentAPI(api iris.Party, db *gorm.DB, ch *sql.DB, geoStore *geoip.S
 			"reverse_dns": result.ReverseDNS,
 		}).Info("whoami response")
 
-		_ = ctx.JSON(result)
+		return c.JSON(result)
 	})
 
-	// GET /agent/api/lookup/ip/{ip} - Lookup GeoIP/PTR for any IP
+	// GET /agent/api/lookup/ip/:ip - Lookup GeoIP/PTR for any IP
 	// Useful for agents that want to enrich hop data locally
-	agentAPI.Get("/lookup/ip/{ip:string}", func(ctx iris.Context) {
-		ip := ctx.Params().Get("ip")
+	agentAPI.Get("/lookup/ip/:ip", func(c *fiber.Ctx) error {
+		ip := c.Params("ip")
 		if ip == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "ip parameter required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "ip parameter required"})
 		}
 
-		result, err := lookup.UnifiedLookup(ctx.Request().Context(), ch, geoStore, ip)
+		result, err := lookup.UnifiedLookup(c.UserContext(), ch, geoStore, ip)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(result)
+		return c.JSON(result)
 	})
 }

@@ -3,198 +3,176 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 
 	"netwatcher-controller/internal/alert"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-func panelAlerts(api iris.Party, db *gorm.DB) {
+func panelAlerts(api fiber.Router, db *gorm.DB) {
 	wsStore := workspace.NewStore(db)
 
 	// Global alert endpoints (across all user's workspaces)
-	alerts := api.Party("/alerts")
+	alerts := api.Group("/alerts")
 
 	// GET /alerts - List all alerts for user's workspaces
-	alerts.Get("/", func(ctx iris.Context) {
-		userID := getUserID(ctx)
+	alerts.Get("/", func(c *fiber.Ctx) error {
+		userID := getUserID(c)
 		if userID == 0 {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return
+			return c.SendStatus(http.StatusUnauthorized)
 		}
 
 		// Get user's workspace IDs
-		workspaceIDs, err := getUserWorkspaceIDs(ctx.Request().Context(), db, userID)
+		workspaceIDs, err := getUserWorkspaceIDs(c.UserContext(), db, userID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		if len(workspaceIDs) == 0 {
-			_ = ctx.JSON(NewListResponse([]alert.Alert{}))
-			return
+			return c.JSON(NewListResponse([]alert.Alert{}))
 		}
 
 		// Get status filter
 		var statusFilter *alert.Status
-		if s := ctx.URLParam("status"); s != "" {
+		if s := c.Query("status"); s != "" {
 			status := alert.Status(s)
 			statusFilter = &status
 		}
 
-		limit := ctx.URLParamIntDefault("limit", 100)
+		limit := 100
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
+			limit = l
+		}
 
 		var allAlerts []alert.Alert
 		for _, wsID := range workspaceIDs {
-			alerts, err := alert.ListAlerts(ctx.Request().Context(), db, &wsID, statusFilter, limit)
+			a, err := alert.ListAlerts(c.UserContext(), db, &wsID, statusFilter, limit)
 			if err != nil {
 				continue
 			}
-			allAlerts = append(allAlerts, alerts...)
+			allAlerts = append(allAlerts, a...)
 		}
 
-		_ = ctx.JSON(NewListResponse(allAlerts))
+		return c.JSON(NewListResponse(allAlerts))
 	})
 
 	// GET /alerts/count - Get count of active alerts
-	alerts.Get("/count", func(ctx iris.Context) {
-		userID := getUserID(ctx)
+	alerts.Get("/count", func(c *fiber.Ctx) error {
+		userID := getUserID(c)
 		if userID == 0 {
-			ctx.StatusCode(http.StatusUnauthorized)
-			return
+			return c.SendStatus(http.StatusUnauthorized)
 		}
 
-		workspaceIDs, err := getUserWorkspaceIDs(ctx.Request().Context(), db, userID)
+		workspaceIDs, err := getUserWorkspaceIDs(c.UserContext(), db, userID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		count, err := alert.CountActiveAlerts(ctx.Request().Context(), db, workspaceIDs)
+		count, err := alert.CountActiveAlerts(c.UserContext(), db, workspaceIDs)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{"count": count})
+		return c.JSON(fiber.Map{"count": count})
 	})
 
 	// GET /alerts/:id - Get single alert
-	alerts.Get("/{id:uint}", func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
-		a, err := alert.GetAlertByID(ctx.Request().Context(), db, id)
+	alerts.Get("/:id", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		a, err := alert.GetAlertByID(c.UserContext(), db, id)
 		if err != nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(a)
+		return c.JSON(a)
 	})
 
 	// PATCH /alerts/:id/acknowledge - Acknowledge alert
-	alerts.Patch("/{id:uint}/acknowledge", func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
-		userID := getUserID(ctx)
+	alerts.Patch("/:id/acknowledge", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		userID := getUserID(c)
 
-		if err := alert.AcknowledgeAlert(ctx.Request().Context(), db, id, userID); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+		if err := alert.AcknowledgeAlert(c.UserContext(), db, id, userID); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
 	// PATCH /alerts/:id/resolve - Resolve alert
-	alerts.Patch("/{id:uint}/resolve", func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
+	alerts.Patch("/:id/resolve", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 
-		if err := alert.ResolveAlert(ctx.Request().Context(), db, id); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+		if err := alert.ResolveAlert(c.UserContext(), db, id); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
 	// -------------------- Alert Rules (per workspace) --------------------
-	rules := api.Party("/workspaces/{id:uint}/alert-rules")
+	rules := api.Group("/workspaces/:id/alert-rules")
 	rules.Use(RequireWorkspaceAccess(wsStore))
 
 	// GET /workspaces/:id/alert-rules - List rules for workspace
-	rules.Get("/", func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		list, err := alert.ListRulesByWorkspace(ctx.Request().Context(), db, wsID)
+	rules.Get("/", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		list, err := alert.ListRulesByWorkspace(c.UserContext(), db, wsID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(list))
+		return c.JSON(NewListResponse(list))
 	})
 
 	// POST /workspaces/:id/alert-rules - Create rule (requires CanEdit)
-	rules.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
+	rules.Post("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
 		var input alert.CreateRuleInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		input.WorkspaceID = wsID
 
-		rule, err := alert.CreateRule(ctx.Request().Context(), db, input)
+		rule, err := alert.CreateRule(c.UserContext(), db, input)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(rule)
+		return c.Status(http.StatusCreated).JSON(rule)
 	})
 
 	// GET /workspaces/:id/alert-rules/:ruleID - Get single rule
-	rules.Get("/{ruleID:uint}", func(ctx iris.Context) {
-		ruleID := uintParam(ctx, "ruleID")
-		rule, err := alert.GetRuleByID(ctx.Request().Context(), db, ruleID)
+	rules.Get("/:ruleID", func(c *fiber.Ctx) error {
+		ruleID := uintParam(c, "ruleID")
+		rule, err := alert.GetRuleByID(c.UserContext(), db, ruleID)
 		if err != nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(rule)
+		return c.JSON(rule)
 	})
 
 	// PATCH /workspaces/:id/alert-rules/:ruleID - Update rule (requires CanEdit)
-	rules.Patch("/{ruleID:uint}", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		ruleID := uintParam(ctx, "ruleID")
+	rules.Patch("/:ruleID", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		ruleID := uintParam(c, "ruleID")
 		var input alert.UpdateRuleInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		input.ID = ruleID
 
-		rule, err := alert.UpdateRule(ctx.Request().Context(), db, input)
+		rule, err := alert.UpdateRule(c.UserContext(), db, input)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(rule)
+		return c.JSON(rule)
 	})
 
 	// DELETE /workspaces/:id/alert-rules/:ruleID - Delete rule (requires CanManage)
-	rules.Delete("/{ruleID:uint}", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
-		ruleID := uintParam(ctx, "ruleID")
-		if err := alert.DeleteRule(ctx.Request().Context(), db, ruleID); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+	rules.Delete("/:ruleID", RequireRole(wsStore, CanManage), func(c *fiber.Ctx) error {
+		ruleID := uintParam(c, "ruleID")
+		if err := alert.DeleteRule(c.UserContext(), db, ruleID); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 }

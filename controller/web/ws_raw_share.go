@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/fiber/v2"
 	"github.com/gorilla/websocket"
-	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
@@ -44,37 +45,36 @@ func GetRawShareHub() *RawShareHub {
 }
 
 // RegisterRawShareWS registers the raw WebSocket endpoint for share-link access
-func RegisterRawShareWS(app *iris.Application, db *gorm.DB) {
-	app.Get("/ws/share/raw", func(ctx iris.Context) {
+func RegisterRawShareWS(app *fiber.App, db *gorm.DB) {
+	// Use adaptor to bridge a standard net/http handler that uses gorilla/websocket
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authenticate via share token + optional password in query params
-		token := ctx.URLParam("token")
-		password := ctx.URLParam("password")
+		token := r.URL.Query().Get("token")
+		password := r.URL.Query().Get("password")
 
 		if token == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
-			ctx.JSON(iris.Map{"error": "missing token"})
+			http.Error(w, `{"error":"missing token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Validate share link (one-time auth at connection)
-		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+		link, err := share.Validate(r.Context(), db, share.ValidateInput{
 			Token:    token,
 			Password: password,
 		})
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			ctx.JSON(iris.Map{"error": err.Error()})
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Upgrade to WebSocket
-		ws, err := rawUpgrader.Upgrade(ctx.ResponseWriter(), ctx.Request(), nil)
+		ws, err := rawUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Errorf("[RawShareWS] Upgrade error: %v", err)
 			return
 		}
 
-		connID := ctx.Request().Header.Get("Sec-WebSocket-Key")
+		connID := r.Header.Get("Sec-WebSocket-Key")
 		if connID == "" {
 			connID = time.Now().Format(time.RFC3339Nano)
 		}
@@ -95,8 +95,10 @@ func RegisterRawShareWS(app *iris.Application, db *gorm.DB) {
 
 		// Start read/write pumps
 		go conn.writePump()
-		go conn.readPump(rawShareHub)
+		conn.readPump(rawShareHub)
 	})
+
+	app.Get("/ws/share/raw", adaptor.HTTPHandler(handler))
 }
 
 // Register adds a connection to the hub

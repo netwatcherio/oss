@@ -14,22 +14,20 @@ import (
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, limitsConfig *limits.Config) {
-	wsParty := api.Party("/workspaces")
+func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore, limitsConfig *limits.Config) {
+	wsParty := api.Group("/workspaces")
 	store := workspace.NewStore(db)
 
 	// GET /workspaces - returns all workspaces where user is a member, with stats
-	wsParty.Get("/", func(ctx iris.Context) {
-		uid := currentUserID(ctx)
-		workspaces, err := store.ListWorkspacesByUserID(ctx.Request().Context(), uid)
+	wsParty.Get("/", func(c *fiber.Ctx) error {
+		uid := currentUserID(c)
+		workspaces, err := store.ListWorkspacesByUserID(c.UserContext(), uid)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Build enriched response with stats for each workspace
@@ -48,7 +46,7 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			stats := WorkspaceWithStats{Workspace: ws}
 
 			// Get agent counts
-			agents, _, _ := agent.ListAgentsByWorkspace(ctx.Request().Context(), db, ws.ID, 1000, 0)
+			agents, _, _ := agent.ListAgentsByWorkspace(c.UserContext(), db, ws.ID, 1000, 0)
 			stats.AgentCount = len(agents)
 
 			// Count online agents
@@ -59,32 +57,30 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			}
 
 			// Get member count
-			members, _ := store.ListMembers(ctx.Request().Context(), ws.ID)
+			members, _ := store.ListMembers(c.UserContext(), ws.ID)
 			stats.MemberCount = len(members)
 
 			// Get active alerts count
 			activeStatus := alert.StatusActive
-			alerts, _ := alert.ListAlerts(ctx.Request().Context(), db, &ws.ID, &activeStatus, 0)
+			alerts, _ := alert.ListAlerts(c.UserContext(), db, &ws.ID, &activeStatus, 0)
 			stats.AlertCount = len(alerts)
 
 			result = append(result, stats)
 		}
 
-		_ = ctx.JSON(result)
+		return c.JSON(result)
 	})
 
 	// POST /workspaces
-	wsParty.Post("/", func(ctx iris.Context) {
-		uid := currentUserID(ctx)
+	wsParty.Post("/", func(c *fiber.Ctx) error {
+		uid := currentUserID(c)
 
 		// Check email verification requirement
 		if isEmailVerificationRequired() {
-			userVal := ctx.Values().Get("user")
+			userVal := c.Locals("user")
 			if userVal != nil {
 				if user, ok := userVal.(*users.User); ok && !user.Verified {
-					ctx.StatusCode(http.StatusForbidden)
-					_ = ctx.JSON(iris.Map{"error": "email_verification_required", "message": "Please verify your email before creating a workspace"})
-					return
+					return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "email_verification_required", "message": "Please verify your email before creating a workspace"})
 				}
 			}
 		}
@@ -94,10 +90,8 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			DisplayName string         `json:"displayName"`
 			Settings    map[string]any `json:"settings"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid json"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
 		in := workspace.CreateWorkspaceInput{
 			Name:        body.Name,
@@ -105,39 +99,34 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			Description: body.DisplayName,
 			Settings:    jsonFromMap(body.Settings),
 		}
-		ws, err := store.CreateWorkspace(ctx.Request().Context(), in)
+		ws, err := store.CreateWorkspace(c.UserContext(), in)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrAlreadyExists {
 				status = http.StatusConflict
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(ws)
+		return c.Status(http.StatusCreated).JSON(ws)
 	})
 
-	// /workspaces/{id}
-	wsID := wsParty.Party("/{id:uint}")
+	// /workspaces/:id
+	wsID := wsParty.Group("/:id")
 
 	// Apply permission middleware to all workspace ID routes
 	wsID.Use(RequireWorkspaceAccess(store))
 
-	// GET /workspaces/{id} - requires CanView (any member)
-	wsID.Get("/", func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
-		userID := currentUserID(ctx)
-		ws, err := store.GetWorkspace(ctx.Request().Context(), id)
+	// GET /workspaces/:id - requires CanView (any member)
+	wsID.Get("/", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		userID := currentUserID(c)
+		ws, err := store.GetWorkspace(c.UserContext(), id)
 		if err != nil || ws == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": "not found"})
-			return
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "not found"})
 		}
 		// Add user's role to response
-		member, _ := store.GetMemberByUserID(ctx.Request().Context(), id, userID)
-		response := iris.Map{
+		member, _ := store.GetMemberByUserID(c.UserContext(), id, userID)
+		response := fiber.Map{
 			"id":          ws.ID,
 			"name":        ws.Name,
 			"description": ws.Description,
@@ -149,125 +138,105 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 		if member != nil {
 			response["my_role"] = member.Role
 		}
-		_ = ctx.JSON(response)
+		return c.JSON(response)
 	})
 
-	// PATCH /workspaces/{id} - requires CanManage (ADMIN+)
-	wsID.Patch("/", RequireRole(store, CanManage), func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
+	// PATCH /workspaces/:id - requires CanManage (ADMIN+)
+	wsID.Patch("/", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 		var body struct {
 			Name        *string         `json:"name"`
 			Description *string         `json:"description"`
 			Settings    *map[string]any `json:"settings"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid json"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
 		in := workspace.UpdateWorkspaceInput{
 			Description: body.Description,
 			Name:        body.Name,
 			Settings:    jsonPtrFromMap(body.Settings),
 		}
-		ws, err := store.UpdateWorkspace(ctx.Request().Context(), id, in)
+		ws, err := store.UpdateWorkspace(c.UserContext(), id, in)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
 				status = http.StatusNotFound
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(ws)
+		return c.JSON(ws)
 	})
 
-	// DELETE /workspaces/{id} - requires CanOwn (OWNER only)
-	wsID.Delete("/", RequireRole(store, CanOwn), func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
-		err := store.DeleteWorkspace(ctx.Request().Context(), id)
+	// DELETE /workspaces/:id - requires CanOwn (OWNER only)
+	wsID.Delete("/", RequireRole(store, CanOwn), func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		err := store.DeleteWorkspace(c.UserContext(), id)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
 				status = http.StatusNotFound
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
 	// ----- Members -----
 
-	// GET /workspaces/{id}/members
-	wsID.Get("/members", func(ctx iris.Context) {
-		id := uintParam(ctx, "id")
-		ms, err := store.ListMembers(ctx.Request().Context(), id)
+	// GET /workspaces/:id/members
+	wsID.Get("/members", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		ms, err := store.ListMembers(c.UserContext(), id)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(ms))
+		return c.JSON(NewListResponse(ms))
 	})
 
-	// POST /workspaces/{id}/members - requires CanManage (ADMIN+)
+	// POST /workspaces/:id/members - requires CanManage (ADMIN+)
 	// If userId is provided, add existing user directly
 	// If only email is provided, create an invite and send email
-	wsID.Post("/members", RequireRole(store, CanManage), func(ctx iris.Context) {
-		wsIDv := uintParam(ctx, "id")
-		userID := currentUserID(ctx)
+	wsID.Post("/members", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		wsIDv := uintParam(c, "id")
+		userID := currentUserID(c)
 		var body struct {
 			UserID uint           `json:"userId"`
 			Email  string         `json:"email"`
 			Role   workspace.Role `json:"role"`
 			Meta   map[string]any `json:"meta"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid json"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
 
 		// Check workspace member limit
-		if err := limits.CanAddMember(ctx.Request().Context(), db, limitsConfig, wsIDv); err != nil {
+		if err := limits.CanAddMember(c.UserContext(), db, limitsConfig, wsIDv); err != nil {
 			if errors.Is(err, limits.ErrMemberLimitReached) {
-				ctx.StatusCode(http.StatusForbidden)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Check if the user being added has reached their workspace membership limit
 		if body.UserID != 0 {
-			if err := limits.CanJoinWorkspace(ctx.Request().Context(), db, limitsConfig, body.UserID); err != nil {
+			if err := limits.CanJoinWorkspace(c.UserContext(), db, limitsConfig, body.UserID); err != nil {
 				if errors.Is(err, limits.ErrWorkspaceLimitReached) {
-					ctx.StatusCode(http.StatusForbidden)
-					_ = ctx.JSON(iris.Map{"error": err.Error()})
-					return
+					return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 				}
-				ctx.StatusCode(http.StatusInternalServerError)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 			}
 		}
 
 		// If only email provided (no userId), use invite flow
 		if body.UserID == 0 && strings.TrimSpace(body.Email) != "" {
 			// Get workspace name for email
-			ws, err := store.GetWorkspace(ctx.Request().Context(), wsIDv)
+			ws, err := store.GetWorkspace(c.UserContext(), wsIDv)
 			if err != nil {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "workspace not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "workspace not found"})
 			}
 
-			m, err := InviteMemberWithEmail(ctx, db, store, emailStore, wsIDv, ws.Name, body.Email, body.Role, userID)
+			m, err := InviteMemberWithEmail(c.UserContext(), db, store, emailStore, wsIDv, ws.Name, body.Email, body.Role, userID)
 			if err != nil {
 				status := http.StatusBadRequest
 				switch err {
@@ -280,17 +249,13 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 				case workspace.ErrForbidden:
 					status = http.StatusForbidden
 				}
-				ctx.StatusCode(status)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 			}
-			ctx.StatusCode(http.StatusCreated)
-			_ = ctx.JSON(m)
-			return
+			return c.Status(http.StatusCreated).JSON(m)
 		}
 
 		// Direct add (userId provided)
-		m, err := store.AddMember(ctx.Request().Context(), workspace.AddMemberInput{
+		m, err := store.AddMember(c.UserContext(), workspace.AddMemberInput{
 			WorkspaceID: wsIDv,
 			UserID:      body.UserID,
 			Email:       body.Email,
@@ -309,26 +274,21 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			case workspace.ErrForbidden:
 				status = http.StatusForbidden
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(m)
+		return c.Status(http.StatusCreated).JSON(m)
 	})
 
-	// PATCH /workspaces/{id}/members/{memberId} - requires CanManage (ADMIN+)
-	wsID.Patch("/members/{memberId:uint}", RequireRole(store, CanManage), func(ctx iris.Context) {
-		memberID := uintParamName(ctx, "memberId")
+	// PATCH /workspaces/:id/members/:memberId - requires CanManage (ADMIN+)
+	wsID.Patch("/members/:memberId", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		memberID := uintParam(c, "memberId")
 		var body struct {
 			Role workspace.Role `json:"role"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid json"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
-		m, err := store.UpdateMemberRole(ctx.Request().Context(), memberID, body.Role)
+		m, err := store.UpdateMemberRole(c.UserContext(), memberID, body.Role)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
@@ -336,41 +296,35 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			} else if err == workspace.ErrInvalidRole {
 				status = http.StatusBadRequest
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(m)
+		return c.JSON(m)
 	})
 
-	// DELETE /workspaces/{id}/members/{memberId} - requires CanManage (ADMIN+)
-	wsID.Delete("/members/{memberId:uint}", RequireRole(store, CanManage), func(ctx iris.Context) {
-		memberID := uintParamName(ctx, "memberId")
-		if err := store.RemoveMember(ctx.Request().Context(), memberID); err != nil {
+	// DELETE /workspaces/:id/members/:memberId - requires CanManage (ADMIN+)
+	wsID.Delete("/members/:memberId", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		memberID := uintParam(c, "memberId")
+		if err := store.RemoveMember(c.UserContext(), memberID); err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
 				status = http.StatusNotFound
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
-	// POST /workspaces/{id}/accept-invite
-	wsID.Post("/accept-invite", func(ctx iris.Context) {
-		wsIDv := uintParam(ctx, "id")
+	// POST /workspaces/:id/accept-invite
+	wsID.Post("/accept-invite", func(c *fiber.Ctx) error {
+		wsIDv := uintParam(c, "id")
 		var body struct {
 			Email string `json:"email"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil || strings.TrimSpace(body.Email) == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "email required"})
-			return
+		if err := c.BodyParser(&body); err != nil || strings.TrimSpace(body.Email) == "" {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "email required"})
 		}
-		userID := currentUserID(ctx)
-		m, err := store.AcceptInvite(ctx.Request().Context(), wsIDv, body.Email, userID)
+		userID := currentUserID(c)
+		m, err := store.AcceptInvite(c.UserContext(), wsIDv, body.Email, userID)
 		if err != nil {
 			status := http.StatusBadRequest
 			switch err {
@@ -381,33 +335,27 @@ func panelWorkspaces(api iris.Party, db *gorm.DB, emailStore *email.QueueStore, 
 			case workspace.ErrAlreadyExists:
 				status = http.StatusConflict
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(m)
+		return c.JSON(m)
 	})
 
-	// POST /workspaces/{id}/transfer-ownership
-	wsID.Post("/transfer-ownership", func(ctx iris.Context) {
-		wsIDv := uintParam(ctx, "id")
+	// POST /workspaces/:id/transfer-ownership
+	wsID.Post("/transfer-ownership", func(c *fiber.Ctx) error {
+		wsIDv := uintParam(c, "id")
 		var body struct {
 			NewOwnerUserID uint `json:"newOwnerUserId"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil || body.NewOwnerUserID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "newOwnerUserId required"})
-			return
+		if err := c.BodyParser(&body); err != nil || body.NewOwnerUserID == 0 {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "newOwnerUserId required"})
 		}
-		if err := store.TransferOwnership(ctx.Request().Context(), wsIDv, body.NewOwnerUserID); err != nil {
+		if err := store.TransferOwnership(c.UserContext(), wsIDv, body.NewOwnerUserID); err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrInvalidInput {
 				status = http.StatusBadRequest
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 }

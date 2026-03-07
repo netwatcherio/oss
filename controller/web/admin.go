@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -10,14 +11,14 @@ import (
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 // RegisterAdminRoutes mounts admin API endpoints under /admin
 // All routes require SITE_ADMIN role via AdminMiddleware
-func RegisterAdminRoutes(api iris.Party, db *gorm.DB) {
-	adminAPI := api.Party("/admin")
+func RegisterAdminRoutes(api fiber.Router, db *gorm.DB) {
+	adminAPI := api.Group("/admin")
 	adminAPI.Use(AdminMiddleware(db))
 
 	// Stats
@@ -26,22 +27,22 @@ func RegisterAdminRoutes(api iris.Party, db *gorm.DB) {
 
 	// Users
 	adminAPI.Get("/users", adminListUsersHandler(db))
-	adminAPI.Get("/users/{id:uint}", adminGetUserHandler(db))
-	adminAPI.Put("/users/{id:uint}", adminUpdateUserHandler(db))
-	adminAPI.Delete("/users/{id:uint}", adminDeleteUserHandler(db))
-	adminAPI.Put("/users/{id:uint}/role", adminSetUserRoleHandler(db))
+	adminAPI.Get("/users/:id", adminGetUserHandler(db))
+	adminAPI.Put("/users/:id", adminUpdateUserHandler(db))
+	adminAPI.Delete("/users/:id", adminDeleteUserHandler(db))
+	adminAPI.Put("/users/:id/role", adminSetUserRoleHandler(db))
 
 	// Workspaces
 	adminAPI.Get("/workspaces", adminListWorkspacesHandler(db))
-	adminAPI.Get("/workspaces/{id:uint}", adminGetWorkspaceHandler(db))
-	adminAPI.Put("/workspaces/{id:uint}", adminUpdateWorkspaceHandler(db))
-	adminAPI.Delete("/workspaces/{id:uint}", adminDeleteWorkspaceHandler(db))
+	adminAPI.Get("/workspaces/:id", adminGetWorkspaceHandler(db))
+	adminAPI.Put("/workspaces/:id", adminUpdateWorkspaceHandler(db))
+	adminAPI.Delete("/workspaces/:id", adminDeleteWorkspaceHandler(db))
 
 	// Workspace members
-	adminAPI.Get("/workspaces/{id:uint}/members", adminListMembersHandler(db))
-	adminAPI.Post("/workspaces/{id:uint}/members", adminAddMemberHandler(db))
-	adminAPI.Put("/workspaces/{wID:uint}/members/{mID:uint}", adminUpdateMemberHandler(db))
-	adminAPI.Delete("/workspaces/{wID:uint}/members/{mID:uint}", adminRemoveMemberHandler(db))
+	adminAPI.Get("/workspaces/:id/members", adminListMembersHandler(db))
+	adminAPI.Post("/workspaces/:id/members", adminAddMemberHandler(db))
+	adminAPI.Put("/workspaces/:wID/members/:mID", adminUpdateMemberHandler(db))
+	adminAPI.Delete("/workspaces/:wID/members/:mID", adminRemoveMemberHandler(db))
 
 	// Agents
 	adminAPI.Get("/agents", adminListAgentsHandler(db))
@@ -53,46 +54,40 @@ func RegisterAdminRoutes(api iris.Party, db *gorm.DB) {
 
 // ==================== Stats ====================
 
-func adminStatsHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminStatsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		stats, err := admin.GetStats(context.Background(), db)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(stats)
+		return c.JSON(stats)
 	}
 }
 
-func adminWorkspaceStatsHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminWorkspaceStatsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		stats, err := admin.GetWorkspaceStats(context.Background(), db)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"data": stats})
+		return c.JSON(fiber.Map{"data": stats})
 	}
 }
 
 // ==================== Users ====================
 
-func adminListUsersHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		limit, _ := strconv.Atoi(ctx.URLParamDefault("limit", "50"))
-		offset, _ := strconv.Atoi(ctx.URLParamDefault("offset", "0"))
-		query := ctx.URLParam("q")
+func adminListUsersHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		limit, _ := strconv.Atoi(c.Query("limit", "50"))
+		offset, _ := strconv.Atoi(c.Query("offset", "0"))
+		query := c.Query("q")
 
 		usersList, total, err := users.List(context.Background(), db, limit, offset, query)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"data":   usersList,
 			"total":  total,
 			"limit":  limit,
@@ -101,21 +96,17 @@ func adminListUsersHandler(db *gorm.DB) iris.Handler {
 	}
 }
 
-func adminGetUserHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		id, _ := ctx.Params().GetUint("id")
+func adminGetUserHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 		user, err := users.Get(context.Background(), db, id)
 		if err != nil {
 			if err == users.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "user not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(user)
+		return c.JSON(user)
 	}
 }
 
@@ -125,15 +116,13 @@ type adminUpdateUserInput struct {
 	Verified *bool   `json:"verified"`
 }
 
-func adminUpdateUserHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		id, _ := ctx.Params().GetUint("id")
+func adminUpdateUserHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 
 		var input adminUpdateUserInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		// Update profile fields
@@ -144,13 +133,9 @@ func adminUpdateUserHandler(db *gorm.DB) iris.Handler {
 			}
 			if err := users.UpdateProfile(context.Background(), db, id, profileInput); err != nil {
 				if err == users.ErrNotFound {
-					ctx.StatusCode(iris.StatusNotFound)
-					_ = ctx.JSON(iris.Map{"error": "user not found"})
-					return
+					return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 				}
-				ctx.StatusCode(iris.StatusInternalServerError)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 			}
 		}
 
@@ -161,38 +146,30 @@ func adminUpdateUserHandler(db *gorm.DB) iris.Handler {
 
 		user, err := users.Get(context.Background(), db, id)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(user)
+		return c.JSON(user)
 	}
 }
 
-func adminDeleteUserHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		id, _ := ctx.Params().GetUint("id")
+func adminDeleteUserHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 
 		// Prevent self-deletion
-		currentUser := ctx.Values().Get("user").(*users.User)
+		currentUser := c.Locals("user").(*users.User)
 		if currentUser.ID == id {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "cannot delete yourself"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "cannot delete yourself"})
 		}
 
 		if err := users.Delete(context.Background(), db, id); err != nil {
 			if err == users.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "user not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	}
 }
 
@@ -200,56 +177,46 @@ type adminSetRoleInput struct {
 	Role string `json:"role"`
 }
 
-func adminSetUserRoleHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		id, _ := ctx.Params().GetUint("id")
+func adminSetUserRoleHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
 
 		var input adminSetRoleInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		role := strings.TrimSpace(input.Role)
 		if role != "USER" && role != admin.SiteAdminRole {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "role must be USER or SITE_ADMIN"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "role must be USER or SITE_ADMIN"})
 		}
 
 		// Prevent self-demotion
-		currentUser := ctx.Values().Get("user").(*users.User)
+		currentUser := c.Locals("user").(*users.User)
 		if currentUser.ID == id && role != admin.SiteAdminRole {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "cannot demote yourself"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "cannot demote yourself"})
 		}
 
 		if err := users.SetRole(context.Background(), db, id, role); err != nil {
 			if err == users.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "user not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		user, _ := users.Get(context.Background(), db, id)
-		_ = ctx.JSON(user)
+		return c.JSON(user)
 	}
 }
 
 // ==================== Workspaces ====================
 
-func adminListWorkspacesHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminListWorkspacesHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		limit, _ := strconv.Atoi(ctx.URLParamDefault("limit", "50"))
-		offset, _ := strconv.Atoi(ctx.URLParamDefault("offset", "0"))
-		query := ctx.URLParam("q")
+		limit, _ := strconv.Atoi(c.Query("limit", "50"))
+		offset, _ := strconv.Atoi(c.Query("offset", "0"))
+		query := c.Query("q")
 
 		workspaces, err := store.ListWorkspaces(context.Background(), workspace.ListWorkspacesFilter{
 			Query:  query,
@@ -257,12 +224,10 @@ func adminListWorkspacesHandler(db *gorm.DB) iris.Handler {
 			Offset: offset,
 		})
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"data":   workspaces,
 			"limit":  limit,
 			"offset": offset,
@@ -270,21 +235,17 @@ func adminListWorkspacesHandler(db *gorm.DB) iris.Handler {
 	}
 }
 
-func adminGetWorkspaceHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminGetWorkspaceHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		id, _ := ctx.Params().GetUint("id")
+		id := uintParam(c, "id")
 
 		ws, err := store.GetWorkspace(context.Background(), id)
 		if err != nil {
 			if err == workspace.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "workspace not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "workspace not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Get members
@@ -293,7 +254,7 @@ func adminGetWorkspaceHandler(db *gorm.DB) iris.Handler {
 		// Get agents
 		agents, _, _ := agent.ListAgentsByWorkspace(context.Background(), db, id, 100, 0)
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"workspace": ws,
 			"members":   members,
 			"agents":    agents,
@@ -301,19 +262,17 @@ func adminGetWorkspaceHandler(db *gorm.DB) iris.Handler {
 	}
 }
 
-func adminUpdateWorkspaceHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminUpdateWorkspaceHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		id, _ := ctx.Params().GetUint("id")
+		id := uintParam(c, "id")
 
 		var input struct {
 			Name        *string `json:"name"`
 			Description *string `json:"description"`
 		}
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		ws, err := store.UpdateWorkspace(context.Background(), id, workspace.UpdateWorkspaceInput{
@@ -322,51 +281,41 @@ func adminUpdateWorkspaceHandler(db *gorm.DB) iris.Handler {
 		})
 		if err != nil {
 			if err == workspace.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "workspace not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "workspace not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(ws)
+		return c.JSON(ws)
 	}
 }
 
-func adminDeleteWorkspaceHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminDeleteWorkspaceHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		id, _ := ctx.Params().GetUint("id")
+		id := uintParam(c, "id")
 
 		if err := store.DeleteWorkspace(context.Background(), id); err != nil {
 			if err == workspace.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "workspace not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "workspace not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	}
 }
 
 // ==================== Workspace Members ====================
 
-func adminListMembersHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminListMembersHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		id, _ := ctx.Params().GetUint("id")
+		id := uintParam(c, "id")
 
 		members, err := store.ListMembers(context.Background(), id)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"data": members})
+		return c.JSON(fiber.Map{"data": members})
 	}
 }
 
@@ -376,23 +325,19 @@ type adminAddMemberInput struct {
 	Role   string `json:"role"`
 }
 
-func adminAddMemberHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminAddMemberHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		wsID, _ := ctx.Params().GetUint("id")
+		wsID := uintParam(c, "id")
 
 		var input adminAddMemberInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		role := workspace.Role(strings.ToUpper(input.Role))
 		if !role.Valid() {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid role"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid role"})
 		}
 
 		member, err := store.AddMember(context.Background(), workspace.AddMemberInput{
@@ -403,88 +348,70 @@ func adminAddMemberHandler(db *gorm.DB) iris.Handler {
 		})
 		if err != nil {
 			if err == workspace.ErrAlreadyExists {
-				ctx.StatusCode(iris.StatusConflict)
-				_ = ctx.JSON(iris.Map{"error": "member already exists"})
-				return
+				return c.Status(http.StatusConflict).JSON(fiber.Map{"error": "member already exists"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(member)
+		return c.JSON(member)
 	}
 }
 
-func adminUpdateMemberHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminUpdateMemberHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		mID, _ := ctx.Params().GetUint("mID")
+		mID := uintParam(c, "mID")
 
 		var input struct {
 			Role string `json:"role"`
 		}
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		role := workspace.Role(strings.ToUpper(input.Role))
 		if !role.Valid() {
-			ctx.StatusCode(iris.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid role"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid role"})
 		}
 
 		member, err := store.UpdateMemberRole(context.Background(), mID, role)
 		if err != nil {
 			if err == workspace.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "member not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(member)
+		return c.JSON(member)
 	}
 }
 
-func adminRemoveMemberHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminRemoveMemberHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
-		mID, _ := ctx.Params().GetUint("mID")
+		mID := uintParam(c, "mID")
 
 		if err := store.RemoveMember(context.Background(), mID); err != nil {
 			if err == workspace.ErrNotFound {
-				ctx.StatusCode(iris.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "member not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
 			}
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	}
 }
 
 // ==================== Agents ====================
 
-func adminListAgentsHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
-		limit, _ := strconv.Atoi(ctx.URLParamDefault("limit", "50"))
-		offset, _ := strconv.Atoi(ctx.URLParamDefault("offset", "0"))
+func adminListAgentsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		limit, _ := strconv.Atoi(c.Query("limit", "50"))
+		offset, _ := strconv.Atoi(c.Query("offset", "0"))
 
 		agents, total, err := admin.ListAllAgents(context.Background(), db, limit, offset)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"data":   agents,
 			"total":  total,
 			"limit":  limit,
@@ -493,15 +420,13 @@ func adminListAgentsHandler(db *gorm.DB) iris.Handler {
 	}
 }
 
-func adminAgentStatsHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminAgentStatsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		stats, err := admin.GetWorkspaceStats(context.Background(), db)
 		if err != nil {
-			ctx.StatusCode(iris.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"data": stats})
+		return c.JSON(fiber.Map{"data": stats})
 	}
 }
 
@@ -527,17 +452,17 @@ type WorkspaceGroup struct {
 }
 
 // adminDebugConnectionsHandler returns active WebSocket connection info for debugging
-func adminDebugConnectionsHandler(db *gorm.DB) iris.Handler {
-	return func(ctx iris.Context) {
+func adminDebugConnectionsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		hub := GetAgentHub()
 		connections := hub.GetActiveConnections()
 
 		// Collect all agent IDs and workspace IDs
 		agentIDs := make([]uint, 0, len(connections))
 		workspaceIDs := make([]uint, 0, len(connections))
-		for _, c := range connections {
-			agentIDs = append(agentIDs, c.AgentID)
-			workspaceIDs = append(workspaceIDs, c.WorkspaceID)
+		for _, conn := range connections {
+			agentIDs = append(agentIDs, conn.AgentID)
+			workspaceIDs = append(workspaceIDs, conn.WorkspaceID)
 		}
 
 		// Fetch agent names
@@ -570,28 +495,28 @@ func adminDebugConnectionsHandler(db *gorm.DB) iris.Handler {
 		groupMap := make(map[uint]*WorkspaceGroup)
 		var enriched []EnrichedConnection
 
-		for _, c := range connections {
+		for _, conn := range connections {
 			ec := EnrichedConnection{
-				AgentID:       c.AgentID,
-				AgentName:     agentNames[c.AgentID],
-				WorkspaceID:   c.WorkspaceID,
-				WorkspaceName: workspaceNames[c.WorkspaceID],
-				ConnID:        c.ConnID,
-				ClientIP:      c.ClientIP,
-				ConnectedAt:   c.ConnectedAt.Format("2006-01-02T15:04:05Z07:00"),
+				AgentID:       conn.AgentID,
+				AgentName:     agentNames[conn.AgentID],
+				WorkspaceID:   conn.WorkspaceID,
+				WorkspaceName: workspaceNames[conn.WorkspaceID],
+				ConnID:        conn.ConnID,
+				ClientIP:      conn.ClientIP,
+				ConnectedAt:   conn.ConnectedAt.Format("2006-01-02T15:04:05Z07:00"),
 			}
 			enriched = append(enriched, ec)
 
 			// Group by workspace
-			if _, exists := groupMap[c.WorkspaceID]; !exists {
-				groupMap[c.WorkspaceID] = &WorkspaceGroup{
-					WorkspaceID:   c.WorkspaceID,
-					WorkspaceName: workspaceNames[c.WorkspaceID],
+			if _, exists := groupMap[conn.WorkspaceID]; !exists {
+				groupMap[conn.WorkspaceID] = &WorkspaceGroup{
+					WorkspaceID:   conn.WorkspaceID,
+					WorkspaceName: workspaceNames[conn.WorkspaceID],
 					Connections:   []EnrichedConnection{},
 				}
 			}
-			groupMap[c.WorkspaceID].Connections = append(groupMap[c.WorkspaceID].Connections, ec)
-			groupMap[c.WorkspaceID].AgentCount++
+			groupMap[conn.WorkspaceID].Connections = append(groupMap[conn.WorkspaceID].Connections, ec)
+			groupMap[conn.WorkspaceID].AgentCount++
 		}
 
 		// Convert map to slice
@@ -600,7 +525,7 @@ func adminDebugConnectionsHandler(db *gorm.DB) iris.Handler {
 			groups = append(groups, *g)
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"connected_count": len(connections),
 			"workspace_count": len(groups),
 			"connections":     enriched,

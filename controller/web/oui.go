@@ -1,44 +1,39 @@
 package web
 
 import (
+	"net/http"
+
 	"netwatcher-controller/internal/oui"
 
-	"github.com/kataras/iris/v12"
-	"github.com/kataras/iris/v12/core/router"
+	"github.com/gofiber/fiber/v2"
 )
 
 // panelOUI registers OUI lookup endpoints.
-func panelOUI(api router.Party, ouiStore *oui.Store) {
+func panelOUI(api fiber.Router, ouiStore *oui.Store) {
 	// Lookup single MAC
-	api.Get("/lookup/oui/{mac}", func(ctx iris.Context) {
-		mac := ctx.Params().Get("mac")
+	api.Get("/lookup/oui/:mac", func(c *fiber.Ctx) error {
+		mac := c.Params("mac")
 		if mac == "" {
-			ctx.StatusCode(iris.StatusBadRequest)
-			ctx.JSON(iris.Map{"error": "mac parameter required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "mac parameter required"})
 		}
 
 		if !ouiStore.IsLoaded() {
-			ctx.StatusCode(iris.StatusServiceUnavailable)
-			ctx.JSON(iris.Map{
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{
 				"error":  "OUI database not loaded",
 				"loaded": false,
 			})
-			return
 		}
 
 		entry, found := ouiStore.Lookup(mac)
 		if !found {
-			ctx.StatusCode(iris.StatusNotFound)
-			ctx.JSON(iris.Map{
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{
 				"mac":    mac,
 				"vendor": nil,
 				"found":  false,
 			})
-			return
 		}
 
-		ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"mac":    mac,
 			"oui":    entry.OUI,
 			"vendor": entry.Vendor,
@@ -47,50 +42,42 @@ func panelOUI(api router.Party, ouiStore *oui.Store) {
 	})
 
 	// Bulk lookup
-	api.Post("/lookup/oui", func(ctx iris.Context) {
+	api.Post("/lookup/oui", func(c *fiber.Ctx) error {
 		var req struct {
 			MACs []string `json:"macs"`
 		}
 
-		if err := ctx.ReadJSON(&req); err != nil {
-			ctx.StatusCode(iris.StatusBadRequest)
-			ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		if len(req.MACs) == 0 {
-			ctx.StatusCode(iris.StatusBadRequest)
-			ctx.JSON(iris.Map{"error": "macs array required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "macs array required"})
 		}
 
 		if len(req.MACs) > 100 {
-			ctx.StatusCode(iris.StatusBadRequest)
-			ctx.JSON(iris.Map{"error": "maximum 100 MACs per request"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "maximum 100 MACs per request"})
 		}
 
 		if !ouiStore.IsLoaded() {
-			ctx.StatusCode(iris.StatusServiceUnavailable)
-			ctx.JSON(iris.Map{
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{
 				"error":  "OUI database not loaded",
 				"loaded": false,
 			})
-			return
 		}
 
-		results := make([]iris.Map, len(req.MACs))
+		results := make([]fiber.Map, len(req.MACs))
 		for i, mac := range req.MACs {
 			entry, found := ouiStore.Lookup(mac)
 			if found {
-				results[i] = iris.Map{
+				results[i] = fiber.Map{
 					"mac":    mac,
 					"oui":    entry.OUI,
 					"vendor": entry.Vendor,
 					"found":  true,
 				}
 			} else {
-				results[i] = iris.Map{
+				results[i] = fiber.Map{
 					"mac":    mac,
 					"vendor": nil,
 					"found":  false,
@@ -98,15 +85,15 @@ func panelOUI(api router.Party, ouiStore *oui.Store) {
 			}
 		}
 
-		ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"results": results,
 			"count":   len(results),
 		})
 	})
 
 	// Status endpoint
-	api.Get("/lookup/oui/status", func(ctx iris.Context) {
-		ctx.JSON(iris.Map{
+	api.Get("/lookup/oui/status", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
 			"loaded":      ouiStore.IsLoaded(),
 			"entry_count": ouiStore.EntryCount(),
 		})

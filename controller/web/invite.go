@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -10,24 +11,22 @@ import (
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 // RegisterInviteRoutes registers public invite endpoints (no auth required)
-func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.QueueStore) {
+func RegisterInviteRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStore) {
 	store := workspace.NewStore(db)
 
-	// GET /invite/{token} - Validate token and get invite info
-	app.Get("/invite/{token}", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
+	// GET /invite/:token - Validate token and get invite info
+	app.Get("/invite/:token", func(c *fiber.Ctx) error {
+		token := c.Params("token")
 		if token == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "token required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "token required"})
 		}
 
-		info, err := store.GetInviteInfo(ctx.Request().Context(), token)
+		info, err := store.GetInviteInfo(c.UserContext(), token)
 		if err != nil {
 			status := http.StatusBadRequest
 			switch err {
@@ -38,41 +37,33 @@ func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.
 			case workspace.ErrAlreadyExists:
 				status = http.StatusConflict
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(info)
+		return c.JSON(info)
 	})
 
-	// POST /invite/{token}/complete - Complete registration and accept invite
-	app.Post("/invite/{token}/complete", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
+	// POST /invite/:token/complete - Complete registration and accept invite
+	app.Post("/invite/:token/complete", func(c *fiber.Ctx) error {
+		token := c.Params("token")
 		if token == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "token required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "token required"})
 		}
 
 		var body struct {
 			Name     string `json:"name"`
 			Password string `json:"password"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid json"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
 
 		if strings.TrimSpace(body.Password) == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "password required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "password required"})
 		}
 
 		// Get invite info first
-		info, err := store.GetInviteInfo(ctx.Request().Context(), token)
+		info, err := store.GetInviteInfo(c.UserContext(), token)
 		if err != nil {
 			status := http.StatusBadRequest
 			switch err {
@@ -83,30 +74,24 @@ func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.
 			case workspace.ErrAlreadyExists:
 				status = http.StatusConflict
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Get or create user
-		user, created, err := users.GetOrCreatePendingUser(ctx.Request().Context(), db, info.Email, body.Name)
+		user, created, err := users.GetOrCreatePendingUser(c.UserContext(), db, info.Email, body.Name)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// If user was created or is pending, complete their registration
 		if created || users.IsPendingUser(user) {
-			if err := users.CompleteRegistration(ctx.Request().Context(), db, user.ID, body.Name, body.Password); err != nil {
-				ctx.StatusCode(http.StatusBadRequest)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+			if err := users.CompleteRegistration(c.UserContext(), db, user.ID, body.Name, body.Password); err != nil {
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 			}
 		}
 
 		// Complete the invite - link member to user
-		member, err := store.CompleteInviteWithToken(ctx.Request().Context(), token, user.ID)
+		member, err := store.CompleteInviteWithToken(c.UserContext(), token, user.ID)
 		if err != nil {
 			status := http.StatusBadRequest
 			switch err {
@@ -115,30 +100,24 @@ func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.
 			case workspace.ErrAlreadyExists:
 				status = http.StatusConflict
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Create session and return JWT
-		session, err := users.CreateUserSession(ctx.Request().Context(), db, user.ID, 24*time.Hour*30) // 30 days
+		session, err := users.CreateUserSession(c.UserContext(), db, user.ID, 24*time.Hour*30) // 30 days
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to create session"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create session"})
 		}
 
 		jwtToken, err := users.SignUserToken(session.SessionID, user.ID, 24*time.Hour*30)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to sign token"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to sign token"})
 		}
 
 		// Refresh user data after updates
-		user, _ = users.Get(ctx.Request().Context(), db, user.ID)
+		user, _ = users.Get(c.UserContext(), db, user.ID)
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"token":        jwtToken,
 			"user":         user,
 			"member":       member,
@@ -151,7 +130,7 @@ func RegisterInviteRoutes(app *iris.Application, db *gorm.DB, emailStore *email.
 // If user already has an account, adds them directly
 // If user doesn't exist, creates invite and queues email
 func InviteMemberWithEmail(
-	ctx iris.Context,
+	ctx context.Context,
 	db *gorm.DB,
 	store *workspace.Store,
 	emailStore *email.QueueStore,
@@ -162,10 +141,10 @@ func InviteMemberWithEmail(
 	invitedByUserID uint,
 ) (*workspace.Member, error) {
 	// Check if user already exists with this email
-	existingUser, err := users.GetByEmail(ctx.Request().Context(), db, inviteeEmail)
+	existingUser, err := users.GetByEmail(ctx, db, inviteeEmail)
 	if err == nil && existingUser != nil {
 		// User exists - add them directly to workspace (no invite needed)
-		member, err := store.AddMember(ctx.Request().Context(), workspace.AddMemberInput{
+		member, err := store.AddMember(ctx, workspace.AddMemberInput{
 			WorkspaceID: wsID,
 			UserID:      existingUser.ID,
 			Email:       inviteeEmail,
@@ -179,7 +158,7 @@ func InviteMemberWithEmail(
 	}
 
 	// User doesn't exist - create invite with token
-	member, token, err := store.CreateInvite(ctx.Request().Context(), workspace.CreateInviteInput{
+	member, token, err := store.CreateInvite(ctx, workspace.CreateInviteInput{
 		WorkspaceID: wsID,
 		Email:       inviteeEmail,
 		Role:        role,
@@ -192,7 +171,7 @@ func InviteMemberWithEmail(
 	// Queue invite email (pass token, the template builds the URL from PANEL_ENDPOINT)
 	if emailStore != nil && token != "" {
 		if err := emailStore.EnqueueInvite(
-			ctx.Request().Context(),
+			ctx,
 			member.Email,
 			"", // name not known yet
 			token,
@@ -205,7 +184,7 @@ func InviteMemberWithEmail(
 			_ = err
 		} else {
 			// Mark email as sent
-			_ = store.MarkInviteEmailSent(ctx.Request().Context(), member.ID)
+			_ = store.MarkInviteEmailSent(ctx, member.ID)
 		}
 	}
 

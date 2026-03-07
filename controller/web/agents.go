@@ -13,36 +13,34 @@ import (
 
 	"netwatcher-controller/internal/agent"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
-func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.Config) {
-	ws := api.Party("/workspaces/{id:uint}")
+func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits.Config) {
+	ws := api.Group("/workspaces/:id")
 	wsStore := workspace.NewStore(db)
 
 	// Apply workspace access check to all agent routes
-	as := ws.Party("/agents")
+	as := ws.Group("/agents")
 	as.Use(RequireWorkspaceAccess(wsStore))
 
 	// GET /workspaces/{id}/agents
-	as.Get("/", func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		limit := intParam(ctx, "limit", 50, 1, 200)
-		offset := intParam(ctx, "offset", 0, 0, 1_000_000)
-		list, total, err := agent.ListAgentsByWorkspace(ctx.Request().Context(), db, wsID, limit, offset)
+	as.Get("/", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		limit := intParam(c, "limit", 50, 1, 200)
+		offset := intParam(c, "offset", 0, 0, 1_000_000)
+		list, total, err := agent.ListAgentsByWorkspace(c.UserContext(), db, wsID, limit, offset)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"data": list, "total": total, "limit": limit, "offset": offset})
+		return c.JSON(fiber.Map{"data": list, "total": total, "limit": limit, "offset": offset})
 	})
 
 	// POST /workspaces/{id}/agents - requires CanEdit (USER+)
-	as.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
+	as.Post("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
 		var body struct {
 			Name              string         `json:"name"`
 			Description       string         `json:"description"`
@@ -57,9 +55,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			TrafficSimHost    string         `json:"trafficsim_host"`
 			TrafficSimPort    int            `json:"trafficsim_port"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		var ttl *time.Duration
 		if body.PinTTLSeconds > 0 {
@@ -68,18 +65,14 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 		}
 
 		// Check workspace agent limit
-		if err := limits.CanAddAgent(ctx.Request().Context(), db, limitsConfig, wsID); err != nil {
+		if err := limits.CanAddAgent(c.UserContext(), db, limitsConfig, wsID); err != nil {
 			if errors.Is(err, limits.ErrAgentLimitReached) {
-				ctx.StatusCode(http.StatusForbidden)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		out, err := agent.CreateAgent(ctx.Request().Context(), db, agent.CreateInput{
+		out, err := agent.CreateAgent(c.UserContext(), db, agent.CreateInput{
 			WorkspaceID:      wsID,
 			Name:             body.Name,
 			Description:      body.Description,
@@ -92,54 +85,46 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			PINTTL:           ttl,
 		})
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(out)
+		return c.Status(http.StatusCreated).JSON(out)
 	})
 
 	// /workspaces/{id}/agents/{agentID}
-	aid := as.Party("/{agentID:uint}")
+	aid := as.Group("/:agentID")
 
 	// GET /workspaces/{id}/agents/{agentID}
-	aid.Get("/", func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
-		a, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, wsID, aID)
+	aid.Get("/", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		aID := uintParam(c, "agentID")
+		a, err := agent.GetAgentByWorkspaceAndID(c.UserContext(), db, wsID, aID)
 		if err != nil || a == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(a)
+		return c.JSON(a)
 	})
 
-	aid.Get("/netinfo", func(ctx iris.Context) {
-		//wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
+	aid.Get("/netinfo", func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 		a, err := probe.GetLatestNetInfoForAgent(context.TODO(), ch, uint64(aID), nil)
 		if err != nil || a == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(a)
+		return c.JSON(a)
 	})
 
-	aid.Get("/sysinfo", func(ctx iris.Context) {
-		//wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
+	aid.Get("/sysinfo", func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 		a, err := probe.GetLatestSysInfoForAgent(context.TODO(), ch, uint64(aID), nil)
 		if err != nil || a == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(a)
+		return c.JSON(a)
 	})
 
 	// PATCH /workspaces/{id}/agents/{agentID} - requires CanEdit (USER+)
-	aid.Patch("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		aID := uintParam(ctx, "agentID")
+	aid.Patch("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 		var body struct {
 			Name              *string         `json:"name"`
 			Description       *string         `json:"description"`
@@ -152,9 +137,8 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			TrafficSimHost    *string         `json:"trafficsim_host"`
 			TrafficSimPort    *int            `json:"trafficsim_port"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		patch := map[string]any{}
 		if body.Name != nil {
@@ -188,18 +172,16 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			patch["trafficsim_port"] = *body.TrafficSimPort
 		}
 
-		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, patch); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+		if err := agent.PatchAgentFields(c.UserContext(), db, aID, patch); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		a, _ := agent.GetAgentByID(ctx.Request().Context(), db, aID)
-		_ = ctx.JSON(a)
+		a, _ := agent.GetAgentByID(c.UserContext(), db, aID)
+		return c.JSON(a)
 	})
 
 	// DELETE /workspaces/{id}/agents/{agentID} - requires CanManage (ADMIN+)
-	aid.Delete("/", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
-		aID := uintParam(ctx, "agentID")
+	aid.Delete("/", RequireRole(wsStore, CanManage), func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 
 		// Send deactivation message to connected agent BEFORE deletion
 		// This ensures the agent receives the message while still authenticated
@@ -207,64 +189,56 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			log.Infof("Sent deactivation to connected agent %d before deletion", aID)
 		}
 
-		if err := agent.DeleteAgent(ctx.Request().Context(), db, aID); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+		if err := agent.DeleteAgent(c.UserContext(), db, aID); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
 	// POST /workspaces/{id}/agents/{agentID}/heartbeat
-	aid.Post("/heartbeat", func(ctx iris.Context) {
-		aID := uintParam(ctx, "agentID")
+	aid.Post("/heartbeat", func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 		now := time.Now()
-		if err := agent.UpdateAgentSeen(ctx.Request().Context(), db, aID, now); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+		if err := agent.UpdateAgentSeen(c.UserContext(), db, aID, now); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true, "ts": now})
+		return c.JSON(fiber.Map{"ok": true, "ts": now})
 	})
 
 	// POST /workspaces/{id}/agents/{agentID}/issue-pin - requires CanEdit (USER+)
-	aid.Post("/issue-pin", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
+	aid.Post("/issue-pin", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		aID := uintParam(c, "agentID")
 		var body struct {
 			PinLength  int `json:"pinLength"`
 			TTLSeconds int `json:"ttlSeconds"`
 		}
-		_ = ctx.ReadJSON(&body)
+		_ = c.BodyParser(&body)
 		var ttl *time.Duration
 		if body.TTLSeconds > 0 {
 			d := time.Duration(body.TTLSeconds) * time.Second
 			ttl = &d
 		}
-		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
+		pin, err := agent.IssuePIN(c.UserContext(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"pin": pin})
+		return c.JSON(fiber.Map{"pin": pin})
 	})
 
 	// POST /workspaces/{id}/agents/{agentID}/regenerate - requires CanManage (ADMIN+)
 	// Invalidates existing PSK (disconnecting any connected agent), marks agent as uninitialized,
 	// and issues a new PIN for reinstallation on a different machine.
-	aid.Post("/regenerate", RequireRole(wsStore, CanManage), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
+	aid.Post("/regenerate", RequireRole(wsStore, CanManage), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		aID := uintParam(c, "agentID")
 		var body struct {
 			PinLength  int `json:"pinLength"`
 			TTLSeconds int `json:"ttlSeconds"`
 		}
-		_ = ctx.ReadJSON(&body)
+		_ = c.BodyParser(&body)
 
 		// 1) Send deactivation signal to connected agent BEFORE invalidating PSK
-		// This ensures the agent receives the message while still authenticated
-		// and triggers its cleanup/uninstall flow
 		if GetAgentHub().DeactivateAgent(aID, "regenerated") {
 			log.Infof("Sent deactivation to connected agent %d before regeneration", aID)
 			// Brief pause to allow the deactivate message to be delivered
@@ -272,14 +246,11 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 		}
 
 		// 2) Clear the PSK hash - this invalidates any existing sessions
-		// If the agent missed the deactivate signal, it will fail auth on next reconnect
-		if err := agent.PatchAgentFields(ctx.Request().Context(), db, aID, map[string]any{
+		if err := agent.PatchAgentFields(c.UserContext(), db, aID, map[string]any{
 			"psk_hash":    "",    // Clear PSK - invalidates existing sessions
 			"initialized": false, // Mark as not initialized - requires bootstrap
 		}); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// 2) Issue a new PIN for reinstallation
@@ -288,47 +259,39 @@ func panelAgents(api iris.Party, db *gorm.DB, ch *sql.DB, limitsConfig *limits.C
 			d := time.Duration(body.TTLSeconds) * time.Second
 			ttl = &d
 		}
-		pin, err := agent.IssuePIN(ctx.Request().Context(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
+		pin, err := agent.IssuePIN(c.UserContext(), db, wsID, aID, ifZero(body.PinLength, 9), ttl)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// 3) Get updated agent info
-		a, _ := agent.GetAgentByID(ctx.Request().Context(), db, aID)
+		a, _ := agent.GetAgentByID(c.UserContext(), db, aID)
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"pin":   pin,
 			"agent": a,
 		})
 	})
 
 	// GET /workspaces/{id}/agents/{agentID}/pending-pin - requires CanEdit (USER+)
-	// Returns the pending (unconsumed) PIN for an agent, if one exists.
-	// Only returns a PIN if the agent is not yet initialized (bootstrap not completed).
-	aid.Get("/pending-pin", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
-		aID := uintParam(ctx, "agentID")
+	aid.Get("/pending-pin", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		aID := uintParam(c, "agentID")
 
 		// Check if agent is already initialized
-		a, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, wsID, aID)
+		a, err := agent.GetAgentByWorkspaceAndID(c.UserContext(), db, wsID, aID)
 		if err != nil || a == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
 		if a.Initialized {
 			// Agent already bootstrapped - no PIN to show
-			_ = ctx.JSON(iris.Map{"pin": "", "initialized": true})
-			return
+			return c.JSON(fiber.Map{"pin": "", "initialized": true})
 		}
 
-		pin, err := agent.GetPendingPIN(ctx.Request().Context(), db, wsID, aID)
+		pin, err := agent.GetPendingPIN(c.UserContext(), db, wsID, aID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"pin": pin, "initialized": false})
+		return c.JSON(fiber.Map{"pin": pin, "initialized": false})
 	})
 }

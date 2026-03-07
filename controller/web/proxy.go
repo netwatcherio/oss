@@ -1,9 +1,10 @@
 package web
 
 import (
-	"github.com/kataras/iris/v12"
 	"net"
 	"strings"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 var trustedProxies = []string{
@@ -23,42 +24,38 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-func ProxyIPMiddleware(ctx iris.Context) {
-	remoteIP := net.ParseIP(ctx.RemoteAddr())
+func ProxyIPMiddleware(c *fiber.Ctx) error {
+	remoteIP := net.ParseIP(c.IP())
 	if remoteIP == nil {
-		ctx.Values().Set("client_ip", ctx.RemoteAddr())
-		ctx.Next()
-		return
+		c.Locals("client_ip", c.IP())
+		return c.Next()
 	}
 
 	if !isPrivateIP(remoteIP) {
-		ctx.Values().Set("client_ip", remoteIP.String())
-		ctx.Next()
-		return
+		c.Locals("client_ip", remoteIP.String())
+		return c.Next()
 	}
 
-	if forwardedFor := ctx.GetHeader("X-Forwarded-For"); forwardedFor != "" {
+	if forwardedFor := c.Get("X-Forwarded-For"); forwardedFor != "" {
 		ips := strings.Split(forwardedFor, ",")
 		for _, ip := range ips {
 			parsedIP := net.ParseIP(strings.TrimSpace(ip))
 			if parsedIP != nil && !isPrivateIP(parsedIP) {
-				ctx.Values().Set("client_ip", parsedIP.String())
-				ctx.Next()
-				return
+				c.Locals("client_ip", parsedIP.String())
+				return c.Next()
 			}
 		}
 	}
 
-	if realIP := ctx.GetHeader("X-Real-IP"); realIP != "" {
+	if realIP := c.Get("X-Real-IP"); realIP != "" {
 		parsedIP := net.ParseIP(realIP)
 		if parsedIP != nil && !isPrivateIP(parsedIP) {
-			ctx.Values().Set("client_ip", parsedIP.String())
-			ctx.Next()
-			return
+			c.Locals("client_ip", parsedIP.String())
+			return c.Next()
 		}
 	}
 
 	// If we couldn't determine a public IP, fall back to the remote address
-	ctx.Values().Set("client_ip", ctx.RemoteAddr())
-	ctx.Next()
+	c.Locals("client_ip", c.IP())
+	return c.Next()
 }

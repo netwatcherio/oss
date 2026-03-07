@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kataras/iris/v12/websocket"
+	"github.com/kataras/neffos"
 	log "github.com/sirupsen/logrus"
 )
 
 // AgentConnectionInfo tracks metadata about an agent's WebSocket connection
 type AgentConnectionInfo struct {
-	AgentID     uint              `json:"agent_id"`
-	WorkspaceID uint              `json:"workspace_id"`
-	ConnID      string            `json:"conn_id"`
-	ClientIP    string            `json:"client_ip"`
-	ConnectedAt time.Time         `json:"connected_at"`
-	conn        *websocket.NSConn // internal, not exposed in JSON
+	AgentID     uint           `json:"agent_id"`
+	WorkspaceID uint           `json:"workspace_id"`
+	ConnID      string         `json:"conn_id"`
+	ClientIP    string         `json:"client_ip"`
+	ConnectedAt time.Time      `json:"connected_at"`
+	conn        *neffos.NSConn // internal, not exposed in JSON
 }
 
 // AgentHub manages WebSocket connections for agents.
@@ -62,7 +62,7 @@ func (h *AgentHub) RegisterAgentWithInfo(info AgentConnectionInfo) {
 			info.ConnID, info.ClientIP)
 
 		// Force disconnect the old connection in background
-		go func(oldConn *websocket.NSConn) {
+		go func(oldConn *neffos.NSConn) {
 			time.Sleep(500 * time.Millisecond)
 			if err := oldConn.Disconnect(context.TODO()); err != nil {
 				log.Debugf("[AgentHub] Error disconnecting old connection for agent %d: %v", info.AgentID, err)
@@ -76,7 +76,7 @@ func (h *AgentHub) RegisterAgentWithInfo(info AgentConnectionInfo) {
 }
 
 // RegisterAgent registers an agent connection (legacy compatibility)
-func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
+func (h *AgentHub) RegisterAgent(agentID uint, conn *neffos.NSConn) {
 	h.RegisterAgentWithInfo(AgentConnectionInfo{
 		AgentID:     agentID,
 		conn:        conn,
@@ -87,7 +87,7 @@ func (h *AgentHub) RegisterAgent(agentID uint, conn *websocket.NSConn) {
 // UnregisterAgent removes an agent connection
 // Only removes if the agent is currently registered (prevents race conditions
 // where an old connection's disconnect event fires after a new connection was registered)
-func (h *AgentHub) UnregisterAgent(agentID uint, conn *websocket.NSConn) {
+func (h *AgentHub) UnregisterAgent(agentID uint, conn *neffos.NSConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

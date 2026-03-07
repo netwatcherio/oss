@@ -14,42 +14,36 @@ import (
 	"netwatcher-controller/internal/share"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 // -------------------- Protected Endpoints (JWT auth) --------------------
 
 // panelShareLinks registers share link management endpoints for authenticated users.
-func panelShareLinks(api iris.Party, db *gorm.DB) {
+func panelShareLinks(api fiber.Router, db *gorm.DB) {
 	// Create share link for an agent
-	api.Post("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links", func(ctx iris.Context) {
-		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
-		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+	api.Post("/workspaces/:id/agents/:agentID/share-links", func(c *fiber.Ctx) error {
+		workspaceID := uintParam(c, "id")
+		agentID := uintParam(c, "agentID")
 
-		userID, ok := ctx.Values().Get("userID").(uint)
-		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+		userID := getUserID(c)
+		if userID == 0 {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		// Verify user has access to workspace
-		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
-			return
+		if !fiberHasWorkspaceAccess(c, db, workspaceID, userID) {
+			return nil // response already sent
 		}
 
 		// Verify agent belongs to workspace
-		_, err := agent.GetAgentByWorkspaceAndID(ctx.Request().Context(), db, workspaceID, agentID)
+		_, err := agent.GetAgentByWorkspaceAndID(c.UserContext(), db, workspaceID, agentID)
 		if err != nil {
 			if errors.Is(err, agent.ErrNotFound) {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "agent not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found"})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Parse request body
@@ -57,10 +51,8 @@ func panelShareLinks(api iris.Party, db *gorm.DB) {
 			ExpiresInSeconds int    `json:"expires_in_seconds"`
 			Password         string `json:"password,omitempty"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		// Default to 24 hours if not specified
@@ -74,7 +66,7 @@ func panelShareLinks(api iris.Party, db *gorm.DB) {
 		}
 
 		// Create share link
-		output, err := share.Create(ctx.Request().Context(), db, share.CreateInput{
+		output, err := share.Create(c.UserContext(), db, share.CreateInput{
 			WorkspaceID:     workspaceID,
 			AgentID:         agentID,
 			CreatedByUserID: userID,
@@ -82,88 +74,73 @@ func panelShareLinks(api iris.Party, db *gorm.DB) {
 			Password:        body.Password,
 		})
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(output)
+		return c.Status(http.StatusCreated).JSON(output)
 	})
 
 	// List share links for an agent
-	api.Get("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links", func(ctx iris.Context) {
-		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
-		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
+	api.Get("/workspaces/:id/agents/:agentID/share-links", func(c *fiber.Ctx) error {
+		workspaceID := uintParam(c, "id")
+		agentID := uintParam(c, "agentID")
 
-		userID, ok := ctx.Values().Get("userID").(uint)
-		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+		userID := getUserID(c)
+		if userID == 0 {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		// Verify user has access to workspace
-		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
-			return
+		if !fiberHasWorkspaceAccess(c, db, workspaceID, userID) {
+			return nil // response already sent
 		}
 
-		links, err := share.ListByAgent(ctx.Request().Context(), db, workspaceID, agentID)
+		links, err := share.ListByAgent(c.UserContext(), db, workspaceID, agentID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{"items": links, "total": len(links)})
+		return c.JSON(fiber.Map{"items": links, "total": len(links)})
 	})
 
 	// Delete (revoke) a share link
-	api.Delete("/workspaces/{id:uint64}/agents/{agentID:uint64}/share-links/{linkID:uint64}", func(ctx iris.Context) {
-		workspaceID := uint(ctx.Params().GetUint64Default("id", 0))
-		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
-		linkID := uint(ctx.Params().GetUint64Default("linkID", 0))
+	api.Delete("/workspaces/:id/agents/:agentID/share-links/:linkID", func(c *fiber.Ctx) error {
+		workspaceID := uintParam(c, "id")
+		agentID := uintParam(c, "agentID")
+		linkID := uintParam(c, "linkID")
 
-		userID, ok := ctx.Values().Get("userID").(uint)
-		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+		userID := getUserID(c)
+		if userID == 0 {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		// Verify user has access to workspace
-		if !hasWorkspaceAccess(ctx, db, workspaceID, userID) {
-			return
+		if !fiberHasWorkspaceAccess(c, db, workspaceID, userID) {
+			return nil // response already sent
 		}
 
-		err := share.Delete(ctx.Request().Context(), db, workspaceID, agentID, linkID)
+		err := share.Delete(c.UserContext(), db, workspaceID, agentID, linkID)
 		if err != nil {
 			if errors.Is(err, share.ErrShareLinkNotFound) {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "share link not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "share link not found"})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		ctx.StatusCode(http.StatusNoContent)
+		return c.SendStatus(http.StatusNoContent)
 	})
 }
 
-// hasWorkspaceAccess checks if the user has access to the workspace.
-func hasWorkspaceAccess(ctx iris.Context, db *gorm.DB, workspaceID, userID uint) bool {
+// fiberHasWorkspaceAccess checks if the user has access to the workspace.
+func fiberHasWorkspaceAccess(c *fiber.Ctx, db *gorm.DB, workspaceID, userID uint) bool {
 	store := workspace.NewStore(db)
-	_, err := store.GetMemberByUserID(ctx.Request().Context(), workspaceID, userID)
+	_, err := store.GetMemberByUserID(c.UserContext(), workspaceID, userID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrNotFound) {
-			ctx.StatusCode(http.StatusForbidden)
-			_ = ctx.JSON(iris.Map{"error": "access denied"})
+			_ = c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "access denied"})
 			return false
 		}
-		ctx.StatusCode(http.StatusInternalServerError)
-		_ = ctx.JSON(iris.Map{"error": err.Error()})
+		_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		return false
 	}
 	return true
@@ -172,39 +149,36 @@ func hasWorkspaceAccess(ctx iris.Context, db *gorm.DB, workspaceID, userID uint)
 // -------------------- Public Endpoints (no auth) --------------------
 
 // RegisterShareRoutes registers public share link access endpoints.
-func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
-	shareAPI := app.Party("/share")
+func RegisterShareRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB) {
+	shareAPI := app.Group("/share")
 
 	// Get shared agent info (validates token and optional password)
-	shareAPI.Get("/{token:string}", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
-		password := ctx.URLParam("password")
+	shareAPI.Get("/:token", func(c *fiber.Ctx) error {
+		token := c.Params("token")
+		password := c.Query("password")
 
 		// Validate share link
-		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+		link, err := share.Validate(c.UserContext(), db, share.ValidateInput{
 			Token:    token,
 			Password: password,
 		})
 		if err != nil {
-			handleShareError(ctx, err)
-			return
+			return fiberHandleShareError(c, err)
 		}
 
 		// Record access
-		_ = share.RecordAccess(ctx.Request().Context(), db, link.ID)
+		_ = share.RecordAccess(c.UserContext(), db, link.ID)
 
 		// Get agent info
-		ag, err := agent.GetAgentByID(ctx.Request().Context(), db, link.AgentID)
+		ag, err := agent.GetAgentByID(c.UserContext(), db, link.AgentID)
 		if err != nil {
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": "agent not found"})
-			return
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found"})
 		}
 
 		// Determine public IP - prefer actual NETINFO public_address over override
 		publicIP := ag.PublicIPOverride
 		if ch != nil {
-			netInfoData, err := probe.GetLatestNetInfoForAgent(ctx.Request().Context(), ch, uint64(link.AgentID), nil)
+			netInfoData, err := probe.GetLatestNetInfoForAgent(c.UserContext(), ch, uint64(link.AgentID), nil)
 			if err == nil && netInfoData != nil && netInfoData.Payload != nil {
 				// Parse the netinfo payload to extract public_address
 				var netPayload struct {
@@ -217,11 +191,9 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		}
 
 		// Get owned probes AND reverse probes (from other agents targeting this one)
-		owned, reverse, err := probe.ListByAgentWithReverse(ctx.Request().Context(), db, link.AgentID)
+		owned, reverse, err := probe.ListByAgentWithReverse(c.UserContext(), db, link.AgentID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to fetch probes"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch probes"})
 		}
 
 		// Filter to enabled probes only
@@ -238,8 +210,8 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		}
 
 		// Return limited agent info (no secrets)
-		_ = ctx.JSON(iris.Map{
-			"agent": iris.Map{
+		return c.JSON(fiber.Map{
+			"agent": fiber.Map{
 				"id":           ag.ID,
 				"name":         ag.Name,
 				"description":  ag.Description,
@@ -258,25 +230,21 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 	})
 
 	// Check if share link requires password (no password needed for this check)
-	shareAPI.Get("/{token:string}/info", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
+	shareAPI.Get("/:token/info", func(c *fiber.Ctx) error {
+		token := c.Params("token")
 
-		link, err := share.GetByToken(ctx.Request().Context(), db, token)
+		link, err := share.GetByToken(c.UserContext(), db, token)
 		if err != nil {
 			if errors.Is(err, share.ErrShareLinkNotFound) {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "share link not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "share link not found"})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Check if expired
 		expired := time.Now().After(link.ExpiresAt)
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"has_password":    link.HasPassword,
 			"expired":         expired,
 			"expires_at":      link.ExpiresAt,
@@ -286,19 +254,18 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 
 	// Get agent name for shared context (sanitized - only returns name)
 	// Only works for agents that are part of probes visible to this share link
-	shareAPI.Get("/{token:string}/agent/{agentID:uint64}", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
-		agentID := uint(ctx.Params().GetUint64Default("agentID", 0))
-		password := ctx.URLParam("password")
+	shareAPI.Get("/:token/agent/:agentID", func(c *fiber.Ctx) error {
+		token := c.Params("token")
+		agentID := uintParam(c, "agentID")
+		password := c.Query("password")
 
 		// Validate share link
-		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+		link, err := share.Validate(c.UserContext(), db, share.ValidateInput{
 			Token:    token,
 			Password: password,
 		})
 		if err != nil {
-			handleShareError(ctx, err)
-			return
+			return fiberHandleShareError(c, err)
 		}
 
 		// Check if this agent is accessible from the shared agent's probes
@@ -313,7 +280,7 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		// Check 2: Is this agent targeted by a probe owned by the shared agent?
 		if !isAccessible {
 			var count int64
-			db.WithContext(ctx.Request().Context()).
+			db.WithContext(c.UserContext()).
 				Table("probe_targets").
 				Joins("JOIN probes ON probes.id = probe_targets.probe_id").
 				Where("probes.agent_id = ? AND probe_targets.agent_id = ?", link.AgentID, agentID).
@@ -326,7 +293,7 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		// Check 3: Does this agent have a probe that targets the shared agent?
 		if !isAccessible {
 			var count int64
-			db.WithContext(ctx.Request().Context()).
+			db.WithContext(c.UserContext()).
 				Table("probe_targets").
 				Joins("JOIN probes ON probes.id = probe_targets.probe_id").
 				Where("probes.agent_id = ? AND probe_targets.agent_id = ?", agentID, link.AgentID).
@@ -337,21 +304,17 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		}
 
 		if !isAccessible {
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": "agent not found"})
-			return
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found"})
 		}
 
 		// Get agent and return only safe fields
-		ag, err := agent.GetAgentByID(ctx.Request().Context(), db, agentID)
+		ag, err := agent.GetAgentByID(c.UserContext(), db, agentID)
 		if err != nil {
-			ctx.StatusCode(http.StatusNotFound)
-			_ = ctx.JSON(iris.Map{"error": "agent not found"})
-			return
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found"})
 		}
 
 		// Return only name (and optionally location for context)
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"id":       ag.ID,
 			"name":     ag.Name,
 			"location": ag.Location,
@@ -359,19 +322,18 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 	})
 
 	// Get probe data for shared agent
-	shareAPI.Get("/{token:string}/probe-data/{probeID:uint64}", func(ctx iris.Context) {
-		token := ctx.Params().Get("token")
-		probeID := uint(ctx.Params().GetUint64Default("probeID", 0))
-		password := ctx.URLParam("password")
+	shareAPI.Get("/:token/probe-data/:probeID", func(c *fiber.Ctx) error {
+		token := c.Params("token")
+		probeID := uintParam(c, "probeID")
+		password := c.Query("password")
 
 		// Validate share link
-		link, err := share.Validate(ctx.Request().Context(), db, share.ValidateInput{
+		link, err := share.Validate(c.UserContext(), db, share.ValidateInput{
 			Token:    token,
 			Password: password,
 		})
 		if err != nil {
-			handleShareError(ctx, err)
-			return
+			return fiberHandleShareError(c, err)
 		}
 
 		// Verify probe belongs to the shared agent OR targets the shared agent
@@ -379,22 +341,20 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		var p probe.Probe
 
 		// First try: probe is owned by the shared agent
-		err = db.WithContext(ctx.Request().Context()).
+		err = db.WithContext(c.UserContext()).
 			Where("id = ? AND agent_id = ?", probeID, link.AgentID).
 			First(&p).Error
 
 		if err != nil {
 			// Second try: probe targets the shared agent (reverse probe)
 			// Check if any target in the probe has agent_id = shared agent
-			err = db.WithContext(ctx.Request().Context()).
+			err = db.WithContext(c.UserContext()).
 				Preload("Targets").
 				Where("id = ?", probeID).
 				First(&p).Error
 
 			if err != nil {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "probe not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "probe not found"})
 			}
 
 			// Verify the probe targets the shared agent
@@ -406,24 +366,22 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 				}
 			}
 			if !isReverseProbe {
-				ctx.StatusCode(http.StatusNotFound)
-				_ = ctx.JSON(iris.Map{"error": "probe not found"})
-				return
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "probe not found"})
 			}
 		}
 
 		// Record access
-		_ = share.RecordAccess(ctx.Request().Context(), db, link.ID)
+		_ = share.RecordAccess(c.UserContext(), db, link.ID)
 
 		// Parse query params - EXACTLY like the normal panel endpoint in data.go
-		from := ctx.URLParamDefault("from", "")
-		to := ctx.URLParamDefault("to", "")
-		limitStr := ctx.URLParamDefault("limit", "0")
+		from := c.Query("from", "")
+		to := c.Query("to", "")
+		limitStr := c.Query("limit", "0")
 		limit, _ := strconv.Atoi(limitStr)
-		asc := ctx.URLParamDefault("asc", "") == "true"
-		aggregateSecStr := ctx.URLParamDefault("aggregate", "0")
+		asc := c.Query("asc", "") == "true"
+		aggregateSecStr := c.Query("aggregate", "0")
 		aggregateSec, _ := strconv.Atoi(aggregateSecStr)
-		probeType := ctx.URLParam("type") // "PING", "TRAFFICSIM", or "MTR"
+		probeType := c.Query("type") // "PING", "TRAFFICSIM", or "MTR"
 
 		// Parse time range to time.Time
 		var fromTime, toTime time.Time
@@ -434,16 +392,16 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 			toTime, _ = time.Parse(time.RFC3339, to)
 		}
 
-		// Use the SAME logic as the normal panel endpoint (data.go lines 156-195)
+		// Use the SAME logic as the normal panel endpoint (data.go)
 		var rows []probe.ProbeData
 		var queryErr error
 
 		if aggregateSec > 0 && (probeType == "PING" || probeType == "TRAFFICSIM" || probeType == "MTR") {
 			// Use aggregated query for performance
-			rows, queryErr = probe.GetProbeDataAggregated(ctx.Request().Context(), ch, uint64(probeID), nil, probeType, fromTime, toTime, aggregateSec, limit)
+			rows, queryErr = probe.GetProbeDataAggregated(c.UserContext(), ch, uint64(probeID), nil, probeType, fromTime, toTime, aggregateSec, limit)
 		} else {
 			// Standard non-aggregated query
-			rows, queryErr = probe.GetProbeDataByProbe(ctx.Request().Context(), ch, uint64(probeID), nil, fromTime, toTime, asc, limit)
+			rows, queryErr = probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(probeID), nil, fromTime, toTime, asc, limit)
 			// Post-filter by type if specified
 			if queryErr == nil && probeType != "" {
 				filtered := make([]probe.ProbeData, 0, len(rows))
@@ -457,33 +415,26 @@ func RegisterShareRoutes(app *iris.Application, db *gorm.DB, ch *sql.DB) {
 		}
 
 		if queryErr != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to query probe data"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to query probe data"})
 		}
 
 		// Return the SAME format as the normal panel - NewListResponse(rows)
-		_ = ctx.JSON(NewListResponse(rows))
+		return c.JSON(NewListResponse(rows))
 	})
 }
 
-// handleShareError handles common share link errors.
-func handleShareError(ctx iris.Context, err error) {
+// fiberHandleShareError handles common share link errors.
+func fiberHandleShareError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, share.ErrShareLinkNotFound):
-		ctx.StatusCode(http.StatusNotFound)
-		_ = ctx.JSON(iris.Map{"error": "share link not found"})
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "share link not found"})
 	case errors.Is(err, share.ErrShareLinkExpired):
-		ctx.StatusCode(http.StatusGone)
-		_ = ctx.JSON(iris.Map{"error": "share link has expired"})
+		return c.Status(http.StatusGone).JSON(fiber.Map{"error": "share link has expired"})
 	case errors.Is(err, share.ErrPasswordRequired):
-		ctx.StatusCode(http.StatusUnauthorized)
-		_ = ctx.JSON(iris.Map{"error": "password required", "requires_password": true})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "password required", "requires_password": true})
 	case errors.Is(err, share.ErrInvalidPassword):
-		ctx.StatusCode(http.StatusUnauthorized)
-		_ = ctx.JSON(iris.Map{"error": "invalid password"})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid password"})
 	default:
-		ctx.StatusCode(http.StatusInternalServerError)
-		_ = ctx.JSON(iris.Map{"error": err.Error()})
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 }

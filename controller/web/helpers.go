@@ -10,7 +10,7 @@ import (
 
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -34,11 +34,11 @@ func getUserWorkspaceIDs(ctx context.Context, db *gorm.DB, userID uint) ([]uint,
 
 // -------------------- Context Helpers --------------------
 
-// currentUserID extracts the authenticated user ID from the Iris context.
+// currentUserID extracts the authenticated user ID from the Fiber context.
 // Uses the same key as JWTMiddleware stores.
 // Returns 0 if not authenticated.
-func currentUserID(ctx iris.Context) uint {
-	if v := ctx.Values().Get("userID"); v != nil {
+func currentUserID(c *fiber.Ctx) uint {
+	if v := c.Locals("userID"); v != nil {
 		if id, ok := v.(uint); ok {
 			return id
 		}
@@ -46,22 +46,22 @@ func currentUserID(ctx iris.Context) uint {
 	return 0
 }
 
-// currentUser extracts the authenticated user object from the Iris context.
+// currentUser extracts the authenticated user object from the Fiber context.
 // Returns nil if not authenticated.
-func currentUser(ctx iris.Context) interface{} {
-	return ctx.Values().Get("user")
+func currentUser(c *fiber.Ctx) interface{} {
+	return c.Locals("user")
 }
 
 // getUserID is an alias for currentUserID for backward compatibility.
-func getUserID(ctx iris.Context) uint {
-	return currentUserID(ctx)
+func getUserID(c *fiber.Ctx) uint {
+	return currentUserID(c)
 }
 
 // -------------------- Parameter Parsing --------------------
 
 // uintParam extracts a uint path parameter by name.
-func uintParam(ctx iris.Context, name string) uint {
-	v, _ := strconv.Atoi(ctx.Params().Get(name))
+func uintParam(c *fiber.Ctx, name string) uint {
+	v, _ := strconv.Atoi(c.Params(name))
 	if v < 0 {
 		return 0
 	}
@@ -70,13 +70,13 @@ func uintParam(ctx iris.Context, name string) uint {
 
 // uintParamName is an alias for uintParam for backward compatibility.
 // Deprecated: Use uintParam instead.
-func uintParamName(ctx iris.Context, name string) uint {
-	return uintParam(ctx, name)
+func uintParamName(c *fiber.Ctx, name string) uint {
+	return uintParam(c, name)
 }
 
 // intParam extracts an int query parameter with bounds checking.
-func intParam(ctx iris.Context, name string, def, min, max int) int {
-	if v, err := strconv.Atoi(ctx.URLParamDefault(name, "")); err == nil {
+func intParam(c *fiber.Ctx, name string, def, min, max int) int {
+	if v, err := strconv.Atoi(c.Query(name)); err == nil {
 		if v < min {
 			return min
 		}

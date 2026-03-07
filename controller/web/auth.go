@@ -10,28 +10,26 @@ import (
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/users"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.QueueStore) {
-	auth := app.Party("/auth")
+func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStore) {
+	auth := app.Group("/auth")
 
 	// GET /auth/config - public endpoint for panel to check registration settings
-	auth.Get("/config", func(ctx iris.Context) {
-		_ = ctx.JSON(iris.Map{
+	auth.Get("/config", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
 			"registration_enabled":        isRegistrationEnabled(),
 			"email_verification_required": isEmailVerificationRequired(),
 		})
 	})
 
 	// POST /auth/register
-	auth.Post("/register", func(ctx iris.Context) {
+	auth.Post("/register", func(c *fiber.Ctx) error {
 		// Check if registration is enabled
 		if !isRegistrationEnabled() {
-			ctx.StatusCode(http.StatusForbidden)
-			_ = ctx.JSON(iris.Map{"error": "registration is disabled"})
-			return
+			return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "registration is disabled"})
 		}
 
 		var body struct {
@@ -42,9 +40,8 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			Labels   map[string]any `json:"labels"`
 			Metadata map[string]any `json:"metadata"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		in := users.RegisterInput{
 			Email:    body.Email,
@@ -54,46 +51,40 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			Labels:   jsonFromMap(body.Labels),
 			Metadata: jsonFromMap(body.Metadata),
 		}
-		token, u, _, err := users.RegisterUser(ctx.Request().Context(), db, in, ctx.RemoteAddr())
+		token, u, _, err := users.RegisterUser(c.UserContext(), db, in, c.IP())
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Send registration confirmation email if enabled
 		if emailStore != nil && shouldSendRegistrationConfirmation() {
-			_ = emailStore.EnqueueRegistrationConfirmation(ctx.Request().Context(), u.Email, u.Name)
+			_ = emailStore.EnqueueRegistrationConfirmation(c.UserContext(), u.Email, u.Name)
 		}
 
 		// Send verification email if required and email store is available
 		if emailStore != nil && isEmailVerificationRequired() {
-			verifyToken, err := users.CreateToken(ctx.Request().Context(), db, u.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
+			verifyToken, err := users.CreateToken(c.UserContext(), db, u.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
 			if err == nil {
-				_ = emailStore.EnqueueEmailVerification(ctx.Request().Context(), u.Email, u.Name, verifyToken.Token, u.ID)
+				_ = emailStore.EnqueueEmailVerification(c.UserContext(), u.Email, u.Name, verifyToken.Token, u.ID)
 			}
 		}
 
-		_ = ctx.JSON(iris.Map{"token": token, "data": u})
+		return c.JSON(fiber.Map{"token": token, "data": u})
 	})
 
 	// GET /auth/me - returns current authenticated user
-	auth.Get("/me", JWTMiddleware(db), func(ctx iris.Context) {
-		userVal := ctx.Values().Get("user")
+	auth.Get("/me", JWTMiddleware(db), func(c *fiber.Ctx) error {
+		userVal := c.Locals("user")
 		if userVal == nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		user, ok := userVal.(*users.User)
 		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid user context"})
 		}
 
-		_ = ctx.JSON(iris.Map{
+		return c.JSON(fiber.Map{
 			"id":       user.ID,
 			"email":    user.Email,
 			"name":     user.Name,
@@ -103,87 +94,70 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 	})
 
 	// PUT /auth/me/password - change current user's password
-	auth.Put("/me/password", JWTMiddleware(db), func(ctx iris.Context) {
-		userVal := ctx.Values().Get("user")
+	auth.Put("/me/password", JWTMiddleware(db), func(c *fiber.Ctx) error {
+		userVal := c.Locals("user")
 		if userVal == nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		user, ok := userVal.(*users.User)
 		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid user context"})
 		}
 
 		var body struct {
 			OldPassword string `json:"old_password"`
 			NewPassword string `json:"new_password"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		if body.OldPassword == "" || body.NewPassword == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "old_password and new_password are required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "old_password and new_password are required"})
 		}
 
-		err := users.ChangePassword(ctx.Request().Context(), db, user.ID, users.ChangePasswordInput{
+		err := users.ChangePassword(c.UserContext(), db, user.ID, users.ChangePasswordInput{
 			OldPassword: body.OldPassword,
 			NewPassword: body.NewPassword,
 		})
 		if err != nil {
 			if err == users.ErrBadPassword {
-				ctx.StatusCode(http.StatusUnauthorized)
-				_ = ctx.JSON(iris.Map{"error": "incorrect current password"})
-				return
+				return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "incorrect current password"})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(iris.Map{"success": true})
+		return c.JSON(fiber.Map{"success": true})
 	})
 
 	// POST /auth/login
-	auth.Post("/login", func(ctx iris.Context) {
+	auth.Post("/login", func(c *fiber.Ctx) error {
 		var body struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		in := users.LoginInput{Email: body.Email, Password: body.Password}
-		token, u, _, err := users.LoginUser(ctx.Request().Context(), db, in, ctx.RemoteAddr())
+		token, u, _, err := users.LoginUser(c.UserContext(), db, in, c.IP())
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"token": token, "data": u, "email_verification_required": isEmailVerificationRequired()})
+		return c.JSON(fiber.Map{"token": token, "data": u, "email_verification_required": isEmailVerificationRequired()})
 	})
 
 	// POST /auth/verify-email - verify email with token
-	auth.Post("/verify-email", func(ctx iris.Context) {
+	auth.Post("/verify-email", func(c *fiber.Ctx) error {
 		var body struct {
 			Token string `json:"token"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
-		userID, err := users.ConsumeToken(ctx.Request().Context(), db, body.Token, users.TokenTypeEmailVerification)
+		userID, err := users.ConsumeToken(c.UserContext(), db, body.Token, users.TokenTypeEmailVerification)
 		if err != nil {
 			status := http.StatusBadRequest
 			msg := "invalid or expired token"
@@ -192,119 +166,95 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			} else if errors.Is(err, users.ErrTokenNotFound) {
 				msg = "token not found"
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": msg})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": msg})
 		}
 
 		// Mark user as verified
-		if err := users.MarkVerified(ctx.Request().Context(), db, userID); err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to verify user"})
-			return
+		if err := users.MarkVerified(c.UserContext(), db, userID); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to verify user"})
 		}
 
-		_ = ctx.JSON(iris.Map{"success": true, "message": "email verified successfully"})
+		return c.JSON(fiber.Map{"success": true, "message": "email verified successfully"})
 	})
 
 	// POST /auth/resend-verification - resend verification email
-	auth.Post("/resend-verification", JWTMiddleware(db), func(ctx iris.Context) {
-		userVal := ctx.Values().Get("user")
+	auth.Post("/resend-verification", JWTMiddleware(db), func(c *fiber.Ctx) error {
+		userVal := c.Locals("user")
 		if userVal == nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "unauthorized"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 
 		user, ok := userVal.(*users.User)
 		if !ok {
-			ctx.StatusCode(http.StatusUnauthorized)
-			_ = ctx.JSON(iris.Map{"error": "invalid user context"})
-			return
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid user context"})
 		}
 
 		if user.Verified {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "email already verified"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "email already verified"})
 		}
 
 		if emailStore == nil {
-			ctx.StatusCode(http.StatusServiceUnavailable)
-			_ = ctx.JSON(iris.Map{"error": "email service unavailable"})
-			return
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "email service unavailable"})
 		}
 
 		// Create new verification token
-		verifyToken, err := users.CreateToken(ctx.Request().Context(), db, user.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
+		verifyToken, err := users.CreateToken(c.UserContext(), db, user.ID, users.TokenTypeEmailVerification, users.GetEmailVerificationExpiryHours())
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to create verification token"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create verification token"})
 		}
 
 		// Queue verification email
-		if err := emailStore.EnqueueEmailVerification(ctx.Request().Context(), user.Email, user.Name, verifyToken.Token, user.ID); err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to queue verification email"})
-			return
+		if err := emailStore.EnqueueEmailVerification(c.UserContext(), user.Email, user.Name, verifyToken.Token, user.ID); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to queue verification email"})
 		}
 
-		_ = ctx.JSON(iris.Map{"success": true, "message": "verification email sent"})
+		return c.JSON(fiber.Map{"success": true, "message": "verification email sent"})
 	})
 
 	// POST /auth/forgot-password - request password reset
-	auth.Post("/forgot-password", func(ctx iris.Context) {
+	auth.Post("/forgot-password", func(c *fiber.Ctx) error {
 		var body struct {
 			Email string `json:"email"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
-		email := strings.ToLower(strings.TrimSpace(body.Email))
-		if email == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "email is required"})
-			return
+		emailAddr := strings.ToLower(strings.TrimSpace(body.Email))
+		if emailAddr == "" {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
 		}
 
 		// Always return success to prevent email enumeration
 		// But only actually send email if user exists
-		user, err := users.GetByEmail(ctx.Request().Context(), db, email)
+		user, err := users.GetByEmail(c.UserContext(), db, emailAddr)
 		if err == nil && user != nil && emailStore != nil {
 			// Create password reset token
-			resetToken, err := users.CreateToken(ctx.Request().Context(), db, user.ID, users.TokenTypePasswordReset, users.GetPasswordResetExpiryHours())
+			resetToken, err := users.CreateToken(c.UserContext(), db, user.ID, users.TokenTypePasswordReset, users.GetPasswordResetExpiryHours())
 			if err == nil {
-				_ = emailStore.EnqueuePasswordReset(ctx.Request().Context(), user.Email, user.Name, resetToken.Token, user.ID)
+				_ = emailStore.EnqueuePasswordReset(c.UserContext(), user.Email, user.Name, resetToken.Token, user.ID)
 			}
 		}
 
 		// Always return success to prevent email enumeration
-		_ = ctx.JSON(iris.Map{"success": true, "message": "if that email exists, a reset link has been sent"})
+		return c.JSON(fiber.Map{"success": true, "message": "if that email exists, a reset link has been sent"})
 	})
 
 	// POST /auth/reset-password - complete password reset with token
-	auth.Post("/reset-password", func(ctx iris.Context) {
+	auth.Post("/reset-password", func(c *fiber.Ctx) error {
 		var body struct {
 			Token       string `json:"token"`
 			NewPassword string `json:"new_password"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid request body"})
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
 		if strings.TrimSpace(body.NewPassword) == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "new_password is required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "new_password is required"})
 		}
 
-		userID, err := users.ConsumeToken(ctx.Request().Context(), db, body.Token, users.TokenTypePasswordReset)
+		userID, err := users.ConsumeToken(c.UserContext(), db, body.Token, users.TokenTypePasswordReset)
 		if err != nil {
 			status := http.StatusBadRequest
 			msg := "invalid or expired token"
@@ -313,21 +263,17 @@ func registerAuthRoutes(app *iris.Application, db *gorm.DB, emailStore *email.Qu
 			} else if errors.Is(err, users.ErrTokenNotFound) {
 				msg = "token not found"
 			}
-			ctx.StatusCode(status)
-			_ = ctx.JSON(iris.Map{"error": msg})
-			return
+			return c.Status(status).JSON(fiber.Map{"error": msg})
 		}
 
 		// Update user's password (without requiring old password)
-		if err := users.ChangePassword(ctx.Request().Context(), db, userID, users.ChangePasswordInput{
+		if err := users.ChangePassword(c.UserContext(), db, userID, users.ChangePasswordInput{
 			NewPassword: body.NewPassword,
 		}); err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": "failed to update password"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update password"})
 		}
 
-		_ = ctx.JSON(iris.Map{"success": true, "message": "password reset successfully"})
+		return c.JSON(fiber.Map{"success": true, "message": "password reset successfully"})
 	})
 }
 

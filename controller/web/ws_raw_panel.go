@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/fiber/v2"
 	"github.com/gorilla/websocket"
-	"github.com/kataras/iris/v12"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
@@ -53,38 +54,37 @@ func GetRawPanelHub() *RawPanelHub {
 }
 
 // RegisterRawPanelWS registers the raw WebSocket endpoint for panel
-func RegisterRawPanelWS(app *iris.Application, db *gorm.DB) {
-	app.Get("/ws/panel/raw", func(ctx iris.Context) {
+func RegisterRawPanelWS(app *fiber.App, db *gorm.DB) {
+	// Use adaptor to bridge a standard net/http handler that uses gorilla/websocket
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authenticate via query param token
-		token := ctx.URLParam("token")
+		token := r.URL.Query().Get("token")
 		if token == "" {
-			authHeader := ctx.GetHeader("Authorization")
+			authHeader := r.Header.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				token = strings.TrimPrefix(authHeader, "Bearer ")
 			}
 		}
 
 		if token == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
-			ctx.JSON(iris.Map{"error": "missing token"})
+			http.Error(w, `{"error":"missing token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		u, _, err := users.GetUserFromToken(context.Background(), db, token)
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
-			ctx.JSON(iris.Map{"error": "invalid token"})
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Upgrade to WebSocket
-		ws, err := rawUpgrader.Upgrade(ctx.ResponseWriter(), ctx.Request(), nil)
+		ws, err := rawUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Errorf("[RawPanelWS] Upgrade error: %v", err)
 			return
 		}
 
-		connID := ctx.Request().Header.Get("Sec-WebSocket-Key")
+		connID := r.Header.Get("Sec-WebSocket-Key")
 		if connID == "" {
 			connID = time.Now().Format(time.RFC3339Nano)
 		}
@@ -101,8 +101,10 @@ func RegisterRawPanelWS(app *iris.Application, db *gorm.DB) {
 
 		// Start read/write pumps
 		go conn.writePump()
-		go conn.readPump(rawPanelHub)
+		conn.readPump(rawPanelHub)
 	})
+
+	app.Get("/ws/panel/raw", adaptor.HTTPHandler(handler))
 }
 
 // Register adds a connection to the hub

@@ -16,12 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
 	gorillaWs "github.com/gorilla/websocket"
-	_ "github.com/kataras/iris/v12"
-	"github.com/kataras/iris/v12/websocket"
+	"github.com/kataras/neffos"
+	"github.com/kataras/neffos/gorilla"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -51,132 +52,135 @@ var agentUpgrader = gorillaWs.Upgrader{
 }
 
 // Expected headers for WS:
-//   X-Workspace-ID: <uint>
-//   X-Agent-ID:     <uint>
-//   X-Agent-PSK:    <string>
 //
-// If valid, we attach agent/workspace IDs to the Iris context for use in events.
+//	X-Workspace-ID: <uint>
+//	X-Agent-ID:     <uint>
+//	X-Agent-PSK:    <string>
+//
+// If valid, we attach agent/workspace IDs to the connection state for use in events.
 
-func addWebSocketServer(app *iris.Application, db *gorm.DB, ch *sql.DB) error {
+func addWebSocketServer(app *fiber.App, db *gorm.DB, ch *sql.DB) error {
 	// Agent WebSocket server - uses PSK header auth with custom upgrader for stability
-	agentWsServer := websocket.New(
-		websocket.GorillaUpgrader(agentUpgrader),
-		getAgentWebsocketEvents(app, db, ch),
+	agentWsServer := neffos.New(
+		gorilla.Upgrader(agentUpgrader),
+		getAgentWebsocketEvents(db, ch),
 	)
-	agentWsServer.OnConnect = func(c *websocket.Conn) error {
-		ctx := websocket.GetContext(c)
 
-		wsIDStr := ctx.GetHeader("X-Workspace-ID")
-		agIDStr := ctx.GetHeader("X-Agent-ID")
-		psk := ctx.GetHeader("X-Agent-PSK")
+	agentWsServer.OnConnect = func(c *neffos.Conn) error {
+		r := c.Socket().Request()
+
+		wsIDStr := r.Header.Get("X-Workspace-ID")
+		agIDStr := r.Header.Get("X-Agent-ID")
+		psk := r.Header.Get("X-Agent-PSK")
 
 		if wsIDStr == "" || agIDStr == "" || psk == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: missing X-Workspace-ID, X-Agent-ID, or X-Agent-PSK headers")
 		}
 
 		wsID64, err := strconv.ParseUint(strings.TrimSpace(wsIDStr), 10, 64)
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid workspace id")
 		}
 		agID64, err := strconv.ParseUint(strings.TrimSpace(agIDStr), 10, 64)
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid agent id")
 		}
 
-		a, err := agent.AuthenticateWithPSK(ctx, db, uint(wsID64), uint(agID64), psk)
+		a, err := agent.AuthenticateWithPSK(context.TODO(), db, uint(wsID64), uint(agID64), psk)
 		if err != nil {
 			// Check if agent was deleted - return proper error to signal deactivation
 			if errors.Is(err, agent.ErrAgentDeleted) {
 				log.Infof("WS: Agent %d/%d attempted connect after deletion", wsID64, agID64)
-				ctx.StatusCode(http.StatusGone) // 410 Gone
 				return errors.New("agent_deleted: agent has been removed from workspace")
 			}
 			// Check for transient server errors (DB down, storage full, etc.)
 			// Return 503 so agents know to retry instead of deactivating
 			if errors.Is(err, agent.ErrServerError) {
 				log.Warnf("WS: Agent %d/%d auth failed due to server error: %v", wsID64, agID64, err)
-				ctx.StatusCode(http.StatusServiceUnavailable) // 503
 				return errors.New("service unavailable: server error")
 			}
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid psk")
 		}
 
-		_ = agent.UpdateAgentSeen(ctx, db, a.ID, time.Now())
+		_ = agent.UpdateAgentSeen(context.TODO(), db, a.ID, time.Now())
+
+		// Get client IP from request headers (equivalent to old lookup.GetClientIP(ctx))
+		clientIP := lookup.GetClientIPFromHeaders(
+			r.RemoteAddr,
+			r.Header.Get("X-Forwarded-For"),
+			r.Header.Get("X-Real-Ip"),
+		)
 
 		// Store session data in the Connection state (safe for long-lived access)
-		// Accessing ctx.Values() later causes race conditions as Iris pools contexts.
 		c.Set("agent_id", a.ID)
 		c.Set("workspace_id", a.WorkspaceID)
 		c.Set("client_type", "agent")
 		c.Set("conn_id", c.ID())
-		c.Set("client_ip", lookup.GetClientIP(ctx)) // Capture IP once during handshake
+		c.Set("client_ip", clientIP)
 
 		log.Infof("WS auth ok — agent %d (ws %d) conn_id=%s", a.ID, a.WorkspaceID, c.ID())
 		return nil
 	}
 
 	// Panel WebSocket server - uses JWT query param auth (browsers can't send headers)
-	panelWsServer := websocket.New(
-		websocket.DefaultGorillaUpgrader,
-		getPanelWebsocketEvents(app, db, ch),
+	panelWsServer := neffos.New(
+		gorilla.DefaultUpgrader,
+		getPanelWebsocketEvents(db, ch),
 	)
-	panelWsServer.OnConnect = func(c *websocket.Conn) error {
-		ctx := websocket.GetContext(c)
+
+	panelWsServer.OnConnect = func(c *neffos.Conn) error {
+		r := c.Socket().Request()
 
 		// Get JWT from query param (browsers can't send Authorization header with WebSocket)
-		token := ctx.URLParam("token")
+		token := r.URL.Query().Get("token")
 		if token == "" {
 			// Fallback to Authorization header (for non-browser clients)
-			authHeader := ctx.GetHeader("Authorization")
+			authHeader := r.Header.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				token = strings.TrimPrefix(authHeader, "Bearer ")
 			}
 		}
 
 		if token == "" {
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: missing token query param or Authorization header")
 		}
 
 		u, sess, err := users.GetUserFromToken(context.Background(), db, token)
 		if err != nil {
-			ctx.StatusCode(http.StatusUnauthorized)
 			return errors.New("unauthorized: invalid jwt token")
 		}
 
-		ctx.Values().Set("user_id", u.ID)
-		ctx.Values().Set("session_id", sess.SessionID)
-		ctx.Values().Set("client_type", "panel")
+		// Store session data in the Connection state
+		c.Set("user_id", u.ID)
+		c.Set("session_id", sess.SessionID)
+		c.Set("client_type", "panel")
 
 		log.Infof("WS auth ok — panel user %d (session %d) connected as %s", u.ID, sess.SessionID, c.ID())
 		return nil
 	}
 
-	// Mount separate endpoints
-	app.Get("/ws/agent", websocket.Handler(agentWsServer))
-	app.Get("/ws/panel", websocket.Handler(panelWsServer))
+	// Mount separate endpoints using adaptor to bridge neffos HTTP handler to Fiber
+	agentHandler := adaptor.HTTPHandler(agentWsServer)
+	panelHandler := adaptor.HTTPHandler(panelWsServer)
+
+	app.Get("/ws/agent", agentHandler)
+	app.Get("/ws/panel", panelHandler)
 
 	// Keep legacy /ws for backwards compatibility (routes to agent)
-	app.Get("/ws", websocket.Handler(agentWsServer))
+	app.Get("/ws", agentHandler)
 
 	return nil
 }
 
 // getAgentWebsocketEvents returns the namespace events for agent connections
-func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocket.Namespaces {
-	return websocket.Namespaces{
-		"agent": websocket.Events{
-			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
+func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
+	return neffos.Namespaces{
+		"agent": neffos.Events{
+			neffos.OnNamespaceConnected: func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				// Retrieve agent info from Connection state (set in OnConnect)
-				// Do NOT use websocket.GetContext() as that accesses the pooled Iris context
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				wsid, _ := nsConn.Conn.Get("workspace_id").(uint)
 				connID := nsConn.Conn.Get("conn_id").(string)
-				// client_ip is stored as string in OnConnect
 				clientIP := nsConn.Conn.Get("client_ip").(string)
 
 				log.Infof("[NS_CONNECT] agent=%d ws=%d conn_id=%s ip=%s ns=%s", aid, wsid, connID, clientIP, msg.Namespace)
@@ -193,7 +197,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 
 				return nil
 			},
-			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			neffos.OnNamespaceDisconnect: func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				connID := nsConn.Conn.Get("conn_id").(string)
 
@@ -207,7 +211,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 
 			// Deactivate handler - sent when agent is deleted from panel
 			// Agent receives this and should clean up and exit
-			"deactivate": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"deactivate": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				// This is sent TO the agent, not FROM the agent
 				// No action needed on controller side for incoming deactivate messages
 				log.Debugf("[%s] received deactivate ack", nsConn)
@@ -216,7 +220,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 
 			// Ping/heartbeat handler - agents send this periodically to keep connection alive
 			// Also serves as online status tracking by updating last_seen_at
-			"ping": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"ping": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -232,7 +236,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"version": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"version": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				var versionData = struct {
 					Version string `json:"version"`
 				}{}
@@ -263,7 +267,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"probe_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"probe_get": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				// Retrieve agent info safely from Connection state
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
@@ -302,7 +306,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"probe_post": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"probe_post": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				// Retrieve agent info safely from Connection state
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
@@ -420,7 +424,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"speedtest_servers": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"speedtest_servers": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -444,7 +448,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"speedtest_queue_get": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"speedtest_queue_get": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -481,7 +485,7 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"speedtest_result": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"speedtest_result": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -574,13 +578,12 @@ func getAgentWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 }
 
 // getPanelWebsocketEvents returns the namespace events for panel connections
-func getPanelWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) websocket.Namespaces {
-	return websocket.Namespaces{
-		"panel": websocket.Events{
-			websocket.OnNamespaceConnected: func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				uid, _ := ctx.Values().GetUint("user_id")
-				clientType := ctx.Values().GetString("client_type")
+func getPanelWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
+	return neffos.Namespaces{
+		"panel": neffos.Events{
+			neffos.OnNamespaceConnected: func(nsConn *neffos.NSConn, msg neffos.Message) error {
+				uid, _ := nsConn.Conn.Get("user_id").(uint)
+				clientType, _ := nsConn.Conn.Get("client_type").(string)
 
 				if clientType != "panel" {
 					return errors.New("unauthorized: panel namespace requires JWT auth")
@@ -592,16 +595,15 @@ func getPanelWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			websocket.OnNamespaceDisconnect: func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			neffos.OnNamespaceDisconnect: func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				GetPanelHub().UnregisterConnection(nsConn.Conn.ID())
 				log.Infof("[panel] %s disconnected from panel namespace", nsConn.Conn.ID())
 				return nil
 			},
 
-			"subscribe": func(nsConn *websocket.NSConn, msg websocket.Message) error {
-				ctx := websocket.GetContext(nsConn.Conn)
-				uid, ok := ctx.Values().GetUint("user_id")
-				if ok != nil || uid == 0 {
+			"subscribe": func(nsConn *neffos.NSConn, msg neffos.Message) error {
+				uid, _ := nsConn.Conn.Get("user_id").(uint)
+				if uid == 0 {
 					return errors.New("unauthorized: no user in context")
 				}
 
@@ -621,7 +623,7 @@ func getPanelWebsocketEvents(app *iris.Application, db *gorm.DB, ch *sql.DB) web
 				return nil
 			},
 
-			"unsubscribe": func(nsConn *websocket.NSConn, msg websocket.Message) error {
+			"unsubscribe": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				var sub struct {
 					WorkspaceID uint `json:"workspace_id"`
 					ProbeID     uint `json:"probe_id"`

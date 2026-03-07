@@ -11,78 +11,67 @@ import (
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
 
-	"github.com/kataras/iris/v12"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
-	base := api.Party("/workspaces/{id:uint}/agents/{agentID:uint}/probes")
+func panelProbes(api fiber.Router, db *gorm.DB, limitsConfig *limits.Config) {
+	base := api.Group("/workspaces/:id/agents/:agentID/probes")
 	wsStore := workspace.NewStore(db)
 
 	// Apply workspace access check to all probe routes
 	base.Use(RequireWorkspaceAccess(wsStore))
 
-	// GET /workspaces/{id}/agents/{agentID}/probes - requires CanView (any member)
-	base.Get("/", func(ctx iris.Context) {
-		aID := uintParam(ctx, "agentID")
-		list, err := probe.ListByAgent(ctx.Request().Context(), db, aID)
+	// GET /workspaces/:id/agents/:agentID/probes - requires CanView (any member)
+	base.Get("/", func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
+		list, err := probe.ListByAgent(c.UserContext(), db, aID)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(NewListResponse(list))
+		return c.JSON(NewListResponse(list))
 	})
 
-	// POST /workspaces/{id}/agents/{agentID}/probes - requires CanEdit (USER+)
-	base.Post("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		aID := uintParam(ctx, "agentID")
+	// POST /workspaces/:id/agents/:agentID/probes - requires CanEdit (USER+)
+	base.Post("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
 		var input probe.CreateInput
 
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 
 		// Check agent probe limit
-		if err := limits.CanAddProbe(ctx.Request().Context(), db, limitsConfig, aID); err != nil {
+		if err := limits.CanAddProbe(c.UserContext(), db, limitsConfig, aID); err != nil {
 			if errors.Is(err, limits.ErrProbeLimitReached) {
-				ctx.StatusCode(http.StatusForbidden)
-				_ = ctx.JSON(iris.Map{"error": err.Error()})
-				return
+				return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 			}
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		p, err := probe.Create(ctx.Request().Context(), db, input)
+		p, err := probe.Create(c.UserContext(), db, input)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		ctx.StatusCode(http.StatusCreated)
-		_ = ctx.JSON(p)
+		return c.Status(http.StatusCreated).JSON(p)
 	})
 
-	// /workspaces/{id}/agents/{agentID}/probes/{probeID}
-	pid := base.Party("/{probeID:uint}")
+	// /workspaces/:id/agents/:agentID/probes/:probeID
+	pid := base.Group("/:probeID")
 
-	// GET /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanView (any member)
-	pid.Get("/", func(ctx iris.Context) {
-		id := uintParam(ctx, "probeID")
-		p, err := probe.GetByID(ctx.Request().Context(), db, id)
+	// GET /workspaces/:id/agents/:agentID/probes/:probeID - requires CanView (any member)
+	pid.Get("/", func(c *fiber.Ctx) error {
+		id := uintParam(c, "probeID")
+		p, err := probe.GetByID(c.UserContext(), db, id)
 		if err != nil || p == nil {
-			ctx.StatusCode(http.StatusNotFound)
-			return
+			return c.SendStatus(http.StatusNotFound)
 		}
-		_ = ctx.JSON(p)
+		return c.JSON(p)
 	})
 
-	// PATCH /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanEdit (USER+)
-	pid.Patch("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		id := uintParam(ctx, "probeID")
+	// PATCH /workspaces/:id/agents/:agentID/probes/:probeID - requires CanEdit (USER+)
+	pid.Patch("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		id := uintParam(c, "probeID")
 		var body struct {
 			Enabled             *bool           `json:"enabled"`
 			IntervalSec         *int            `json:"intervalSec"`
@@ -92,9 +81,8 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 			ReplaceTargets      []string        `json:"replaceTargets"`
 			ReplaceAgentTargets []uint          `json:"replaceAgentTargets"`
 		}
-		if err := ctx.ReadJSON(&body); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			return
+		if err := c.BodyParser(&body); err != nil {
+			return c.SendStatus(http.StatusBadRequest)
 		}
 		in := probe.UpdateInput{
 			ID:                  id,
@@ -106,44 +94,38 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 			ReplaceTargets:      body.ReplaceTargets,
 			ReplaceAgentTargets: body.ReplaceAgentTargets,
 		}
-		p, err := probe.Update(ctx.Request().Context(), db, in)
+		p, err := probe.Update(c.UserContext(), db, in)
 		if err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(p)
+		return c.JSON(p)
 	})
 
-	// DELETE /workspaces/{id}/agents/{agentID}/probes/{probeID} - requires CanEdit (USER+)
-	pid.Delete("/", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		id := uintParam(ctx, "probeID")
-		if err := probe.Delete(ctx.Request().Context(), db, id); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+	// DELETE /workspaces/:id/agents/:agentID/probes/:probeID - requires CanEdit (USER+)
+	pid.Delete("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		id := uintParam(c, "probeID")
+		if err := probe.Delete(c.UserContext(), db, id); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		_ = ctx.JSON(iris.Map{"ok": true})
+		return c.JSON(fiber.Map{"ok": true})
 	})
 
 	// -------------------- Workspace-Level Probe Operations --------------------
 	// These endpoints operate across agents within a workspace
 
-	wsProbes := api.Party("/workspaces/{id:uint}/probes")
+	wsProbes := api.Group("/workspaces/:id/probes")
 	wsProbes.Use(RequireWorkspaceAccess(wsStore))
 
-	// GET /workspaces/{id}/probes/matching?source={agentID}&dest={agentID,agentID,...}&types={TYPE,TYPE,...}
+	// GET /workspaces/:id/probes/matching?source={agentID}&dest={agentID,agentID,...}&types={TYPE,TYPE,...}
 	// Find probes from source agent that target the specified destination agents
-	wsProbes.Get("/matching", func(ctx iris.Context) {
-		sourceIDInt, _ := strconv.Atoi(ctx.URLParam("source"))
+	wsProbes.Get("/matching", func(c *fiber.Ctx) error {
+		sourceIDInt, _ := strconv.Atoi(c.Query("source"))
 		sourceID := uint(sourceIDInt)
-		destIDsStr := ctx.URLParam("dest")
-		typesStr := ctx.URLParam("types")
+		destIDsStr := c.Query("dest")
+		typesStr := c.Query("types")
 
 		if sourceID == 0 || destIDsStr == "" {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "source and dest query params required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "source and dest query params required"})
 		}
 
 		// Parse dest agent IDs
@@ -155,9 +137,7 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 		}
 
 		if len(destIDs) == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "dest must contain valid agent IDs"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "dest must contain valid agent IDs"})
 		}
 
 		// Parse probe types (optional)
@@ -168,26 +148,22 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 			}
 		}
 
-		matches, err := probe.FindMatchingProbes(ctx.Request().Context(), db, sourceID, destIDs, probeTypes)
+		matches, err := probe.FindMatchingProbes(c.UserContext(), db, sourceID, destIDs, probeTypes)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(NewListResponse(matches))
+		return c.JSON(NewListResponse(matches))
 	})
 
-	// POST /workspaces/{id}/probes/copy - Copy probes between agents
+	// POST /workspaces/:id/probes/copy - Copy probes between agents
 	// Requires CanEdit (USER+) permission
-	wsProbes.Post("/copy", RequireRole(wsStore, CanEdit), func(ctx iris.Context) {
-		wsID := uintParam(ctx, "id")
+	wsProbes.Post("/copy", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
 
 		var input probe.CopyInput
-		if err := ctx.ReadJSON(&input); err != nil {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "invalid input: " + err.Error()})
-			return
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid input: " + err.Error()})
 		}
 
 		// Set workspace ID from route
@@ -195,23 +171,17 @@ func panelProbes(api iris.Party, db *gorm.DB, limitsConfig *limits.Config) {
 
 		// Validation
 		if input.SourceAgentID == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "source_agent_id required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "source_agent_id required"})
 		}
 		if len(input.DestAgentIDs) == 0 {
-			ctx.StatusCode(http.StatusBadRequest)
-			_ = ctx.JSON(iris.Map{"error": "dest_agent_ids required"})
-			return
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "dest_agent_ids required"})
 		}
 
-		result, err := probe.CopyProbes(ctx.Request().Context(), db, input)
+		result, err := probe.CopyProbes(c.UserContext(), db, input)
 		if err != nil {
-			ctx.StatusCode(http.StatusInternalServerError)
-			_ = ctx.JSON(iris.Map{"error": err.Error()})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		_ = ctx.JSON(result)
+		return c.JSON(result)
 	})
 }
