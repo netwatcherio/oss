@@ -125,11 +125,10 @@ func main() {
 
 	// CORS middleware
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*",
-		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-		AllowHeaders:     "Authorization,Content-Type,X-Requested-With,Accept",
-		AllowCredentials: true,
-		MaxAge:           86400,
+		AllowOrigins: "*",
+		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+		AllowHeaders: "Authorization,Content-Type,X-Requested-With,Accept",
+		MaxAge:       86400,
 	}))
 
 	probe.InitWorkers(ch, db)
