@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -61,7 +62,6 @@ func main() {
 		log.WithError(err).Fatal("clickhouse cache tables migrate failed")
 	}
 
-	// Start the ClickHouse batch writer (reduces data-part fragmentation)
 	probe.InitBatchWriter(ch)
 
 	// ---- Email Worker ----
@@ -97,15 +97,14 @@ func main() {
 	cleanupScheduler := scheduler.NewCleanupScheduler(db, ch, retentionConfig)
 	go cleanupScheduler.Start(cleanupCtx)
 
-	// Update ClickHouse TTL on startup (in case config changed)
 	go scheduler.EnsureClickHouseTTL(context.Background(), ch, retentionConfig.DataRetentionDays)
 
-	// ---- Alert Scheduler (offline checks) ----
+	// ---- Alert Scheduler ----
 	alertConfig := scheduler.LoadAlertSchedulerConfig()
 	alertScheduler := scheduler.NewAlertScheduler(db, alertConfig)
-	go alertScheduler.Start(cleanupCtx) // reuse same context for shutdown
+	go alertScheduler.Start(cleanupCtx)
 
-	// ---- AI Analysis Loop (background incident detection + alerting) ----
+	// ---- AI Analysis Loop ----
 	analysisConfig := probe.LoadAnalysisLoopConfig()
 	go probe.StartAnalysisLoop(cleanupCtx, ch, db, analysisConfig)
 
@@ -115,15 +114,14 @@ func main() {
 		probe.SetLLMProvider(llmP)
 	}
 
-	// ---- Fiber ----
+	// ---- Fiber (REST routes only) ----
 	app := fiber.New(fiber.Config{
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
-		BodyLimit:    10 * 1024 * 1024, // 10 MB
+		BodyLimit:    10 * 1024 * 1024,
 	})
 
-	// CORS middleware
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
@@ -133,11 +131,22 @@ func main() {
 
 	probe.InitWorkers(ch, db)
 
-	// Routes (public + protected)
 	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore, ouiStore)
 
-	// Health (also registered in router.go, but kept here for main visibility)
-	// app.Get("/healthz", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
+	// ---- Build unified HTTP mux ----
+	// WebSocket routes are served by net/http (supports http.Hijacker).
+	// All other routes go through Fiber via adaptor.FiberApp.
+	mux := web.BuildHTTPMux(app, db, ch)
+
+	listen := getenv("LISTEN", "0.0.0.0:8080")
+
+	srv := &http.Server{
+		Addr:         listen,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
 	// ---- Graceful Shutdown ----
 	go func() {
@@ -146,18 +155,19 @@ func main() {
 		<-sigCh
 		log.Info("Shutting down...")
 		cleanupCancel()
-		probe.StopBatchWriter() // flush remaining CH records
+		probe.StopBatchWriter()
 		emailWorker.Stop()
 		if geoStore != nil {
 			geoStore.Close()
 		}
-		_ = app.Shutdown()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
 	}()
 
 	// ---- Listen ----
-	listen := getenv("LISTEN", "0.0.0.0:8080")
 	log.Infof("HTTP listening on %s", listen)
-	if err := app.Listen(listen); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.WithError(err).Fatal("server exited")
 	}
 }

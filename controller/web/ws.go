@@ -16,8 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/adaptor/v2"
-	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
 	gorillaWs "github.com/gorilla/websocket"
@@ -59,14 +57,17 @@ var agentUpgrader = gorillaWs.Upgrader{
 //
 // If valid, we attach agent/workspace IDs to the connection state for use in events.
 
-func addWebSocketServer(app *fiber.App, db *gorm.DB, ch *sql.DB) error {
+// setupNeffosServers creates neffos WebSocket servers for agent and panel connections.
+// Returns the servers as http.Handlers — they MUST be served by a net/http server
+// (not Fiber) because gorilla/websocket requires http.Hijacker for upgrades.
+func setupNeffosServers(db *gorm.DB, ch *sql.DB) (agentServer *neffos.Server, panelServer *neffos.Server) {
 	// Agent WebSocket server - uses PSK header auth with custom upgrader for stability
-	agentWsServer := neffos.New(
+	agentServer = neffos.New(
 		gorilla.Upgrader(agentUpgrader),
 		getAgentWebsocketEvents(db, ch),
 	)
 
-	agentWsServer.OnConnect = func(c *neffos.Conn) error {
+	agentServer.OnConnect = func(c *neffos.Conn) error {
 		r := c.Socket().Request()
 
 		wsIDStr := r.Header.Get("X-Workspace-ID")
@@ -104,7 +105,7 @@ func addWebSocketServer(app *fiber.App, db *gorm.DB, ch *sql.DB) error {
 
 		_ = agent.UpdateAgentSeen(context.TODO(), db, a.ID, time.Now())
 
-		// Get client IP from request headers (equivalent to old lookup.GetClientIP(ctx))
+		// Get client IP from request headers
 		clientIP := lookup.GetClientIPFromHeaders(
 			r.RemoteAddr,
 			r.Header.Get("X-Forwarded-For"),
@@ -123,12 +124,12 @@ func addWebSocketServer(app *fiber.App, db *gorm.DB, ch *sql.DB) error {
 	}
 
 	// Panel WebSocket server - uses JWT query param auth (browsers can't send headers)
-	panelWsServer := neffos.New(
+	panelServer = neffos.New(
 		gorilla.DefaultUpgrader,
 		getPanelWebsocketEvents(db, ch),
 	)
 
-	panelWsServer.OnConnect = func(c *neffos.Conn) error {
+	panelServer.OnConnect = func(c *neffos.Conn) error {
 		r := c.Socket().Request()
 
 		// Get JWT from query param (browsers can't send Authorization header with WebSocket)
@@ -159,17 +160,7 @@ func addWebSocketServer(app *fiber.App, db *gorm.DB, ch *sql.DB) error {
 		return nil
 	}
 
-	// Mount separate endpoints using adaptor to bridge neffos HTTP handler to Fiber
-	agentHandler := adaptor.HTTPHandler(agentWsServer)
-	panelHandler := adaptor.HTTPHandler(panelWsServer)
-
-	app.Get("/ws/agent", agentHandler)
-	app.Get("/ws/panel", panelHandler)
-
-	// Keep legacy /ws for backwards compatibility (routes to agent)
-	app.Get("/ws", agentHandler)
-
-	return nil
+	return agentServer, panelServer
 }
 
 // getAgentWebsocketEvents returns the namespace events for agent connections
@@ -210,28 +201,22 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 			},
 
 			// Deactivate handler - sent when agent is deleted from panel
-			// Agent receives this and should clean up and exit
 			"deactivate": func(nsConn *neffos.NSConn, msg neffos.Message) error {
-				// This is sent TO the agent, not FROM the agent
-				// No action needed on controller side for incoming deactivate messages
 				log.Debugf("[%s] received deactivate ack", nsConn)
 				return nil
 			},
 
-			// Ping/heartbeat handler - agents send this periodically to keep connection alive
-			// Also serves as online status tracking by updating last_seen_at
+			// Ping/heartbeat handler
 			"ping": func(nsConn *neffos.NSConn, msg neffos.Message) error {
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
 				}
 
-				// Update last_seen_at for status tracking
 				if err := agent.UpdateAgentSeen(context.TODO(), db, aid, time.Now()); err != nil {
 					log.WithError(err).Warnf("[ping] failed to update last_seen for agent %d", aid)
 				}
 
-				// Respond with pong
 				nsConn.Emit("pong", []byte(`{"ok":true}`))
 				return nil
 			},
@@ -248,7 +233,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 
 				log.Infof("[%s] received version update message [%s]: %s", nsConn, msg.Namespace, msg.Body)
 
-				// Load and update agent
 				a, err := agent.GetAgentByID(context.TODO(), db, aid)
 				if err != nil {
 					log.Error(err)
@@ -268,7 +252,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 			},
 
 			"probe_get": func(nsConn *neffos.NSConn, msg neffos.Message) error {
-				// Retrieve agent info safely from Connection state
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -288,7 +271,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 					log.Errorf("probe_get: %v", err)
 				}
 
-				// Log summary of probes being sent (not full JSON)
 				typeCounts := make(map[string]int)
 				var probeIDs []uint
 				for _, p := range ownedP {
@@ -307,7 +289,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 			},
 
 			"probe_post": func(nsConn *neffos.NSConn, msg neffos.Message) error {
-				// Retrieve agent info safely from Connection state
 				aid, _ := nsConn.Conn.Get("agent_id").(uint)
 				if aid == 0 {
 					return errors.New("unauthorized: no agent in connection state")
@@ -327,7 +308,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 				}
 				pp.ReceivedAt = time.Now()
 
-				// Log summarized probe data with connection ID for session debugging
 				targetInfo := pp.Target
 				if pp.TargetAgent > 0 {
 					targetInfo = fmt.Sprintf("agent:%d", pp.TargetAgent)
@@ -335,37 +315,25 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 				log.Infof("[probe_post] agent=%d probe=%d type=%s target=%s",
 					aid, pp.ProbeID, pp.Type, targetInfo)
 
-				// Resolve TargetAgent and ProbeAgentID from probe configuration if not already set
-				// This handles bidirectional probe direction detection
-				// Skip lookup for virtual probes (ID=0) — these are self-reporting default probes
 				if pp.ProbeID != 0 {
 					p, err := probe.GetByID(context.TODO(), db, pp.ProbeID)
 					if err == nil && p != nil {
-						// Always set ProbeAgentID to the probe owner for direction identification
 						pp.ProbeAgentID = p.AgentID
 
-						// SESSION INTEGRITY CHECK: Detect if probe is being submitted by wrong agent
-						// For NETINFO probes, the submitting agent should match the probe owner
-						// (NETINFO is self-reporting, not cross-agent like PING/MTR)
 						if pp.Type == probe.TypeNetInfo && p.AgentID != aid {
 							log.Errorf("[SESSION_INTEGRITY] NETINFO probe %d owned by agent %d but submitted by agent %d (conn_id=%s, ws=%d)",
 								pp.ProbeID, p.AgentID, aid, connID, wsid)
 						}
 
-						// Set TargetAgent if not already set and probe has targets
 						if pp.TargetAgent == 0 && len(p.Targets) > 0 {
-							// Determine direction based on reporting agent
 							if aid == p.AgentID && p.Targets[0].AgentID != nil {
-								// Forward direction: probe owner reporting, target is Target.AgentID
 								pp.TargetAgent = *p.Targets[0].AgentID
 							} else if p.Targets[0].AgentID != nil && aid == *p.Targets[0].AgentID {
-								// Reverse direction: target agent reporting, target is probe owner
 								pp.TargetAgent = p.AgentID
 							}
 						}
 					}
 				} else {
-					// Virtual probe (ID=0): set ProbeAgentID to the submitting agent
 					pp.ProbeAgentID = aid
 				}
 
@@ -379,7 +347,7 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 					return err
 				}
 
-				GetPanelHub().Broadcast(ProbeDataBroadcast{
+				broadcastData := ProbeDataBroadcast{
 					WorkspaceID:  wsid,
 					ProbeID:      pp.ProbeID,
 					AgentID:      pp.AgentID,
@@ -390,35 +358,11 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
 					Target:       pp.Target,
 					Triggered:    pp.Triggered,
-				})
+				}
 
-				// Also broadcast to raw WebSocket clients
-				GetRawPanelHub().BroadcastRaw(ProbeDataBroadcast{
-					WorkspaceID:  wsid,
-					ProbeID:      pp.ProbeID,
-					AgentID:      pp.AgentID,
-					ProbeAgentID: pp.ProbeAgentID,
-					TargetAgent:  pp.TargetAgent,
-					Type:         string(pp.Type),
-					Payload:      pp.Payload,
-					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
-					Target:       pp.Target,
-					Triggered:    pp.Triggered,
-				})
-
-				// Also broadcast to share-link WebSocket clients (keyed by agent ID)
-				GetRawShareHub().BroadcastToShare(pp.AgentID, ProbeDataBroadcast{
-					WorkspaceID:  wsid,
-					ProbeID:      pp.ProbeID,
-					AgentID:      pp.AgentID,
-					ProbeAgentID: pp.ProbeAgentID,
-					TargetAgent:  pp.TargetAgent,
-					Type:         string(pp.Type),
-					Payload:      pp.Payload,
-					CreatedAt:    pp.CreatedAt.Format(time.RFC3339),
-					Target:       pp.Target,
-					Triggered:    pp.Triggered,
-				})
+				GetPanelHub().Broadcast(broadcastData)
+				GetRawPanelHub().BroadcastRaw(broadcastData)
+				GetRawShareHub().BroadcastToShare(pp.AgentID, broadcastData)
 
 				nsConn.Emit("probe_post_ok", []byte(`{"ok":true}`))
 				return nil
@@ -505,11 +449,9 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 				}
 
 				if result.Success {
-					// Get queue item first - we need workspace info for broadcasting
 					queueItem, err := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
 					if err != nil {
 						log.Errorf("speedtest_result get queue item %d: %v", result.QueueID, err)
-						// Still try to mark completed even if we can't get the queue item
 					}
 
 					if err := speedtest.MarkCompleted(context.TODO(), db, result.QueueID); err != nil {
@@ -518,7 +460,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 						log.Infof("speedtest_result: marked queue item %d as completed", result.QueueID)
 					}
 
-					// Broadcast update to panel clients
 					if queueItem != nil {
 						GetRawPanelHub().BroadcastSpeedtestUpdate(SpeedtestUpdate{
 							QueueID:     result.QueueID,
@@ -531,11 +472,10 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 					}
 
 					if len(result.Data) > 0 && queueItem != nil {
-						// Virtual probes use probe_id=0 — no DB lookup needed
 						pp := probe.ProbeData{
 							Type:       probe.TypeSpeedtest,
 							AgentID:    aid,
-							ProbeID:    0, // Virtual probe
+							ProbeID:    0,
 							Payload:    result.Data,
 							CreatedAt:  time.Now(),
 							ReceivedAt: time.Now(),
@@ -547,7 +487,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 						}
 					}
 				} else {
-					// Failed test - mark as failed and broadcast
 					queueItem, _ := speedtest.GetQueueItem(context.TODO(), db, result.QueueID)
 
 					if err := speedtest.MarkFailed(context.TODO(), db, result.QueueID, result.Error); err != nil {
@@ -556,7 +495,6 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 						log.Infof("speedtest_result: marked queue item %d as failed: %s", result.QueueID, result.Error)
 					}
 
-					// Broadcast failure to panel clients
 					if queueItem != nil {
 						GetRawPanelHub().BroadcastSpeedtestUpdate(SpeedtestUpdate{
 							QueueID:     result.QueueID,

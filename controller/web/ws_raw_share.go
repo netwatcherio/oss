@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/adaptor/v2"
-	"github.com/gofiber/fiber/v2"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -21,14 +19,13 @@ type RawShareHub struct {
 	conns map[string]*RawShareConn
 
 	// Subscriptions by agentID -> probeID -> set of connection IDs
-	// (share links are agent-scoped, so we key by agent instead of workspace)
 	subscriptions map[uint]map[uint]map[string]struct{}
 }
 
 type RawShareConn struct {
 	ID      string
-	Token   string // Share link token
-	AgentID uint   // Agent this share gives access to
+	Token   string
+	AgentID uint
 	Conn    *websocket.Conn
 	Send    chan []byte
 }
@@ -44,11 +41,10 @@ func GetRawShareHub() *RawShareHub {
 	return rawShareHub
 }
 
-// RegisterRawShareWS registers the raw WebSocket endpoint for share-link access
-func RegisterRawShareWS(app *fiber.App, db *gorm.DB) {
-	// Use adaptor to bridge a standard net/http handler that uses gorilla/websocket
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Authenticate via share token + optional password in query params
+// setupRawShareWS returns an http.Handler for the share-link WebSocket endpoint.
+// It must be served by a net/http server (not Fiber) for Hijacker support.
+func setupRawShareWS(db *gorm.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		password := r.URL.Query().Get("password")
 
@@ -57,7 +53,6 @@ func RegisterRawShareWS(app *fiber.App, db *gorm.DB) {
 			return
 		}
 
-		// Validate share link (one-time auth at connection)
 		link, err := share.Validate(r.Context(), db, share.ValidateInput{
 			Token:    token,
 			Password: password,
@@ -67,7 +62,6 @@ func RegisterRawShareWS(app *fiber.App, db *gorm.DB) {
 			return
 		}
 
-		// Upgrade to WebSocket
 		ws, err := rawUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Errorf("[RawShareWS] Upgrade error: %v", err)
@@ -90,15 +84,12 @@ func RegisterRawShareWS(app *fiber.App, db *gorm.DB) {
 		rawShareHub.Register(conn)
 		log.Infof("[RawShareWS] Share token connected for agent %d as %s", link.AgentID, connID)
 
-		// Auto-subscribe to this agent's probes (probeID 0 = all probes for this agent)
+		// Auto-subscribe to this agent's probes
 		rawShareHub.Subscribe(connID, link.AgentID, 0)
 
-		// Start read/write pumps
 		go conn.writePump()
 		conn.readPump(rawShareHub)
 	})
-
-	app.Get("/ws/share/raw", adaptor.HTTPHandler(handler))
 }
 
 // Register adds a connection to the hub
@@ -113,7 +104,6 @@ func (h *RawShareHub) Unregister(connID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Remove all subscriptions
 	for agentID, probeMap := range h.subscriptions {
 		for probeID, connMap := range probeMap {
 			delete(connMap, connID)
@@ -144,8 +134,6 @@ func (h *RawShareHub) Subscribe(connID string, agentID, probeID uint) {
 		h.subscriptions[agentID][probeID] = make(map[string]struct{})
 	}
 	h.subscriptions[agentID][probeID][connID] = struct{}{}
-
-	log.Infof("[RawShareWS] Subscription added: conn=%s agent=%d probe=%d", connID, agentID, probeID)
 }
 
 // BroadcastToShare sends probe data to share-link clients subscribed to this agent
@@ -158,20 +146,17 @@ func (h *RawShareHub) BroadcastToShare(agentID uint, data ProbeDataBroadcast) {
 		"data":  data,
 	})
 	if err != nil {
-		log.Errorf("[RawShareWS] Marshal error: %v", err)
 		return
 	}
 
 	recipients := make(map[string]struct{})
 
 	if agentMap, ok := h.subscriptions[agentID]; ok {
-		// Specific probe subscriptions
 		if connMap, ok := agentMap[data.ProbeID]; ok {
 			for connID := range connMap {
 				recipients[connID] = struct{}{}
 			}
 		}
-		// Agent-wide subscriptions (probeID = 0)
 		if connMap, ok := agentMap[0]; ok {
 			for connID := range connMap {
 				recipients[connID] = struct{}{}
@@ -184,13 +169,8 @@ func (h *RawShareHub) BroadcastToShare(agentID uint, data ProbeDataBroadcast) {
 			select {
 			case conn.Send <- payload:
 			default:
-				log.Warnf("[RawShareWS] Send buffer full for %s", connID)
 			}
 		}
-	}
-
-	if len(recipients) > 0 {
-		log.Debugf("[RawShareWS] Broadcast sent to %d share clients for agent %d", len(recipients), agentID)
 	}
 }
 
@@ -218,32 +198,27 @@ func (c *RawShareConn) readPump(hub *RawShareHub) {
 			break
 		}
 
-		// Parse incoming message
 		var msg struct {
 			Event string          `json:"event"`
 			Data  json.RawMessage `json:"data"`
 		}
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Warnf("[RawShareWS] Parse error: %v", err)
 			continue
 		}
 
 		switch msg.Event {
 		case "subscribe":
-			// Share clients can only subscribe to probes belonging to their agent
 			var sub struct {
 				ProbeID uint `json:"probe_id"`
 			}
 			if err := json.Unmarshal(msg.Data, &sub); err == nil {
 				hub.Subscribe(c.ID, c.AgentID, sub.ProbeID)
-				// Send ack
 				ack, _ := json.Marshal(map[string]interface{}{
 					"event": "subscribe_ok",
 					"data":  map[string]uint{"agent_id": c.AgentID, "probe_id": sub.ProbeID},
 				})
 				c.Send <- ack
 			}
-
 		case "ping":
 			pong, _ := json.Marshal(map[string]string{"event": "pong"})
 			c.Send <- pong
@@ -270,7 +245,6 @@ func (c *RawShareConn) writePump() {
 			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-
 		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {

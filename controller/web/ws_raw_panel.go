@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/adaptor/v2"
-	"github.com/gofiber/fiber/v2"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -36,7 +34,7 @@ type RawPanelConn struct {
 // Raw WebSocket upgrader
 var rawUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for now
+		return true
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -53,10 +51,10 @@ func GetRawPanelHub() *RawPanelHub {
 	return rawPanelHub
 }
 
-// RegisterRawPanelWS registers the raw WebSocket endpoint for panel
-func RegisterRawPanelWS(app *fiber.App, db *gorm.DB) {
-	// Use adaptor to bridge a standard net/http handler that uses gorilla/websocket
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// setupRawPanelWS returns an http.Handler for the raw panel WebSocket endpoint.
+// It must be served by a net/http server (not Fiber) for Hijacker support.
+func setupRawPanelWS(db *gorm.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authenticate via query param token
 		token := r.URL.Query().Get("token")
 		if token == "" {
@@ -99,12 +97,9 @@ func RegisterRawPanelWS(app *fiber.App, db *gorm.DB) {
 		rawPanelHub.Register(conn)
 		log.Infof("[RawPanelWS] User %d connected as %s", u.ID, connID)
 
-		// Start read/write pumps
 		go conn.writePump()
 		conn.readPump(rawPanelHub)
 	})
-
-	app.Get("/ws/panel/raw", adaptor.HTTPHandler(handler))
 }
 
 // Register adds a connection to the hub
@@ -119,7 +114,6 @@ func (h *RawPanelHub) Unregister(connID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Remove all subscriptions
 	for wsID, probeMap := range h.subscriptions {
 		for probeID, connMap := range probeMap {
 			delete(connMap, connID)
@@ -171,13 +165,11 @@ func (h *RawPanelHub) BroadcastRaw(data ProbeDataBroadcast) {
 	recipients := make(map[string]struct{})
 
 	if wsMap, ok := h.subscriptions[data.WorkspaceID]; ok {
-		// Specific probe subscriptions
 		if connMap, ok := wsMap[data.ProbeID]; ok {
 			for connID := range connMap {
 				recipients[connID] = struct{}{}
 			}
 		}
-		// Workspace-wide subscriptions (probeID = 0)
 		if connMap, ok := wsMap[0]; ok {
 			for connID := range connMap {
 				recipients[connID] = struct{}{}
@@ -194,10 +186,6 @@ func (h *RawPanelHub) BroadcastRaw(data ProbeDataBroadcast) {
 			}
 		}
 	}
-
-	if len(recipients) > 0 {
-		log.Debugf("[RawPanelWS] Broadcast sent to %d clients", len(recipients))
-	}
 }
 
 // SpeedtestUpdate represents a speedtest queue status change
@@ -205,13 +193,13 @@ type SpeedtestUpdate struct {
 	QueueID     uint   `json:"queue_id"`
 	WorkspaceID uint   `json:"workspace_id"`
 	AgentID     uint   `json:"agent_id"`
-	Status      string `json:"status"` // "completed", "failed", "running"
+	Status      string `json:"status"`
 	Error       string `json:"error,omitempty"`
 	ServerID    string `json:"server_id,omitempty"`
 	ServerName  string `json:"server_name,omitempty"`
 }
 
-// BroadcastSpeedtestUpdate sends speedtest queue updates to all subscribed panel clients for the workspace
+// BroadcastSpeedtestUpdate sends speedtest queue updates to subscribed panel clients
 func (h *RawPanelHub) BroadcastSpeedtestUpdate(update SpeedtestUpdate) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -221,33 +209,20 @@ func (h *RawPanelHub) BroadcastSpeedtestUpdate(update SpeedtestUpdate) {
 		"data":  update,
 	})
 	if err != nil {
-		log.Errorf("[RawPanelWS] Marshal speedtest update error: %v", err)
 		return
 	}
 
-	recipients := make(map[string]struct{})
-
-	// Send to all connections subscribed to this workspace (probeID 0 = workspace-wide)
 	if wsMap, ok := h.subscriptions[update.WorkspaceID]; ok {
 		if connMap, ok := wsMap[0]; ok {
 			for connID := range connMap {
-				recipients[connID] = struct{}{}
+				if conn, ok := h.conns[connID]; ok {
+					select {
+					case conn.Send <- payload:
+					default:
+					}
+				}
 			}
 		}
-	}
-
-	for connID := range recipients {
-		if conn, ok := h.conns[connID]; ok {
-			select {
-			case conn.Send <- payload:
-			default:
-				log.Warnf("[RawPanelWS] Send buffer full for %s (speedtest update)", connID)
-			}
-		}
-	}
-
-	if len(recipients) > 0 {
-		log.Debugf("[RawPanelWS] Speedtest update broadcast to %d clients (queue=%d, status=%s)", len(recipients), update.QueueID, update.Status)
 	}
 }
 
@@ -259,7 +234,7 @@ type NetworkMapUpdate struct {
 	GeneratedAt string      `json:"generated_at"`
 }
 
-// BroadcastNetworkMapUpdate sends network map updates to all subscribed panel clients for the workspace
+// BroadcastNetworkMapUpdate sends network map updates to subscribed panel clients
 func (h *RawPanelHub) BroadcastNetworkMapUpdate(update NetworkMapUpdate) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -269,33 +244,20 @@ func (h *RawPanelHub) BroadcastNetworkMapUpdate(update NetworkMapUpdate) {
 		"data":  update,
 	})
 	if err != nil {
-		log.Errorf("[RawPanelWS] Marshal network map update error: %v", err)
 		return
 	}
 
-	recipients := make(map[string]struct{})
-
-	// Send to all connections subscribed to this workspace (probeID 0 = workspace-wide)
 	if wsMap, ok := h.subscriptions[update.WorkspaceID]; ok {
 		if connMap, ok := wsMap[0]; ok {
 			for connID := range connMap {
-				recipients[connID] = struct{}{}
+				if conn, ok := h.conns[connID]; ok {
+					select {
+					case conn.Send <- payload:
+					default:
+					}
+				}
 			}
 		}
-	}
-
-	for connID := range recipients {
-		if conn, ok := h.conns[connID]; ok {
-			select {
-			case conn.Send <- payload:
-			default:
-				log.Warnf("[RawPanelWS] Send buffer full for %s (network map update)", connID)
-			}
-		}
-	}
-
-	if len(recipients) > 0 {
-		log.Debugf("[RawPanelWS] Network map update broadcast to %d clients (workspace=%d)", len(recipients), update.WorkspaceID)
 	}
 }
 
@@ -323,13 +285,11 @@ func (c *RawPanelConn) readPump(hub *RawPanelHub) {
 			break
 		}
 
-		// Parse incoming message
 		var msg struct {
 			Event string          `json:"event"`
 			Data  json.RawMessage `json:"data"`
 		}
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Warnf("[RawPanelWS] Parse error: %v", err)
 			continue
 		}
 
@@ -341,14 +301,9 @@ func (c *RawPanelConn) readPump(hub *RawPanelHub) {
 			}
 			if err := json.Unmarshal(msg.Data, &sub); err == nil {
 				hub.Subscribe(c.ID, sub.WorkspaceID, sub.ProbeID)
-				// Send ack
-				ack, _ := json.Marshal(map[string]interface{}{
-					"event": "subscribe_ok",
-					"data":  sub,
-				})
+				ack, _ := json.Marshal(map[string]interface{}{"event": "subscribe_ok", "data": sub})
 				c.Send <- ack
 			}
-
 		case "ping":
 			pong, _ := json.Marshal(map[string]string{"event": "pong"})
 			c.Send <- pong
@@ -375,7 +330,6 @@ func (c *RawPanelConn) writePump() {
 			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-
 		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
