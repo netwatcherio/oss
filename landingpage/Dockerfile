@@ -1,13 +1,17 @@
 # NetWatcher OSS Landing Page
-# Multi-stage build with Caddy for automatic HTTPS
+# Multi-stage build: Node for Vite build, Caddy for serving
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
 
 FROM caddy:2-alpine
 
-# Copy static files
-COPY *.html /srv/
-COPY style.css /srv/
-COPY script.js /srv/
-COPY assets/ /srv/assets/
+# Copy built files from Vite
+COPY --from=build /app/dist /srv
 
 # Copy Caddyfile
 COPY Caddyfile /etc/caddy/Caddyfile

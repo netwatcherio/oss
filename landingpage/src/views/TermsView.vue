@@ -1,54 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terms of Service - NetWatcher</title>
-    <meta name="description"
-        content="NetWatcher Terms of Service. Understand the terms governing your use of netwatcher.io and app.netwatcher.io.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="style.css">
-    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-    <link rel="icon" sizes="any" href="assets/favicon.svg">
-    <link rel="apple-touch-icon" href="assets/favicon.svg">
-    <script src="https://rybbit.dec0de.xyz/api/script.js" data-site-id="ba6dcd0c3ea7" defer></script>
-</head>
-
-<body>
-    <!-- Navigation -->
-    <nav class="navbar">
-        <div class="container">
-            <a href="index.html" class="logo">
-                <i class="bi bi-eye"></i>
-                <span>netwatcher</span>
-                <span class="badge">OSS</span>
-            </a>
-            <div class="nav-links">
-                <a href="index.html#features">Features</a>
-                <a href="index.html#comparison">Compare</a>
-                <a href="index.html#roadmap">Roadmap</a>
-                <a href="demo.html">Demo</a>
-                <a href="https://github.com/netwatcherio/oss" class="btn btn-outline" target="_blank">
-                    <i class="bi bi-github"></i> GitHub
-                </a>
-                <a href="index.html#get-started" class="btn btn-primary">Get Started</a>
-            </div>
-            <button class="mobile-menu-btn" aria-label="Menu">
-                <i class="bi bi-list"></i>
-            </button>
-        </div>
-    </nav>
-
-    <!-- Terms of Service Content -->
+<template>
     <main class="legal-page">
         <div class="container">
             <div class="legal-header">
+                <span class="section-eyebrow">Legal Stuff</span>
                 <h1>Terms of Service</h1>
                 <p class="legal-effective">Effective Date: February 19, 2026</p>
             </div>
@@ -94,7 +48,7 @@
                     <p>You are responsible for safeguarding your account credentials. You must notify us immediately at
                         <a href="mailto:hello@netwatcher.io">hello@netwatcher.io</a> if you become aware of any
                         unauthorized access to your account. We track login activity for security purposes as described
-                        in our <a href="privacy.html">Privacy Policy</a>.</p>
+                        in our <router-link to="/privacy">Privacy Policy</router-link>.</p>
                 </section>
 
                 <section class="legal-section">
@@ -172,8 +126,8 @@
                 </section>
 
                 <section class="legal-section">
-                    <h2>8. Data & Privacy</h2>
-                    <p>Your use of the Service is also governed by our <a href="privacy.html">Privacy Policy</a>, which
+                    <h2>8. Data &amp; Privacy</h2>
+                    <p>Your use of the Service is also governed by our <router-link to="/privacy">Privacy Policy</router-link>, which
                         describes how we collect, use, and protect your personal information. Key points:</p>
                     <ul>
                         <li>We use <strong>Rybbit</strong> (self-hosted, privacy-focused) for analytics on netwatcher.io
@@ -238,8 +192,8 @@
                     <h3>12.1 By You</h3>
                     <p>You may terminate your account at any time by contacting us at <a
                             href="mailto:hello@netwatcher.io">hello@netwatcher.io</a> or through the account settings in
-                        the application. Upon termination, your data will be deleted in accordance with our <a
-                            href="privacy.html">Privacy Policy</a>.</p>
+                        the application. Upon termination, your data will be deleted in accordance with our <router-link
+                            to="/privacy">Privacy Policy</router-link>.</p>
 
                     <h3>12.2 By Us</h3>
                     <p>We may suspend or terminate your account if:</p>
@@ -254,7 +208,7 @@
                 </section>
 
                 <section class="legal-section">
-                    <h2>13. Governing Law & Disputes</h2>
+                    <h2>13. Governing Law &amp; Disputes</h2>
                     <p>These Terms are governed by and construed in accordance with the laws of the <strong>Province of
                             Ontario, Canada</strong>, without regard to conflict of law provisions.</p>
                     <p>Any disputes arising from these Terms or the Service shall be subject to the exclusive
@@ -296,58 +250,4 @@
             </div>
         </div>
     </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-brand">
-                    <a href="index.html" class="logo">
-                        <i class="bi bi-eye"></i>
-                        <span>netwatcher</span>
-                        <span class="badge">OSS</span>
-                    </a>
-                    <p>Open source network monitoring.<br>Forever free. Forever yours.</p>
-                </div>
-                <div class="footer-links">
-                    <div class="footer-column">
-                        <h4>Product</h4>
-                        <a href="index.html#features">Features</a>
-                        <a href="index.html#comparison">Compare</a>
-                        <a href="index.html#roadmap">Roadmap</a>
-                        <a href="demo.html">Demo</a>
-                    </div>
-                    <div class="footer-column">
-                        <h4>Resources</h4>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
-                            target="_blank">Documentation</a>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/docs/api-reference.md"
-                            target="_blank">API Reference</a>
-                        <a href="https://github.com/netwatcherio/oss/issues" target="_blank">Report Issue</a>
-                    </div>
-                    <div class="footer-column">
-                        <h4>Community</h4>
-                        <a href="https://github.com/netwatcherio/oss" target="_blank">GitHub</a>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/CONTRIBUTING.md"
-                            target="_blank">Contributing</a>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE" target="_blank">License
-                            (AGPL-3.0)</a>
-                    </div>
-                    <div class="footer-column">
-                        <h4>Legal</h4>
-                        <a href="privacy.html">Privacy Policy</a>
-                        <a href="terms.html">Terms of Service</a>
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <p>&copy; 2026 NetWatcher OSS. Open source under AGPL-3.0. <a href="privacy.html">Privacy</a> · <a
-                        href="terms.html">Terms</a></p>
-            </div>
-        </div>
-    </footer>
-
-    <script src="script.js"></script>
-</body>
-
-</html>
+</template>
