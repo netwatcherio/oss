@@ -406,6 +406,20 @@ export const ProbeDataService = {
         );
         return data;
     },
+
+    /**
+     * DNS dashboard data — DNS probe results grouped by target hostname.
+     * GET /workspaces/{id}/probe-data/agents/{agentID}/dns
+     */
+    async dnsDashboard(workspaceId: number | string, agentId: number | string, params?: { limit?: number; lookback?: number }) {
+        const qs = new URLSearchParams();
+        if (params?.limit) qs.set("limit", String(params.limit));
+        if (params?.lookback) qs.set("lookback", String(params.lookback));
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/probe-data/agents/${agentId}/dns${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
 };
 
 /** ===== Probes (scoped to workspace + agent) ===== */

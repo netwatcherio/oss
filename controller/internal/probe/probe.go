@@ -34,6 +34,7 @@ const (
 	// Inter-agent targeting (e.g., TRAFFICSIM server<->client)
 	TypeAgent      Type = "AGENT"
 	TypeTrafficSim Type = "TRAFFICSIM"
+	TypeDNS        Type = "DNS"
 )
 
 var (
@@ -431,6 +432,9 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	// Track expansion stats
 	var agentProbesExpanded, agentProbesFailed int
 
+	// Track agents already targeted by owned AGENT probes (for reverse dedup)
+	ownedAgentTargets := make(map[uint]bool)
+
 	// 2. Process owned probes - expand AGENT probes, resolve IPs for others
 	for i := range allProbes {
 		p := &allProbes[i]
@@ -442,6 +446,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			for _, t := range p.Targets {
 				if t.AgentID != nil {
 					targetAgentID := *t.AgentID
+					ownedAgentTargets[targetAgentID] = true
 					log.Debugf("[agent %d] Expanding AGENT probe %d -> target agent %d",
 						agentID, p.ID, targetAgentID)
 					expanded, err := expandAgentProbeForOwner(ctx, db, ch, p, targetAgentID, pubIPCache)
@@ -481,6 +486,38 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 		}
 	}
 
+	// 3. Find reverse AGENT probes: other agents' AGENT probes that target this agent.
+	// This enables bidirectional TrafficSim: if agent A has an AGENT probe targeting X,
+	// X needs return-path probes (MTR, PING, TRAFFICSIM) so it can measure the reverse direction.
+	reverseAgentProbes, revErr := findReverseAgentProbes(ctx, db, agentID)
+	if revErr != nil {
+		log.Warnf("[agent %d] Failed to find reverse AGENT probes: %v", agentID, revErr)
+	} else if len(reverseAgentProbes) > 0 {
+		log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent", agentID, len(reverseAgentProbes))
+		for i := range reverseAgentProbes {
+			rp := &reverseAgentProbes[i]
+			sourceAgentID := rp.AgentID // The agent that owns the AGENT probe (targeting us)
+
+			// Skip reverse expansion if this agent already has its own AGENT probe
+			// targeting the same agent — the forward expansion already covers it.
+			if ownedAgentTargets[sourceAgentID] {
+				log.Debugf("[agent %d] Skipping reverse AGENT probe %d from agent %d (already covered by owned AGENT probe)",
+					agentID, rp.ID, sourceAgentID)
+				continue
+			}
+
+			expanded, err := expandAgentProbe(ctx, db, ch, rp, agentID, pubIPCache)
+			if err != nil {
+				log.Warnf("[agent %d] Reverse AGENT probe %d expansion failed (source agent %d): %v",
+					agentID, rp.ID, sourceAgentID, err)
+				continue
+			}
+			out = append(out, expanded...)
+			log.Infof("[agent %d] Expanded reverse AGENT probe %d from agent %d: %d probes",
+				agentID, rp.ID, sourceAgentID, len(expanded))
+		}
+	}
+
 	// If the agent has TrafficSim server enabled in its settings,
 	// inject a virtual TRAFFICSIM server probe so the agent binary starts the server.
 	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
@@ -516,8 +553,46 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 				},
 			},
 		}
+
+		// Populate allowed agents on the server probe.
+		// The agent's NewTrafficSim reads targets at index 1+ as AllowedAgents.
+		allowedAgentSet := make(map[uint]bool)
+
+		// Add agents from reverse AGENT probes (others targeting this agent)
+		for _, rp := range reverseAgentProbes {
+			if !allowedAgentSet[rp.AgentID] {
+				allowedAgentSet[rp.AgentID] = true
+				aid := rp.AgentID
+				serverProbe.Targets = append(serverProbe.Targets, Target{
+					ProbeID:   0,
+					AgentID:   &aid,
+					CreatedAt: now,
+					UpdatedAt: now,
+				})
+			}
+		}
+
+		// Add agents that this agent targets via its own AGENT probes
+		for _, p := range allProbes {
+			if p.Type == TypeAgent {
+				for _, t := range p.Targets {
+					if t.AgentID != nil && !allowedAgentSet[*t.AgentID] {
+						allowedAgentSet[*t.AgentID] = true
+						aid := *t.AgentID
+						serverProbe.Targets = append(serverProbe.Targets, Target{
+							ProbeID:   0,
+							AgentID:   &aid,
+							CreatedAt: now,
+							UpdatedAt: now,
+						})
+					}
+				}
+			}
+		}
+
 		out = append(out, serverProbe)
-		log.Infof("[agent %d] Added virtual TRAFFICSIM server probe from agent settings (%s:%d)", agentID, host, port)
+		log.Infof("[agent %d] Added virtual TRAFFICSIM server probe from agent settings (%s:%d) with %d allowed agents",
+			agentID, host, port, len(allowedAgentSet))
 	}
 
 	// Inject virtual default probes (NETINFO, SYSINFO, SPEEDTEST, SPEEDTEST_SERVERS).

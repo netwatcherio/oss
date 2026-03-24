@@ -158,4 +158,5 @@ func InitWorkers(ch *sql.DB, pg *gorm.DB) {
 	initPing(ch, pg)
 	initSpeedtest(ch)
 	initTrafficSim(ch, pg)
+	initDns(ch, pg)
 }

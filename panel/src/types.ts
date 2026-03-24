@@ -648,3 +648,44 @@ export interface IPLookupResult {
         whois?: string;
     };
 }
+
+// ==================== DNS Monitoring Types ====================
+
+export interface DNSAnswer {
+    name: string;
+    type: string;
+    value: string;
+    ttl: number;
+}
+
+export interface DNSResult {
+    dns_server: string;
+    record_type: string;
+    query_time_ms: number;
+    response_code: string;
+    answers: DNSAnswer[];
+    raw_response: string;
+    error?: string;
+    protocol: string;
+    target: string;
+}
+
+export interface DNSGroupEntry {
+    created_at: string;
+    probe_id: number;
+    payload: DNSResult;
+    target: string;
+}
+
+export interface DNSGroup {
+    target: string;
+    count: number;
+    entries: DNSGroupEntry[];
+}
+
+export interface DNSDashboardData {
+    agent_id: number;
+    total: number;
+    groups: DNSGroup[];
+    lookback: number;
+}

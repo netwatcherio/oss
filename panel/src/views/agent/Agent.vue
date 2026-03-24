@@ -33,6 +33,7 @@ import ElementExpand from "@/components/ElementExpand.vue";
 import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService} from "@/services/apiService";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
+import DnsDashboard from "@/views/agent/DNS.vue";
 
 interface OrganizedProbe {
   key: string;
@@ -92,7 +93,7 @@ const loadingState = reactive<LoadingState>({
 })
 
 // Active tab for the new layout
-const activeTab = ref<'overview' | 'probes' | 'system'>('overview')
+const activeTab = ref<'overview' | 'probes' | 'system' | 'dns'>('overview')
 
 // Overall loading computed
 const isInitializing = computed(() => {
@@ -1133,6 +1134,7 @@ onMounted(async () => {
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'"><i class="bi bi-grid-3x3-gap"></i> Overview</button>
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'probes' }" @click="activeTab = 'probes'"><i class="bi bi-diagram-2"></i> Probes <span class="tab-badge" v-if="!loadingState.probes">{{ totalProbesCount }}</span></button>
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'"><i class="bi bi-cpu"></i> System</button>
+        <button type="button" class="tab-btn" :class="{ active: activeTab === 'dns' }" @click="activeTab = 'dns'"><i class="bi bi-globe2"></i> DNS</button>
       </div>
 
       <!-- OVERVIEW TAB - Network & General Information -->
@@ -1428,6 +1430,14 @@ onMounted(async () => {
       </div></div>
 
 
+      <!-- DNS TAB - Dedicated DNS Monitoring Dashboard -->
+      <div v-show="activeTab === 'dns'" class="tab-panel">
+        <DnsDashboard
+          v-if="state.workspace.id && state.agent.id"
+          :workspace-id="String(state.workspace.id)"
+          :agent-id="String(state.agent.id)"
+        />
+      </div>
 
       <!-- SYSTEM TAB - Hardware & OS Information Only -->
       <div v-show="activeTab === 'system'" class="tab-panel">

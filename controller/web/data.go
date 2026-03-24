@@ -354,6 +354,86 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 
 		return c.JSON(resp)
 	})
+
+	// ------------------------------------------
+	// GET /workspaces/:id/probe-data/agents/:agentID/dns
+	// DNS dashboard data - returns DNS probe results grouped by target hostname
+	// Query: limit (default 50), lookback (minutes, default 60)
+	// ------------------------------------------
+	base.Get("/agents/:agentID/dns", func(c *fiber.Ctx) error {
+		agentID := uint64(uintParam(c, "agentID"))
+		limit := intOrDefault(c.Query("limit"), 50)
+		lookbackMin := intOrDefault(c.Query("lookback"), 60)
+
+		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)
+
+		typ := string(probe.TypeDNS)
+		rows, err := probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
+			Type:    &typ,
+			AgentID: &agentID,
+			From:    from,
+			Limit:   limit,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Group results by target hostname
+		type dnsGroupEntry struct {
+			CreatedAt time.Time       `json:"created_at"`
+			ProbeID   uint            `json:"probe_id"`
+			Payload   json.RawMessage `json:"payload"`
+			Target    string          `json:"target"`
+		}
+		type dnsGroup struct {
+			Target  string          `json:"target"`
+			Count   int             `json:"count"`
+			Entries []dnsGroupEntry `json:"entries"`
+		}
+
+		groupMap := make(map[string]*dnsGroup)
+		var groupOrder []string
+
+		for _, row := range rows {
+			target := row.Target
+			if target == "" {
+				var p struct {
+					Target string `json:"target"`
+				}
+				if err := json.Unmarshal(row.Payload, &p); err == nil && p.Target != "" {
+					target = p.Target
+				} else {
+					target = "unknown"
+				}
+			}
+
+			g, exists := groupMap[target]
+			if !exists {
+				g = &dnsGroup{Target: target}
+				groupMap[target] = g
+				groupOrder = append(groupOrder, target)
+			}
+			g.Count++
+			g.Entries = append(g.Entries, dnsGroupEntry{
+				CreatedAt: row.CreatedAt,
+				ProbeID:   row.ProbeID,
+				Payload:   row.Payload,
+				Target:    target,
+			})
+		}
+
+		groups := make([]dnsGroup, 0, len(groupOrder))
+		for _, key := range groupOrder {
+			groups = append(groups, *groupMap[key])
+		}
+
+		return c.JSON(fiber.Map{
+			"agent_id": agentID,
+			"total":    len(rows),
+			"groups":   groups,
+			"lookback": lookbackMin,
+		})
+	})
 }
 
 // ---------- helpers (parsing & Postgres lookups) ----------
