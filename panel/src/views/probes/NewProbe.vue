@@ -352,19 +352,19 @@ async function submit() {
       newProbe.agent_targets = [];
     }
 
-    // DNS metadata
+    // DNS metadata — must match agent's DNSConfig format: dns_server, record_type, protocol
     if (state.selected.value === 'DNS') {
-      const dnsMetadata: any = {
-        queryAll: state.dnsConfig.queryAll,
-        dnssecValidation: state.dnsConfig.dnssecValidation
+      const dnsServer = state.dnsConfig.dnsServer
+        ? (state.dnsConfig.dnsServer.includes(':') ? state.dnsConfig.dnsServer : `${state.dnsConfig.dnsServer}:53`)
+        : '8.8.8.8:53';
+      const recordType = state.dnsConfig.selectedRecordTypes.length > 0
+        ? state.dnsConfig.selectedRecordTypes[0]
+        : 'A';
+      newProbe.metadata = {
+        dns_server: dnsServer,
+        record_type: recordType,
+        protocol: 'udp'
       };
-      if (!state.dnsConfig.queryAll && state.dnsConfig.selectedRecordTypes.length > 0) {
-        dnsMetadata.recordTypes = state.dnsConfig.selectedRecordTypes;
-      }
-      if (state.dnsConfig.dnsServer) {
-        dnsMetadata.dnsServer = state.dnsConfig.dnsServer;
-      }
-      newProbe.metadata = { ...newProbe.metadata, ...dnsMetadata };
       newProbe.targets = [state.hostInput];
       newProbe.agent_targets = [];
     }
@@ -776,7 +776,7 @@ onMounted(async () => {
                 <h6 class="section-title">Probe Settings</h6>
 
                 <!-- Interval -->
-                <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
+                <div class="mb-4" v-if="['PING', 'MTR', 'DNS'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterval">
                     <i class="bi bi-clock me-2"></i>Probe Interval
                   </label>

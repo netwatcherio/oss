@@ -362,7 +362,7 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	// ------------------------------------------
 	base.Get("/agents/:agentID/dns", func(c *fiber.Ctx) error {
 		agentID := uint64(uintParam(c, "agentID"))
-		limit := intOrDefault(c.Query("limit"), 50)
+		limit := intOrDefault(c.Query("limit"), 500)
 		lookbackMin := intOrDefault(c.Query("lookback"), 60)
 
 		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)

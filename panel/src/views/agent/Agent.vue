@@ -19,7 +19,7 @@ import type {
 } from "@/types";
 import {usePermissions} from "@/composables/usePermissions";
 import {useWebSocket, type ProbeDataEvent} from "@/composables/useWebSocket";
-import {useAgentStatus} from "@/composables/useAgentStatus";
+import {useAgentStatus, type AgentStatusTier} from "@/composables/useAgentStatus";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import Chart from "@/components/Chart.vue"
@@ -557,6 +557,7 @@ let state = reactive({
   agent: {} as Agent,
   agents: [] as Agent[],
   agentNames: {} as Record<number, string>,  // Cache of agent ID → name for target display
+  targetAgents: {} as Record<number, Agent>,  // Full agent objects for target status checks
   networkInfo: {} as NetInfoPayload,
   systemInfo: {} as SysInfoPayload,
   systemData: {} as SystemData,
@@ -809,7 +810,9 @@ onMounted(async () => {
         const pL = res as Probe[];
         state.probes = pL;
 
-        const grouped = groupProbesByTarget(pL, { excludeDefaults: true, excludeServers: true });
+        // Exclude DNS probes from the normal probe list — they have a dedicated DNS tab
+        const nonDnsProbes = pL.filter(p => p.type !== 'DNS');
+        const grouped = groupProbesByTarget(nonDnsProbes, { excludeDefaults: true, excludeServers: true });
 
         state.targetGroups = grouped.groups;
         state.targetGroupsByKey = grouped.byKey;
@@ -825,7 +828,7 @@ onMounted(async () => {
           state.groupStats[group.key] = initializeGroupStats(group);
         });
 
-        // Lookup agent names for agent-type groups
+        // Lookup agent names and store full agent objects for agent-type groups
         const agentGroups = grouped.groups.filter(g => g.kind === 'agent');
         for (const g of agentGroups) {
           const targetAgentId = Number(g.id);
@@ -833,6 +836,7 @@ onMounted(async () => {
             try {
               const targetAgent = await AgentService.get(workspaceID, targetAgentId) as Agent;
               state.agentNames[targetAgentId] = targetAgent.name || `Agent #${targetAgentId}`;
+              state.targetAgents[targetAgentId] = targetAgent;
             } catch {
               state.agentNames[targetAgentId] = `Agent #${targetAgentId}`;
             }
@@ -1368,7 +1372,13 @@ onMounted(async () => {
                   : 'bi bi-cpu'"></i>
                 </div>
                 <div class="probe-status">
-                  <i :class="`bi ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
+                  <!-- For agent groups: show target agent status when offline/stale -->
+                  <template v-if="g.kind === 'agent' && state.targetAgents[Number(g.id)] && agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]) !== 'online'">
+                    <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))"></i>
+                  </template>
+                  <template v-else>
+                    <i :class="`bi ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
+                  </template>
                 </div>
               </div>
 
@@ -1407,6 +1417,14 @@ onMounted(async () => {
                   <div v-else class="probe-stat text-muted">
                     <i class="bi bi-info-circle"></i>
                     <span>No ping data available</span>
+                  </div>
+                  <!-- Target agent connectivity status for agent-type groups -->
+                  <div v-if="g.kind === 'agent' && state.targetAgents[Number(g.id)]" 
+                       class="probe-stat"
+                       :class="agentStatus.getStatusColor(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))">
+                    <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))"></i>
+                    <span>Target {{ agentStatus.getStatusLabel(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)])) }}</span>
+                    <span class="text-muted" style="margin-left: 0.25rem;">· {{ agentStatus.getLastSeenText(state.targetAgents[Number(g.id)]) }}</span>
                   </div>
                 </div>
               </div>

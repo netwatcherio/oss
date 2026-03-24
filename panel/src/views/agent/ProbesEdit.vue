@@ -205,6 +205,7 @@ function getProbeIcon(probe: Probe): string {
     case 'TRAFFICSIM': return probe.config?.server ? 'bi bi-broadcast-pin' : 'bi bi-graph-up';*/
     case 'SPEEDTEST': return 'bi bi-speedometer2';
     case 'SPEEDTEST_SERVERS': return 'bi bi-list-check';
+    case 'DNS': return 'bi bi-globe2';
     default: return 'bi bi-box';
   }
 }
@@ -217,6 +218,7 @@ function getProbeColor(probe: Probe): string {
     case 'SPEEDTEST_SERVERS': return 'teal';
     case 'MTR': return 'cyan';
     case 'PING': return 'green';
+    case 'DNS': return 'purple';
     /*case 'RPERF': return probe.config?.server ? 'purple' : 'orange';
     case 'TRAFFICSIM': return probe.config?.server ? 'indigo' : 'red';*/
     default: return 'gray';
@@ -231,6 +233,7 @@ function getProbeDescription(probe: Probe): string {
     case 'SPEEDTEST_SERVERS': return 'Speed test server discovery';
     case 'MTR': return 'Multi-hop network trace';
     case 'PING': return 'Network latency monitoring';
+    case 'DNS': return 'DNS resolution monitoring';
    /* case 'RPERF':
       return probe.config?.server ? 'Performance test server' : 'Network performance testing';
     case 'TRAFFICSIM':
