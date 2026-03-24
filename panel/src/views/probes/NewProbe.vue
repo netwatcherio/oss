@@ -157,9 +157,9 @@ const probeTypeConfig = computed(() => {
       icon: "bi-broadcast",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
-      defaultInterval: 300,
+      defaultInterval: 1,
       defaultTimeout: 10,
-      defaultCount: 5
+      defaultCount: 10
     },
     MTR: {
       description: "Combine traceroute and ping to diagnose network paths and identify packet loss",
@@ -832,7 +832,7 @@ onMounted(async () => {
                         v-model.number="state.probe.interval_sec"
                         class="form-control"
                         type="number"
-                        min="10"
+                        :min="state.selected.value === 'PING' ? 1 : 10"
                         max="3600">
                     <span class="input-group-text">seconds</span>
                   </div>

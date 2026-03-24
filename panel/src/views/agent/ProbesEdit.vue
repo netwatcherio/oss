@@ -687,6 +687,25 @@ const hasSelectedAgentProbes = computed(() => {
               </div>
             </div>
 
+            <!-- DNS Configuration (only for DNS probes) -->
+            <div v-if="state.selectedProbe.type === 'DNS' && state.selectedProbe.metadata" class="detail-section">
+              <h6 class="detail-label">DNS Configuration</h6>
+              <div class="detail-grid">
+                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).record_type">
+                  <span class="detail-key">Record Type</span>
+                  <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).record_type }}</span>
+                </div>
+                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).dns_server">
+                  <span class="detail-key">Resolver</span>
+                  <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).dns_server }}</span>
+                </div>
+                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).protocol">
+                  <span class="detail-key">Protocol</span>
+                  <span class="detail-value">{{ ((state.selectedProbe.metadata as any).protocol || '').toUpperCase() }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- Targets -->
             <div v-if="hasTargets(state.selectedProbe)" class="detail-section">
               <h6 class="detail-label">Targets ({{ state.selectedProbe.targets.length }})</h6>
@@ -2245,5 +2264,35 @@ const hasSelectedAgentProbes = computed(() => {
 
 [data-theme="dark"] .empty-selection {
   color: #64748b !important;
+}
+
+/* Dark Mode - Modal Footer Buttons */
+[data-theme="dark"] .modal-close:hover {
+  background: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-outline-danger,
+[data-theme="dark"] .btn-outline-danger {
+  color: #f87171 !important;
+  border-color: #f87171 !important;
+  background: transparent !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-outline-danger:hover,
+[data-theme="dark"] .btn-outline-danger:hover {
+  background: rgba(248, 113, 113, 0.15) !important;
+  color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-secondary,
+[data-theme="dark"] .modal-footer .btn {
+  background: #334155 !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-outline-danger {
+  background: transparent !important;
 }
 </style>
