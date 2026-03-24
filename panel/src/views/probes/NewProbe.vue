@@ -352,21 +352,44 @@ async function submit() {
       newProbe.agent_targets = [];
     }
 
-    // DNS metadata — must match agent's DNSConfig format: dns_server, record_type, protocol
+    // DNS probes — create one probe per resolver (comma-separated)
     if (state.selected.value === 'DNS') {
-      const dnsServer = state.dnsConfig.dnsServer
-        ? (state.dnsConfig.dnsServer.includes(':') ? state.dnsConfig.dnsServer : `${state.dnsConfig.dnsServer}:53`)
-        : '8.8.8.8:53';
       const recordType = state.dnsConfig.selectedRecordTypes.length > 0
         ? state.dnsConfig.selectedRecordTypes[0]
         : 'A';
-      newProbe.metadata = {
-        dns_server: dnsServer,
-        record_type: recordType,
-        protocol: 'udp'
-      };
-      newProbe.targets = [state.hostInput];
-      newProbe.agent_targets = [];
+
+      // Parse comma-separated resolvers
+      const rawServers = state.dnsConfig.dnsServer
+        ? state.dnsConfig.dnsServer.split(',').map((s: string) => s.trim()).filter((s: string) => s)
+        : ['8.8.8.8'];
+
+      // Normalize: ensure each has :port
+      const resolvers = rawServers.map((s: string) => s.includes(':') ? s : `${s}:53`);
+
+      // Create one probe per resolver
+      let createdCount = 0;
+      for (const resolver of resolvers) {
+        const dnsProbe: ProbeCreateInput = {
+          ...newProbe,
+          metadata: {
+            dns_server: resolver,
+            record_type: recordType,
+            protocol: 'udp'
+          },
+          targets: [state.hostInput],
+          agent_targets: []
+        };
+
+        await ProbeService.create(
+          state.workspace.id,
+          state.agent.id,
+          dnsProbe
+        );
+        createdCount++;
+      }
+
+      await router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
+      return;
     }
 
     const response = await ProbeService.create(
@@ -398,6 +421,29 @@ async function checkForDuplicates() {
     // Check for duplicates based on type and target
     for (const probe of existingProbes) {
       if (probe.type !== state.selected.value) continue;
+
+      // DNS duplicate check: only duplicate if same host AND same resolver
+      if (state.selected.value === 'DNS' && state.hostInput) {
+        const targetToCheck = state.hostInput;
+        const hasTargetHost = probe.targets?.some(
+            t => t.target === targetToCheck
+        );
+        if (hasTargetHost) {
+          // Also check if the resolver matches
+          const meta = probe.metadata as Record<string, any> || {};
+          const existingServer = meta.dns_server || '';
+          const inputServers = state.dnsConfig.dnsServer
+            ? state.dnsConfig.dnsServer.split(',').map((s: string) => s.trim()).filter((s: string) => s)
+            : ['8.8.8.8'];
+          const normalizedServers = inputServers.map((s: string) => s.includes(':') ? s : `${s}:53`);
+          const duplicateResolvers = normalizedServers.filter((s: string) => s === existingServer);
+          if (duplicateResolvers.length > 0) {
+            state.duplicateWarning = `A DNS probe for ${targetToCheck} with resolver ${duplicateResolvers[0]} already exists`;
+            return;
+          }
+        }
+        continue;
+      }
 
       // Check server mode duplicates
       if (state.probe.server && probe.server) {
@@ -731,9 +777,9 @@ onMounted(async () => {
                   </div>
                 </div>
 
-                <!-- DNS Server Configuration -->
+                <!-- DNS Server / Resolver Configuration -->
                 <label class="form-label fw-semibold" for="dnsServer">
-                  <i class="bi bi-server me-2"></i>DNS Server (Optional)
+                  <i class="bi bi-server me-2"></i>DNS Resolvers
                 </label>
                 <div class="input-group mb-2">
                   <span class="input-group-text"><i class="bi bi-server"></i></span>
@@ -742,9 +788,9 @@ onMounted(async () => {
                       v-model="state.dnsConfig.dnsServer"
                       class="form-control"
                       type="text"
-                      placeholder="8.8.8.8 or 1.1.1.1">
+                      placeholder="8.8.8.8, 1.1.1.1, 9.9.9.9">
                 </div>
-                <small class="text-muted">Leave empty to use system default DNS server</small>
+                <small class="text-muted">Comma-separated list of DNS resolvers. Each creates a separate probe. Default: 8.8.8.8</small>
 
                 <!-- Advanced DNS Options -->
                 <div class="mt-3">
