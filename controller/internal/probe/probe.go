@@ -210,6 +210,17 @@ func checkDuplicateProbe(ctx context.Context, db *gorm.DB, in CreateInput) error
 		incomingAgentTargets[aid] = true
 	}
 
+	// For DNS probes, extract the incoming dns_server from metadata
+	var incomingDNSServer string
+	if in.Type == TypeDNS && len(in.Metadata) > 0 {
+		var meta map[string]interface{}
+		if json.Unmarshal(in.Metadata, &meta) == nil {
+			if srv, ok := meta["dns_server"].(string); ok {
+				incomingDNSServer = srv
+			}
+		}
+	}
+
 	// Check each existing probe for matching targets
 	for _, p := range existing {
 		// Build sets of existing targets
@@ -240,8 +251,25 @@ func checkDuplicateProbe(ctx context.Context, db *gorm.DB, in CreateInput) error
 			}
 		}
 
-		// If any target overlaps, it's a duplicate
+		// If any target overlaps, check further for DNS
 		if hasLiteralOverlap || hasAgentOverlap {
+			// DNS probes: same target is allowed if the dns_server differs
+			if in.Type == TypeDNS && incomingDNSServer != "" {
+				var existingDNSServer string
+				if len(p.Metadata) > 0 {
+					var meta map[string]interface{}
+					if json.Unmarshal(p.Metadata, &meta) == nil {
+						if srv, ok := meta["dns_server"].(string); ok {
+							existingDNSServer = srv
+						}
+					}
+				}
+				// Different resolver → not a duplicate
+				if existingDNSServer != incomingDNSServer {
+					continue
+				}
+			}
+
 			log.Warnf("Duplicate probe detected: existing probe %d (agent=%d, type=%s) has overlapping targets",
 				p.ID, p.AgentID, p.Type)
 			return fmt.Errorf("%w: probe with same type and target already exists on agent %d (probe ID: %d)",
