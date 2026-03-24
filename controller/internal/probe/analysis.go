@@ -120,6 +120,8 @@ type MtrPathAnalysis struct {
 	RouteStabilityPct float64  `json:"route_stability_pct"`
 	AvgEndHopLatency  float64  `json:"avg_end_hop_latency"`
 	AvgEndHopLoss     float64  `json:"avg_end_hop_loss"`
+	AvgEndHopJitter   float64  `json:"avg_end_hop_jitter"` // stddev from end hop
+	TraceCount        int      `json:"trace_count"`        // number of MTR traces analysed
 	RateLimitedHops   []int    `json:"rate_limited_hops"`
 	TimeoutSegments   []string `json:"timeout_segments"`
 }
@@ -530,6 +532,7 @@ LIMIT 100
 	var totalTraces int
 	var totalEndHopLatency float64
 	var totalEndHopLoss float64
+	var totalEndHopJitter float64
 	var rateLimitedHops []int
 	var timeoutSegments []string
 	var maxHops int
@@ -571,6 +574,7 @@ LIMIT 100
 		lastHop := payload.Report.Hops[len(payload.Report.Hops)-1]
 		totalEndHopLatency += parseFloat(lastHop.Avg)
 		totalEndHopLoss += parseFloat(lastHop.LossPct)
+		totalEndHopJitter += parseFloat(lastHop.StdDev)
 
 		// Detect ICMP rate limiting and timeout segments (only on first trace)
 		if totalTraces == 1 {
@@ -628,6 +632,8 @@ LIMIT 100
 		RouteStabilityPct: sanitizeFloat(stabilityPct),
 		AvgEndHopLatency:  sanitizeFloat(totalEndHopLatency / float64(totalTraces)),
 		AvgEndHopLoss:     sanitizeFloat(totalEndHopLoss / float64(totalTraces)),
+		AvgEndHopJitter:   sanitizeFloat(totalEndHopJitter / float64(totalTraces)),
+		TraceCount:        totalTraces,
 		RateLimitedHops:   rateLimitedHops,
 		TimeoutSegments:   timeoutSegments,
 	}
@@ -686,6 +692,61 @@ LIMIT 100
 	return analysis, signals, nil
 }
 
+// findSiblingProbeIDs finds other probes from the same agent that share the same
+// first target (by literal target string or agent_id). Returns a map of Type → probe ID
+// so the analysis can query PING data from a PING sibling and MTR data from an MTR sibling.
+func findSiblingProbeIDs(ctx context.Context, db *gorm.DB, p *Probe) map[Type]uint {
+	result := make(map[Type]uint)
+	// Always include the probe itself
+	result[p.Type] = p.ID
+
+	if len(p.Targets) == 0 {
+		return result
+	}
+
+	firstTarget := p.Targets[0]
+
+	// Find all probes from the same agent
+	siblings, err := ListByAgent(ctx, db, p.AgentID)
+	if err != nil {
+		log.Warnf("[Analysis] findSiblingProbeIDs: failed to list probes for agent %d: %v", p.AgentID, err)
+		return result
+	}
+
+	for _, sib := range siblings {
+		if sib.ID == p.ID || len(sib.Targets) == 0 {
+			continue
+		}
+		// Skip non-monitoring types
+		if sib.Type != TypePing && sib.Type != TypeMTR && sib.Type != TypeDNS {
+			continue
+		}
+
+		sibTarget := sib.Targets[0]
+
+		// Match by agent_id target
+		if firstTarget.AgentID != nil && sibTarget.AgentID != nil {
+			if *firstTarget.AgentID == *sibTarget.AgentID {
+				result[sib.Type] = sib.ID
+				continue
+			}
+		}
+
+		// Match by literal target string (case-insensitive, trimmed)
+		if firstTarget.Target != "" && sibTarget.Target != "" {
+			if strings.EqualFold(strings.TrimSpace(firstTarget.Target), strings.TrimSpace(sibTarget.Target)) {
+				result[sib.Type] = sib.ID
+			}
+		}
+	}
+
+	if len(result) > 1 {
+		log.Debugf("[Analysis] Probe %d (type=%s): found %d sibling probe IDs: %v", p.ID, p.Type, len(result), result)
+	}
+
+	return result
+}
+
 // ── Public API ──
 
 // ComputeProbeAnalysis computes full health vector + signals for a specific probe
@@ -733,20 +794,37 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		agentName = a.Name
 	}
 
-	// Fetch PING metrics
-	metrics, err := probeAnalysisMetrics(ctx, ch, agentIDs, probeID, from)
+	// For non-AGENT probes, find sibling probes (same agent, same target, different type).
+	// The frontend groups PING+MTR probes targeting the same host together on one page,
+	// so the analysis should combine data from all sibling probe IDs.
+	pingProbeID := probeID
+	mtrProbeID := probeID
+	if p.Type != TypeAgent {
+		siblingIDs := findSiblingProbeIDs(ctx, pg, p)
+		if pid, ok := siblingIDs[TypePing]; ok {
+			pingProbeID = pid
+			log.Debugf("[Analysis] Probe %d: using PING sibling probe %d for metrics", probeID, pid)
+		}
+		if mid, ok := siblingIDs[TypeMTR]; ok {
+			mtrProbeID = mid
+			log.Debugf("[Analysis] Probe %d: using MTR sibling probe %d for path analysis", probeID, mid)
+		}
+	}
+
+	// Fetch PING metrics (from this probe or its PING sibling)
+	metrics, err := probeAnalysisMetrics(ctx, ch, agentIDs, pingProbeID, from)
 	if err != nil {
-		log.Warnf("[Analysis] Failed to fetch PING metrics for probe %d: %v", probeID, err)
+		log.Warnf("[Analysis] Failed to fetch PING metrics for probe %d: %v", pingProbeID, err)
 		metrics = ProbeMetrics{}
 	}
 
-	log.Debugf("[Analysis] Probe %d (type=%s): PING samples=%d, avgLat=%.1f, loss=%.2f%%, agentIDs=%v",
-		probeID, p.Type, metrics.SampleCount, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
+	log.Debugf("[Analysis] Probe %d (type=%s): PING samples=%d (queried pid=%d), avgLat=%.1f, loss=%.2f%%, agentIDs=%v",
+		probeID, p.Type, metrics.SampleCount, pingProbeID, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
 
-	// Fetch MTR path analysis
-	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, probeID, from)
+	// Fetch MTR path analysis (from this probe or its MTR sibling)
+	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, mtrProbeID, from)
 	if err != nil {
-		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", probeID, err)
+		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", mtrProbeID, err)
 	}
 
 	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type)
@@ -768,6 +846,19 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 				}
 			}
 		}
+	}
+
+	// For non-AGENT probes (standalone MTR, etc.), if PING metrics are empty
+	// but MTR path analysis found data, derive metrics from MTR end-hop stats.
+	// This ensures standalone MTR probes get proper health scores.
+	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
+		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
+			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitter)
+		metrics.AvgLatency = pathAnalysis.AvgEndHopLatency
+		metrics.P95Latency = pathAnalysis.AvgEndHopLatency * 1.3 // Approximate P95 from avg
+		metrics.PacketLoss = pathAnalysis.AvgEndHopLoss
+		metrics.Jitter = pathAnalysis.AvgEndHopJitter
+		metrics.SampleCount = pathAnalysis.TraceCount
 	}
 
 	// Route stability from MTR (100% if no MTR data)
