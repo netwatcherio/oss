@@ -515,34 +515,29 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	}
 
 	// 3. Find reverse AGENT probes: other agents' AGENT probes that target this agent.
-	// This enables bidirectional TrafficSim: if agent A has an AGENT probe targeting X,
-	// X needs return-path probes (MTR, PING, TRAFFICSIM) so it can measure the reverse direction.
+	// These are used for TrafficSim server allowed-agent lists (below), but we do NOT
+	// expand them into return-path MTR/PING/TRAFFICSIM probes.
+	//
+	// Bidirectional testing requires BOTH agents to have AGENT probes targeting each
+	// other. When both exist, each agent's own forward expansion already produces the
+	// necessary probes. When only one side has an AGENT probe, we intentionally keep
+	// it one-directional — the target agent does NOT get reverse probes.
 	reverseAgentProbes, revErr := findReverseAgentProbes(ctx, db, agentID)
 	if revErr != nil {
 		log.Warnf("[agent %d] Failed to find reverse AGENT probes: %v", agentID, revErr)
 	} else if len(reverseAgentProbes) > 0 {
-		log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent", agentID, len(reverseAgentProbes))
+		log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent (no expansion — bidi requires mutual AGENT probes)",
+			agentID, len(reverseAgentProbes))
 		for i := range reverseAgentProbes {
 			rp := &reverseAgentProbes[i]
-			sourceAgentID := rp.AgentID // The agent that owns the AGENT probe (targeting us)
-
-			// Skip reverse expansion if this agent already has its own AGENT probe
-			// targeting the same agent — the forward expansion already covers it.
+			sourceAgentID := rp.AgentID
 			if ownedAgentTargets[sourceAgentID] {
-				log.Debugf("[agent %d] Skipping reverse AGENT probe %d from agent %d (already covered by owned AGENT probe)",
+				log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: covered by owned forward AGENT probe",
 					agentID, rp.ID, sourceAgentID)
-				continue
+			} else {
+				log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: skipped (no mutual AGENT probe, one-way only)",
+					agentID, rp.ID, sourceAgentID)
 			}
-
-			expanded, err := expandAgentProbe(ctx, db, ch, rp, agentID, pubIPCache)
-			if err != nil {
-				log.Warnf("[agent %d] Reverse AGENT probe %d expansion failed (source agent %d): %v",
-					agentID, rp.ID, sourceAgentID, err)
-				continue
-			}
-			out = append(out, expanded...)
-			log.Infof("[agent %d] Expanded reverse AGENT probe %d from agent %d: %d probes",
-				agentID, rp.ID, sourceAgentID, len(expanded))
 		}
 	}
 
@@ -788,49 +783,6 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 
 	log.Infof("[agent %d] AGENT probe %d expanded: %d probes -> target agent %d @ %s",
 		ownerAgentID, agentProbe.ID, len(expanded), targetAgentID, targetIP)
-
-	return expanded, nil
-}
-
-// expandAgentProbe expands an AGENT-type probe into concrete MTR, PING, and optionally TRAFFICSIM probes.
-// The source agent's public IP is resolved and used as the target.
-func expandAgentProbe(ctx context.Context, db *gorm.DB, ch *sql.DB,
-	agentProbe *Probe, targetAgentID uint, pubIPCache map[uint]string) ([]Probe, error) {
-
-	// Get source agent's public IP
-	sourceAgentID := agentProbe.AgentID
-	sourceIP, ok := pubIPCache[sourceAgentID]
-	if !ok {
-		var err error
-		sourceIP, err = getPublicIP(ctx, db, ch, sourceAgentID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get source agent %d public IP: %w", sourceAgentID, err)
-		}
-		pubIPCache[sourceAgentID] = sourceIP
-	}
-
-	if sourceIP == "" {
-		return nil, fmt.Errorf("source agent %d has no public IP", sourceAgentID)
-	}
-
-	var expanded []Probe
-
-	// Create MTR probe
-	expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, sourceIP, sourceAgentID))
-
-	// Create PING probe
-	expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, sourceIP, sourceAgentID))
-
-	// Create TRAFFICSIM probe only if source agent has a server
-	if hasTrafficSimServer(ctx, db, sourceAgentID) {
-		tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, sourceIP, sourceAgentID)
-		// Get the server port from the source's TrafficSim server config
-		port := getTrafficSimServerPort(ctx, db, sourceAgentID)
-		if port != "" {
-			tsProbe.Targets[0].Target = sourceIP + ":" + port
-		}
-		expanded = append(expanded, tsProbe)
-	}
 
 	return expanded, nil
 }
