@@ -894,7 +894,7 @@ watch(
                         <i class="bi bi-arrow-left"></i>
                     </button>
                     <i class="bi bi-eye"></i>
-                    <span>NetWatcher</span>
+                    <span>netwatcher.io</span>
                     <span class="badge">Shared View</span>
                 </div>
                 <div class="header-actions">
@@ -1216,7 +1216,7 @@ watch(
         <footer class="shared-footer">
             <p>
                 <i class="bi bi-info-circle"></i>
-                Shared via NetWatcher • Read-only view
+                Shared via netwatcher.io • Read-only view
             </p>
         </footer>
         

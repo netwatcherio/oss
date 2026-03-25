@@ -277,16 +277,76 @@ func UpdateAgentVersion(ctx context.Context, db *gorm.DB, id uint, version strin
 	return nil
 }
 
-// DeleteAgent permanently deletes the row (no soft-delete on Agent)
+// DeleteAgent permanently deletes the agent and all associated data.
 func DeleteAgent(ctx context.Context, db *gorm.DB, id uint) error {
-	res := db.WithContext(ctx).Delete(&Agent{}, id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1) Collect probe IDs owned by this agent
+		var probeIDs []uint
+		if err := tx.Model(&dbProbe{}).Where("agent_id = ?", id).Pluck("id", &probeIDs).Error; err != nil {
+			return err
+		}
+
+		if len(probeIDs) > 0 {
+			// Delete probe targets
+			if err := tx.Where("probe_id IN ?", probeIDs).Delete(&dbTarget{}).Error; err != nil {
+				return err
+			}
+			// Delete alert rules referencing these probes
+			if err := tx.Where("probe_id IN ?", probeIDs).Delete(&dbAlertRule{}).Error; err != nil {
+				return err
+			}
+			// Delete alerts referencing these probes
+			if err := tx.Where("probe_id IN ?", probeIDs).Delete(&dbAlert{}).Error; err != nil {
+				return err
+			}
+			// Delete route baselines for these probes
+			if err := tx.Where("probe_id IN ?", probeIDs).Delete(&dbRouteBaseline{}).Error; err != nil {
+				return err
+			}
+			// Delete the probes themselves
+			if err := tx.Where("agent_id = ?", id).Delete(&dbProbe{}).Error; err != nil {
+				return err
+			}
+		}
+
+		// 2) Delete agent-scoped alert rules & alerts (agent_id column)
+		if err := tx.Where("agent_id = ?", id).Delete(&dbAlertRule{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", id).Delete(&dbAlert{}).Error; err != nil {
+			return err
+		}
+
+		// 3) Delete share links for this agent
+		if err := tx.Where("agent_id = ?", id).Delete(&dbShareLink{}).Error; err != nil {
+			return err
+		}
+
+		// 4) Delete speedtest servers cached for this agent
+		if err := tx.Where("agent_id = ?", id).Delete(&dbSpeedtestServer{}).Error; err != nil {
+			return err
+		}
+
+		// 5) Delete speedtest queue items for this agent
+		if err := tx.Where("agent_id = ?", id).Delete(&dbSpeedtestQueue{}).Error; err != nil {
+			return err
+		}
+
+		// 6) Delete agent auth PINs
+		if err := tx.Where("agent_id = ?", id).Delete(&Auth{}).Error; err != nil {
+			return err
+		}
+
+		// 7) Delete the agent itself
+		res := tx.Delete(&Agent{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // -------------------- PIN operations --------------------
@@ -570,3 +630,41 @@ type dbTarget struct {
 }
 
 func (dbTarget) TableName() string { return "probe_targets" }
+
+// Local table models for cascade deletion (avoids circular imports)
+
+type dbAlertRule struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbAlertRule) TableName() string { return "alert_rules" }
+
+type dbAlert struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbAlert) TableName() string { return "alerts" }
+
+type dbRouteBaseline struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbRouteBaseline) TableName() string { return "route_baselines" }
+
+type dbShareLink struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbShareLink) TableName() string { return "share_links" }
+
+type dbSpeedtestServer struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbSpeedtestServer) TableName() string { return "agent_speedtest_servers" }
+
+type dbSpeedtestQueue struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbSpeedtestQueue) TableName() string { return "speedtest_queue" }

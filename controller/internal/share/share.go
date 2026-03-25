@@ -119,7 +119,7 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*CreateOutput, er
 	}
 
 	link.HasPassword = link.PasswordHash != ""
-	link.AllowSpeedtest = time.Until(link.ExpiresAt) < 24*time.Hour
+	link.AllowSpeedtest = false // Never allow speedtest on shared pages
 
 	return &CreateOutput{
 		ShareLink: link,
@@ -139,7 +139,7 @@ func GetByToken(ctx context.Context, db *gorm.DB, token string) (*ShareLink, err
 	}
 
 	link.HasPassword = link.PasswordHash != ""
-	link.AllowSpeedtest = time.Until(link.ExpiresAt) < 24*time.Hour
+	link.AllowSpeedtest = false // Never allow speedtest on shared pages
 	return &link, nil
 }
 
@@ -195,7 +195,7 @@ func ListByAgent(ctx context.Context, db *gorm.DB, workspaceID, agentID uint) ([
 	// Set computed fields
 	for i := range links {
 		links[i].HasPassword = links[i].PasswordHash != ""
-		links[i].AllowSpeedtest = time.Until(links[i].ExpiresAt) < 24*time.Hour
+		links[i].AllowSpeedtest = false // Never allow speedtest on shared pages
 	}
 
 	return links, nil

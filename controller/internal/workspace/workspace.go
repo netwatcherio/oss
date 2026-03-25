@@ -271,14 +271,98 @@ func (s *Store) UpdateWorkspace(ctx context.Context, id uint, in UpdateWorkspace
 }
 
 func (s *Store) DeleteWorkspace(ctx context.Context, id uint) error {
-	res := s.db.WithContext(ctx).Delete(&Workspace{}, "id = ?", id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1) Collect all agent IDs in this workspace
+		var agentIDs []uint
+		if err := tx.Model(&wsAgent{}).Where("workspace_id = ?", id).Pluck("id", &agentIDs).Error; err != nil {
+			return err
+		}
+
+		if len(agentIDs) > 0 {
+			// Collect all probe IDs owned by these agents
+			var probeIDs []uint
+			if err := tx.Model(&wsProbe{}).Where("agent_id IN ?", agentIDs).Pluck("id", &probeIDs).Error; err != nil {
+				return err
+			}
+
+			if len(probeIDs) > 0 {
+				// Delete probe targets
+				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsTarget{}).Error; err != nil {
+					return err
+				}
+				// Delete alert rules referencing these probes
+				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsAlertRule{}).Error; err != nil {
+					return err
+				}
+				// Delete alerts referencing these probes
+				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsAlert{}).Error; err != nil {
+					return err
+				}
+				// Delete route baselines for these probes
+				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsRouteBaseline{}).Error; err != nil {
+					return err
+				}
+				// Delete the probes
+				if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsProbe{}).Error; err != nil {
+					return err
+				}
+			}
+
+			// Delete share links for these agents
+			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsShareLink{}).Error; err != nil {
+				return err
+			}
+			// Delete speedtest servers for these agents
+			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsSpeedtestServer{}).Error; err != nil {
+				return err
+			}
+			// Delete speedtest queue items for these agents
+			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsSpeedtestQueue{}).Error; err != nil {
+				return err
+			}
+			// Delete agent auth PINs
+			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsAgentPin{}).Error; err != nil {
+				return err
+			}
+			// Delete the agents
+			if err := tx.Where("workspace_id = ?", id).Delete(&wsAgent{}).Error; err != nil {
+				return err
+			}
+		}
+
+		// 2) Delete workspace-level alert rules & alerts
+		if err := tx.Where("workspace_id = ?", id).Delete(&wsAlertRule{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("workspace_id = ?", id).Delete(&wsAlert{}).Error; err != nil {
+			return err
+		}
+
+		// 3) Delete workspace share links (catch any not tied to specific agents)
+		if err := tx.Where("workspace_id = ?", id).Delete(&wsShareLink{}).Error; err != nil {
+			return err
+		}
+
+		// 4) Delete workspace speedtest queue items
+		if err := tx.Where("workspace_id = ?", id).Delete(&wsSpeedtestQueue{}).Error; err != nil {
+			return err
+		}
+
+		// 5) Delete workspace members
+		if err := tx.Where("workspace_id = ?", id).Delete(&Member{}).Error; err != nil {
+			return err
+		}
+
+		// 6) Delete the workspace itself
+		res := tx.Delete(&Workspace{}, "id = ?", id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // --- Member API ---
@@ -504,3 +588,66 @@ func roleAtLeast(role, minRole Role) bool {
 	}
 	return hierarchy[role] >= hierarchy[minRole]
 }
+
+// -------------------- Local table models for cascade deletion --------------------
+// These avoid circular imports with other packages.
+
+type wsAgent struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsAgent) TableName() string { return "agents" }
+
+type wsProbe struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsProbe) TableName() string { return "probes" }
+
+type wsTarget struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsTarget) TableName() string { return "probe_targets" }
+
+type wsAlertRule struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsAlertRule) TableName() string { return "alert_rules" }
+
+type wsAlert struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsAlert) TableName() string { return "alerts" }
+
+type wsRouteBaseline struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsRouteBaseline) TableName() string { return "route_baselines" }
+
+type wsShareLink struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsShareLink) TableName() string { return "share_links" }
+
+type wsSpeedtestServer struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsSpeedtestServer) TableName() string { return "agent_speedtest_servers" }
+
+type wsSpeedtestQueue struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsSpeedtestQueue) TableName() string { return "speedtest_queue" }
+
+type wsAgentPin struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (wsAgentPin) TableName() string { return "agent_pins" }

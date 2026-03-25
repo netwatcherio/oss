@@ -1009,12 +1009,26 @@ func Update(ctx context.Context, db *gorm.DB, in UpdateInput) (*Probe, error) {
 	return GetByID(ctx, db, in.ID)
 }
 
-// Delete hard-deletes the probe and its targets.
+// Delete hard-deletes the probe and all associated data.
 func Delete(ctx context.Context, db *gorm.DB, id uint) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete targets
 		if err := tx.Where("probe_id = ?", id).Delete(&Target{}).Error; err != nil {
 			return err
 		}
+		// Delete alert rules referencing this probe
+		if err := tx.Where("probe_id = ?", id).Delete(&dbAlertRule{}).Error; err != nil {
+			return err
+		}
+		// Delete alerts referencing this probe
+		if err := tx.Where("probe_id = ?", id).Delete(&dbAlert{}).Error; err != nil {
+			return err
+		}
+		// Delete route baselines for this probe
+		if err := tx.Where("probe_id = ?", id).Delete(&dbRouteBaseline{}).Error; err != nil {
+			return err
+		}
+		// Delete the probe itself
 		res := tx.Delete(&Probe{}, id)
 		if res.Error != nil {
 			return res.Error
@@ -1250,3 +1264,24 @@ func (p Probe) String() string {
 	return fmt.Sprintf("Probe{id=%d, ws=%d, agent=%d, type=%s, enabled=%t, every=%ds, timeout=%ds, targets=[%s]}",
 		p.ID, p.WorkspaceID, p.AgentID, p.Type, p.Enabled, p.IntervalSec, p.TimeoutSec, strings.Join(ts, ","))
 }
+
+// -------------------- Local table models for cascade deletion --------------------
+// These avoid circular imports with the alert package.
+
+type dbAlertRule struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbAlertRule) TableName() string { return "alert_rules" }
+
+type dbAlert struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbAlert) TableName() string { return "alerts" }
+
+type dbRouteBaseline struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (dbRouteBaseline) TableName() string { return "route_baselines" }
