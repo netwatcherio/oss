@@ -1454,6 +1454,7 @@ const hasSelectedAgentProbes = computed(() => {
 .probe-action {
   padding: 0.5rem;
   border-radius: 8px;
+  background: none;
   color: var(--bs-secondary-color);
   transition: all 0.2s;
   text-decoration: none;
@@ -1463,6 +1464,7 @@ const hasSelectedAgentProbes = computed(() => {
   width: 36px;
   height: 36px;
   border: 1px solid transparent;
+  cursor: pointer;
 }
 
 .probe-action:hover {
