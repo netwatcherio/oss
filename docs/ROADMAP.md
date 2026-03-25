@@ -15,7 +15,7 @@
 | **Quality Metrics** | MOS Score (ITU-T G.107 E-Model) for VoIP quality |
 | **Monitoring** | Bidirectional probe detection, 3-tier agent status (Online/Stale/Offline) |
 | **Visualization** | D3 Workspace Network Map, Connectivity Matrix, real-time WebSocket dashboards |
-| **Alerting** | Compound AND/OR conditions, MTR-specific (hop loss/latency/route changes), SysInfo (CPU/Memory), Agent Offline detection |
+| **Alerting** | Compound AND/OR conditions, MTR-specific (hop loss/latency/route changes), DNS (query time/failure/NXDOMAIN), SysInfo (CPU/Memory), Agent Offline detection, webhook notifications (HMAC-signed), auto-resolve on recovery |
 | **Controller APIs** | Centralized GeoIP, WHOIS, OUI lookup, `/whoami` for air-gapped networks |
 | **Multi-Tenancy** | Workspace isolation, configurable resource limits, RBAC (Owner/Admin/User/Viewer) |
 | **Sharing** | Sharable Agent Pages (P3.6) with token-based access, password protection, speedtest gating |
@@ -52,33 +52,37 @@
 
 ---
 
-### P1.4 Email & Registration Configuration ⏳
-**Status: Partial (backend scaffolding exists)** | **Effort: Low**
+### P1.4 Email & Registration Configuration ✅
+**Status: Complete**
 
 **System-Wide SMTP (via .env):**
-- [ ] Connect `sendEmailNotification` to email queue
-- [ ] SMTP host, port, user, password env vars (mostly in place)
-- [ ] HTML + plaintext email templates
-- [ ] Digest mode option (batch alerts)
+- [x] SMTP host, port, user, password, TLS, skip-verify env vars
+- [x] Background email worker with queue, retry logic, batch processing
+- [x] HTML + plaintext branded email templates (invite, registration, password reset, email verification)
+- [x] Webhook delivery alternative (`EMAIL_WEBHOOK_URL`)
 
 **Registration & Verification Controls:**
-- [ ] `REQUIRE_EMAIL_VERIFICATION` env var (default: `false`)
-- [ ] `ENABLE_REGISTRATION` env var (default: `true`)
-- [ ] RBAC enforcement: verified email required for workspace creation when enabled
-- [ ] Block unverified users from sensitive actions (invites, API key generation)
+- [x] `REQUIRE_EMAIL_VERIFICATION` env var (default: `false`)
+- [x] `REGISTRATION_ENABLED` env var (default: `true`)
+- [x] Email verification flow (send, resend, verify endpoints + panel UI)
+- [x] Password reset flow (forgot password, reset with token)
+- [x] Workspace invite emails with branded templates
 
-**Priority:** Medium — Essential for production deployments
+> **Future Enhancement:** Alert email digest mode (batch alerts) — `sendEmailNotification` in alerting pipeline is scaffolded but not yet connected to the email queue.
+
+**Priority:** ✅ Shipped
 
 ---
 
-### P1.5 Smart Notifications ⏳
-**Status: Partial** | **Effort: Low**
+### P1.5 Smart Notifications 🔄
+**Status: Partially Complete** | **Remaining: Low Effort**
 
 | Completed | Pending |
 |-----------|---------|
-| Recovery notifications | Debouncing (suppress duplicates in time window) |
-| | Grouping (combine related alerts) |
-| | Escalation (Warning → Critical after N minutes) |
+| Auto-resolve on recovery (probes + agent offline) | Debouncing (suppress duplicates in time window) |
+| Webhook notifications with HMAC signing | Grouping (combine related alerts) |
+| Panel in-app alert notifications | Escalation (Warning → Critical after N minutes) |
+| Duplicate suppression (skip if active alert exists) | |
 
 **Priority:** Medium — Reduces notification fatigue
 
@@ -176,7 +180,7 @@ Based on user value and competitive positioning:
 | Priority | Feature | Rationale |
 |----------|---------|-----------|
 | 1 | P2.1 SNMP Probe | Critical competitor gap |
-| 2 | P1.4 Email Notifications | Essential for production use |
+| ~~2~~ | ~~P1.4 Email Notifications~~ | ✅ Shipped |
 | ~~3~~ | ~~P2.2 DNS Probe~~ | ✅ Shipped |
 | 4 | P2.3 HTTP/HTTPS Probe | Agent code exists but needs migration |
 | 5 | P1.3 Dynamic Thresholds | Differentiating intelligence |
@@ -203,7 +207,7 @@ Based on user value and competitive positioning:
 - [ ] SNMP polling shipped
 - [x] DNS probe shipped
 - [ ] HTTP/HTTPS probe shipped
-- [ ] Email notifications complete
+- [x] Email notifications complete
 - [ ] 500+ GitHub stars
 
 ### 12-Month Goals (End of 2026)

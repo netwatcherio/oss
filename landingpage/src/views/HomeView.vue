@@ -313,7 +313,7 @@
                         <li class="completed"><i class="bi bi-check-circle-fill"></i> DNS Probe</li>
                         <li class="in-progress"><i class="bi bi-arrow-repeat"></i> HTTP/HTTPS Probes</li>
                         <li class="in-progress"><i class="bi bi-arrow-repeat"></i> Dynamic Thresholds</li>
-                        <li class="in-progress"><i class="bi bi-arrow-repeat"></i> Email Notifications</li>
+                        <li class="completed"><i class="bi bi-check-circle-fill"></i> Email Notifications</li>
                     </ul>
                 </div>
 
