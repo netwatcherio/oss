@@ -2272,7 +2272,16 @@ const hasSelectedAgentProbes = computed(() => {
   color: #f1f5f9 !important;
 }
 
+[data-theme="dark"] .modal-footer .btn-secondary,
+[data-theme="dark"] .modal-footer .btn {
+  background: #334155 !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+/* Must come AFTER the generic .btn rule to override it for delete button */
 [data-theme="dark"] .modal-footer .btn-outline-danger,
+[data-theme="dark"] .modal-footer .btn.btn-outline-danger,
 [data-theme="dark"] .btn-outline-danger {
   color: #f87171 !important;
   border-color: #f87171 !important;
@@ -2283,16 +2292,6 @@ const hasSelectedAgentProbes = computed(() => {
 [data-theme="dark"] .btn-outline-danger:hover {
   background: rgba(248, 113, 113, 0.15) !important;
   color: #fca5a5 !important;
-}
-
-[data-theme="dark"] .modal-footer .btn-secondary,
-[data-theme="dark"] .modal-footer .btn {
-  background: #334155 !important;
-  border-color: #475569 !important;
-  color: #e2e8f0 !important;
-}
-
-[data-theme="dark"] .modal-footer .btn-outline-danger {
-  background: transparent !important;
+  border-color: #fca5a5 !important;
 }
 </style>
