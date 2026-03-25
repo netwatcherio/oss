@@ -510,8 +510,8 @@ type TrafficSim struct {
     stopping      int32  // atomic: 0=no, 1=yes
     
     // Identity
-    ThisAgent     primitive.ObjectID  // TODO: uint
-    OtherAgent    primitive.ObjectID  // TODO: uint
+    ThisAgent     uint
+    OtherAgent    uint
     
     // Connection
     Conn          *net.UDPConn
@@ -520,8 +520,8 @@ type TrafficSim struct {
     IsServer      bool
     
     // Authorization (server only)
-    AllowedAgents []primitive.ObjectID
-    Connections   map[primitive.ObjectID]*Connection
+    AllowedAgents []uint
+    Connections   map[uint]*Connection
     
     // Statistics
     ClientStats   *ClientStats
@@ -540,42 +540,29 @@ type TrafficSim struct {
 
 ---
 
-## Issues for Re-implementation
+## Migration Notes (Completed)
 
-### 1. MongoDB → PostgreSQL/ClickHouse Migration
+The following migrations have been completed:
 
-The original implementation used MongoDB ObjectIDs throughout:
+### MongoDB → PostgreSQL/ClickHouse Migration ✅
+
+All MongoDB `primitive.ObjectID` references have been migrated to `uint` IDs:
 
 ```go
-// OLD (MongoDB)
-import "go.mongodb.org/mongo-driver/bson/primitive"
-
-type TrafficSimMsg struct {
-    Src primitive.ObjectID `json:"src"`
-    Dst primitive.ObjectID `json:"dst"`
-}
-
-// NEW (PostgreSQL)
+// Migrated
 type TrafficSimMsg struct {
     SrcAgentID uint `json:"src_agent_id"`
     DstAgentID uint `json:"dst_agent_id"`
 }
 ```
 
-**Affected areas:**
-- `TrafficSim.ThisAgent` / `OtherAgent`
-- `TrafficSimMsg.Src` / `Dst`
-- `Connection.AgentID`
-- `AllowedAgents []primitive.ObjectID`
-- All flow tracking keys
+### ProbeData Structure Alignment ✅
 
-### 2. ProbeData Structure Alignment
-
-Current controller expects:
+TrafficSim now emits the standard ProbeData format:
 ```go
 type ProbeData struct {
     ProbeID     uint            `json:"probe_id"`
-    AgentID     uint            `json:"agent_id"`     // Reporting agent
+    AgentID     uint            `json:"agent_id"`
     Type        Type            `json:"type"`
     Payload     json.RawMessage `json:"payload"`
     Target      string          `json:"target"`
@@ -583,15 +570,7 @@ type ProbeData struct {
 }
 ```
 
-TrafficSim needs to emit this format, not the old MongoDB-based structure.
-
-### 3. Typo Fix
-
-```go
-// Line ~1080
-reportingAgent, err := primitive.ObjectIDFromHex(os.getEnv("AGENT_ID"))
-//                                                    ^ should be os.Getenv
-```
+> **Note:** The `trafficsim.go.disabled` file in the agent still contains the old MongoDB-based implementation. The active `trafficsim.go` uses the migrated `uint` ID format.
 
 ---
 
@@ -835,147 +814,20 @@ probe:
 
 ---
 
-## Re-implementation Plan
+## Re-implementation Summary (Completed)
 
-### Phase 1: Data Model Migration (1-2 days)
+The TrafficSim probe has been fully re-implemented with the following completed phases:
 
-**Goal:** Replace all MongoDB types with PostgreSQL-compatible types.
+| Phase | Description | Status |
+|-------|-------------|--------|
+| **Data Model Migration** | Replaced all `primitive.ObjectID` → `uint` | ✅ Complete |
+| **ProbeData Alignment** | Emits standard `ProbeData` format with `uint` IDs | ✅ Complete |
+| **Controller Handler** | ClickHouse storage via `initTrafficSim` | ✅ Complete |
+| **Server Mode** | AllowedAgents validation, connection cleanup, REPORT messages | ✅ Complete |
+| **Bidirectional Metrics** | Forward + reverse direction measurement | ✅ Complete |
+| **Triggered MTR** | Automatic diagnostics on anomaly detection | ✅ Complete |
 
-| Change | Files Affected |
-|--------|----------------|
-| Replace `primitive.ObjectID` → `uint` | `trafficsim.go` |
-| Update `TrafficSimMsg` struct | `trafficsim.go` |
-| Update `Connection` struct | `trafficsim.go` |
-| Update flow key format | `trafficsim.go` |
-| Fix `os.getEnv` typo | `trafficsim.go` |
-
-```go
-// Before
-type TrafficSimMsg struct {
-    Src primitive.ObjectID `json:"src"`
-    Dst primitive.ObjectID `json:"dst"`
-}
-
-// After
-type TrafficSimMsg struct {
-    SrcAgentID uint `json:"src_agent_id"`
-    DstAgentID uint `json:"dst_agent_id"`
-}
-```
-
-### Phase 2: ProbeData Alignment (1 day)
-
-**Goal:** Align with current controller `probe.Dispatch` expectations.
-
-```go
-// Create payload structure
-type TrafficSimPayload struct {
-    Direction      string             `json:"direction"`
-    CycleRange     CycleRange         `json:"cycle_range"`
-    LostPackets    int                `json:"lost_packets"`
-    LossPercentage float64            `json:"loss_percentage"`
-    OutOfSequence  int                `json:"out_of_sequence"`
-    RTTStats       RTTStatistics      `json:"rtt_stats"`
-    JitterStats    JitterStatistics   `json:"jitter_stats"`
-    Flows          map[string]FlowStats `json:"flows"`
-    Timestamp      time.Time          `json:"timestamp"`
-}
-
-// Emit to data channel
-payload, _ := json.Marshal(stats)
-ts.DataChan <- probes.ProbeData{
-    ProbeID:     ts.Probe.ID,
-    Type:        probes.ProbeType_TRAFFICSIM,
-    Payload:     payload,
-    Target:      fmt.Sprintf("%s:%d", ts.IPAddress, ts.Port),
-    TargetAgent: ts.OtherAgentID,  // uint now
-}
-```
-
-### Phase 3: Controller Handler (0.5 days)
-
-**Goal:** Add ClickHouse storage for TrafficSim data.
-
-```go
-// controller/internal/probe/trafficsim.go
-func initTrafficSim(db *sql.DB) {
-    Register(NewHandler[TrafficSimPayload](
-        TypeTrafficSim,
-        nil, // validation
-        func(ctx context.Context, data ProbeData, p TrafficSimPayload) error {
-            return SaveRecordCH(ctx, db, data, string(TypeTrafficSim), p)
-        },
-    ))
-}
-```
-
-Add to `InitWorkers`:
-```go
-func InitWorkers(ch *sql.DB) {
-    // ...existing handlers
-    initTrafficSim(ch)
-}
-```
-
-### Phase 4: Server Mode Polish (1-2 days)
-
-**Goal:** Ensure server mode is production-ready.
-
-- [ ] Validate `AllowedAgents` from agent config
-- [ ] Add connection timeout/cleanup
-- [ ] Implement proper REPORT messages
-- [ ] Test multi-client scenarios
-- [ ] Add server-side metrics to ClickHouse
-
-### Phase 5: Testing (2-3 days)
-
-| Test | Description |
-|------|-------------|
-| **Unit tests** | Message parsing, stats calculation |
-| **2-agent integration** | Client↔Server basic flow |
-| **Multi-client** | 3+ clients to 1 server |
-| **Reconnection** | Network interruption recovery |
-| **Interface failover** | WiFi→Ethernet transition |
-| **High packet loss** | Simulated 50%+ loss |
-
-### Phase 6: Enable & Document (0.5 days)
-
-1. Rename `trafficsim.go.disabled` → `trafficsim.go`
-2. Add to worker switch in `workers/probes.go`
-3. Update `docs/agent-probes.md`
-4. Add panel UI components if needed
-
----
-
-## Simplified Alternative
-
-If full re-implementation is too complex, consider a **simplified version**:
-
-```go
-type SimpleTrafficSim struct {
-    ServerAddr  string
-    Interval    time.Duration
-    PacketSize  int
-}
-
-// Just UDP ping-pong with timestamps
-func (s *SimpleTrafficSim) Run(ctx context.Context) {
-    for {
-        sent := time.Now()
-        conn.Write(timestampPacket)
-        conn.Read(response)  
-        rtt := time.Since(sent)
-        // Report RTT
-    }
-}
-```
-
-This would provide:
-- ✅ Basic latency measurement
-- ✅ Packet loss detection
-- ❌ No flow statistics
-- ❌ No percentile calculations
-- ❌ No bidirectional metrics
+> **Note:** The `trafficsim.go.disabled` file contains the original MongoDB-based implementation for reference. The active `trafficsim.go` is the fully migrated version.
 
 ---
 

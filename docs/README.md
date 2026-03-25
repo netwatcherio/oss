@@ -58,7 +58,7 @@ NetWatcher is a distributed network monitoring system with three main components
 │                        AGENTS                                │
 │                     (Go Daemons)                            │
 │    ┌──────────────────────────────────────────────────┐    │
-│    │  MTR • Ping • Speedtest • SysInfo • TrafficSim  │    │
+│    │  MTR • Ping • DNS • Speedtest • SysInfo • TrafficSim │    │
 │    └──────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -108,6 +108,7 @@ Monitoring checks configured in the panel. Each probe targets one or more hosts 
 |------|-------------|
 | **MTR** | Multi-hop traceroute with latency and loss per hop |
 | **PING** | ICMP ping with RTT statistics |
+| **DNS** | DNS resolution monitoring with query time metrics |
 | **SPEEDTEST** | Download/upload speed measurements |
 | **SYSINFO** | System information (CPU, memory, OS) |
 | **NETINFO** | Network information (public IP, gateway, ISP) |

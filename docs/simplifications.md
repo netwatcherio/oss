@@ -99,10 +99,8 @@ func stringsTrim(s string) string { ... }
 
 | File | Issue | Action |
 |------|-------|--------|
-| `web/probes.old` | 13KB of old code | Delete |
-| `internal/probe/dns.go` | Only 14 bytes (empty) | Delete or implement |
+| `web/probes.old` | 13KB of old code | ✅ Deleted |
 | `internal/probe/alerts.go` | Only 14 bytes (empty) | Delete or implement |
-| `internal/probe/trafficsim.go` | Only 14 bytes (empty) | Delete or implement |
 
 ---
 
@@ -181,20 +179,17 @@ type PaginatedResponse struct {
 
 ## Agent Simplifications
 
-### 1. ⚠️ Dead/Old Probe Files
+### 1. ⚠️ Disabled Probe Files
 
 | File | Size | Issue |
 |------|------|-------|
-| `agent/probes/dns.old` | 6,306 | Old code |
-| `agent/probes/rperf.current` | 7,274 | `.current` extension (use `.go`) |
-| `agent/probes/trafficsim.current` | 78,205 | `.current` extension |
-| `agent/probes/trafficsim.oldgo` | 22,244 | Old code |
-| `agent/probes/web.current` | 6,788 | `.current` extension |
+| `agent/probes/rperf.go.disabled` | 7,274 | References old `Probe.Config` struct |
+| `agent/probes/trafficsim.go.disabled` | 78,205 | Type mismatch: `uint` vs `primitive.ObjectID` |
+| `agent/probes/web.go.disabled` | 6,788 | Similar struct field issues |
 
 **Recommendation:**
-1. Delete `.old` and `.oldgo` files
-2. Rename `.current` files to `.go`
-3. Add migration notes if needed
+1. Migrate disabled files to use current `Probe` struct
+2. Re-enable as `.go` once compile errors are fixed
 
 ---
 

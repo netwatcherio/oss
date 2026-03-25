@@ -1,6 +1,6 @@
 # NetWatcher OSS Roadmap 2026
 
-> Last Updated: February 2026
+> Last Updated: March 2026
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Category | Features |
 |----------|----------|
-| **Agents** | Cross-platform (Windows, Linux, macOS), auto-update with SHA256 verification, watchdog timer |
-| **Probe Types** | PING, MTR, TrafficSim, Speedtest, Sysinfo, Netinfo |
+| **Agents** | Cross-platform (Windows, Linux), auto-update with SHA256 verification, watchdog timer |
+| **Probe Types** | PING, MTR, TrafficSim, Speedtest, Sysinfo, Netinfo, DNS, HTTP/HTTPS |
 | **Quality Metrics** | MOS Score (ITU-T G.107 E-Model) for VoIP quality |
 | **Monitoring** | Bidirectional probe detection, 3-tier agent status (Online/Stale/Offline) |
 | **Visualization** | D3 Workspace Network Map, Connectivity Matrix, real-time WebSocket dashboards |
@@ -89,7 +89,7 @@
 ### P2.1 SNMP Probe 🎯
 **Priority: Critical** | **Effort: High**
 
-The #1 feature gap vs. competitors (Obkio, Kentik):
+The #1 feature gap vs. established competitors:
 
 - SNMP v2c/v3 support via gosnmp
 - Device discovery and OID auto-detection
@@ -100,26 +100,27 @@ The #1 feature gap vs. competitors (Obkio, Kentik):
 
 ---
 
-### P2.2 DNS Probe
-**Priority: High** | **Effort: Medium**
+### P2.2 DNS Probe ✅
+**Status: Complete**
 
-- Query types: A, AAAA, MX, TXT, CNAME, NS
-- Resolution time metrics
-- Record validation (expected vs. actual)
-- Multiple resolver support
-- Propagation delay detection
+- [x] Query types: A, AAAA, MX, TXT, CNAME, NS
+- [x] Resolution time metrics
+- [x] Multiple resolver support
+- [x] Configurable intervals
+- [x] Dashboard visualization
+- [x] Shareable DNS pages
 
 ---
 
-### P2.3 HTTP/HTTPS Probe
-**Priority: High** | **Effort: Low**
+### P2.3 HTTP/HTTPS Probe 🔄
+**Status: In Progress** | **Remaining: Medium Effort**
 
-- Methods: GET, POST, HEAD
-- Status code validation
-- Response time measurement
-- Body pattern matching
-- TLS certificate expiry monitoring
-- Custom headers, Basic/Bearer auth
+| Completed | Pending |
+|-----------|---------|
+| Response timing breakdown (DNS, TCP, TLS, TTFB) | Migrate `web.go.disabled` to current probe architecture |
+| TLS certificate extraction | Register controller handler |
+| Status code and header tracking | Dashboard visualization |
+| | Shareable HTTP pages |
 
 ---
 
@@ -176,9 +177,9 @@ Based on user value and competitive positioning:
 |----------|---------|-----------|
 | 1 | P2.1 SNMP Probe | Critical competitor gap |
 | 2 | P1.4 Email Notifications | Essential for production use |
-| 3 | P2.3 HTTP/HTTPS Probe | Low effort, high value |
-| 4 | P1.3 Dynamic Thresholds | Differentiating intelligence |
-| 5 | P2.2 DNS Probe | Completes probe coverage |
+| ~~3~~ | ~~P2.2 DNS Probe~~ | ✅ Shipped |
+| 4 | P2.3 HTTP/HTTPS Probe | Agent code exists but needs migration |
+| 5 | P1.3 Dynamic Thresholds | Differentiating intelligence |
 | 6 | P1.1 Interface Binding | Finishes existing feature |
 | 7 | P3.7 Prometheus/Loki API | Enterprise integration demand |
 
@@ -200,7 +201,8 @@ Based on user value and competitive positioning:
 
 ### 6-Month Goals (Mid-2026)
 - [ ] SNMP polling shipped
-- [ ] DNS + HTTP probes shipped
+- [x] DNS probe shipped
+- [ ] HTTP/HTTPS probe shipped
 - [ ] Email notifications complete
 - [ ] 500+ GitHub stars
 

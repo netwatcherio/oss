@@ -130,7 +130,7 @@ controller/
 |-----------|---------|
 | **Language** | Go |
 | **Protocol** | WebSocket (gobwas) |
-| **Probes** | MTR, Ping, Speedtest, SysInfo, NetInfo, TrafficSim |
+| **Probes** | MTR, Ping, DNS, Speedtest, SysInfo, NetInfo, TrafficSim |
 | **Location** | `/agent/` |
 
 **Key Files:**
@@ -144,6 +144,7 @@ agent/
 │   ├── types.go               # Probe/ProbeData structures
 │   ├── mtr.go                 # MTR probe (uses Trippy)
 │   ├── ping.go                # ICMP ping probe
+│   ├── dns.go                 # DNS resolution probe
 │   ├── speedtest.go           # Speed test
 │   ├── speedtest_queue.go     # Speedtest job queue
 │   ├── sysinfo.go             # System information
@@ -223,6 +224,7 @@ sequenceDiagram
 |------|-------------|
 | `MTR` | Multi-hop traceroute with latency/loss per hop |
 | `PING` | ICMP ping with RTT statistics |
+| `DNS` | DNS resolution monitoring with query time metrics |
 | `SPEEDTEST` | Download/upload speed tests |
 | `SYSINFO` | System info (CPU, memory, host details) |
 | `NETINFO` | Network info (public IP, gateway, ISP) |

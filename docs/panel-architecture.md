@@ -380,6 +380,7 @@ All views in `panel/src/views/`:
 | `DeactivateAgent.vue` | Temporarily disable agent (sets `active: false`) |
 | `ProbesEdit.vue` | Manage agent probes |
 | `Speedtests.vue` | Speedtest history |
+| `DNS.vue` | DNS probe monitoring dashboard |
 | `NewSpeedtest.vue` | Trigger manual speedtest |
 
 ### Probe Views
@@ -419,6 +420,7 @@ All views in `panel/src/views/`:
 |------|---------|
 | `SharedAgent.vue` | Public agent dashboard via share token |
 | `SharedProbe.vue` | Public probe data view via share token |
+| `SharedDNS.vue` | Public DNS probe monitoring via share token |
 
 
 ---

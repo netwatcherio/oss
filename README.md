@@ -148,6 +148,7 @@ See [docs/permissions.md](./docs/permissions.md) for the complete permission mat
 |------|-------------|
 | MTR | Multi-hop traceroute with per-hop latency and loss |
 | PING | ICMP ping with RTT statistics |
+| DNS | DNS resolution monitoring with query time metrics |
 | SPEEDTEST | Download/upload speed measurements |
 | SYSINFO | System information (CPU, memory, OS) |
 | NETINFO | Network information (public IP, gateway, ISP) |

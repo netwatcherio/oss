@@ -61,6 +61,8 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, pctx ProbeContext, payl
 			result = evaluateMtrRule(ctx, db, &rule, pctx, payloadJSON)
 		case "SYSINFO":
 			result = evaluateSysInfoRule(&rule, pctx, payloadJSON)
+		case "DNS":
+			result = evaluateDnsRule(&rule, pctx, payloadJSON)
 		default:
 			result = evaluateStandardRule(&rule, pctx, payloadJSON)
 		}

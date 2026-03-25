@@ -15,7 +15,7 @@
                 <a href="https://github.com/netwatcherio/oss" class="btn btn-outline btn-sm" target="_blank">
                     <i class="bi bi-github"></i> GitHub
                 </a>
-                <router-link to="/#get-started" class="btn btn-primary btn-sm">Get Started</router-link>
+                <a href="https://app.netwatcher.io" class="btn btn-primary btn-sm" target="_blank">Get Started</a>
             </div>
             <button class="mobile-menu-btn" aria-label="Menu" @click="toggleMobile">
                 <i class="bi" :class="mobileOpen ? 'bi-x-lg' : 'bi-list'"></i>

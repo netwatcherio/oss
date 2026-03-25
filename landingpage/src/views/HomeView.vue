@@ -24,8 +24,8 @@
                     <span class="btn-arrow">→</span>
                 </a>
                 <router-link to="/#get-started" class="btn btn-outline btn-lg btn-dim">
-                    <i class="bi bi-terminal"></i>
-                    <span>Self-Host in 60s</span>
+                    <i class="bi bi-hdd-rack"></i>
+                    <span>Self-Host</span>
                 </router-link>
             </div>
 
@@ -64,12 +64,12 @@
             <div class="pain-grid">
                 <div class="pain-card">
                     <div class="pain-emoji">💸</div>
-                    <h3>Obkio: ~$300/mo for 5 agents</h3>
+                    <h3>SaaS Tools: ~$300/mo</h3>
                     <p>That's $60 per agent. <em>Per month.</em> For doing what a script could do.</p>
                 </div>
                 <div class="pain-card">
                     <div class="pain-emoji">🏢</div>
-                    <h3>Kentik: "Call for pricing"</h3>
+                    <h3>Enterprise: "Call for pricing"</h3>
                     <p>Translation: $2,000+/mo and a sales team that won't stop calling.</p>
                 </div>
                 <div class="pain-card pain-solution">
@@ -109,7 +109,7 @@
                 <div class="feature-card">
                     <div class="feature-orb orb-blue"><i class="bi bi-hdd-network"></i></div>
                     <h3>Agents Everywhere</h3>
-                    <p>Windows, Linux, macOS. Deploy in minutes. Monitor from anywhere your users actually are.</p>
+                    <p>Windows and Linux. Deploy in minutes. Monitor from anywhere your users actually are.</p>
                 </div>
 
                 <div class="feature-card">
@@ -214,8 +214,8 @@
                             <tr>
                                 <th>Feature</th>
                                 <th class="highlight">NetWatcher</th>
-                                <th>Obkio</th>
-                                <th>Kentik</th>
+                                <th>SaaS Tools</th>
+                                <th>Enterprise</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -310,6 +310,8 @@
                         <li class="completed"><i class="bi bi-check-circle-fill"></i> MOS Score (VoIP Quality)</li>
                         <li class="completed"><i class="bi bi-check-circle-fill"></i> Enhanced Alerting</li>
                         <li class="completed"><i class="bi bi-check-circle-fill"></i> Sharable Pages</li>
+                        <li class="completed"><i class="bi bi-check-circle-fill"></i> DNS Probe</li>
+                        <li class="in-progress"><i class="bi bi-arrow-repeat"></i> HTTP/HTTPS Probes</li>
                         <li class="in-progress"><i class="bi bi-arrow-repeat"></i> Dynamic Thresholds</li>
                         <li class="in-progress"><i class="bi bi-arrow-repeat"></i> Email Notifications</li>
                     </ul>
@@ -323,8 +325,6 @@
                     <h3>Probe Expansion</h3>
                     <ul class="roadmap-items">
                         <li class="highlight-item"><i class="bi bi-router"></i> SNMP Polling</li>
-                        <li><i class="bi bi-globe2"></i> DNS Probe Type</li>
-                        <li><i class="bi bi-link-45deg"></i> HTTP/HTTPS Probes</li>
                         <li><i class="bi bi-signpost-2"></i> AS Path Resolution</li>
                     </ul>
                 </div>
@@ -448,58 +448,76 @@
     <section id="get-started" class="section">
         <div class="container">
             <div class="section-header">
-                <span class="section-eyebrow">Quick Start</span>
-                <h2 class="section-title">Deploy in 60 Seconds</h2>
-                <p class="section-subtitle">If you know Docker, you know NetWatcher</p>
+                <span class="section-eyebrow">Get Started</span>
+                <h2 class="section-title">Start Monitoring in Minutes</h2>
+                <p class="section-subtitle">Jump straight into our hosted platform or deploy on your own infrastructure</p>
             </div>
 
-            <div class="terminal-window">
-                <div class="terminal-header">
-                    <div class="terminal-buttons">
-                        <span class="btn-red"></span>
-                        <span class="btn-yellow"></span>
-                        <span class="btn-green"></span>
+            <div class="get-started-grid">
+                <!-- Primary: Cloud Sign-Up -->
+                <div class="gs-card gs-card-primary">
+                    <div class="gs-card-badge">Recommended</div>
+                    <div class="gs-card-icon">
+                        <i class="bi bi-cloud-check"></i>
                     </div>
-                    <span class="terminal-title">netwatcher@oss:~</span>
-                    <button class="copy-btn" @click="copyCode">
-                        <i class="bi bi-clipboard"></i> Copy
-                    </button>
+                    <h3>Start Free in Seconds</h3>
+                    <p class="gs-card-desc">Create a free account on our hosted platform — no install, no credit card, no Docker required. Just sign up and deploy agents.</p>
+                    <ul class="gs-benefits">
+                        <li><i class="bi bi-check-circle-fill"></i> Instant setup — monitoring in under 2 minutes</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Up to 20 agents &amp; 10 users free forever</li>
+                        <li><i class="bi bi-check-circle-fill"></i> Automatic updates &amp; zero maintenance</li>
+                        <li><i class="bi bi-check-circle-fill"></i> All features included, no paywalls</li>
+                    </ul>
+                    <a href="https://app.netwatcher.io" class="btn btn-primary btn-lg btn-block btn-glow" target="_blank">
+                        <i class="bi bi-lightning-charge"></i> Create Free Account
+                        <span class="btn-arrow">→</span>
+                    </a>
                 </div>
-                <div class="terminal-body">
-                    <pre><code><span class="comment"># 1. Clone the repo</span>
+
+                <!-- Secondary: Self-Host -->
+                <div class="gs-card gs-card-secondary">
+                    <div class="gs-card-icon gs-card-icon-alt">
+                        <i class="bi bi-terminal"></i>
+                    </div>
+                    <h3>Prefer Self-Hosting?</h3>
+                    <p class="gs-card-desc">Full control, unlimited everything. Deploy with Docker in 60 seconds.</p>
+
+                    <div class="terminal-window">
+                        <div class="terminal-header">
+                            <div class="terminal-buttons">
+                                <span class="btn-red"></span>
+                                <span class="btn-yellow"></span>
+                                <span class="btn-green"></span>
+                            </div>
+                            <span class="terminal-title">netwatcher@oss:~</span>
+                            <button class="copy-btn" @click="copyCode">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                        </div>
+                        <div class="terminal-body">
+                            <pre><code><span class="comment"># 1. Clone the repo</span>
 <span class="prompt">$</span> git clone https://github.com/netwatcherio/oss.git &amp;&amp; cd oss
 
-<span class="comment"># 2. Configure (seriously, read the comments)</span>
+<span class="comment"># 2. Configure</span>
 <span class="prompt">$</span> cp .env.example .env &amp;&amp; nano .env
 
 <span class="comment"># 3. Deploy</span>
-<span class="prompt">$</span> docker-compose up -d
+<span class="prompt">$</span> docker-compose up -d</code></pre>
+                        </div>
+                    </div>
 
-<span class="comment"># 4. Access at http://localhost:8080</span>
-<span class="prompt">$</span> <span class="cursor-blink">_</span></code></pre>
+                    <div class="gs-secondary-links">
+                        <a href="https://github.com/netwatcherio/oss" class="btn btn-outline btn-sm" target="_blank">
+                            <i class="bi bi-github"></i> GitHub
+                        </a>
+                        <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md" class="btn btn-outline btn-sm" target="_blank">
+                            <i class="bi bi-book"></i> Docs
+                        </a>
+                        <router-link to="/demo" class="btn btn-outline btn-sm">
+                            <i class="bi bi-images"></i> Screenshots
+                        </router-link>
+                    </div>
                 </div>
-            </div>
-
-            <div class="setup-note">
-                <i class="bi bi-lightbulb"></i>
-                <span>
-                    <strong>Pro tip:</strong> Check the <a
-                        href="https://github.com/netwatcherio/oss/blob/master/docs/README.md"
-                        target="_blank">docs</a> for SMTP, domain config, and production hardening.
-                </span>
-            </div>
-
-            <div class="get-started-links">
-                <a href="https://github.com/netwatcherio/oss" class="btn btn-primary btn-lg" target="_blank">
-                    <i class="bi bi-github"></i> Star on GitHub
-                </a>
-                <a href="https://github.com/netwatcherio/oss/blob/master/docs/README.md" class="btn btn-outline btn-lg"
-                    target="_blank">
-                    <i class="bi bi-book"></i> Read Docs
-                </a>
-                <router-link to="/demo" class="btn btn-outline btn-lg">
-                    <i class="bi bi-images"></i> See Screenshots
-                </router-link>
             </div>
         </div>
     </section>

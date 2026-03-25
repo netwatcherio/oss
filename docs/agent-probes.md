@@ -56,6 +56,8 @@ for _, probe := range probes {
         go handlePingProbe(probe, dataChan)
     case probes.ProbeType_MTR:
         go handleMTRProbe(probe, dataChan)
+    case probes.ProbeType_DNS:
+        go handleDNSProbe(probe, dataChan)
     case probes.ProbeType_SPEEDTEST:
         go handleSpeedTestProbe(probe, dataChan)
     // ... etc
@@ -237,6 +239,62 @@ type NetInfoPayload struct {
 
 ---
 
+### DNS
+
+**Purpose:** DNS resolution monitoring with query time metrics
+
+**Library:** `github.com/miekg/dns`
+
+**Payload:**
+```go
+type DNSPayload struct {
+    DNSServer    string      `json:"dns_server"`
+    RecordType   string      `json:"record_type"`
+    QueryTimeMs  float64     `json:"query_time_ms"`
+    ResponseCode string      `json:"response_code"`
+    Answers      []DNSAnswer `json:"answers"`
+    RawResponse  string      `json:"raw_response"`
+    Error        string      `json:"error,omitempty"`
+    Protocol     string      `json:"protocol"`
+    Target       string      `json:"target"`
+}
+
+type DNSAnswer struct {
+    Name  string `json:"name"`
+    Type  string `json:"type"`
+    Value string `json:"value"`
+    TTL   uint32 `json:"ttl"`
+}
+```
+
+**Supported Record Types:**
+| Type | Description |
+|------|-------------|
+| `A` | IPv4 address |
+| `AAAA` | IPv6 address |
+| `MX` | Mail exchange |
+| `NS` | Nameserver |
+| `SOA` | Start of authority |
+| `TXT` | Text records |
+| `CNAME` | Canonical name |
+| `SRV` | Service locator |
+| `PTR` | Pointer (reverse DNS) |
+
+**Configuration (via probe metadata):**
+| Field | Default | Description |
+|-------|---------|-------------|
+| `dns_server` | `8.8.8.8:53` | DNS resolver address |
+| `record_type` | `A` | Query type (see table above) |
+| `protocol` | `udp` | Transport protocol (`udp` or `tcp`) |
+
+**Execution:**
+- Configuration is stored in probe `metadata` JSONB field
+- Sends a single DNS query per target per probe run
+- Uses configurable timeout from `timeout_sec` (default 10s)
+- Sleeps for `interval_sec` between probe runs
+
+---
+
 ### AGENT (Agent-to-Agent Monitoring)
 
 **Purpose:** Bidirectional monitoring between agents for mesh network health
@@ -322,15 +380,15 @@ These probes are **not** executed as active clients—they exist only as anchors
 
 ### WEB (web.go.disabled)
 
-**Purpose:** HTTP endpoint monitoring
+**Purpose:** HTTP/HTTPS endpoint monitoring
 
-**Potential Features:**
-- Response time measurement
-- Status code validation
-- Content matching
-- TLS certificate checking
+**Planned Features:**
+- Response time measurement (DNS, TCP, TLS, first byte, total)
+- Status code tracking
+- TLS certificate information (expiry, SANs, cipher suite)
+- Content-Type and body size
 
-**Why Disabled:** Incomplete implementation
+**Status:** Disabled — legacy implementation using MongoDB structures. A successor HTTP/HTTPS probe is planned.
 
 ---
 
@@ -376,13 +434,16 @@ type ProbeTarget struct {
 
 **Configuration Field Usage:**
 
-| Field | PING | MTR | TRAFFICSIM | SPEEDTEST |
-|-------|------|-----|------------|----------|
-| `interval_sec` | Scheduling delay | Scheduling delay | N/A | N/A |
-| `timeout_sec` | Pinger timeout | Trippy timeout | N/A | N/A |
-| `count` | ICMP packets | MTR cycles | N/A | N/A |
-| `duration_sec` | N/A | N/A | Run duration | N/A |
-| `server` | N/A | N/A | Server/Client mode | N/A |
+| Field | PING | MTR | DNS | TRAFFICSIM | SPEEDTEST |
+|-------|------|-----|-----|------------|----------|
+| `interval_sec` | Scheduling delay | Scheduling delay | Scheduling delay | N/A | N/A |
+| `timeout_sec` | Pinger timeout | Trippy timeout | Query timeout | N/A | N/A |
+| `count` | ICMP packets | MTR cycles | N/A | N/A | N/A |
+| `duration_sec` | N/A | N/A | N/A | Run duration | N/A |
+| `server` | N/A | N/A | N/A | Server/Client mode | N/A |
+| `metadata` | N/A | N/A | DNS config* | N/A | N/A |
+
+> **\*DNS metadata fields:** `dns_server`, `record_type`, `protocol` — see [DNS section](#dns) above.
 
 > **Note:** `interval_sec` controls **scheduling** (time between probe runs), not the interval between individual packets within a single probe execution.
 

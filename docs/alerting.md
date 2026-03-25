@@ -23,6 +23,7 @@ Alert Definition → Alert Rule → Alert Instance
 | `packet_loss` | PING, TRAFFICSIM | Triggered when avg/max loss exceeds threshold |
 | `latency` | PING, MTR, TRAFFICSIM | Triggered when RTT exceeds threshold |
 | `jitter` | PING, TRAFFICSIM | Monitored for VoIP/real-time traffic |
+| `dns_query_time` | DNS | Triggered when DNS resolution time exceeds threshold |
 | `offline` | HEARTBEAT | Triggered if agent fails to check in |
 
 ---

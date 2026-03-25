@@ -428,6 +428,31 @@ interface NetInfoPayload {
 
 ---
 
+### DNS Payload
+
+```typescript
+interface DNSPayload {
+  dns_server: string;
+  record_type: string;
+  query_time_ms: number;
+  response_code: string;
+  answers: DNSAnswer[];
+  raw_response: string;
+  error?: string;
+  protocol: string;
+  target: string;
+}
+
+interface DNSAnswer {
+  name: string;
+  type: string;
+  value: string;
+  ttl: number;
+}
+```
+
+---
+
 ### SysInfo Payload
 
 ```typescript

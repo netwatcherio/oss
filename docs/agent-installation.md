@@ -1,6 +1,6 @@
 # NetWatcher Agent Installation Guide
 
-This guide covers installing, configuring, and managing the NetWatcher Agent on Windows, Linux, and macOS.
+This guide covers installing, configuring, and managing the NetWatcher Agent on Windows and Linux.
 
 ## Prerequisites
 
@@ -8,11 +8,10 @@ This guide covers installing, configuring, and managing the NetWatcher Agent on 
 |----------|-------------|
 | **Windows** | Windows 10+ or Windows Server 2016+, PowerShell 5.1+, Administrator access |
 | **Linux** | systemd-based distribution (Ubuntu 18.04+, Debian 10+, RHEL 8+, etc.), root access |
-| **macOS** | macOS 10.15+, root access |
 
 ## Quick Start
 
-### Linux / macOS
+### Linux
 
 ```bash
 # Download and run the installer
@@ -106,7 +105,7 @@ Get-EventLog -LogName Application -Source NetWatcherAgent -Newest 50
 
 ### Using Bash Script
 
-The bash script (`install.sh`) handles installation on Linux and macOS with systemd.
+The bash script (`install.sh`) handles installation on Linux with systemd.
 
 #### Basic Installation
 
@@ -171,7 +170,7 @@ sudo systemctl disable netwatcher-agent
 .\install.ps1 -Uninstall -Force
 ```
 
-### Linux / macOS
+### Linux
 
 ```bash
 # Interactive uninstall (with confirmation)
@@ -210,7 +209,6 @@ PIN=YOUR_AGENT_PIN
 |----------|------|
 | Windows | `C:\Program Files\NetWatcher-Agent\config.conf` |
 | Linux | `/opt/netwatcher-agent/config.conf` |
-| macOS | `/opt/netwatcher-agent/config.conf` |
 
 ---
 

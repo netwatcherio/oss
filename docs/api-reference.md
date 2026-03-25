@@ -588,6 +588,7 @@ Create a new probe.
 |------|-------------|
 | `MTR` | Traceroute with per-hop stats |
 | `PING` | ICMP ping |
+| `DNS` | DNS resolution monitoring |
 | `SPEEDTEST` | Speed test |
 | `SYSINFO` | System information |
 | `NETINFO` | Network information |
