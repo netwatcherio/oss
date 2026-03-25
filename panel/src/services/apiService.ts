@@ -499,7 +499,7 @@ export const ProbeService = {
             probe_ids?: number[];
             probe_types?: string[];
             match_targets?: boolean;
-            skip_duplicates?: boolean;
+            bidirectional?: boolean;
         }
     ) {
         const { data } = await request.post<{
@@ -1003,6 +1003,34 @@ export const PublicShareService = {
 
         // Cache successful result
         setCache(cacheKey, result, AGENT_CACHE_TTL_MS);
+        return result;
+    },
+
+    /** Get DNS dashboard data for a shared agent */
+    async getDnsDashboard(
+        token: string,
+        params?: {
+            lookback?: number;
+            limit?: number;
+            password?: string;
+        }
+    ): Promise<any> {
+        const cacheKey = `dns:${token}:${params?.lookback || 60}:${params?.limit || 500}`;
+        const cached = getCached<any>(cacheKey);
+        if (cached) return cached;
+
+        const baseUrl = this.getBaseUrl();
+        const qs = new URLSearchParams();
+        if (params?.lookback) qs.set('lookback', String(params.lookback));
+        if (params?.limit) qs.set('limit', String(params.limit));
+        if (params?.password) qs.set('password', params.password);
+        const url = `${baseUrl}/share/${token}/dns${qs.toString() ? `?${qs}` : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error('Failed to get DNS data');
+        }
+        const result = await response.json();
+        setCache(cacheKey, result, DATA_CACHE_TTL_MS);
         return result;
     },
 };

@@ -22,7 +22,6 @@ const state = reactive({
   copySelectedProbes: [] as number[],
   copyDestAgents: [] as number[],
   copyMatchTargets: false,
-  copySkipDuplicates: true,
   copyBidirectional: false, // For agent probes: create reverse probes too
   copyLoading: false,
   copyResults: null as {
@@ -68,7 +67,6 @@ function openCopyModal() {
   state.copySelectedProbes = [];
   state.copyDestAgents = [];
   state.copyMatchTargets = false;
-  state.copySkipDuplicates = true;
   state.copyBidirectional = false;
   state.copyResults = null;
   state.showCopyModal = true;
@@ -132,7 +130,7 @@ async function executeCopy() {
       dest_agent_ids: state.copyDestAgents,
       probe_ids: state.copySelectedProbes,
       match_targets: state.copyMatchTargets,
-      skip_duplicates: state.copySkipDuplicates
+      bidirectional: state.copyBidirectional || undefined
     });
     state.copyResults = result;
   } catch (error) {
@@ -875,12 +873,6 @@ const hasSelectedAgentProbes = computed(() => {
                     <input type="checkbox" v-model="state.copyBidirectional">
                     <span>Create bidirectional probes (reverse probes from destination agents back to source)</span>
                     <small class="option-hint">Only applies to Agent-to-Agent probes</small>
-                  </label>
-                </div>
-                <div class="copy-options">
-                  <label class="option-item">
-                    <input type="checkbox" v-model="state.copySkipDuplicates">
-                    <span>Skip probes that already exist on destination</span>
                   </label>
                 </div>
               </div>

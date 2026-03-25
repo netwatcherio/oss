@@ -121,16 +121,16 @@ type UpdateInput struct {
 	ReplaceAgentTargets []uint
 }
 
-// CopyInput defines parameters for copying probes to destination agents
+// CopyInput defines parameters for copying probes to destination agents.
+// Duplicates are always silently skipped (not configurable).
 type CopyInput struct {
-	SourceAgentID  uint   `json:"source_agent_id"`         // Agent to copy probes FROM
-	DestAgentIDs   []uint `json:"dest_agent_ids"`          // Agents to copy probes TO
-	WorkspaceID    uint   `json:"workspace_id"`            // Workspace context
-	ProbeIDs       []uint `json:"probe_ids,omitempty"`     // Specific probes to copy (if empty, copies all)
-	ProbeTypes     []Type `json:"probe_types,omitempty"`   // Filter by type (AGENT, MTR, PING, TRAFFICSIM)
-	MatchTargets   bool   `json:"match_targets"`           // Only copy probes with targets matching dest agents
-	SkipDuplicates bool   `json:"skip_duplicates"`         // Skip probes that already exist on dest (recommended)
-	Bidirectional  *bool  `json:"bidirectional,omitempty"` // Override bidirectional flag (nil = use source value)
+	SourceAgentID uint   `json:"source_agent_id"`         // Agent to copy probes FROM
+	DestAgentIDs  []uint `json:"dest_agent_ids"`          // Agents to copy probes TO
+	WorkspaceID   uint   `json:"workspace_id"`            // Workspace context
+	ProbeIDs      []uint `json:"probe_ids,omitempty"`     // Specific probes to copy (if empty, copies all)
+	ProbeTypes    []Type `json:"probe_types,omitempty"`   // Filter by type (AGENT, MTR, PING, TRAFFICSIM)
+	MatchTargets  bool   `json:"match_targets"`           // Only copy probes with targets matching dest agents
+	Bidirectional *bool  `json:"bidirectional,omitempty"` // Override bidirectional flag (nil = use source value)
 }
 
 // CopyResult contains the result of copying a single probe
@@ -1088,7 +1088,7 @@ func FindMatchingProbes(ctx context.Context, db *gorm.DB, sourceAgentID uint, de
 }
 
 // CopyProbes copies probes from a source agent to one or more destination agents.
-// - SkipDuplicates: if true, probes that already exist on the dest agent are skipped
+// Duplicates are always silently skipped to prevent accidental copies.
 // - MatchTargets: if true, only copies probes whose targets include one of the dest agents
 func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, error) {
 	if in.SourceAgentID == 0 {
@@ -1182,8 +1182,7 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 				copyInput.Bidirectional = true
 			}
 
-			// Always check for duplicates to prevent accidental copies.
-			// With SkipDuplicates: silently skip. Without: hard error.
+			// Always check for duplicates — silently skip if one already exists.
 			if err := checkDuplicateProbe(ctx, db, copyInput); err != nil {
 				if errors.Is(err, ErrDuplicate) {
 					result.Skipped = true
@@ -1203,6 +1202,15 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 			// Create the probe copy
 			newProbe, err := Create(ctx, db, copyInput)
 			if err != nil {
+				// Duplicate errors from Create (e.g. bidirectional reverse probe already exists) → skip
+				if errors.Is(err, ErrDuplicate) {
+					result.Skipped = true
+					result.SkipReason = "duplicate exists (reverse)"
+					output.Skipped++
+					output.Results = append(output.Results, result)
+					log.Infof("[COPY] Skipped duplicate from Create: probe %d -> agent %d", srcProbe.ID, destAgentID)
+					continue
+				}
 				result.Error = err.Error()
 				output.Errors++
 				log.Warnf("[COPY] Failed to create probe copy: %v", err)

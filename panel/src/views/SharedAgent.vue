@@ -33,7 +33,9 @@ const agentNames = ref<Record<string | number, string>>({});  // Cache for agent
 // Filter out groups where the target is THIS agent (reverse probes targeting self)
 const targetGroups = computed<ProbeGroupByTarget[]>(() => {
     if (!probes.value || probes.value.length === 0) return [];
-    const result = groupProbesByTarget(probes.value, { excludeDefaults: true, excludeServers: true });
+    // Exclude DNS probes from the normal probe list — they have a dedicated DNS section
+    const nonDnsProbes = probes.value.filter((p: any) => p.type !== 'DNS');
+    const result = groupProbesByTarget(nonDnsProbes, { excludeDefaults: true, excludeServers: true });
     
     // Filter out agent groups that target the current agent itself
     // These are reverse probes that shouldn't appear as separate cards
@@ -44,6 +46,11 @@ const targetGroups = computed<ProbeGroupByTarget[]>(() => {
         // For agent groups, exclude if targeting self
         return Number(g.id) !== currentAgentId;
     });
+});
+
+// Check if agent has DNS probes
+const hasDnsProbes = computed(() => {
+    return probes.value.some((p: any) => p.type === 'DNS');
 });
 
 // Format expiry as human-readable relative time
@@ -460,6 +467,26 @@ onUnmounted(() => {
                         </div>
                     </div>
                     
+                    <!-- DNS Monitoring Section -->
+                    <div v-if="hasDnsProbes" class="dns-section">
+                        <h2>
+                            <i class="bi bi-globe2"></i>
+                            DNS Monitoring
+                        </h2>
+                        <router-link :to="{ name: 'sharedDNS', params: { token } }" class="dns-card">
+                            <div class="dns-card-content">
+                                <div class="dns-card-icon">
+                                    <i class="bi bi-globe2"></i>
+                                </div>
+                                <div class="dns-card-info">
+                                    <h6>DNS Dashboard</h6>
+                                    <p>View DNS probe results, response times, and resolver status</p>
+                                </div>
+                                <i class="bi bi-chevron-right dns-card-arrow"></i>
+                            </div>
+                        </router-link>
+                    </div>
+
                     <!-- Footer Notice -->
                     <div class="shared-footer">
                         <p>
@@ -1021,6 +1048,85 @@ onUnmounted(() => {
     }
 }
 
+/* DNS Section */
+.dns-section {
+    margin-top: 2rem;
+}
+
+.dns-section h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dns-section h2 i {
+    color: var(--bs-primary);
+}
+
+.dns-card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    transition: all 0.2s;
+}
+
+.dns-card:hover {
+    border-color: var(--bs-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.dns-card-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+}
+
+.dns-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: rgba(var(--bs-primary-rgb), 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.dns-card-icon i {
+    font-size: 1.25rem;
+    color: var(--bs-primary);
+}
+
+.dns-card-info {
+    flex: 1;
+}
+
+.dns-card-info h6 {
+    margin: 0;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.dns-card-info p {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+}
+
+.dns-card-arrow {
+    color: var(--bs-secondary-color);
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
 /* Dark mode support via data-theme attribute */
 :global([data-theme="dark"]) .password-card,
 :global([data-theme="dark"]) .info-card,
@@ -1030,5 +1136,9 @@ onUnmounted(() => {
 
 :global([data-theme="dark"]) .shared-header {
     background: rgba(0, 0, 0, 0.2);
+}
+
+:global([data-theme="dark"]) .dns-card {
+    background: var(--bs-dark);
 }
 </style>

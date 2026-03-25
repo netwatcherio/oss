@@ -115,6 +115,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/SharedProbe.vue'),
     },
 
+    // Public shared DNS dashboard view (no auth required)
+    {
+        path: '/shared/:token/dns',
+        name: 'sharedDNS',
+        component: () => import('@/views/SharedDNS.vue'),
+    },
+
     // App shell
     {
         path: '/',
