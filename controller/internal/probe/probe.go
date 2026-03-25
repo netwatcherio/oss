@@ -1182,23 +1182,22 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 				copyInput.Bidirectional = true
 			}
 
-			// Check for duplicates if requested
-			if in.SkipDuplicates {
-				if err := checkDuplicateProbe(ctx, db, copyInput); err != nil {
-					if errors.Is(err, ErrDuplicate) {
-						result.Skipped = true
-						result.SkipReason = "duplicate exists"
-						output.Skipped++
-						output.Results = append(output.Results, result)
-						log.Infof("[COPY] Skipped duplicate: probe %d -> agent %d", srcProbe.ID, destAgentID)
-						continue
-					}
-					// Other error
-					result.Error = err.Error()
-					output.Errors++
+			// Always check for duplicates to prevent accidental copies.
+			// With SkipDuplicates: silently skip. Without: hard error.
+			if err := checkDuplicateProbe(ctx, db, copyInput); err != nil {
+				if errors.Is(err, ErrDuplicate) {
+					result.Skipped = true
+					result.SkipReason = "duplicate exists"
+					output.Skipped++
 					output.Results = append(output.Results, result)
+					log.Infof("[COPY] Skipped duplicate: probe %d -> agent %d", srcProbe.ID, destAgentID)
 					continue
 				}
+				// Other error
+				result.Error = err.Error()
+				output.Errors++
+				output.Results = append(output.Results, result)
+				continue
 			}
 
 			// Create the probe copy
