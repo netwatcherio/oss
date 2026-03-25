@@ -26,6 +26,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	RegisterInviteRoutes(app, db, emailStore)
 	RegisterAgentAPI(app, db, ch, geoStore)
 
+	// Public share access routes — MUST be registered before the JWT group,
+	// because app.Group("/") applies its middleware to all routes declared after it.
+	RegisterShareRoutes(app, db, ch)
+
 	// ----- Protected (JWT) -----
 	api := app.Group("/")
 	api.Use(JWTMiddleware(db))
@@ -43,9 +47,6 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelShareLinks(api, db)
 	panelAnalysis(api, db, ch)
 	RegisterAdminRoutes(api, db)
-
-	// Public share access routes (no auth)
-	RegisterShareRoutes(app, db, ch)
 
 	// Health
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
