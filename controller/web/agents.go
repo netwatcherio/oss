@@ -294,4 +294,15 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits
 		}
 		return c.JSON(fiber.Map{"pin": pin, "initialized": false})
 	})
+
+	// GET /workspaces/{id}/available-global-agents — global agents from other workspaces
+	// Returns agents that this workspace can target with cross-workspace probes
+	as.Get("/global", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		globals, err := agent.ListGlobalAgentsExcludingWorkspace(c.UserContext(), db, wsID)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"data": globals})
+	})
 }

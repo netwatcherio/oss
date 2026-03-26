@@ -65,6 +65,10 @@
           <i class="bi bi-hdd-network-fill"></i>
           <span>View All Agents</span>
         </router-link>
+        <router-link to="/admin/global-agents" class="quick-link">
+          <i class="bi bi-globe2"></i>
+          <span>Global Agents</span>
+        </router-link>
         <router-link to="/admin/system" class="quick-link system">
           <i class="bi bi-terminal-fill"></i>
           <span>System Debug</span>

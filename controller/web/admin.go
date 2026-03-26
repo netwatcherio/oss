@@ -48,6 +48,10 @@ func RegisterAdminRoutes(api fiber.Router, db *gorm.DB) {
 	adminAPI.Get("/agents", adminListAgentsHandler(db))
 	adminAPI.Get("/agents/stats", adminAgentStatsHandler(db))
 
+	// Global Agents
+	adminAPI.Get("/global-agents", adminListGlobalAgentsHandler(db))
+	adminAPI.Put("/agents/:id/global", adminSetAgentGlobalHandler(db))
+
 	// Debug endpoints for session/connection diagnostics
 	adminAPI.Get("/debug/connections", adminDebugConnectionsHandler(db))
 }
@@ -531,5 +535,51 @@ func adminDebugConnectionsHandler(db *gorm.DB) fiber.Handler {
 			"connections":     enriched,
 			"by_workspace":    groups,
 		})
+	}
+}
+
+// ==================== Global Agents ====================
+
+func adminListGlobalAgentsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		agents, err := admin.ListGlobalAgents(context.Background(), db)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"data": agents})
+	}
+}
+
+func adminSetAgentGlobalHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		agentID := uintParam(c, "id")
+
+		var input struct {
+			IsGlobal             bool  `json:"is_global"`
+			BidirectionalDefault *bool `json:"bidirectional_default"`
+		}
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		}
+
+		// Default bidirectional to true if not specified
+		bidirDefault := true
+		if input.BidirectionalDefault != nil {
+			bidirDefault = *input.BidirectionalDefault
+		}
+
+		if err := agent.SetGlobalStatus(context.Background(), db, agentID, input.IsGlobal, bidirDefault); err != nil {
+			if err == agent.ErrNotFound {
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found"})
+			}
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Return updated agent
+		a, err := agent.GetAgentByID(context.Background(), db, agentID)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(a)
 	}
 }

@@ -187,7 +187,35 @@ export async function getDebugConnections(): Promise<DebugConnectionsResponse> {
     return res.data;
 }
 
-export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse, AgentConnection, WorkspaceGroup, DebugConnectionsResponse };
+// Global Agents
+interface GlobalAgentInfo {
+    id: number;
+    workspace_id: number;
+    workspace_name: string;
+    name: string;
+    description: string;
+    version: string;
+    location: string;
+    last_seen_at: string;
+    initialized: boolean;
+    created_at: string;
+    is_online: boolean;
+    is_global: boolean;
+    bidirectional_default: boolean;
+    cross_workspace_probes: number;
+}
 
+export async function listGlobalAgents(): Promise<ListResponse<GlobalAgentInfo>> {
+    const res = await request.get<ListResponse<GlobalAgentInfo>>('/admin/global-agents');
+    return res.data;
+}
 
+export async function setAgentGlobalStatus(id: number, isGlobal: boolean, bidirectionalDefault = true): Promise<AdminAgent> {
+    const res = await request.put<AdminAgent>(`/admin/agents/${id}/global`, {
+        is_global: isGlobal,
+        bidirectional_default: bidirectionalDefault,
+    });
+    return res.data;
+}
 
+export type { AdminStats, WorkspaceStats, AdminUser, AdminWorkspace, AdminAgent, ListResponse, AgentConnection, WorkspaceGroup, DebugConnectionsResponse, GlobalAgentInfo };

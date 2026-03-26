@@ -515,35 +515,83 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	}
 
 	// 3. Find reverse AGENT probes: other agents' AGENT probes that target this agent.
-	// These are used for TrafficSim server allowed-agent lists (below), but we do NOT
-	// expand them into return-path MTR/PING/TRAFFICSIM probes.
+	// These are used for TrafficSim server allowed-agent lists (below).
 	//
-	// Bidirectional testing requires BOTH agents to have AGENT probes targeting each
-	// other. When both exist, each agent's own forward expansion already produces the
-	// necessary probes. When only one side has an AGENT probe, we intentionally keep
-	// it one-directional — the target agent does NOT get reverse probes.
+	// For NORMAL agents: we do NOT expand them into return-path MTR/PING/TRAFFICSIM.
+	// Bidirectional testing requires BOTH agents to have AGENT probes targeting each other.
+	//
+	// For GLOBAL agents: we DO expand reverse probes from any workspace. This is the
+	// core global agent behavior — any workspace can target a global agent and the
+	// global agent automatically probes back (if bidirectional_default is true).
 	reverseAgentProbes, revErr := findReverseAgentProbes(ctx, db, agentID)
 	if revErr != nil {
 		log.Warnf("[agent %d] Failed to find reverse AGENT probes: %v", agentID, revErr)
-	} else if len(reverseAgentProbes) > 0 {
-		log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent (no expansion — bidi requires mutual AGENT probes)",
-			agentID, len(reverseAgentProbes))
-		for i := range reverseAgentProbes {
-			rp := &reverseAgentProbes[i]
-			sourceAgentID := rp.AgentID
-			if ownedAgentTargets[sourceAgentID] {
-				log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: covered by owned forward AGENT probe",
-					agentID, rp.ID, sourceAgentID)
-			} else {
-				log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: skipped (no mutual AGENT probe, one-way only)",
-					agentID, rp.ID, sourceAgentID)
+	}
+
+	// Check if this agent is global (we fetch agentObj early since we need it for global check)
+	isGlobalAgent := false
+	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
+	if err == nil {
+		isGlobalAgent = agentObj.IsGlobal
+	}
+
+	if len(reverseAgentProbes) > 0 {
+		if isGlobalAgent && agentObj.BidirectionalDefault {
+			// GLOBAL AGENT: expand reverse probes from agents we don't already have forward probes for
+			log.Infof("[agent %d] GLOBAL agent: expanding %d reverse AGENT probes into return-path probes",
+				agentID, len(reverseAgentProbes))
+			for i := range reverseAgentProbes {
+				rp := &reverseAgentProbes[i]
+				sourceAgentID := rp.AgentID
+				if ownedAgentTargets[sourceAgentID] {
+					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: already covered by owned forward probe",
+						agentID, rp.ID, sourceAgentID)
+					continue
+				}
+				// Expand this reverse probe into return-path MTR/PING/TRAFFICSIM
+				log.Infof("[agent %d] GLOBAL: expanding reverse probe %d from agent %d (ws %d) into return-path probes",
+					agentID, rp.ID, sourceAgentID, rp.WorkspaceID)
+				expanded, err := expandAgentProbeForOwner(ctx, db, ch, rp, sourceAgentID, pubIPCache)
+				if err != nil {
+					log.Warnf("[agent %d] GLOBAL reverse expansion FAILED for agent %d: %v",
+						agentID, sourceAgentID, err)
+					continue
+				}
+				// Override the agent ID on expanded probes to be the global agent
+				// (it's the one running these return-path probes)
+				for j := range expanded {
+					expanded[j].AgentID = agentID
+				}
+				out = append(out, expanded...)
+				agentProbesExpanded++
+			}
+		} else {
+			log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent (no expansion — %s)",
+				agentID, len(reverseAgentProbes),
+				func() string {
+					if isGlobalAgent {
+						return "global agent with bidirectional disabled"
+					}
+					return "bidi requires mutual AGENT probes"
+				}())
+			for i := range reverseAgentProbes {
+				rp := &reverseAgentProbes[i]
+				sourceAgentID := rp.AgentID
+				if ownedAgentTargets[sourceAgentID] {
+					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: covered by owned forward AGENT probe",
+						agentID, rp.ID, sourceAgentID)
+				} else {
+					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: skipped (no mutual AGENT probe, one-way only)",
+						agentID, rp.ID, sourceAgentID)
+				}
 			}
 		}
 	}
 
-	// If the agent has TrafficSim server enabled in its settings,
-	// inject a virtual TRAFFICSIM server probe so the agent binary starts the server.
-	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
+	// agentObj already fetched above for global check — re-fetch if it was nil
+	if agentObj == nil {
+		agentObj, err = agent.GetAgentByID(ctx, db, agentID)
+	}
 	if err == nil && agentObj.TrafficSimEnabled {
 		host := agentObj.TrafficSimHost
 		if host == "" {

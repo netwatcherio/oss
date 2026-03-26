@@ -63,6 +63,10 @@ export interface Agent {
     trafficsim_enabled: boolean;
     trafficsim_host: string;
     trafficsim_port: number;
+
+    // Global agent configuration
+    is_global: boolean;
+    bidirectional_default: boolean;
 }
 
 /** ===== Probes ===== */

@@ -67,6 +67,10 @@ type Agent struct {
 	TrafficSimEnabled bool   `gorm:"column:trafficsim_enabled;default:false" json:"trafficsim_enabled"`
 	TrafficSimHost    string `gorm:"column:trafficsim_host;size:64;default:0.0.0.0" json:"trafficsim_host"`
 	TrafficSimPort    int    `gorm:"column:trafficsim_port;default:5000" json:"trafficsim_port"`
+
+	// Global agent configuration
+	IsGlobal             bool `gorm:"default:false" json:"is_global"`            // Visible to all workspaces as a target
+	BidirectionalDefault bool `gorm:"default:true" json:"bidirectional_default"` // Auto-create reverse probes when targeted cross-workspace
 }
 
 // -------------------- Auth placeholders in separate tables --------------------
@@ -557,6 +561,43 @@ func BootstrapWithPIN(ctx context.Context, db *gorm.DB, in BootstrapWithPINInput
 		return nil, err
 	}
 	return &BootstrapOutput{Agent: a, PSK: pskPlain}, nil
+}
+
+// -------------------- Global Agent operations --------------------
+
+// ListGlobalAgents returns all agents marked as global.
+func ListGlobalAgents(ctx context.Context, db *gorm.DB) ([]Agent, error) {
+	var out []Agent
+	err := db.WithContext(ctx).Where("is_global = ?", true).Order("id DESC").Find(&out).Error
+	return out, err
+}
+
+// ListGlobalAgentsExcludingWorkspace returns all global agents NOT in the given workspace.
+// Used when a workspace wants to discover global agents from other workspaces to target.
+func ListGlobalAgentsExcludingWorkspace(ctx context.Context, db *gorm.DB, excludeWorkspaceID uint) ([]Agent, error) {
+	var out []Agent
+	err := db.WithContext(ctx).
+		Where("is_global = ? AND workspace_id <> ?", true, excludeWorkspaceID).
+		Order("id DESC").
+		Find(&out).Error
+	return out, err
+}
+
+// SetGlobalStatus toggles the is_global and bidirectional_default flags on an agent.
+func SetGlobalStatus(ctx context.Context, db *gorm.DB, agentID uint, isGlobal bool, bidirDefault bool) error {
+	res := db.WithContext(ctx).Model(&Agent{}).Where("id = ?", agentID).
+		Updates(map[string]any{
+			"is_global":             isGlobal,
+			"bidirectional_default": bidirDefault,
+			"updated_at":            time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // -------------------- Helpers --------------------

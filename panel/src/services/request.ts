@@ -55,6 +55,9 @@ export default {
     patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
         return client.patch<T>(url, data, config);
     },
+    put<T = any>(url: string, data?: any, config?: AxiosRequestConfig) {
+        return client.put<T>(url, data, config);
+    },
     delete<T = any>(url: string, config?: AxiosRequestConfig) {
         return client.delete<T>(url, config);
     },

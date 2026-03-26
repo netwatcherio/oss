@@ -243,3 +243,60 @@ func getenv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
+
+// -------------------- Global Agents --------------------
+
+// GlobalAgentInfo represents a global agent with its workspace info for admin views
+type GlobalAgentInfo struct {
+	ID                   uint      `json:"id"`
+	WorkspaceID          uint      `json:"workspace_id"`
+	WorkspaceName        string    `json:"workspace_name"`
+	Name                 string    `json:"name"`
+	Description          string    `json:"description"`
+	Version              string    `json:"version"`
+	Location             string    `json:"location"`
+	LastSeenAt           time.Time `json:"last_seen_at"`
+	Initialized          bool      `json:"initialized"`
+	CreatedAt            time.Time `json:"created_at"`
+	IsOnline             bool      `json:"is_online"`
+	IsGlobal             bool      `json:"is_global"`
+	BidirectionalDefault bool      `json:"bidirectional_default"`
+	CrossWorkspaceProbes int64     `json:"cross_workspace_probes"` // Number of probes from other workspaces targeting this agent
+}
+
+// ListGlobalAgents returns all global agents with workspace info
+func ListGlobalAgents(ctx context.Context, db *gorm.DB) ([]GlobalAgentInfo, error) {
+	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
+
+	rows, err := db.WithContext(ctx).
+		Table("agents").
+		Select("agents.id, agents.workspace_id, workspaces.name as workspace_name, agents.name, agents.description, agents.version, agents.location, agents.last_seen_at, agents.initialized, agents.created_at, agents.is_global, agents.bidirectional_default").
+		Joins("LEFT JOIN workspaces ON workspaces.id = agents.workspace_id").
+		Where("agents.is_global = ?", true).
+		Order("agents.id DESC").
+		Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []GlobalAgentInfo
+	for rows.Next() {
+		var a GlobalAgentInfo
+		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.WorkspaceName, &a.Name, &a.Description, &a.Version, &a.Location, &a.LastSeenAt, &a.Initialized, &a.CreatedAt, &a.IsGlobal, &a.BidirectionalDefault); err != nil {
+			return nil, err
+		}
+		a.IsOnline = a.LastSeenAt.After(fiveMinutesAgo)
+
+		// Count cross-workspace probes targeting this agent
+		db.WithContext(ctx).
+			Table("probe_targets").
+			Joins("JOIN probes ON probes.id = probe_targets.probe_id").
+			Where("probe_targets.agent_id = ? AND probes.workspace_id <> ? AND probes.deleted_at IS NULL AND probe_targets.deleted_at IS NULL", a.ID, a.WorkspaceID).
+			Count(&a.CrossWorkspaceProbes)
+
+		result = append(result, a)
+	}
+
+	return result, nil
+}
