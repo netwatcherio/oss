@@ -163,9 +163,9 @@ const probeTypeConfig = computed(() => {
       icon: "bi-broadcast",
       requiresTargetAgent: false,
       supportsCustomTarget: true,
-      defaultInterval: 1,
+      defaultInterval: 0,
       defaultTimeout: 10,
-      defaultCount: 10
+      defaultCount: 60
     },
     MTR: {
       description: "Combine traceroute and ping to diagnose network paths and identify packet loss",
@@ -174,7 +174,7 @@ const probeTypeConfig = computed(() => {
       supportsCustomTarget: true,
       defaultInterval: 300,
       defaultTimeout: 30,
-      defaultCount: 10
+      defaultCount: 5
     },
     DNS: {
       description: "Monitor DNS resolution performance and availability",
@@ -843,8 +843,8 @@ onMounted(async () => {
               <div class="configuration-section">
                 <h6 class="section-title">Probe Settings</h6>
 
-                <!-- Interval -->
-                <div class="mb-4" v-if="['PING', 'MTR', 'DNS'].includes(state.selected.value)">
+                <!-- Interval (not shown for PING — PING runs continuously, cadence = packet count × 1s) -->
+                <div class="mb-4" v-if="['MTR', 'DNS'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterval">
                     <i class="bi bi-clock me-2"></i>Probe Interval
                   </label>
@@ -854,7 +854,7 @@ onMounted(async () => {
                         v-model.number="state.probe.interval_sec"
                         class="form-control"
                         type="number"
-                        :min="state.selected.value === 'PING' ? 1 : 10"
+                        min="10"
                         max="3600">
                     <span class="input-group-text">seconds</span>
                   </div>
@@ -875,11 +875,14 @@ onMounted(async () => {
                         class="form-control"
                         type="number"
                         min="1"
-                        max="100">
+                        :max="state.selected.value === 'PING' ? 300 : 100">
                     <span class="input-group-text">packets</span>
                   </div>
-                  <small class="text-muted">
-                    Number of packets to send per probe run (recommended: {{ probeTypeConfig.defaultCount }})
+                  <small class="text-muted" v-if="state.selected.value === 'PING'">
+                    Number of ping packets per test (count × 1s = upload interval, e.g. 60 packets = results every ~60s)
+                  </small>
+                  <small class="text-muted" v-else>
+                    Number of measurement packets per hop (recommended: {{ probeTypeConfig.defaultCount }})
                   </small>
                 </div>
 

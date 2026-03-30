@@ -843,7 +843,11 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 
 // createExpandedProbe creates a concrete probe from an AGENT probe template.
 // targetAgentID is the ID of the agent being targeted by this probe.
+// Each expanded probe type gets its own defaults rather than inheriting the AGENT probe's settings.
 func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetAgentID uint) Probe {
+	// Apply per-type defaults — agent probes always use system defaults
+	intervalSec, timeoutSec, count := expandedProbeDefaults(probeType)
+
 	return Probe{
 		ID:          source.ID, // Keep original ID for data correlation
 		CreatedAt:   source.CreatedAt,
@@ -852,9 +856,9 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 		AgentID:     source.AgentID, // Original source agent owns this probe
 		Type:        probeType,
 		Enabled:     source.Enabled,
-		IntervalSec: source.IntervalSec,
-		TimeoutSec:  source.TimeoutSec,
-		Count:       source.Count,
+		IntervalSec: intervalSec,
+		TimeoutSec:  timeoutSec,
+		Count:       count,
 		DurationSec: source.DurationSec,
 		Labels:      source.Labels,
 		Metadata:    source.Metadata,
@@ -867,6 +871,21 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 				UpdatedAt: source.UpdatedAt,
 			},
 		},
+	}
+}
+
+// expandedProbeDefaults returns the system defaults for each probe type
+// when expanded from an AGENT probe. These are not user-configurable.
+func expandedProbeDefaults(probeType Type) (intervalSec, timeoutSec, count int) {
+	switch probeType {
+	case TypePing:
+		return 0, 10, 60 // continuous, 10s timeout, 60 packets (= ~60s per run)
+	case TypeMTR:
+		return 300, 30, 5 // every 5min, 30s timeout, 5 packets per hop
+	case TypeTrafficSim:
+		return 60, 10, 0 // TrafficSim uses its own hardcoded constants internally
+	default:
+		return 60, 10, 0
 	}
 }
 

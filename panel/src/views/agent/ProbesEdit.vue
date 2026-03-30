@@ -790,8 +790,8 @@ async function saveProbeSettings() {
 
               <!-- Editable settings for PING, MTR, DNS etc -->
               <div v-if="!isBuiltInProbe(state.selectedProbe) && state.selectedProbe.type !== 'AGENT'" class="settings-form">
-                <!-- Interval -->
-                <div class="setting-row">
+                <!-- Interval (hidden for PING — runs continuously, cadence = packet count × 1s) -->
+                <div class="setting-row" v-if="state.selectedProbe.type !== 'PING'">
                   <label class="setting-label" for="editInterval">
                     <i class="bi bi-clock me-1"></i>Interval
                   </label>
@@ -801,7 +801,7 @@ async function saveProbeSettings() {
                         v-model.number="state.editInterval"
                         class="form-control form-control-sm"
                         type="number"
-                        :min="state.selectedProbe.type === 'PING' ? 1 : 10"
+                        min="10"
                         max="3600"
                         :disabled="state.savingSettings"
                     >
