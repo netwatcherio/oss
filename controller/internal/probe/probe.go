@@ -55,17 +55,18 @@ type Probe struct {
 	UpdatedAt time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	WorkspaceID uint           `gorm:"index" json:"workspace_id"`
-	AgentID     uint           `gorm:"index" json:"agent_id"`
-	Type        Type           `gorm:"type:VARCHAR(64);index" json:"type"`
-	Enabled     bool           `gorm:"default:true;index" json:"enabled"`
-	IntervalSec int            `gorm:"default:60" json:"interval_sec"`
-	TimeoutSec  int            `gorm:"default:10" json:"timeout_sec"`
-	Count       int            `json:"count"`
-	DurationSec int            `json:"duration_sec"`
-	Server      bool           `json:"server"`
-	Labels      datatypes.JSON `gorm:"type:jsonb" json:"labels"`
-	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
+	WorkspaceID   uint           `gorm:"index" json:"workspace_id"`
+	AgentID       uint           `gorm:"index" json:"agent_id"`
+	Type          Type           `gorm:"type:VARCHAR(64);index" json:"type"`
+	Enabled       bool           `gorm:"default:true;index" json:"enabled"`
+	IntervalSec   int            `gorm:"default:60" json:"interval_sec"`
+	TimeoutSec    int            `gorm:"default:10" json:"timeout_sec"`
+	Count         int            `json:"count"`
+	DurationSec   int            `json:"duration_sec"`
+	Server        bool           `json:"server"`
+	BindInterface string         `gorm:"size:128" json:"bind_interface,omitempty"` // Interface name to bind to (empty = OS default)
+	Labels        datatypes.JSON `gorm:"type:jsonb" json:"labels"`
+	Metadata      datatypes.JSON `gorm:"type:jsonb" json:"metadata"`
 
 	Targets []Target `json:"targets"` // eager-loaded as needed
 }
@@ -101,6 +102,7 @@ type CreateInput struct {
 	Count         int            `json:"count,omitempty"`
 	DurationSec   int            `json:"duration_sec,omitempty"`
 	Server        bool           `json:"server,omitempty"`
+	BindInterface string         `json:"bind_interface,omitempty"` // Interface name to bind to
 	Targets       []string       `json:"targets,omitempty"`
 	AgentTargets  []uint         `json:"agent_targets,omitempty"`
 	Labels        datatypes.JSON `gorm:"type:jsonb" json:"labels,omitempty"`
@@ -109,12 +111,15 @@ type CreateInput struct {
 }
 
 type UpdateInput struct {
-	ID          uint
-	Enabled     *bool
-	IntervalSec *int
-	TimeoutSec  *int
-	Labels      *datatypes.JSON
-	Metadata    *datatypes.JSON
+	ID            uint
+	Enabled       *bool
+	IntervalSec   *int
+	TimeoutSec    *int
+	Count         *int    // Update packet count (nil = don't change)
+	DurationSec   *int    // Update duration (nil = don't change)
+	BindInterface *string // Update interface binding (nil = don't change)
+	Labels        *datatypes.JSON
+	Metadata      *datatypes.JSON
 
 	// Optional full replacement of targets in one shot
 	ReplaceTargets      []string
@@ -307,17 +312,18 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 
 	now := time.Now()
 	p := &Probe{
-		WorkspaceID: in.WorkspaceID,
-		AgentID:     in.AgentID,
-		Type:        in.Type,
-		Enabled:     boolOr(&in.Enabled, true),
-		IntervalSec: ifZero(in.IntervalSec, 60),
-		TimeoutSec:  ifZero(in.TimeoutSec, 10),
-		Server:      in.Server, // TRAFFICSIM server mode
-		Labels:      coalesceJSON(in.Labels),
-		Metadata:    coalesceJSON(in.Metadata),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		WorkspaceID:   in.WorkspaceID,
+		AgentID:       in.AgentID,
+		Type:          in.Type,
+		Enabled:       boolOr(&in.Enabled, true),
+		IntervalSec:   ifZero(in.IntervalSec, 60),
+		TimeoutSec:    ifZero(in.TimeoutSec, 10),
+		Server:        in.Server, // TRAFFICSIM server mode
+		BindInterface: in.BindInterface,
+		Labels:        coalesceJSON(in.Labels),
+		Metadata:      coalesceJSON(in.Metadata),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -999,11 +1005,20 @@ func Update(ctx context.Context, db *gorm.DB, in UpdateInput) (*Probe, error) {
 		if in.TimeoutSec != nil {
 			updates["timeout_sec"] = *in.TimeoutSec
 		}
+		if in.Count != nil {
+			updates["count"] = *in.Count
+		}
+		if in.DurationSec != nil {
+			updates["duration_sec"] = *in.DurationSec
+		}
 		if in.Labels != nil {
 			updates["labels"] = coalesceJSON(*in.Labels)
 		}
 		if in.Metadata != nil {
 			updates["metadata"] = coalesceJSON(*in.Metadata)
+		}
+		if in.BindInterface != nil {
+			updates["bind_interface"] = *in.BindInterface
 		}
 
 		res := tx.Model(&Probe{}).Where("id = ?", in.ID).Updates(updates)
