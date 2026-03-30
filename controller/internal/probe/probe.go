@@ -879,7 +879,7 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 func expandedProbeDefaults(probeType Type) (intervalSec, timeoutSec, count int) {
 	switch probeType {
 	case TypePing:
-		return 0, 10, 60 // continuous, 10s timeout, 60 packets (= ~60s per run)
+		return 0, 0, 60 // continuous, timeout derived by agent (count×1.25s), 60 packets (= ~60s per run)
 	case TypeMTR:
 		return 300, 30, 5 // every 5min, 30s timeout, 5 packets per hop
 	case TypeTrafficSim:
