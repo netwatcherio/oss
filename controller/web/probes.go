@@ -74,8 +74,11 @@ func panelProbes(api fiber.Router, db *gorm.DB, limitsConfig *limits.Config) {
 		id := uintParam(c, "probeID")
 		var body struct {
 			Enabled             *bool           `json:"enabled"`
-			IntervalSec         *int            `json:"intervalSec"`
-			TimeoutSec          *int            `json:"timeoutSec"`
+			IntervalSec         *int            `json:"interval_sec"`
+			TimeoutSec          *int            `json:"timeout_sec"`
+			Count               *int            `json:"count"`
+			DurationSec         *int            `json:"duration_sec"`
+			BindInterface       *string         `json:"bind_interface"`
 			Labels              *map[string]any `json:"labels"`
 			Metadata            *map[string]any `json:"metadata"`
 			ReplaceTargets      []string        `json:"replaceTargets"`
@@ -89,6 +92,9 @@ func panelProbes(api fiber.Router, db *gorm.DB, limitsConfig *limits.Config) {
 			Enabled:             body.Enabled,
 			IntervalSec:         body.IntervalSec,
 			TimeoutSec:          body.TimeoutSec,
+			Count:               body.Count,
+			DurationSec:         body.DurationSec,
+			BindInterface:       body.BindInterface,
 			Labels:              jsonPtrFromMap(body.Labels),
 			Metadata:            jsonPtrFromMap(body.Metadata),
 			ReplaceTargets:      body.ReplaceTargets,

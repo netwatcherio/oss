@@ -85,6 +85,7 @@ export interface Probe {
     count: number;
     duration_sec: number;
     server: boolean;
+    bind_interface?: string;  // Interface name to bind to (empty = OS default)
     labels: JsonObject;
     metadata: JsonObject;
 
@@ -120,6 +121,7 @@ export interface ProbeCreateInput {
     labels: JsonObject;
     metadata: JsonObject;
     server?: boolean
+    bind_interface?: string;  // Interface name to bind to
 
     /** One of:
      *  - targets: literal endpoints
@@ -132,8 +134,11 @@ export interface ProbeCreateInput {
 export interface ProbeUpdateInput {
     id: number;
     enabled?: boolean;
-    intervalSec?: number;
-    timeoutSec?: number;
+    interval_sec?: number;
+    timeout_sec?: number;
+    count?: number;
+    duration_sec?: number;
+    bind_interface?: string;  // Update interface binding
     labels?: JsonObject;
     metadata?: JsonObject;
 

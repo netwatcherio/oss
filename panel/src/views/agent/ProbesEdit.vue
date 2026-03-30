@@ -2,7 +2,7 @@
 import {onMounted, reactive, computed} from "vue";
 import Title from "@/components/Title.vue";
 import core from "@/core";
-import {Agent, Probe, type Workspace} from "@/types";
+import {Agent, Probe, type InterfaceInfo, type Workspace} from "@/types";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
@@ -36,12 +36,32 @@ const state = reactive({
       skip_reason?: string;
       error?: string;
     }>;
-  } | null
+  } | null,
+  // Interface binding
+  availableInterfaces: [] as InterfaceInfo[],
+  editingInterface: '' as string,
+  savingInterface: false,
+  interfaceSaveSuccess: false,
+  // Probe settings editing
+  editInterval: 0,
+  editTimeout: 0,
+  editCount: 0,
+  editDuration: 0,
+  savingSettings: false,
+  settingsSaveSuccess: false,
 })
 
 // Modal functions
 function openProbeDetails(probe: Probe) {
   state.selectedProbe = probe;
+  state.editingInterface = probe.bind_interface || '';
+  state.interfaceSaveSuccess = false;
+  // Initialize editable settings
+  state.editInterval = probe.interval_sec;
+  state.editTimeout = probe.timeout_sec;
+  state.editCount = probe.count;
+  state.editDuration = probe.duration_sec;
+  state.settingsSaveSuccess = false;
   state.showProbeModal = true;
 }
 
@@ -170,6 +190,19 @@ onMounted(async () => {
   ProbeService.list(workspaceID, agentID).then(res => {
     state.probes = res as Probe[] || [];
   })
+
+  // Fetch available interfaces from NETINFO
+  try {
+    const netinfoResponse = await ProbeService.netInfo(workspaceID, agentID);
+    const payload = (netinfoResponse as any)?.payload;
+    if (payload?.interfaces && Array.isArray(payload.interfaces)) {
+      state.availableInterfaces = payload.interfaces.filter(
+        (iface: InterfaceInfo) => iface.type !== 'loopback' && iface.ipv4 && iface.ipv4.length > 0
+      );
+    }
+  } catch (err) {
+    console.debug('Could not fetch NETINFO interfaces:', err);
+  }
 
 
   try {
@@ -378,6 +411,95 @@ const hasSelectedAgentProbes = computed(() => {
     return probe?.type === 'AGENT';
   });
 });
+
+// Save interface binding change
+async function saveInterfaceBinding() {
+  if (!state.selectedProbe) return;
+  state.savingInterface = true;
+  state.interfaceSaveSuccess = false;
+
+  try {
+    await ProbeService.update(
+      state.workspace.id,
+      state.agent.id,
+      state.selectedProbe.id,
+      { bind_interface: state.editingInterface || '' }
+    );
+
+    // Update local probe state
+    state.selectedProbe!.bind_interface = state.editingInterface || undefined;
+    const idx = state.probes.findIndex(p => p.id === state.selectedProbe?.id);
+    if (idx >= 0) {
+      state.probes[idx].bind_interface = state.editingInterface || undefined;
+    }
+
+    state.interfaceSaveSuccess = true;
+  } catch (error) {
+    console.error('Failed to update interface binding:', error);
+  } finally {
+    state.savingInterface = false;
+  }
+}
+
+// Check if any settings have changed
+function hasSettingsChanges(): boolean {
+  if (!state.selectedProbe) return false;
+  return (
+    state.editInterval !== state.selectedProbe.interval_sec ||
+    state.editTimeout !== state.selectedProbe.timeout_sec ||
+    state.editCount !== state.selectedProbe.count ||
+    state.editDuration !== state.selectedProbe.duration_sec
+  );
+}
+
+// Save probe settings (interval, timeout, count, duration)
+async function saveProbeSettings() {
+  if (!state.selectedProbe || !hasSettingsChanges()) return;
+  state.savingSettings = true;
+  state.settingsSaveSuccess = false;
+
+  try {
+    const updates: Record<string, any> = {};
+    if (state.editInterval !== state.selectedProbe.interval_sec) {
+      updates.interval_sec = state.editInterval;
+    }
+    if (state.editTimeout !== state.selectedProbe.timeout_sec) {
+      updates.timeout_sec = state.editTimeout;
+    }
+    if (state.editCount !== state.selectedProbe.count) {
+      updates.count = state.editCount;
+    }
+    if (state.editDuration !== state.selectedProbe.duration_sec) {
+      updates.duration_sec = state.editDuration;
+    }
+
+    await ProbeService.update(
+      state.workspace.id,
+      state.agent.id,
+      state.selectedProbe.id,
+      updates
+    );
+
+    // Update local state
+    state.selectedProbe!.interval_sec = state.editInterval;
+    state.selectedProbe!.timeout_sec = state.editTimeout;
+    state.selectedProbe!.count = state.editCount;
+    state.selectedProbe!.duration_sec = state.editDuration;
+    const idx = state.probes.findIndex(p => p.id === state.selectedProbe?.id);
+    if (idx >= 0) {
+      state.probes[idx].interval_sec = state.editInterval;
+      state.probes[idx].timeout_sec = state.editTimeout;
+      state.probes[idx].count = state.editCount;
+      state.probes[idx].duration_sec = state.editDuration;
+    }
+
+    state.settingsSaveSuccess = true;
+  } catch (error) {
+    console.error('Failed to update probe settings:', error);
+  } finally {
+    state.savingSettings = false;
+  }
+}
 </script>
 
 <template>
@@ -662,10 +784,88 @@ const hasSelectedAgentProbes = computed(() => {
           
           <div class="modal-body">
 
-            <!-- Configuration Details -->
+            <!-- Configuration Details (editable for non-built-in probes) -->
             <div class="detail-section">
               <h6 class="detail-label">Configuration</h6>
-              <div class="detail-grid">
+
+              <!-- Editable settings for PING, MTR, DNS etc -->
+              <div v-if="!isBuiltInProbe(state.selectedProbe) && state.selectedProbe.type !== 'AGENT'" class="settings-form">
+                <!-- Interval -->
+                <div class="setting-row">
+                  <label class="setting-label" for="editInterval">
+                    <i class="bi bi-clock me-1"></i>Interval
+                  </label>
+                  <div class="setting-input">
+                    <input
+                        id="editInterval"
+                        v-model.number="state.editInterval"
+                        class="form-control form-control-sm"
+                        type="number"
+                        :min="state.selectedProbe.type === 'PING' ? 1 : 10"
+                        max="3600"
+                        :disabled="state.savingSettings"
+                    >
+                    <span class="setting-unit">sec</span>
+                  </div>
+                </div>
+
+                <!-- Timeout -->
+                <div class="setting-row">
+                  <label class="setting-label" for="editTimeout">
+                    <i class="bi bi-hourglass-split me-1"></i>Timeout
+                  </label>
+                  <div class="setting-input">
+                    <input
+                        id="editTimeout"
+                        v-model.number="state.editTimeout"
+                        class="form-control form-control-sm"
+                        type="number"
+                        min="5"
+                        max="300"
+                        :disabled="state.savingSettings"
+                    >
+                    <span class="setting-unit">sec</span>
+                  </div>
+                </div>
+
+                <!-- Count (PING, MTR) -->
+                <div class="setting-row" v-if="['PING', 'MTR'].includes(state.selectedProbe.type)">
+                  <label class="setting-label" for="editCount">
+                    <i class="bi bi-hash me-1"></i>Packet Count
+                  </label>
+                  <div class="setting-input">
+                    <input
+                        id="editCount"
+                        v-model.number="state.editCount"
+                        class="form-control form-control-sm"
+                        type="number"
+                        min="1"
+                        max="100"
+                        :disabled="state.savingSettings"
+                    >
+                    <span class="setting-unit">pkts</span>
+                  </div>
+                </div>
+
+                <!-- Save button -->
+                <div class="setting-actions">
+                  <button
+                      class="btn btn-sm btn-primary"
+                      :disabled="state.savingSettings || !hasSettingsChanges()"
+                      @click="saveProbeSettings"
+                  >
+                    <i v-if="state.savingSettings" class="bi bi-arrow-repeat spin-animation me-1"></i>
+                    <i v-else class="bi bi-check-lg me-1"></i>
+                    {{ state.savingSettings ? 'Saving...' : 'Save Settings' }}
+                  </button>
+                  <small v-if="state.settingsSaveSuccess" class="text-success ms-2">
+                    <i class="bi bi-check-circle me-1"></i>Settings updated — agent will apply on next cycle
+                  </small>
+                </div>
+              </div>
+
+              <!-- Read-only display for built-in and AGENT probes -->
+              <div v-else class="detail-grid">
                 <div class="detail-item">
                   <span class="detail-key">Interval</span>
                   <span class="detail-value">{{ formatInterval(state.selectedProbe.interval_sec) }}</span>
@@ -721,6 +921,45 @@ const hasSelectedAgentProbes = computed(() => {
               </div>
             </div>
 
+            <!-- Interface Binding (editable) -->
+            <div v-if="state.selectedProbe && !isBuiltInProbe(state.selectedProbe)" class="detail-section">
+              <h6 class="detail-label">Network Interface</h6>
+              <div class="interface-edit-row">
+                <select
+                    v-model="state.editingInterface"
+                    class="form-select form-select-sm"
+                    :disabled="state.savingInterface"
+                >
+                  <option value="">Default (OS Auto)</option>
+                  <option
+                      v-for="iface in state.availableInterfaces"
+                      :key="iface.name"
+                      :value="iface.name"
+                  >
+                    {{ iface.name }} — {{ iface.ipv4?.[0]?.split('/')[0] || 'No IP' }}
+                    <template v-if="iface.is_default"> (default)</template>
+                  </option>
+                </select>
+                <button
+                    class="btn btn-sm btn-primary ms-2"
+                    :disabled="state.savingInterface || state.editingInterface === (state.selectedProbe.bind_interface || '')"
+                    @click="saveInterfaceBinding"
+                >
+                  <i v-if="state.savingInterface" class="bi bi-arrow-repeat spin-animation"></i>
+                  <i v-else class="bi bi-check-lg"></i>
+                </button>
+              </div>
+              <small v-if="state.interfaceSaveSuccess" class="text-success">
+                <i class="bi bi-check-circle me-1"></i>Interface binding updated — agent will apply on next cycle
+              </small>
+              <small v-else-if="state.availableInterfaces.length === 0" class="text-warning">
+                <i class="bi bi-info-circle me-1"></i>No interfaces detected
+              </small>
+              <small v-else class="text-muted">
+                Bind this probe to a specific network interface
+              </small>
+            </div>
+
             <!-- Timestamps -->
             <div class="detail-section">
               <h6 class="detail-label">Timestamps</h6>
@@ -746,10 +985,6 @@ const hasSelectedAgentProbes = computed(() => {
           </div>
 
           <div class="modal-footer">
-            <p class="modal-hint">
-              <i class="bi bi-info-circle"></i>
-              To modify this probe, delete it and create a new one.
-            </p>
             <router-link
                 :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${state.selectedProbe.id}/delete`"
                 class="btn btn-outline-danger"
@@ -902,6 +1137,73 @@ const hasSelectedAgentProbes = computed(() => {
 </template>
 
 <style scoped>
+/* Interface edit row */
+.interface-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.interface-edit-row .form-select {
+  flex: 1;
+}
+
+.spin-animation {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Settings form */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.setting-label {
+  flex: 0 0 120px;
+  font-size: 0.82rem;
+  color: var(--text-muted, #8b8fa3);
+  white-space: nowrap;
+  margin: 0;
+}
+
+.setting-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.setting-input .form-control {
+  max-width: 100px;
+  text-align: center;
+}
+
+.setting-unit {
+  font-size: 0.78rem;
+  color: var(--text-muted, #8b8fa3);
+  white-space: nowrap;
+}
+
+.setting-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
 /* Content Wrapper */
 .content-wrapper {
   display: flex;

@@ -2,6 +2,7 @@
 import { onMounted, reactive, computed, watch } from "vue";
 import {
   Agent,
+  type InterfaceInfo,
   type Probe,
   type ProbeCreateInput,
   type ProbeType,
@@ -40,7 +41,10 @@ interface ProbeState {
   hostInput: string;
   portInput: string;
   dnsConfig: DnsConfig;
-  bidirectional: boolean; // Create matching probe on target agent
+  bidirectional: boolean;
+  // Interface binding
+  availableInterfaces: InterfaceInfo[];
+  selectedInterface: string; // Interface name or empty for OS default
 }
 
 // Get probe description
@@ -95,7 +99,9 @@ const state = reactive<ProbeState>({
     dnsServer: "",
     dnssecValidation: false
   },
-  bidirectional: true // Default to bidirectional for AGENT probes
+  bidirectional: true, // Default to bidirectional for AGENT probes
+  availableInterfaces: [],
+  selectedInterface: "" // Empty = OS default
 });
 
 const router = core.router();
@@ -332,7 +338,8 @@ async function submit() {
       ...state.probe,
       workspace_id: state.workspace.id,
       agent_id: state.agent.id,
-      type: state.selected.value as ProbeType
+      type: state.selected.value as ProbeType,
+      bind_interface: state.selectedInterface || undefined
     };
 
     if (state.targetAgent && state.targetAgentSelected && showTargetAgentOption.value) {
@@ -538,6 +545,21 @@ onMounted(async () => {
 
     // Initialize probe options
     initializeOptions();
+
+    // Fetch available interfaces from latest NETINFO data
+    try {
+      const netinfoResponse = await ProbeService.netInfo(workspaceID, agentID);
+      const payload = (netinfoResponse as any)?.payload;
+      if (payload?.interfaces && Array.isArray(payload.interfaces)) {
+        // Filter out loopback and interfaces without IPv4
+        state.availableInterfaces = payload.interfaces.filter(
+          (iface: InterfaceInfo) => iface.type !== 'loopback' && iface.ipv4 && iface.ipv4.length > 0
+        );
+      }
+    } catch (err) {
+      console.debug('Could not fetch NETINFO interfaces:', err);
+      // Non-fatal — dropdown will show "No interfaces available"
+    }
 
     state.ready = true;
 
@@ -898,6 +920,35 @@ onMounted(async () => {
                   </div>
                   <small class="text-muted">
                     Maximum time to wait for probe completion (recommended: {{ probeTypeConfig.defaultTimeout }} seconds)
+                  </small>
+                </div>
+
+                <!-- Network Interface Binding -->
+                <div class="mb-4" v-if="['PING', 'MTR', 'DNS', 'AGENT'].includes(state.selected.value)">
+                  <label class="form-label fw-semibold" for="probeInterface">
+                    <i class="bi bi-ethernet me-2"></i>Network Interface
+                  </label>
+                  <select
+                      id="probeInterface"
+                      v-model="state.selectedInterface"
+                      class="form-select"
+                      :disabled="state.loading"
+                  >
+                    <option value="">Default (OS Auto)</option>
+                    <option
+                        v-for="iface in state.availableInterfaces"
+                        :key="iface.name"
+                        :value="iface.name"
+                    >
+                      {{ iface.name }} — {{ iface.ipv4?.[0]?.split('/')[0] || 'No IP' }}
+                      <template v-if="iface.is_default"> (default)</template>
+                    </option>
+                  </select>
+                  <small v-if="state.availableInterfaces.length === 0" class="text-warning">
+                    <i class="bi bi-info-circle me-1"></i>No interfaces detected — agent may be offline or NETINFO not yet reported
+                  </small>
+                  <small v-else class="text-muted">
+                    Bind this probe to a specific network interface. Leave as "Default" to use the OS routing table.
                   </small>
                 </div>
 
