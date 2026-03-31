@@ -187,9 +187,14 @@ func boolOr(b *bool, def bool) bool {
 }
 
 // very light target validation; accept "host", "host:port", "ip", "ip:port"
+// Also accepts full URLs like https://example.com for HTTP probes
 func validateLiteralTarget(s string) bool {
 	if s == "" {
 		return false
+	}
+	// If it starts with http:// or https://, accept it as a valid URL target
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		return true
 	}
 	// If it contains a colon, try to parse port
 	h, p, err := net.SplitHostPort(s)
@@ -204,6 +209,25 @@ func validateLiteralTarget(s string) bool {
 	}
 	// No port: allow host or IP
 	return true
+}
+
+// normalizeProbeTarget normalizes probe targets based on type for consistency
+func normalizeProbeTarget(t string, probeType Type) string {
+	switch probeType {
+	case TypeHTTP:
+		// HTTP probes: prepend https:// if no scheme
+		if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+			return "https://" + t
+		}
+	case TypeTLS:
+		// TLS probes: strip scheme if present
+		if strings.HasPrefix(t, "https://") {
+			t = strings.TrimPrefix(t, "https://")
+		} else if strings.HasPrefix(t, "http://") {
+			t = strings.TrimPrefix(t, "http://")
+		}
+	}
+	return t
 }
 
 // checkDuplicateProbe checks if a probe with the same agent, type, and targets already exists.
@@ -353,9 +377,11 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 			if !validateLiteralTarget(t) {
 				return fmt.Errorf("%w: %q", ErrTargetFormat, t)
 			}
+			// Normalize target based on probe type
+			normalized := normalizeProbeTarget(t, p.Type)
 			rows = append(rows, Target{
 				ProbeID:   p.ID,
-				Target:    t,
+				Target:    normalized,
 				AgentID:   nil,
 				CreatedAt: now,
 				UpdatedAt: now,
