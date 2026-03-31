@@ -112,7 +112,16 @@ Monitoring checks configured in the panel. Each probe targets one or more hosts 
 | **SPEEDTEST** | Download/upload speed measurements |
 | **SYSINFO** | System information (CPU, memory, OS) |
 | **NETINFO** | Network information (public IP, gateway, ISP) |
+| **HTTP/HTTPS** | Web monitoring with response timing, TLS certificate checks |
+| **TLS** | TLS certificate expiration and chain validation |
+| **SNMP** | SNMP polling for network devices (v1/v2c/v3) |
 | **TRAFFICSIM** | Inter-agent traffic simulation |
+
+---
+
+## Security
+
+For security-related information, see the [Security Audit Report](../security/security-audit-2026-03-30.md).
 
 ---
 

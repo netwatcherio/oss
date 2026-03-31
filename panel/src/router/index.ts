@@ -38,6 +38,11 @@ import NewProbe from '@/views/probes/NewProbe.vue'
 import DeleteProbe from '@/views/probes/DeleteProbe.vue'
 import Alerts from '@/views/Alerts.vue'
 
+// reports
+import Reports from '@/views/workspace/Reports.vue'
+import NewReport from '@/views/workspace/NewReport.vue'
+import EditReport from '@/views/workspace/EditReport.vue'
+
 // admin views
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
 import AdminUsers from '@/views/admin/AdminUsers.vue'
@@ -188,6 +193,30 @@ const routes: RouteRecordRaw[] = [
                                 path: 'edit/:userId(\\d+)',
                                 name: 'workspaceMemberEdit',
                                 component: EditMember,
+                                props: true,
+                                meta: { requiresRole: 'ADMIN' }
+                            },
+                        ],
+                    },
+
+                    // ----- Reports: /workspaces/:wID/reports[...] -----
+                    {
+                        path: 'reports',
+                        component: BasicView,
+                        props: true,
+                        children: [
+                            { path: '', name: 'workspaceReports', component: Reports, props: true },
+                            {
+                                path: 'new',
+                                name: 'reportNew',
+                                component: NewReport,
+                                props: true,
+                                meta: { requiresRole: 'ADMIN' }
+                            },
+                            {
+                                path: ':rID(\\d+)/edit',
+                                name: 'reportEdit',
+                                component: EditReport,
                                 props: true,
                                 meta: { requiresRole: 'ADMIN' }
                             },

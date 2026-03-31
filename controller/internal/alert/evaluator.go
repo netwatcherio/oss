@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -39,7 +40,7 @@ type EvaluationResult struct {
 }
 
 // EvaluateProbeData checks probe data against alert rules and creates alerts if thresholds are exceeded
-func EvaluateProbeData(ctx context.Context, db *gorm.DB, pctx ProbeContext, payloadJSON []byte) error {
+func EvaluateProbeData(ctx context.Context, db *gorm.DB, ch *sql.DB, pctx ProbeContext, payloadJSON []byte) error {
 	// Get relevant alert rules for this probe
 	var rules []AlertRule
 	err := db.WithContext(ctx).
@@ -63,8 +64,10 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, pctx ProbeContext, payl
 			result = evaluateSysInfoRule(&rule, pctx, payloadJSON)
 		case "DNS":
 			result = evaluateDnsRule(&rule, pctx, payloadJSON)
+		case "HTTP":
+			result = evaluateHttpRule(ctx, db, ch, &rule, pctx, payloadJSON)
 		default:
-			result = evaluateStandardRule(&rule, pctx, payloadJSON)
+			result = evaluateStandardRule(ctx, db, ch, &rule, pctx, payloadJSON)
 		}
 
 		if result == nil {
@@ -126,19 +129,29 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, pctx ProbeContext, payl
 }
 
 // evaluateStandardRule evaluates PING/TRAFFICSIM rules with optional compound conditions
-func evaluateStandardRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte) *EvaluationResult {
+func evaluateStandardRule(ctx context.Context, db *gorm.DB, ch *sql.DB, rule *AlertRule, pctx ProbeContext, payloadJSON []byte) *EvaluationResult {
 	var payload ProbeDataPayload
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 		log.Warnf("alert.evaluateStandardRule: failed to parse payload: %v", err)
 		return nil
 	}
 
-	// Evaluate primary condition
 	value1 := getMetricValue(&payload, rule.Metric, pctx.ProbeType)
 	if value1 == nil {
-		return nil // Metric not applicable to this probe type
+		return nil
 	}
-	cond1 := ShouldTrigger(rule.Operator, *value1, rule.Threshold)
+
+	threshold := rule.Threshold
+	if rule.ThresholdType != ThresholdTypeStatic && ch != nil {
+		stats, err := GetProbeBaseline(ctx, ch, pctx.ProbeID, rule.Metric, rule.BaselineWindowDays)
+		if err != nil {
+			log.Warnf("alert.evaluateStandardRule: failed to get baseline for probe %d metric %s: %v", pctx.ProbeID, rule.Metric, err)
+		} else if stats.Count > 0 {
+			threshold = ComputeDynamicThreshold(stats, rule)
+		}
+	}
+
+	cond1 := ShouldTrigger(rule.Operator, *value1, threshold)
 
 	// If no secondary condition, use primary result
 	if rule.Metric2 == nil {
@@ -147,7 +160,7 @@ func evaluateStandardRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte
 				Triggered: true,
 				Value:     *value1,
 				Metric:    string(rule.Metric),
-				Message:   fmt.Sprintf("%s exceeded threshold: %.2f (threshold: %.2f)", rule.Metric, *value1, rule.Threshold),
+				Message:   fmt.Sprintf("%s exceeded threshold: %.2f (threshold: %.2f)", rule.Metric, *value1, threshold),
 			}
 		}
 		return &EvaluationResult{Triggered: false}
@@ -156,13 +169,12 @@ func evaluateStandardRule(rule *AlertRule, pctx ProbeContext, payloadJSON []byte
 	// Evaluate secondary condition
 	value2 := getMetricValue(&payload, *rule.Metric2, pctx.ProbeType)
 	if value2 == nil {
-		// Secondary metric not applicable, fall back to primary only
 		if cond1 {
 			return &EvaluationResult{
 				Triggered: true,
 				Value:     *value1,
 				Metric:    string(rule.Metric),
-				Message:   fmt.Sprintf("%s exceeded threshold: %.2f (threshold: %.2f)", rule.Metric, *value1, rule.Threshold),
+				Message:   fmt.Sprintf("%s exceeded threshold: %.2f (threshold: %.2f)", rule.Metric, *value1, threshold),
 			}
 		}
 		return &EvaluationResult{Triggered: false}

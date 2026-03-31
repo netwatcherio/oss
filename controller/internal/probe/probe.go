@@ -35,6 +35,9 @@ const (
 	TypeAgent      Type = "AGENT"
 	TypeTrafficSim Type = "TRAFFICSIM"
 	TypeDNS        Type = "DNS"
+	TypeHTTP       Type = "HTTP"
+	TypeTLS        Type = "TLS"
+	TypeSNMP       Type = "SNMP"
 )
 
 var (

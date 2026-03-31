@@ -175,6 +175,10 @@ onUnmounted(() => {
           <i class="bi bi-people"></i>
           <span class="d-none d-sm-inline">&nbsp;Members</span>
         </router-link>
+        <router-link :to="`/workspaces/${state.workspace.id}/reports`" class="btn btn-outline-dark">
+          <i class="bi bi-file-earmark-pdf"></i>
+          <span class="d-none d-sm-inline">&nbsp;Reports</span>
+        </router-link>
         <router-link 
           v-if="permissions.canEdit.value" 
           :to="`/workspaces/${state.workspace.id}/agents/new`" 

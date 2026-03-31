@@ -26,6 +26,7 @@ const (
 	TypeRegistrationConfirmation EmailType = "registration_confirmation"
 	TypePasswordReset            EmailType = "password_reset"
 	TypeEmailVerification        EmailType = "email_verification"
+	TypeReport                   EmailType = "report"
 )
 
 // EmailQueue represents an email in the queue

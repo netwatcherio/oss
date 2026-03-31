@@ -21,6 +21,35 @@ interface DnsConfig {
   dnssecValidation: boolean;
 }
 
+interface HttpConfig {
+  method: string;
+  expectedStatus: number[];
+  expectedContent: string;
+  contentMatchType: string;
+  headers: Record<string, string>;
+  followRedirects: boolean;
+  insecureTls: boolean;
+}
+
+interface TlsConfig {
+  target: string;
+  timeoutSec: number;
+  insecureTls: boolean;
+}
+
+interface SnmpConfig {
+  version: string;
+  community: string;
+  profile: string;
+  oids: string;
+  userName: string;
+  authPassword: string;
+  authProtocol: string;
+  privacyPassword: string;
+  privacyProtocol: string;
+  securityLevel: string;
+}
+
 interface ProbeState {
   workspace: Workspace;
   ready: boolean;
@@ -54,6 +83,9 @@ function getProbeDescription(probeType: string): string {
     PING: "Test basic connectivity and measure round-trip time to a target",
     MTR: "Combine traceroute and ping to diagnose network paths and identify packet loss",
     DNS: "Monitor DNS resolution performance and availability",
+    HTTP: "Monitor HTTP/HTTPS endpoint availability, response time, and content",
+    TLS: "Monitor SSL/TLS certificate expiration and configuration",
+    SNMP: "Query network devices via SNMP for interface, CPU, and memory metrics",
     SPEEDTEST: "Measure bandwidth performance between locations",
     RPERF: "Advanced UDP performance testing with detailed metrics"
   };
@@ -98,6 +130,32 @@ const state = reactive<ProbeState>({
     selectedRecordTypes: ['A', 'AAAA'],
     dnsServer: "",
     dnssecValidation: false
+  },
+  httpConfig: {
+    method: 'GET',
+    expectedStatus: [200],
+    expectedContent: '',
+    contentMatchType: 'contains',
+    headers: {},
+    followRedirects: true,
+    insecureTls: false
+  },
+  tlsConfig: {
+    target: '',
+    timeoutSec: 10,
+    insecureTls: false
+  },
+  snmpConfig: {
+    version: '2c',
+    community: 'public',
+    profile: 'system',
+    oids: '',
+    userName: '',
+    authPassword: '',
+    authProtocol: 'SHA',
+    privacyPassword: '',
+    privacyProtocol: 'AES',
+    securityLevel: 'authPriv'
   },
   bidirectional: true, // Default to bidirectional for AGENT probes
   availableInterfaces: [],
@@ -186,6 +244,36 @@ const probeTypeConfig = computed(() => {
       defaultTimeout: 10,
       defaultCount: 1
     },
+    HTTP: {
+      description: "Monitor HTTP/HTTPS endpoint availability, response time, and content validation",
+      icon: "bi-globe2",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      requiresHostOnly: true,
+      defaultInterval: 60,
+      defaultTimeout: 10,
+      defaultCount: 1
+    },
+    TLS: {
+      description: "Monitor SSL/TLS certificate expiration and configuration",
+      icon: "bi-lock",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      requiresHostOnly: true,
+      defaultInterval: 3600,
+      defaultTimeout: 10,
+      defaultCount: 1
+    },
+    SNMP: {
+      description: "Query network devices via SNMP for interface, CPU, and memory metrics",
+      icon: "bi-router",
+      requiresTargetAgent: false,
+      supportsCustomTarget: true,
+      requiresHostOnly: true,
+      defaultInterval: 60,
+      defaultTimeout: 10,
+      defaultCount: 1
+    },
     SPEEDTEST: {
       description: "Measure bandwidth performance between locations",
       icon: "bi-speedometer2",
@@ -243,6 +331,30 @@ function initializeOptions() {
       agentAvailable: false,
       disabled: false,
       recommended: false
+    },
+    {
+      value: "HTTP",
+      text: "HTTP Monitor",
+      icon: "bi-globe2",
+      agentAvailable: false,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "TLS",
+      text: "TLS Certificate",
+      icon: "bi-lock",
+      agentAvailable: false,
+      disabled: false,
+      recommended: false
+    },
+    {
+      value: "SNMP",
+      text: "SNMP Monitor",
+      icon: "bi-router",
+      agentAvailable: false,
+      disabled: false,
+      recommended: false
     }
   ];
 }
@@ -273,9 +385,12 @@ const isValidProbe = computed(() => {
     }
 
     case "DNS":
+    case "HTTP":
+    case "TLS":
+    case "SNMP":
     case "SPEEDTEST":
-      if (state.targetAgent && showTargetAgentOption.value) {
-        return state.targetAgentSelected !== null;
+      if (state.targetAgent && α5.value) {
+        return state.α1 !== null;
       } else {
         return state.hostInput.trim() !== "";
       }
@@ -399,6 +514,48 @@ async function submit() {
       return;
     }
 
+    // HTTP probes — set HTTP-specific metadata
+    if (state.selected.value === 'HTTP') {
+      newProbe.metadata = {
+        method: state.httpConfig.method,
+        url: state.hostInput,
+        expected_status: state.httpConfig.expectedStatus,
+        expected_content: state.httpConfig.expectedContent,
+        content_match_type: state.httpConfig.contentMatchType,
+        headers: state.httpConfig.headers,
+        follow_redirects: state.httpConfig.followRedirects,
+        insecure_tls: state.httpConfig.insecureTls,
+        timeout_sec: state.probe.timeout_sec
+      };
+    }
+
+    // TLS probes — set TLS-specific metadata
+    if (state.selected.value === 'TLS') {
+      newProbe.metadata = {
+        target: state.hostInput,
+        timeout_sec: state.probe.timeout_sec,
+        insecure_skip_verify: state.tlsConfig.α6
+      };
+    }
+
+    // SNMP probes — set SNMP-specific metadata
+    if (state.selected.value === 'SNMP') {
+      newProbe.metadata = {
+        target: state.hostInput,
+        version: state.snmpConfig.version,
+        community: state.snmpConfig.community,
+        profile: state.snmpConfig.profile,
+        oids: state.snmpConfig.oids || undefined,
+        user_name: state.snmpConfig.userName || undefined,
+        auth_password: state.snmpConfig.authPassword || undefined,
+        auth_protocol: state.snmpConfig.authProtocol || undefined,
+        privacy_password: state.snmpConfig.privacyPassword || undefined,
+        privacy_protocol: state.snmpConfig.privacyProtocol || undefined,
+        security_level: state.snmpConfig.securityLevel || undefined,
+        timeout_sec: state.probe.timeout_sec
+      };
+    }
+
     const response = await ProbeService.create(
         state.workspace.id,
         state.agent.id,
@@ -502,6 +659,38 @@ watch(() => state.selected.value, async (newType) => {
     selectedRecordTypes: ['A', 'AAAA'],
     dnsServer: "",
     dnssecValidation: false
+  };
+
+  // Reset HTTP configuration
+  state.httpConfig = {
+    method: 'GET',
+    expectedStatus: [200],
+    expectedContent: '',
+    contentMatchType: 'contains',
+    headers: {},
+    followRedirects: true,
+    insecureTls: false
+  };
+
+  // Reset TLS configuration
+  state.tlsConfig = {
+    target: '',
+    timeoutSec: 10,
+    α6: false
+  };
+
+  // Reset SNMP configuration
+  state.snmpConfig = {
+    version: '2c',
+    community: 'public',
+    profile: 'system',
+    oids: '',
+    userName: '',
+    authPassword: '',
+    authProtocol: 'SHA',
+    privacyPassword: '',
+    privacyProtocol: 'AES',
+    securityLevel: 'authPriv'
   };
 
   // Apply defaults for the new probe type
@@ -826,6 +1015,250 @@ onMounted(async () => {
                       Enable DNSSEC Validation
                       <small class="text-muted d-block">Verify DNS responses are authenticated</small>
                     </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- HTTP Configuration -->
+              <div v-if="state.selected.value === 'HTTP'" class="mb-4">
+                <label class="form-label fw-semibold" for="httpTarget">
+                  <i class="bi bi-globe me-2"></i>URL to Monitor
+                </label>
+                <div class="input-group mb-3">
+                  <span class="input-group-text"><i class="bi bi-link"></i></span>
+                  <input
+                      id="httpTarget"
+                      v-model="state.hostInput"
+                      class="form-control"
+                      type="text"
+                      placeholder="https://example.com/api/health">
+                </div>
+
+                <label class="form-label fw-semibold">
+                  <i class="bi bi-gear me-2"></i>HTTP Options
+                </label>
+                <div class="http-options mb-3">
+                  <div class="row g-3">
+                    <div class="col-md-4">
+                      <label class="form-label">Method</label>
+                      <select v-model="state.httpConfig.method" class="form-select">
+                        <option value="GET">GET</option>
+                        <option value="HEAD">HEAD</option>
+                        <option value="POST">POST</option>
+                        <option value="OPTIONS">OPTIONS</option>
+                      </select>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Expected Status</label>
+                      <input
+                          v-model.number="state.httpConfig.expectedStatus[0]"
+                          class="form-control"
+                          type="number"
+                          placeholder="200">
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Content Match</label>
+                      <select v-model="state.httpConfig.contentMatchType" class="form-select">
+                        <option value="contains">Contains</option>
+                        <option value="regex">Regex</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="mt-3" v-if="state.httpConfig.contentMatchType === 'contains' || state.httpConfig.contentMatchType === 'regex'">
+                    <label class="form-label">Expected Content</label>
+                    <input
+                        v-model="state.httpConfig.expectedContent"
+                        class="form-control"
+                        type="text"
+                        :placeholder="state.httpConfig.contentMatchType === 'regex' ? 'Regular expression' : 'String to match'">
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <div class="form-check form-switch mb-2">
+                    <input
+                        id="followRedirects"
+                        v-model="state.httpConfig.followRedirects"
+                        class="form-check-input"
+                        type="checkbox">
+                    <label class="form-check-label" for="followRedirects">
+                      Follow Redirects
+                    </label>
+                  </div>
+                  <div class="form-check form-switch">
+                    <input
+                        id="insecureTls"
+                        v-model="state.httpConfig.insecureTls"
+                        class="form-check-input"
+                        type="checkbox">
+                    <label class="form-check-label" for="insecureTls">
+                      Skip TLS Verification
+                      <small class="text-muted d-block">Use only for testing with self-signed certificates</small>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TLS Configuration -->
+              <div v-if="state.selected.value === 'TLS'" class="mb-4">
+                <label class="form-label fw-semibold" for="tlsTarget">
+                  <i class="bi bi-globe me-2"></i>Host to Monitor
+                </label>
+                <div class="input-group mb-3">
+                  <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                  <input
+                      id="tlsTarget"
+                      v-model="state.hostInput"
+                      class="form-control"
+                      type="text"
+                      placeholder="example.com:443">
+                </div>
+                <small class="text-muted">
+                  Enter the hostname and port (default port is 443)
+                </small>
+
+                <div class="mt-3">
+                  <div class="form-check form-switch">
+                    <input
+                        id="α6Check"
+                        v-model="state.tlsConfig.α6"
+                        class="form-check-input"
+                        type="checkbox">
+                    <label class="form-check-label" for="α6Check">
+                      Skip TLS Verification
+                      <small class="text-muted d-block">Use only for testing with self-signed certificates</small>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SNMP Configuration -->
+              <div v-if="state.selected.value === 'SNMP'" class="mb-4">
+                <label class="form-label fw-semibold" for="snmpTarget">
+                  <i class="bi bi-globe me-2"></i>Target Device
+                </label>
+                <div class="input-group mb-3">
+                  <span class="input-group-text"><i class="bi bi-router"></i></span>
+                  <input
+                      id="snmpTarget"
+                      v-model="state.hostInput"
+                      class="form-control"
+                      type="text"
+                      placeholder="192.168.1.1:161">
+                </div>
+                <small class="text-muted">
+                  Enter the IP address and port of the SNMP device (default port is 161)
+                </small>
+
+                <!-- SNMP Version -->
+                <label class="form-label fw-semibold mt-3">
+                  <i class="bi bi-sliders me-2"></i>SNMP Version
+                </label>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-4">
+                    <select v-model="state.snmpConfig.version" class="form-select">
+                      <option value="1">SNMP v1</option>
+                      <option value="2c">SNMP v2c</option>
+                      <option value="3">SNMP v3</option>
+                    </select>
+                  </div>
+                  <div class="col-md-8" v-if="state.snmpConfig.version !== '3'">
+                    <input
+                        v-model="state.snmpConfig.community"
+                        class="form-control"
+                        type="text"
+                        placeholder="Community string (e.g. public)">
+                  </div>
+                </div>
+
+                <!-- SNMP v3 Options -->
+                <div v-if="state.snmpConfig.version === '3'" class="snmp-v3-options mt-3">
+                  <label class="form-label fw-semibold">
+                    <i class="bi bi-shield-lock me-2"></i>SNMP v3 Authentication
+                  </label>
+                  <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                      <label class="form-label">Security Level</label>
+                      <select v-model="state.snmpConfig.securityLevel" class="form-select">
+                        <option value="noAuthNoPriv">No Authentication, No Privacy</option>
+                        <option value="authNoPriv">Authentication, No Privacy</option>
+                        <option value="authPriv">Authentication and Privacy</option>
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Username</label>
+                      <input
+                          v-model="state.snmpConfig.userName"
+                          class="form-control"
+                          type="text"
+                          placeholder=" SNMP v3 username">
+                    </div>
+                  </div>
+
+                  <div v-if="state.snmpConfig.securityLevel !== 'noAuthNoPriv'" class="row g-3 mb-3">
+                    <div class="col-md-6">
+                      <label class="form-label">Auth Protocol</label>
+                      <select v-model="state.snmpConfig.authProtocol" class="form-select">
+                        <option value="MD5">MD5</option>
+                        <option value="SHA">SHA</option>
+                        <option value="SHA224">SHA224</option>
+                        <option value="SHA256">SHA256</option>
+                        <option value="SHA384">SHA384</option>
+                        <option value="SHA512">SHA512</option>
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Auth Password</label>
+                      <input
+                          v-model="state.snmpConfig.authPassword"
+                          class="form-control"
+                          type="password"
+                          placeholder="Authentication passphrase">
+                    </div>
+                  </div>
+
+                  <div v-if="state.snmpConfig.securityLevel === 'authPriv'" class="row g-3 mb-3">
+                    <div class="col-md-6">
+                      <label class="form-label">Privacy Protocol</label>
+                      <select v-model="state.snmpConfig.privacyProtocol" class="form-select">
+                        <option value="DES">DES</option>
+                        <option value="AES">AES-128</option>
+                        <option value="AES192">AES-192</option>
+                        <option value="AES256">AES-256</option>
+                      </select>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">Privacy Password</label>
+                      <input
+                          v-model="state.snmpConfig.privacyPassword"
+                          class="form-control"
+                          type="password"
+                          placeholder="Privacy passphrase">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- OID Profile -->
+                <label class="form-label fw-semibold mt-3">
+                  <i class="bi bi-diagram-3 me-2"></i>OID Profile
+                </label>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <select v-model="state.snmpConfig.profile" class="form-select">
+                      <option value="system">System Info (sysDescr, sysUpTime, etc.)</option>
+                      <option value="interface">Network Interfaces (ifInOctets, ifOutOctets, etc.)</option>
+                      <option value="cpu">CPU Statistics</option>
+                      <option value="memory">Memory Statistics</option>
+                      <option value="custom">Custom OIDs</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6" v-if="state.snmpConfig.profile === 'custom'">
+                    <input
+                        v-model="state.snmpConfig.oids"
+                        class="form-control"
+                        type="text"
+                        placeholder="1.3.6.1.2.1.1.1.0, 1.3.6.1.2.1.1.3.0">
+                    <small class="text-muted">Comma-separated OIDs</small>
                   </div>
                 </div>
               </div>

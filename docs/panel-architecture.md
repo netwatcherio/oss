@@ -369,6 +369,9 @@ All views in `panel/src/views/`:
 | `InviteMember.vue` | Invite new member |
 | `EditMember.vue` | Change member role |
 | `RemoveMember.vue` | Remove member from workspace |
+| `Reports.vue` | List and manage scheduled reports |
+| `NewReport.vue` | Create new scheduled report |
+| `EditReport.vue` | Edit existing scheduled report |
 
 ### Agent Views
 | View | Purpose |
@@ -398,6 +401,7 @@ All views in `panel/src/views/`:
 | `AdminWorkspaces.vue` | Workspace management (list, delete) |
 | `AdminWorkspaceDetail.vue` | Workspace detail with members and agents |
 | `AdminAgents.vue` | All agents across workspaces |
+| `AdminGlobalAgents.vue` | Global agent management across all workspaces |
 | `AdminSystemDebug.vue` | System debug info (active WebSocket connections, health) |
 
 ### Profile Views

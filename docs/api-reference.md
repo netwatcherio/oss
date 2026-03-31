@@ -592,6 +592,10 @@ Create a new probe.
 | `SPEEDTEST` | Speed test |
 | `SYSINFO` | System information |
 | `NETINFO` | Network information |
+| `HTTP` | HTTP/HTTPS web monitoring |
+| `HTTPS` | HTTPS web monitoring (TLS certificate) |
+| `TLS` | TLS certificate monitoring |
+| `SNMP` | SNMP polling for network devices |
 | `TRAFFICSIM` | Traffic simulation |
 
 ---
@@ -1228,6 +1232,134 @@ Copy probes from one agent to multiple destination agents.
 | `probe_types` | Filter by type (AGENT, MTR, PING, etc.) |
 | `match_targets` | Only copy probes targeting dest agents |
 | `skip_duplicates` | Skip if probe already exists on dest |
+
+---
+
+## Reports API Endpoints
+
+### `GET /workspaces/{id}/reports`
+
+List all scheduled reports for a workspace.
+
+**Required Role:** Any workspace member
+
+**Response:**
+```json
+{
+  "reports": [
+    {
+      "id": 1,
+      "workspace_id": 1,
+      "name": "Weekly Summary",
+      "description": "{\"time_range_days\": 7, \"include_alerts\": true}",
+      "report_type": "workspace_summary",
+      "schedule": "0 0 * * 1",
+      "email_enabled": true,
+      "email_recipients": ["admin@example.com"],
+      "last_run_at": "2026-03-24T00:00:00Z",
+      "last_error": "",
+      "created_at": "2026-03-01T00:00:00Z",
+      "updated_at": "2026-03-24T00:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### `POST /workspaces/{id}/reports`
+
+Create a new scheduled report.
+
+**Required Role:** `ADMIN`
+
+**Request Body:**
+```json
+{
+  "name": "Weekly Summary",
+  "description": "{\"time_range_days\": 7, \"include_alerts\": true}",
+  "report_type": "workspace_summary",
+  "schedule": "0 0 * * 1",
+  "email_enabled": true,
+  "email_recipients": ["admin@example.com"]
+}
+```
+
+**Report Types:**
+| Type | Description |
+|------|-------------|
+| `workspace_summary` | Overview of all agents and probes |
+| `agent_summary` | Per-agent detailed report |
+| `alert_summary` | Alert history and statistics |
+
+**Schedule Format (cron):**
+- `0 0 * * *` - Daily at midnight
+- `0 0 * * 1` - Weekly on Monday
+- `0 0 1 * *` - Monthly on the 1st
+
+---
+
+### `GET /workspaces/{id}/reports/{reportId}`
+
+Get a specific report configuration.
+
+**Required Role:** Any workspace member
+
+---
+
+### `PUT /workspaces/{id}/reports/{reportId}`
+
+Update a report configuration.
+
+**Required Role:** `ADMIN`
+
+**Request Body:**
+```json
+{
+  "name": "Updated Report Name",
+  "schedule": "0 0 * * 2",
+  "email_enabled": false,
+  "email_recipients": ["new@example.com"]
+}
+```
+
+---
+
+### `DELETE /workspaces/{id}/reports/{reportId}`
+
+Delete a scheduled report.
+
+**Required Role:** `ADMIN`
+
+---
+
+### `GET /workspaces/{id}/reports/{reportId}/run`
+
+Generate and download a PDF report immediately (on-demand).
+
+**Required Role:** Any workspace member
+
+**Response:**
+- Content-Type: `application/pdf`
+- Content-Disposition: `attachment; filename=<report-name>.pdf`
+
+---
+
+### `GET /workspaces/{id}/reports/preview`
+
+Preview a report as PDF without saving.
+
+**Required Role:** Any workspace member
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `time_range_days` | int | 7 | Time range for the preview |
+
+**Response:**
+- Content-Type: `application/pdf`
+- Content-Disposition: `inline; filename=report-preview.pdf`
 
 ---
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -43,9 +44,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelWhois(api, ch)
 	panelLookup(api, geoStore, ch)
 	panelOUI(api, ouiStore)
-	panelAlerts(api, db)
+	panelAlerts(api, db, ch)
 	panelShareLinks(api, db)
 	panelAnalysis(api, db, ch)
+	panelReports(api, db, ch, emailStore)
 	RegisterAdminRoutes(api, db)
 
 	// Health
@@ -74,6 +76,9 @@ func BuildHTTPMux(app *fiber.App, db *gorm.DB, ch *sql.DB) http.Handler {
 	mux.Handle("/ws", agentNeffos) // legacy backwards compat
 
 	log.Info("WebSocket routes registered on net/http mux")
+
+	// --- Prometheus metrics endpoint ---
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// --- Everything else → Fiber ---
 	mux.Handle("/", adaptor.FiberApp(app))

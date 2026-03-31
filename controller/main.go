@@ -19,8 +19,11 @@ import (
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/llm"
+	"netwatcher-controller/internal/logloki"
+	"netwatcher-controller/internal/metrics"
 	"netwatcher-controller/internal/oui"
 	"netwatcher-controller/internal/probe"
+	"netwatcher-controller/internal/reports"
 	"netwatcher-controller/internal/scheduler"
 	"netwatcher-controller/web"
 )
@@ -85,6 +88,22 @@ func main() {
 		log.Info("GeoIP not configured, lookups disabled")
 	}
 
+	// ---- Prometheus Metrics ----
+	m := metrics.New(db, ch)
+	m.RegisterCollectors(db, ch)
+	log.Info("Prometheus metrics initialized")
+
+	// ---- Loki Log Shipping ----
+	if lokiURL := os.Getenv("LOKI_URL"); lokiURL != "" {
+		lokiHook := logloki.NewHook(lokiURL, "netwatcher-controller")
+		if workspaceID := os.Getenv("LOKI_WORKSPACE_ID"); workspaceID != "" {
+			lokiHook.SetLabel("workspace_id", workspaceID)
+		}
+		lokiHook.Start()
+		log.AddHook(lokiHook)
+		log.Infof("Loki log shipping enabled: %s", lokiURL)
+	}
+
 	// ---- OUI Store ----
 	ouiConfig := oui.LoadConfigFromEnv()
 	ouiStore := oui.NewStore(ouiConfig)
@@ -107,6 +126,14 @@ func main() {
 	// ---- AI Analysis Loop ----
 	analysisConfig := probe.LoadAnalysisLoopConfig()
 	go probe.StartAnalysisLoop(cleanupCtx, ch, db, analysisConfig)
+
+	// ---- Report Scheduler ----
+	reportStore := reports.NewStore(db)
+	reportGenerator := reports.NewGenerator(db, ch)
+	reportScheduler := reports.NewScheduler(db, ch, reportStore, reportGenerator, emailWorker.GetStore())
+	if err := reportScheduler.Start(cleanupCtx); err != nil {
+		log.WithError(err).Warn("Report scheduler start failed")
+	}
 
 	// ---- Optional LLM Enrichment ----
 	llmConfig := llm.LoadConfig()
@@ -157,6 +184,7 @@ func main() {
 		cleanupCancel()
 		probe.StopBatchWriter()
 		emailWorker.Stop()
+		reportScheduler.Stop()
 		if geoStore != nil {
 			geoStore.Close()
 		}

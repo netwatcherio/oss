@@ -62,6 +62,13 @@ Access the admin panel at `/admin` (requires SITE_ADMIN role).
 - View online/offline status
 - See agent versions and last-seen times
 
+### Global Agents (`/admin/global-agents`)
+- View all agents across all workspaces without workspace context
+- Filter by status (online/offline/stale), workspace, or version
+- View agent details including current probes and configuration
+- Access agent-specific views (DNS, Speedtests) from global context
+- Search agents by name, IP, or location
+
 ## API Endpoints
 
 All endpoints require authentication with a `SITE_ADMIN` role user.

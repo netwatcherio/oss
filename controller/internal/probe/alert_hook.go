@@ -28,7 +28,7 @@ func SaveRecordWithAlertEval(
 	}
 
 	// Only evaluate alerts for types that have metrics we can check
-	if kind != string(TypePing) && kind != string(TypeTrafficSim) && kind != string(TypeMTR) && kind != string(TypeSysInfo) && kind != string(TypeDNS) {
+	if kind != string(TypePing) && kind != string(TypeTrafficSim) && kind != string(TypeMTR) && kind != string(TypeSysInfo) && kind != string(TypeDNS) && kind != string(TypeHTTP) && kind != string(TypeSNMP) {
 		return nil
 	}
 
@@ -82,7 +82,7 @@ func SaveRecordWithAlertEval(
 	}
 
 	// Evaluate alerts (non-blocking, log errors)
-	if err := alert.EvaluateProbeData(ctx, pg, pctx, payloadJSON); err != nil {
+	if err := alert.EvaluateProbeData(ctx, pg, ch, pctx, payloadJSON); err != nil {
 		log.Warnf("alert_hook: alert evaluation failed: %v", err)
 	}
 

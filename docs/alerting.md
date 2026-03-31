@@ -16,7 +16,11 @@ Alert Definition → Alert Rule → Alert Instance
 
 ---
 
-## Supported Metrics
+## Alert Types
+
+### Threshold-Based Alerts
+
+Static threshold evaluation using fixed values:
 
 | Metric | Probe Types | Description |
 |--------|-------------|-------------|
@@ -25,6 +29,62 @@ Alert Definition → Alert Rule → Alert Instance
 | `jitter` | PING, TRAFFICSIM | Monitored for VoIP/real-time traffic |
 | `dns_query_time` | DNS | Triggered when DNS resolution time exceeds threshold |
 | `offline` | HEARTBEAT | Triggered if agent fails to check in |
+
+### Baseline-Based Alerts
+
+Dynamic thresholds calculated from historical data using standard deviation:
+
+| Metric | Probe Types | Description |
+|--------|-------------|-------------|
+| `latency_baseline` | PING, MTR | Threshold = baseline_avg + (baseline_stddev × multiplier) |
+| `packet_loss_baseline` | PING, TRAFFICSIM | Baseline-aware packet loss detection |
+| `dns_query_time_baseline` | DNS | Dynamic DNS response time thresholds |
+
+**Configuration:**
+- Baseline window: 7/14/30 days
+- Multiplier: Configurable standard deviation multiplier per severity
+- Percentile support: P50/P90/P95/P99
+
+### DNS-Specific Alerts
+
+| Metric | Description |
+|--------|-------------|
+| `dns_failure` | DNS query returned SERVFAIL or REFUSED |
+| `dns_nxdomain` | Domain does not exist (NXDOMAIN response) |
+| `dns_timeout` | DNS query timed out |
+| `dns_mismatch` | DNS response mismatch between expected and actual |
+
+### HTTP/HTTPS Alerts
+
+| Metric | Description |
+|--------|-------------|
+| `http_status` | HTTP status code indicates error (>= 400) |
+| `http_ttfb` | Time to first byte exceeds threshold |
+| `http_total` | Total request time exceeds threshold |
+| `http_cert_expiring` | TLS certificate expires within threshold days |
+| `http_cert_expired` | TLS certificate has expired |
+
+### MTR-Specific Alerts
+
+| Metric | Description |
+|--------|-------------|
+| `hop_loss` | Packet loss at specific MTR hop |
+| `route_change` | Route change detected (new hop, missing hop, changed ASN) |
+| `mos_score` | VoIP quality MOS score below threshold (ITU-T G.107 E-Model) |
+
+### SysInfo Alerts
+
+| Metric | Description |
+|--------|-------------|
+| `cpu_percent` | CPU usage exceeds threshold |
+| `memory_percent` | Memory usage exceeds threshold |
+
+### Agent Health Alerts
+
+| Metric | Description |
+|--------|-------------|
+| `agent_offline` | Agent fails to check in (no heartbeat within timeout) |
+| `agent_stale` | Agent check-in is delayed but not yet offline |
 
 ---
 
@@ -37,20 +97,48 @@ Rules are configured per-workspace via **Workspace Settings → Alert Rules**.
 | Field | Description |
 |-------|-------------|
 | `name` | Human-readable rule name |
-| `metric` | One of: `packet_loss`, `latency`, `jitter`, `offline` |
+| `metric` | One of the metrics listed above |
 | `operator` | `>`, `>=`, `<`, `<=`, `=` |
 | `threshold` | Numeric threshold value |
 | `severity` | `info`, `warning`, `critical` |
 | `probe_id` | Optional: scope to specific probe |
 | `agent_id` | Optional: scope to specific agent |
+| `use_baseline` | Use dynamic baseline thresholds instead of static |
+| `baseline_multiplier` | Standard deviation multiplier for baseline (default: 2.0) |
+
+### Compound Conditions
+
+Alert rules can use AND/OR logic for complex conditions:
+
+```json
+{
+  "name": "High Latency + Packet Loss",
+  "conditions": [
+    { "metric": "latency", "operator": ">", "threshold": 100 },
+    "AND",
+    { "metric": "packet_loss", "operator": ">", "threshold": 5 }
+  ]
+}
+```
 
 ### Notification Channels
 
 | Channel | Description |
 |---------|-------------|
 | **Panel** | Always-on dashboard alerts with navbar badge |
-| **Email** | Email workspace members (planned) |
-| **Webhook** | HTTP POST to configured URL |
+| **Email** | Email workspace members via configured SMTP |
+| **Webhook** | HTTP POST to configured URL with HMAC signature |
+
+---
+
+### Agent Offline Detection
+
+The agent offline alert is automatically triggered when:
+- No heartbeat received within 60 seconds of expected interval
+- Agent has not reported any probe data
+- Agent was previously online but stopped responding
+
+**Auto-recovery:** Alert automatically resolves when agent reconnects and resumes heartbeat.
 
 ---
 

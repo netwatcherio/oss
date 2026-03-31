@@ -2,6 +2,7 @@
 package web
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 
@@ -12,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelAlerts(api fiber.Router, db *gorm.DB) {
+func panelAlerts(api fiber.Router, db *gorm.DB, ch *sql.DB) {
 	wsStore := workspace.NewStore(db)
 
 	// Global alert endpoints (across all user's workspaces)
@@ -174,5 +175,28 @@ func panelAlerts(api fiber.Router, db *gorm.DB) {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(fiber.Map{"ok": true})
+	})
+
+	// GET /workspaces/:id/probes/:probeID/baseline - Get baseline stats for a probe
+	api.Get("/workspaces/:id/probes/:probeID/baseline", func(c *fiber.Ctx) error {
+		probeID := uintParam(c, "probeID")
+		metric := alert.Metric(c.Query("metric", "latency"))
+		windowDays := 7
+		if wd, err := strconv.Atoi(c.Query("window", "7")); err == nil && wd > 0 {
+			windowDays = wd
+		}
+
+		if ch == nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "ClickHouse not available"})
+		}
+
+		stats, err := alert.GetProbeBaseline(c.UserContext(), ch, probeID, metric, windowDays)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if stats.Count == 0 {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "No data available for baseline"})
+		}
+		return c.JSON(stats)
 	})
 }

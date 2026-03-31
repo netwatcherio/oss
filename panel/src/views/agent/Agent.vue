@@ -34,6 +34,12 @@ import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIServi
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
 import DnsDashboard from "@/views/agent/DNS.vue";
+import AgentHeader from "@/components/agent/AgentHeader.vue";
+import QuickStatsBar from "@/components/agent/QuickStatsBar.vue";
+import UninitializedState from "@/components/agent/UninitializedState.vue";
+import OverviewTab from "@/components/agent/OverviewTab.vue";
+import ProbesTab from "@/components/agent/ProbesTab.vue";
+import SystemTab from "@/components/agent/SystemTab.vue";
 
 interface OrganizedProbe {
   key: string;
@@ -174,18 +180,7 @@ const memoryStatusLevel = computed(() => {
 });
 
 // Circular progress ring calculations (circumference = 2 * PI * radius)
-const ringRadius = 28;
-const ringCircumference = 2 * Math.PI * ringRadius;
-
-const cpuRingOffset = computed(() => {
-  const value = parseFloat(cpuUsagePercent.value as string) || 0;
-  return ringCircumference - (value / 100) * ringCircumference;
-});
-
-const memoryRingOffset = computed(() => {
-  const value = parseFloat(memoryUsagePercent.value as string) || 0;
-  return ringCircumference - (value / 100) * ringCircumference;
-});
+// Copy to clipboard helper
 
 // Copy to clipboard helper
 const copiedField = ref<string | null>(null);
@@ -198,39 +193,6 @@ async function copyToClipboard(text: string, fieldName: string) {
     }, 2000);
   } catch (err) {
     console.error('Failed to copy:', err);
-  }
-}
-
-// OS icon helper
-function getOsIcon(osName?: string): string {
-  if (!osName) return 'bi-display';
-  const lower = osName.toLowerCase();
-  if (lower.includes('windows')) return 'bi-windows';
-  if (lower.includes('mac') || lower.includes('darwin')) return 'bi-apple';
-  if (lower.includes('linux') || lower.includes('ubuntu') || lower.includes('debian') || lower.includes('centos') || lower.includes('fedora')) return 'bi-ubuntu';
-  return 'bi-display';
-}
-
-// Interface type and icon helpers
-function getInterfaceType(ifaceName: string): string {
-  const lower = ifaceName.toLowerCase();
-  if (lower.includes('wifi') || lower.includes('wlan') || lower.includes('wlp')) return 'wifi';
-  if (lower.includes('eth') || lower.includes('enp') || lower.includes('eno')) return 'ethernet';
-  if (lower.includes('lo') || lower === 'loopback') return 'loopback';
-  if (lower.includes('docker') || lower.includes('br-') || lower.includes('veth')) return 'virtual';
-  if (lower.includes('tun') || lower.includes('tap') || lower.includes('vpn')) return 'vpn';
-  return 'other';
-}
-
-function getInterfaceIcon(ifaceName: string): string {
-  const type = getInterfaceType(ifaceName);
-  switch (type) {
-    case 'wifi': return 'bi bi-wifi';
-    case 'ethernet': return 'bi bi-ethernet';
-    case 'loopback': return 'bi bi-arrow-repeat';
-    case 'virtual': return 'bi bi-box';
-    case 'vpn': return 'bi bi-shield-lock';
-    default: return 'bi bi-hdd-network';
   }
 }
 
@@ -340,39 +302,7 @@ function getVendorSync(macAddress: string): string {
   return ouiCache[normalizedMac] || 'Loading...';
 }
 
-function bytesToString(bytes: number, si: boolean = true, dp: number = 2): string {
-  const thresh = si ? 1000 : 1024;
 
-  if (Math.abs(bytes) < thresh) {
-    return bytes + ' B';
-  }
-
-  const units = si
-      ? ['kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
-      : ['KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'];
-  let u = -1;
-  const r = 10 ** dp;
-
-  do {
-    bytes /= thresh;
-    ++u;
-  } while (Math.round(Math.abs(bytes) * r) / r >= thresh && u < units.length - 1);
-
-  return bytes.toFixed(dp) + ' ' + units[u];
-}
-
-function getLocalAddresses(addresses: string[]): string[] {
-  let ipv4s = addresses.filter(f => f.split(".").length == 4)
-  let nonLocal = ipv4s.filter(i => !i.includes("127.0.0.1"))
-  return nonLocal.map(l => l.split('/')[0])
-}
-
-function formatSnakeCaseToHumanCase(name: string): string {
-  let words = name.split("_")
-  words = words.filter(w => w != "bytes")
-  words = words.map(w => w[0].toUpperCase() + w.substring(1))
-  return words.join(" ")
-}
 
 // Calculate probe health status based on metrics
 function calculateProbeStatus(successRate: number, avgResponseTime: number): 'healthy' | 'warning' | 'critical' | 'unknown' {
@@ -576,65 +506,6 @@ const liveUpdating = ref(false);
 // Share modal state
 const showShareModal = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
-
-// Pending PIN copy state
-const copiedPinField = ref<string | null>(null);
-
-// Controller info for install commands
-function getControllerInfo() {
-  const anyWindow = window as any;
-  let endpoint = anyWindow?.CONTROLLER_ENDPOINT 
-    || import.meta.env?.CONTROLLER_ENDPOINT 
-    || `${window.location.protocol}//${window.location.host}`;
-  try {
-    const url = new URL(endpoint);
-    return { host: url.host, ssl: url.protocol === 'https:' };
-  } catch {
-    return { host: window.location.host, ssl: window.location.protocol === 'https:' };
-  }
-}
-
-// Install commands (computed, only when we have a pending PIN)
-const linuxInstallCmd = computed(() => {
-  if (!state.agent.id || !state.pendingPin) return '';
-  const { host, ssl } = getControllerInfo();
-  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
-  --host ${host} \\
-  --ssl ${ssl} \\
-  --workspace ${state.workspace.id} \\
-  --id ${state.agent.id} \\
-  --pin ${state.pendingPin}`;
-});
-
-const windowsInstallCmd = computed(() => {
-  if (!state.agent.id || !state.pendingPin) return '';
-  const { host, ssl } = getControllerInfo();
-  return `Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
-.\\install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.pendingPin}"`;
-});
-
-const dockerInstallCmd = computed(() => {
-  if (!state.agent.id || !state.pendingPin) return '';
-  const { host, ssl } = getControllerInfo();
-  return `docker run -d --name netwatcher-agent \\
-  -e CONTROLLER_HOST="${host}" \\
-  -e CONTROLLER_SSL="${ssl}" \\
-  -e WORKSPACE_ID="${state.workspace.id}" \\
-  -e AGENT_ID="${state.agent.id}" \\
-  -e AGENT_PIN="${state.pendingPin}" \\
-  --restart unless-stopped \\
-  netwatcher/agent:latest`;
-});
-
-async function copyPinText(text: string, field: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    copiedPinField.value = field;
-    setTimeout(() => { copiedPinField.value = null; }, 2000);
-  } catch (err) {
-    console.error('Failed to copy:', err);
-  }
-}
 
 // Get workspace/agent IDs as refs for the WebSocket composable
 const workspaceIdRef = computed(() => state.workspace.id);
@@ -900,170 +771,26 @@ onMounted(async () => {
 
 <template>
   <div class="container-fluid">
-    <Title
-        :history="[
-        {title: 'Workspaces', link: '/workspaces'},
-        {title: state.workspace.name || 'Loading...', link: `/workspaces/${state.workspace.id || ''}`}
-      ]"
-        :title="state.agent.name || 'Loading...'"
-        :subtitle="state.agent.location || 'Agent Information'">
-      <div class="d-flex flex-wrap gap-2">
-        <div class="status-badge" :class="isInitializing ? 'loading' : currentAgentStatus">
-          <i :class="isInitializing ? 'bi bi-arrow-repeat spin-animation' : agentStatus.getStatusIcon(currentAgentStatus)"></i>
-          {{ isInitializing ? 'Loading...' : agentStatus.getStatusLabel(currentAgentStatus) }}
-        </div>
-        <!-- Live Data Indicator -->
-        <div v-if="wsConnected" class="status-badge live" :class="{ 'pulse': liveUpdating }">
-          <i class="bi bi-broadcast"></i>
-          Live
-        </div>
-        <div v-else class="status-badge offline" title="WebSocket disconnected - data may be stale">
-          <i class="bi bi-wifi-off"></i>
-          Disconnected
-        </div>
-        <button
-            v-if="state.agent.id && state.workspace.id"
-            class="btn btn-outline-secondary"
-            @click="showShareModal = true"
-            title="Share this agent">
-          <i class="bi bi-share"></i>
-          <span class="d-none d-sm-inline">&nbsp;Share</span>
-        </button>
-        <router-link
-            v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
-            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/edit`"
-            class="btn btn-outline-primary">
-          <i class="bi bi-pencil-square"></i>
-          <span class="d-none d-sm-inline">&nbsp;Edit Probes</span>
-        </router-link>
-        <router-link
-            v-if="state.agent.id && state.workspace.id && permissions.canEdit.value"
-            :to="`/workspaces/${state.agent.workspace_id}/agents/${state.agent.id}/probes/new`"
-            class="btn btn-primary">
-          <i class="bi bi-plus-lg"></i>&nbsp;Add Probe
-        </router-link>
-      </div>
-    </Title>
+    <AgentHeader
+      :agent="state.agent"
+      :workspace="state.workspace"
+      :permissions="permissions"
+      :is-initializing="isInitializing"
+      :current-status="currentAgentStatus"
+      :ws-connected="wsConnected"
+      :live-updating="liveUpdating"
+      @share="showShareModal = true"
+      @edit-probes="null"
+      @add-probe="null"
+    />
 
-    <!-- Quick Stats Bar - Enhanced with circular progress rings -->
-    <div class="quick-stats">
-      <!-- CPU Usage with Circular Ring -->
-      <div class="stat-item glass" :class="{'loading': loadingState.systemInfo, [`status-${cpuStatusLevel}`]: !loadingState.systemInfo}">
-        <div class="progress-ring-container">
-          <svg class="progress-ring" width="68" height="68">
-            <circle
-              class="progress-ring-bg"
-              stroke-width="6"
-              fill="transparent"
-              r="28"
-              cx="34"
-              cy="34"
-            />
-            <circle
-              class="progress-ring-fill"
-              :class="cpuStatusLevel"
-              stroke-width="6"
-              fill="transparent"
-              r="28"
-              cx="34"
-              cy="34"
-              :style="{ 
-                strokeDasharray: ringCircumference, 
-                strokeDashoffset: loadingState.systemInfo ? ringCircumference : cpuRingOffset 
-              }"
-            />
-          </svg>
-          <div class="ring-icon">
-            <i class="bi bi-cpu"></i>
-          </div>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">
-            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
-            <span v-else>{{ cpuUsagePercent }}<small>%</small></span>
-          </div>
-          <div class="stat-label">CPU Usage</div>
-          <div class="stat-breakdown" v-if="!loadingState.systemInfo && hasSystemData">
-            <span>User: {{ (state.systemData?.cpu?.user * 100).toFixed(0) }}%</span>
-            <span>Sys: {{ (state.systemData?.cpu?.system * 100).toFixed(0) }}%</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Memory Usage with Circular Ring -->
-      <div class="stat-item glass" :class="{'loading': loadingState.systemInfo, [`status-${memoryStatusLevel}`]: !loadingState.systemInfo}">
-        <div class="progress-ring-container">
-          <svg class="progress-ring" width="68" height="68">
-            <circle
-              class="progress-ring-bg"
-              stroke-width="6"
-              fill="transparent"
-              r="28"
-              cx="34"
-              cy="34"
-            />
-            <circle
-              class="progress-ring-fill"
-              :class="memoryStatusLevel"
-              stroke-width="6"
-              fill="transparent"
-              r="28"
-              cx="34"
-              cy="34"
-              :style="{ 
-                strokeDasharray: ringCircumference, 
-                strokeDashoffset: loadingState.systemInfo ? ringCircumference : memoryRingOffset 
-              }"
-            />
-          </svg>
-          <div class="ring-icon">
-            <i class="bi bi-memory"></i>
-          </div>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">
-            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
-            <span v-else>{{ memoryUsagePercent }}<small>%</small></span>
-          </div>
-          <div class="stat-label">Memory Usage</div>
-          <div class="stat-breakdown" v-if="!loadingState.systemInfo && hasSystemData">
-            <span>{{ bytesToString(state.systemInfo.memoryInfo?.used_bytes || 0) }}</span>
-            <span>of {{ bytesToString(state.systemInfo.memoryInfo?.total_bytes || 0) }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Probes -->
-      <div class="stat-item glass" :class="{'loading': loadingState.probes}">
-        <div class="stat-icon-large probes">
-          <i class="bi bi-diagram-3"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">
-            <span v-if="loadingState.probes" class="skeleton-text">-</span>
-            <span v-else>{{ totalProbesCount }}</span>
-          </div>
-          <div class="stat-label">Probes</div>
-          <div class="stat-breakdown" v-if="!loadingState.probes && state.targetGroups.length > 0">
-            <span>{{ state.targetGroups.length }} targets</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Uptime -->
-      <div class="stat-item glass" :class="{'loading': loadingState.systemInfo}">
-        <div class="stat-icon-large uptime">
-          <i class="bi bi-clock-history"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">
-            <span v-if="loadingState.systemInfo" class="skeleton-text">--</span>
-            <span v-else class="uptime-value">{{ hasSystemData ? since(state.systemInfo.hostInfo?.boot_time + "", false) : 'N/A' }}</span>
-          </div>
-          <div class="stat-label">Uptime</div>
-        </div>
-      </div>
-    </div>
+    <QuickStatsBar
+      :loading-state="loadingState"
+      :system-info="state.systemInfo"
+      :system-data="state.systemData"
+      :total-probes="totalProbesCount"
+      :target-groups-length="state.targetGroups.length"
+    />
 
 
     <!-- Error Messages -->
@@ -1076,61 +803,13 @@ onMounted(async () => {
     </div>
 
     <!-- Main Content -->
-    <div v-if="!state.agent.initialized && !loadingState.agent" class="empty-state">
-      <i class="bi bi-exclamation-triangle-fill text-warning"></i>
-      <h5>Agent Not Initialized</h5>
-      <p>This agent needs to be initialized before it can be used.</p>
-      
-      <!-- Pending PIN display -->
-      <div v-if="state.loadingPendingPin" class="mt-3">
-        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-        <span class="ms-2">Loading PIN...</span>
-      </div>
-      <div v-else-if="state.pendingPin" class="card mt-3 text-start" style="max-width: 720px; margin: 0 auto;">
-        <div class="card-header">
-          <h6 class="mb-0"><i class="bi bi-key me-2"></i>Bootstrap PIN</h6>
-        </div>
-        <div class="card-body">
-          <div class="d-flex align-items-center gap-3 mb-3 p-3 rounded" style="background: var(--bs-tertiary-bg, #f8f9fa); border: 1px solid var(--bs-border-color, #dee2e6);">
-            <code style="font-size: 1.5rem; font-weight: 700; letter-spacing: 3px; color: var(--bs-primary, #0d6efd); flex: 1;">{{ state.pendingPin }}</code>
-            <button class="btn btn-sm btn-outline-primary" @click="copyPinText(state.pendingPin, 'pin')">
-              <i class="bi" :class="copiedPinField === 'pin' ? 'bi-check' : 'bi-clipboard'"></i>
-            </button>
-          </div>
-          <p class="text-muted small mb-3">
-            <i class="bi bi-info-circle me-1"></i>
-            This PIN is available until the agent connects and activates. You can revisit this page to view it.
-          </p>
-
-          <!-- Linux install -->
-          <h6 class="mt-3"><i class="bi bi-terminal me-2"></i>Linux / macOS</h6>
-          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
-            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ linuxInstallCmd }}</pre>
-            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(linuxInstallCmd, 'linux')">
-              <i class="bi" :class="copiedPinField === 'linux' ? 'bi-check' : 'bi-clipboard'"></i> Copy
-            </button>
-          </div>
-
-          <!-- Windows install -->
-          <h6 class="mt-3"><i class="bi bi-windows me-2"></i>Windows PowerShell</h6>
-          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
-            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ windowsInstallCmd }}</pre>
-            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(windowsInstallCmd, 'windows')">
-              <i class="bi" :class="copiedPinField === 'windows' ? 'bi-check' : 'bi-clipboard'"></i> Copy
-            </button>
-          </div>
-
-          <!-- Docker install -->
-          <h6 class="mt-3"><i class="bi bi-box me-2"></i>Docker</h6>
-          <div class="position-relative" style="background: #1e1e1e; border-radius: 8px; overflow: hidden;">
-            <pre class="mb-0" style="padding: 16px; color: #d4d4d4; font-size: 0.85rem; overflow-x: auto; white-space: pre;">{{ dockerInstallCmd }}</pre>
-            <button class="btn btn-sm position-absolute" style="top: 8px; right: 8px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #d4d4d4;" @click="copyPinText(dockerInstallCmd, 'docker')">
-              <i class="bi" :class="copiedPinField === 'docker' ? 'bi-check' : 'bi-clipboard'"></i> Copy
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <UninitializedState
+      v-if="!state.agent.initialized && !loadingState.agent"
+      :agent="state.agent"
+      :workspace="state.workspace"
+      :pending-pin="state.pendingPin"
+      :is-loading-pin="state.loadingPendingPin"
+    />
 
     <div v-else class="agent-content">
       <!-- Tab Navigation -->
@@ -1141,312 +820,30 @@ onMounted(async () => {
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'dns' }" @click="activeTab = 'dns'"><i class="bi bi-globe2"></i> DNS</button>
       </div>
 
-      <!-- OVERVIEW TAB - Network & General Information -->
-      <div v-show="activeTab === 'overview'" class="tab-panel">
-        <!-- Quick Stats Cards -->
-        <div class="overview-stats">
-          <div class="stat-card" :class="isOnline ? 'online' : 'offline'">
-            <div class="stat-icon"><i class="bi" :class="isOnline ? 'bi-wifi' : 'bi-wifi-off'"></i></div>
-            <div class="stat-info">
-              <span class="stat-value">{{ isOnline ? 'Online' : 'Offline' }}</span>
-              <span class="stat-label">Connection</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="bi bi-clock-history"></i></div>
-            <div class="stat-info">
-              <span class="stat-value">{{ hasSystemData ? since(state.systemInfo.hostInfo?.boot_time + "", false) : 'N/A' }}</span>
-              <span class="stat-label">Uptime</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="bi bi-pc-display"></i></div>
-            <div class="stat-info">
-              <span class="stat-value">{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
-              <span class="stat-label">Hostname</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="bi bi-ethernet"></i></div>
-            <div class="stat-info">
-              <span class="stat-value">{{ state.networkInfo.interfaces?.length || 0 }}</span>
-              <span class="stat-label">Interfaces</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Network Information Grid -->
-        <div class="info-grid mt-4">
-          <!-- Network Information Card -->
-          <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo}">
-            <div class="card-header">
-              <h5 class="card-title"><i class="bi bi-globe2"></i> Network Information</h5>
-              <div class="connection-status" v-if="!loadingState.networkInfo">
-                <span class="status-dot" :class="isOnline ? 'online' : 'offline'"></span>
-                <span class="status-text">{{ isOnline ? 'Connected' : 'Offline' }}</span>
-              </div>
-            </div>
-            <div class="card-content">
-              <div class="info-row" v-if="hasNetworkData">
-                <span class="info-label"><i class="bi bi-clock-history"></i> Last updated</span>
-                <span class="info-value"><span>{{ since(state.networkInfo.timestamp, true) }}</span></span>
-              </div>
-              <div class="info-row">
-                <span class="info-label"><i class="bi bi-pc-display"></i> Hostname</span>
-                <span class="info-value">
-                  <span v-if="loadingState.systemInfo" class="skeleton-text">--------------------</span>
-                  <span v-else class="hostname-value">{{ state.systemInfo.hostInfo?.name || 'Unknown' }}</span>
-                </span>
-              </div>
-              <div class="info-row copyable">
-                <span class="info-label"><i class="bi bi-cloud"></i> Public IP</span>
-                <div class="info-value-with-copy">
-                  <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
-                  <template v-else>
-                    <span class="ip-value">{{ state.networkInfo.public_address || 'Unknown' }}</span>
-                    <button v-if="state.networkInfo.public_address" class="copy-btn" @click.stop="copyToClipboard(state.networkInfo.public_address, 'publicIp')" :class="{ copied: copiedField === 'publicIp' }" :title="copiedField === 'publicIp' ? 'Copied!' : 'Copy to clipboard'">
-                      <i :class="copiedField === 'publicIp' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <div class="info-row">
-                <span class="info-label"><i class="bi bi-building"></i> ISP</span>
-                <span class="info-value">
-                  <span v-if="loadingState.networkInfo" class="skeleton-text">-------------------------</span>
-                  <span v-else class="isp-value">{{ state.networkInfo.internet_provider || 'Unknown' }}</span>
-                </span>
-              </div>
-              <div class="info-row copyable">
-                <span class="info-label"><i class="bi bi-router"></i> Gateway</span>
-                <div class="info-value-with-copy">
-                  <span v-if="loadingState.networkInfo" class="skeleton-text">---------------</span>
-                  <template v-else>
-                    <span class="ip-value">{{ state.networkInfo.default_gateway || 'Unknown' }}</span>
-                    <button v-if="state.networkInfo.default_gateway" class="copy-btn" @click.stop="copyToClipboard(state.networkInfo.default_gateway, 'gateway')" :class="{ copied: copiedField === 'gateway' }" :title="copiedField === 'gateway' ? 'Copied!' : 'Copy to clipboard'">
-                      <i :class="copiedField === 'gateway' ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <div class="info-row local-ips-section">
-                <span class="info-label"><i class="bi bi-hdd-network"></i> Local IPs</span>
-                <div class="info-value local-ips-list">
-                  <div v-if="loadingState.systemInfo" class="skeleton-text">---------------</div>
-                  <div v-else-if="hasSystemData && state.systemInfo.hostInfo?.ip" class="ip-chips">
-                    <span v-for="ip in getLocalAddresses(state.systemInfo.hostInfo.ip)" :key="ip" class="ip-chip" @click="copyToClipboard(ip, `localIp-${ip}`)" :class="{ copied: copiedField === `localIp-${ip}` }" :title="copiedField === `localIp-${ip}` ? 'Copied!' : 'Click to copy'">{{ ip }} <i :class="copiedField === `localIp-${ip}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i></span>
-                  </div>
-                  <div v-else class="text-muted">No IPs found</div>
-                </div>
-              </div>
-              <div class="info-row" v-if="hasNetworkData && state.networkInfo.lat && state.networkInfo.long">
-                <span class="info-label"><i class="bi bi-geo-alt"></i> Location</span>
-                <span class="info-value location-value">
-                  <a :href="`https://maps.google.com/?q=${state.networkInfo.lat},${state.networkInfo.long}`" target="_blank" class="location-link" title="View on Google Maps">
-                    <i class="bi bi-pin-map"></i> {{ parseFloat(String(state.networkInfo.lat)).toFixed(4) }}, {{ parseFloat(String(state.networkInfo.long)).toFixed(4) }}
-                  </a>
-                </span>
-              </div>
-            </div>
-            <div class="card-footer" v-if="state.agent.id">
-              <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/speedtests`" class="btn btn-sm btn-outline-primary"><i class="bi bi-speedometer2"></i> Run Speedtest</router-link>
-            </div>
-          </div>
-
-          <!-- Network Interfaces Card -->
-          <div class="info-card enhanced" :class="{'loading': loadingState.networkInfo && loadingState.systemInfo}">
-            <div class="card-header">
-              <h5 class="card-title"><i class="bi bi-ethernet"></i> Network Interfaces</h5>
-              <span v-if="hasP11Interfaces" class="badge bg-success">{{ state.networkInfo.interfaces.length }} interfaces</span>
-              <span v-else-if="!loadingState.systemInfo && hasSystemData && state.systemInfo?.hostInfo?.mac" class="badge bg-primary">{{ Object.keys(state.systemInfo.hostInfo.mac).length }} detected</span>
-            </div>
-            <div class="card-content interfaces-content">
-              <div v-if="loadingState.networkInfo && loadingState.systemInfo" class="interfaces-loading">
-                <div v-for="i in 2" :key="`iface-skeleton-${i}`" class="interface-item skeleton">
-                  <div class="interface-icon skeleton-box"></div>
-                  <div class="interface-info">
-                    <div class="skeleton-text" style="width: 80px; height: 16px;"></div>
-                    <div class="skeleton-text" style="width: 140px; height: 14px;"></div>
-                  </div>
-                </div>
-              </div>
-              <div v-else-if="hasP11Interfaces" class="interfaces-list p11-interfaces">
-                <div v-for="iface in state.networkInfo.interfaces" :key="iface.name" class="interface-item p11" :class="{ 'is-default': iface.is_default }">
-                  <div class="interface-icon" :class="iface.type || 'unknown'"><i :class="getInterfaceIcon(iface.name)"></i></div>
-                  <div class="interface-details">
-                    <div class="interface-header">
-                      <span class="interface-name">{{ iface.name }}</span>
-                      <span v-if="iface.is_default" class="badge bg-primary ms-1">Default</span>
-                      <span v-if="iface.type" class="badge bg-secondary ms-1">{{ iface.type }}</span>
-                    </div>
-                    <div v-if="iface.mac" class="interface-mac"><code>{{ iface.mac }}</code><span class="vendor-name">{{ getVendorSync(iface.mac) }}</span></div>
-                    <div v-if="iface.ipv4?.length" class="interface-ips">
-                      <span v-for="ip in iface.ipv4" :key="ip" class="ip-badge">{{ ip }}</span>
-                    </div>
-                    <div v-if="iface.gateway" class="interface-gateway"><i class="bi bi-signpost-2"></i> Gateway: {{ iface.gateway }}</div>
-                  </div>
-                </div>
-              </div>
-              <div v-else-if="hasSystemData && state.systemInfo?.hostInfo?.mac" class="interfaces-list">
-                <div v-for="(mac, iface) in state.systemInfo.hostInfo.mac" :key="iface" class="interface-item" @click="copyToClipboard(mac, `mac-${iface}`)" :class="{ copied: copiedField === `mac-${iface}` }" :title="copiedField === `mac-${iface}` ? 'Copied!' : 'Click to copy MAC address'">
-                  <div class="interface-icon" :class="getInterfaceType(String(iface))"><i :class="getInterfaceIcon(String(iface))"></i></div>
-                  <div class="interface-info">
-                    <div class="interface-name">{{ iface }}</div>
-                    <div class="interface-mac"><code>{{ mac }}</code><span class="vendor-name">{{ getVendorSync(mac) }}</span></div>
-                  </div>
-                  <div class="copy-indicator"><i :class="copiedField === `mac-${iface}` ? 'bi bi-check-lg' : 'bi bi-clipboard'"></i></div>
-                </div>
-              </div>
-              <div v-else class="empty-interfaces"><i class="bi bi-ethernet"></i><span>No network interfaces detected</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Routing Table -->
-        <div v-if="hasP11Routes" class="card glass mt-4">
-          <div class="card-header">
-            <h5><i class="bi bi-signpost-split"></i> Routing Table</h5>
-            <span class="badge bg-info">{{ state.networkInfo.routes.length }} routes</span>
-          </div>
-          <div class="card-content routes-content">
-            <table class="routes-table">
-              <thead><tr><th>Destination</th><th>Gateway</th><th>Interface</th><th>Metric</th></tr></thead>
-              <tbody>
-                <tr v-for="(route, idx) in state.networkInfo.routes.slice(0, 10)" :key="idx" :class="{ 'default-route': route.destination === '0.0.0.0/0' }">
-                  <td><code>{{ route.destination }}</code></td>
-                  <td>{{ route.gateway || 'on-link' }}</td>
-                  <td>{{ route.interface }}</td>
-                  <td>{{ route.metric }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="state.networkInfo.routes.length > 10" class="routes-more">+{{ state.networkInfo.routes.length - 10 }} more routes</div>
-          </div>
-        </div>
-      </div>
+      <!-- OVERVIEW TAB -->
+      <OverviewTab
+        v-show="activeTab === 'overview'"
+        :agent="state.agent"
+        :workspace-id="state.workspace.id"
+        :loading-state="{ systemInfo: loadingState.systemInfo, networkInfo: loadingState.networkInfo }"
+        :system-info="state.systemInfo"
+        :network-info="state.networkInfo"
+        :is-online="isOnline"
+        :oui-cache="ouiCache"
+      />
 
       <!-- PROBES TAB -->
-      <div v-show="activeTab === 'probes'" class="tab-panel">
-      <div class="content-section probes-section">
-        <div class="section-header">
-          <h5 class="section-title">
-            <i class="bi bi-diagram-2"></i>
-            Monitoring Probes
-          </h5>
-          <span class="badge bg-primary" v-if="!loadingState.probes">
-            {{ totalProbesCount }} Probes
-          </span>
-          <span class="badge bg-secondary" v-else>
-            <i class="bi bi-arrow-repeat spin-animation"></i> Loading
-          </span>
-        </div>
-
-        <div v-if="loadingState.probes" class="probes-grid">
-          <!-- Loading skeleton probes -->
-          <div v-for="i in 3" :key="`skeleton-${i}`" class="probe-card skeleton">
-            <div class="probe-link">
-              <div class="probe-icon skeleton-box"></div>
-              <div class="probe-content">
-                <div class="skeleton-text probe-title-skeleton"></div>
-                <div class="probe-types">
-                  <span class="skeleton-text probe-type-skeleton"></span>
-                  <span class="skeleton-text probe-type-skeleton"></span>
-                </div>
-                <div class="probe-stats">
-                  <div class="skeleton-text probe-stat-skeleton"></div>
-                  <div class="skeleton-text probe-stat-skeleton"></div>
-                </div>
-              </div>
-              <i class="bi bi-chevron-right probe-arrow"></i>
-            </div>
-          </div>
-        </div>
-
-        <div v-else-if="state.targetGroups.length > 0" class="probes-grid">
-          <div v-for="g in state.targetGroups" :key="g.key" class="probe-card" :class="{'has-issues': state.groupStats[g.key]?.status === 'critical'}">
-            <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/${g.probes[0]?.id || ''}`" class="probe-link">
-              <div class="probe-header">
-                <div class="probe-icon">
-                  <i :class="g.kind === 'agent' ? 'bi bi-robot'
-                  : g.kind === 'host' ? 'bi bi-diagram-2'
-                  : 'bi bi-cpu'"></i>
-                </div>
-                <div class="probe-status">
-                  <!-- For agent groups: show target agent status when offline/stale -->
-                  <template v-if="g.kind === 'agent' && state.targetAgents[Number(g.id)] && agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]) !== 'online'">
-                    <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))"></i>
-                  </template>
-                  <template v-else>
-                    <i :class="`bi ${getStatusIcon(state.groupStats[g.key]?.status)} ${getStatusColor(state.groupStats[g.key]?.status)}`"></i>
-                  </template>
-                </div>
-              </div>
-
-              <div class="probe-content">
-                <h6 class="probe-title">
-                  <span v-if="g.kind==='host'">{{ g.label }}</span>
-                  <span v-else-if="g.kind==='agent'">{{ state.agentNames[Number(g.id)] || `Agent #${g.id}` }}</span>
-                  <span v-else>Local on Agent {{ g.id }}</span>
-                </h6>
-
-                <div class="probe-types">
-                  <span v-for="t in g.types" :key="t" class="probe-type-badge">
-                    {{ t }} ({{ g.perType[t].count }})
-                  </span>
-                </div>
-
-                <div class="probe-stats" v-if="state.groupStats[g.key]">
-                  <div v-if="state.groupStats[g.key].isLoading" class="probe-stat">
-                    <i class="bi bi-arrow-repeat spin-animation"></i>
-                    <span>Loading stats...</span>
-                  </div>
-                  <template v-else-if="state.groupStats[g.key].hasData">
-                    <div class="probe-stat" v-if="state.groupStats[g.key].successRate !== undefined">
-                      <i class="bi bi-graph-up"></i>
-                      <span>{{ state.groupStats[g.key].successRate.toFixed(1) }}% success</span>
-                    </div>
-                    <div class="probe-stat" v-if="state.groupStats[g.key].avgResponseTime !== undefined">
-                      <i class="bi bi-stopwatch"></i>
-                      <span>{{ state.groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
-                    </div>
-                    <div class="probe-stat" v-if="state.groupStats[g.key].lastRun">
-                      <i class="bi bi-clock"></i>
-                      <span>{{ since(state.groupStats[g.key].lastRun, true) }}</span>
-                    </div>
-                  </template>
-                  <div v-else class="probe-stat text-muted">
-                    <i class="bi bi-info-circle"></i>
-                    <span>No ping data available</span>
-                  </div>
-                  <!-- Target agent connectivity status for agent-type groups -->
-                  <div v-if="g.kind === 'agent' && state.targetAgents[Number(g.id)]" 
-                       class="probe-stat"
-                       :class="agentStatus.getStatusColor(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))">
-                    <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)]))"></i>
-                    <span>Target {{ agentStatus.getStatusLabel(agentStatus.getAgentStatus(state.targetAgents[Number(g.id)])) }}</span>
-                    <span class="text-muted" style="margin-left: 0.25rem;">· {{ agentStatus.getLastSeenText(state.targetAgents[Number(g.id)]) }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <i class="bi bi-chevron-right probe-arrow"></i>
-            </router-link>
-          </div>
-        </div>
-
-        <div v-else-if="!loadingState.probes" class="empty-state">
-          <i class="bi bi-diagram-2"></i>
-          <h5>No Probes Configured</h5>
-          <p>Create your first probe to start monitoring</p>
-          <router-link
-              v-if="state.agent.id && state.workspace.id"
-              :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/new`"
-              class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> Create Probe
-          </router-link>
-        </div>
-      </div></div>
-
+      <ProbesTab
+        v-show="activeTab === 'probes'"
+        :loading-probes="loadingState.probes"
+        :total-probes="totalProbesCount"
+        :target-groups="state.targetGroups"
+        :group-stats="state.groupStats"
+        :target-agents="state.targetAgents"
+        :agent-names="state.agentNames"
+        :workspace-id="state.workspace.id"
+        :agent-id="state.agent.id"
+      />
 
       <!-- DNS TAB - Dedicated DNS Monitoring Dashboard -->
       <div v-show="activeTab === 'dns'" class="tab-panel">
@@ -1457,205 +854,20 @@ onMounted(async () => {
         />
       </div>
 
-      <!-- SYSTEM TAB - Hardware & OS Information Only -->
-      <div v-show="activeTab === 'system'" class="tab-panel">
-        <div class="info-grid">
-        <!-- System Resources - Enhanced -->
-        <div class="info-card enhanced" :class="{'loading': loadingState.systemInfo}">
-          <div class="card-header">
-            <h5 class="card-title">
-              <i class="bi bi-speedometer"></i>
-              System Resources
-            </h5>
-            <div class="refresh-indicator" v-if="hasSystemData">
-              <i class="bi bi-clock"></i>
-              <span>{{ since(state.systemInfo.timestamp + "", true) }}</span>
-            </div>
-          </div>
-          <div class="card-content">
-            <!-- CPU Meter -->
-            <div class="resource-meter enhanced" :class="cpuStatusLevel">
-              <div class="resource-header">
-                <div class="resource-label">
-                  <i class="bi bi-cpu"></i>
-                  <span>CPU Usage</span>
-                </div>
-                <div class="resource-value">
-                  <span v-if="loadingState.systemInfo" class="skeleton-text">--%</span>
-                  <span v-else :class="`status-${cpuStatusLevel}`">{{ cpuUsagePercent }}%</span>
-                </div>
-              </div>
-              <div class="progress-bar-container">
-                <div class="progress gradient">
-                  <div 
-                    class="progress-bar" 
-                    :class="cpuStatusLevel"
-                    :style="{width: loadingState.systemInfo ? '0%' : cpuUsagePercent + '%'}"
-                  ></div>
-                </div>
-              </div>
-              <div class="resource-breakdown" v-if="!loadingState.systemInfo && hasSystemData">
-                <div class="breakdown-item">
-                  <span class="breakdown-label">User</span>
-                  <span class="breakdown-value">{{ (state.systemData?.cpu?.user * 100).toFixed(1) }}%</span>
-                </div>
-                <div class="breakdown-item">
-                  <span class="breakdown-label">System</span>
-                  <span class="breakdown-value">{{ (state.systemData?.cpu?.system * 100).toFixed(1) }}%</span>
-                </div>
-                <div class="breakdown-item">
-                  <span class="breakdown-label">Idle</span>
-                  <span class="breakdown-value">{{ (state.systemData?.cpu?.idle * 100).toFixed(1) }}%</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Memory Meter -->
-            <div class="resource-meter enhanced" :class="memoryStatusLevel">
-              <div class="resource-header">
-                <div class="resource-label">
-                  <i class="bi bi-memory"></i>
-                  <span>Memory Usage</span>
-                </div>
-                <div class="resource-value">
-                  <span v-if="loadingState.systemInfo" class="skeleton-text">--%</span>
-                  <span v-else :class="`status-${memoryStatusLevel}`">{{ memoryUsagePercent }}%</span>
-                </div>
-              </div>
-              <div class="progress-bar-container">
-                <div class="progress gradient">
-                  <div 
-                    class="progress-bar" 
-                    :class="memoryStatusLevel"
-                    :style="{width: loadingState.systemInfo ? '0%' : memoryUsagePercent + '%'}"
-                  ></div>
-                </div>
-              </div>
-              <div class="resource-breakdown" v-if="!loadingState.systemInfo && hasSystemData">
-                <div class="breakdown-item">
-                  <span class="breakdown-label">Used</span>
-                  <span class="breakdown-value">{{ bytesToString(state.systemInfo.memoryInfo?.used_bytes || 0) }}</span>
-                </div>
-                <div class="breakdown-item">
-                  <span class="breakdown-label">Available</span>
-                  <span class="breakdown-value">{{ bytesToString(state.systemInfo.memoryInfo?.available_bytes || 0) }}</span>
-                </div>
-                <div class="breakdown-item">
-                  <span class="breakdown-label">Total</span>
-                  <span class="breakdown-value">{{ bytesToString(state.systemInfo.memoryInfo?.total_bytes || 0) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <ElementExpand title="Memory Details" code :disabled="loadingState.systemInfo || !hasSystemData">
-              <template v-slot:expanded>
-                <div class="memory-details">
-                  <div v-if="loadingState.systemInfo" v-for="i in 4" :key="`mem-skeleton-${i}`" class="detail-row">
-                    <span class="skeleton-text">--------------</span>
-                    <span class="skeleton-text">--- GB</span>
-                  </div>
-                  <div v-else-if="hasSystemData && state.systemInfo.memoryInfo?.raw" v-for="(value, key) in state.systemInfo.memoryInfo.raw" :key="key" class="detail-row">
-                    <span>{{ formatSnakeCaseToHumanCase(key) }}</span>
-                    <span>{{ bytesToString(value) }}</span>
-                  </div>
-                  <div v-else class="text-muted">No memory details available</div>
-                </div>
-              </template>
-            </ElementExpand>
-          </div>
-        </div>
-
-
-        <!-- System Information - Enhanced -->
-        <div class="info-card enhanced" :class="{'loading': loadingState.systemInfo}">
-          <div class="card-header">
-            <h5 class="card-title">
-              <i :class="hasSystemData ? getOsIcon(state.systemInfo.hostInfo?.os?.name) : 'bi bi-display'"></i>
-              System Information
-            </h5>
-          </div>
-          <div class="card-content">
-            <!-- OS Info with Icon -->
-            <div class="info-row os-info">
-              <span class="info-label"><i class="bi bi-pc-display-horizontal"></i> Operating System</span>
-              <div class="info-value os-value">
-                <span v-if="loadingState.systemInfo" class="skeleton-text">-------------------------</span>
-                <template v-else-if="hasSystemData">
-                  <i :class="getOsIcon(state.systemInfo.hostInfo?.os?.name)" class="os-icon"></i>
-                  <span>
-                    {{ state.systemInfo.hostInfo?.os?.name || 'Unknown' }}
-                    <small v-if="state.systemInfo.hostInfo?.os?.version">{{ state.systemInfo.hostInfo?.os?.version }}</small>
-                  </span>
-                </template>
-                <span v-else>Unknown</span>
-              </div>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-cpu"></i> Architecture</span>
-              <span class="info-value">
-                <span v-if="loadingState.systemInfo" class="skeleton-text">-----------</span>
-                <span v-else class="arch-badge">{{ state.systemInfo.hostInfo?.architecture || 'Unknown' }}</span>
-              </span>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-box"></i> Environment</span>
-              <div class="info-value">
-                <span v-if="loadingState.systemInfo" class="skeleton-text">-----------</span>
-                <template v-else-if="hasSystemData">
-                  <span class="env-badge" :class="state.systemInfo.hostInfo?.containerized ? 'virtual' : 'physical'">
-                    <i :class="state.systemInfo.hostInfo?.containerized ? 'bi bi-box-seam' : 'bi bi-motherboard'"></i>
-                    {{ state.systemInfo.hostInfo?.containerized ? 'Virtualized' : 'Physical' }}
-                  </span>
-                </template>
-                <span v-else>Unknown</span>
-              </div>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-clock"></i> Timezone</span>
-              <span class="info-value">
-                <span v-if="loadingState.systemInfo" class="skeleton-text">-------------------</span>
-                <span v-else>{{ state.systemInfo.hostInfo?.timezone || 'Unknown' }}</span>
-              </span>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-geo-alt"></i> Location</span>
-              <span class="info-value location-value">
-                <span v-if="loadingState.networkInfo" class="skeleton-text">------------------</span>
-                <template v-else-if="hasNetworkData && state.networkInfo.lat && state.networkInfo.long">
-                  <a 
-                    :href="`https://maps.google.com/?q=${state.networkInfo.lat},${state.networkInfo.long}`" 
-                    target="_blank" 
-                    class="location-link"
-                    title="View on Google Maps"
-                  >
-                    <i class="bi bi-pin-map"></i>
-                    {{ parseFloat(String(state.networkInfo.lat)).toFixed(4) }}, {{ parseFloat(String(state.networkInfo.long)).toFixed(4) }}
-                  </a>
-                </template>
-                <span v-else>Unknown</span>
-              </span>
-            </div>
-            <div class="info-row">
-              <span class="info-label"><i class="bi bi-eye"></i> Last Seen</span>
-              <span class="info-value">
-                <span v-if="loadingState.agent" class="skeleton-text">------------</span>
-                <span v-else :class="isOnline ? 'text-success' : 'text-muted'">
-                  {{ state.agent.updated_at ? since(state.agent.updated_at, true) : 'Never' }}
-                </span>
-              </span>
-            </div>
-          </div>
-          <div class="card-footer subtle" v-if="hasSystemData">
-            <div class="footer-info">
-              <i class="bi bi-info-circle"></i>
-              <span>System data from {{ since(state.systemInfo.timestamp + "", true) }}</span>
-            </div>
-          </div>
-        </div>
-
-
-        </div>
-      </div>
+      <!-- SYSTEM TAB -->
+      <SystemTab
+        v-show="activeTab === 'system'"
+        :loading-state="{ systemInfo: loadingState.systemInfo, networkInfo: loadingState.networkInfo, agent: loadingState.agent }"
+        :system-info="state.systemInfo"
+        :system-data="state.systemData"
+        :network-info="state.networkInfo"
+        :agent="state.agent"
+        :is-online="isOnline"
+        :cpu-usage-percent="cpuUsagePercent"
+        :memory-usage-percent="memoryUsagePercent"
+        :cpu-status-level="cpuStatusLevel"
+        :memory-status-level="memoryStatusLevel"
+      />
     </div>
   </div>
 

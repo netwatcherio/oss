@@ -1034,3 +1034,79 @@ export const PublicShareService = {
         return result;
     },
 };
+
+// ---- Reports ----
+export interface ReportConfig {
+    id: number;
+    workspace_id: number;
+    name: string;
+    description: string;
+    report_type: string;
+    schedule: string;
+    email_enabled: boolean;
+    email_recipients: string[];
+    last_run_at: string | null;
+    last_error: string;
+    config: {
+        time_range_days: number;
+        agent_ids?: number[];
+        probe_ids?: number[];
+        include_sla: boolean;
+        include_alerts: boolean;
+    };
+    created_at: string;
+    updated_at: string;
+}
+
+export const ReportService = {
+    async list(workspaceId: number | string) {
+        const { data } = await request.get<{ reports: ReportConfig[]; count: number }>(
+            `/workspaces/${workspaceId}/reports`
+        );
+        return data;
+    },
+
+    async create(workspaceId: number | string, body: {
+        name: string;
+        description?: string;
+        report_type: string;
+        schedule?: string;
+        email_enabled?: boolean;
+        email_recipients?: string[];
+    }) {
+        const { data } = await request.post<ReportConfig>(
+            `/workspaces/${workspaceId}/reports`,
+            body
+        );
+        return data;
+    },
+
+    async get(workspaceId: number | string, reportId: number | string) {
+        const { data } = await request.get<ReportConfig>(
+            `/workspaces/${workspaceId}/reports/${reportId}`
+        );
+        return data;
+    },
+
+    async update(workspaceId: number | string, reportId: number | string, body: {
+        name?: string;
+        description?: string;
+        report_type?: string;
+        schedule?: string;
+        email_enabled?: boolean;
+        email_recipients?: string[];
+    }) {
+        const { data } = await request.patch<ReportConfig>(
+            `/workspaces/${workspaceId}/reports/${reportId}`,
+            body
+        );
+        return data;
+    },
+
+    async remove(workspaceId: number | string, reportId: number | string) {
+        const { data } = await request.delete<{ ok: boolean }>(
+            `/workspaces/${workspaceId}/reports/${reportId}`
+        );
+        return data;
+    },
+};
