@@ -14,7 +14,7 @@ import (
 	"netwatcher-controller/internal/reports"
 )
 
-func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.QueueStore) {
+func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, scheduler *reports.Scheduler) {
 	reportStore := reports.NewStore(pg)
 	generator := reports.NewGenerator(pg, ch)
 
@@ -58,6 +58,10 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		if scheduler != nil && cfg.Schedule != "" {
+			scheduler.RescheduleJob(*cfg)
+		}
+
 		return c.Status(http.StatusCreated).JSON(toReportDetails(*cfg))
 	})
 
@@ -93,6 +97,7 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 		}
 
+		oldSchedule := cfg.Schedule
 		if req.Name != nil && *req.Name != "" {
 			cfg.Name = *req.Name
 		}
@@ -116,6 +121,10 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		if scheduler != nil && oldSchedule != cfg.Schedule {
+			scheduler.RescheduleJob(*cfg)
+		}
+
 		return c.JSON(toReportDetails(*cfg))
 	})
 
@@ -129,6 +138,10 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 		}
 		if cfg.WorkspaceID != wID {
 			return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+		}
+
+		if scheduler != nil {
+			scheduler.RemoveJob(reportID)
 		}
 
 		if err := reportStore.Delete(c.UserContext(), reportID); err != nil {
@@ -160,8 +173,11 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 
 		pdfData, err := generator.GenerateWorkspacePDF(c.UserContext(), cfg, configJSON)
 		if err != nil {
+			reportStore.UpdateLastRun(c.UserContext(), reportID, err.Error())
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+
+		reportStore.UpdateLastRun(c.UserContext(), reportID, "")
 
 		c.Set("Content-Type", "application/pdf")
 		c.Set("Content-Disposition", "attachment; filename="+cfg.Name+".pdf")

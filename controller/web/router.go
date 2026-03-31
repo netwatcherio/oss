@@ -9,6 +9,7 @@ import (
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/oui"
+	"netwatcher-controller/internal/reports"
 
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
@@ -18,7 +19,7 @@ import (
 )
 
 // RegisterRoutes mounts all REST / Fiber routes (no WebSocket routes here).
-func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store) {
+func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store, reportScheduler *reports.Scheduler) {
 	limitsConfig := limits.LoadFromEnv()
 
 	// ----- Public (no auth) -----
@@ -47,8 +48,14 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelAlerts(api, db, ch)
 	panelShareLinks(api, db)
 	panelAnalysis(api, db, ch)
-	panelReports(api, db, ch, emailStore)
+	panelReports(api, db, ch, emailStore, reportScheduler)
 	RegisterAdminRoutes(api, db)
+
+	// Workspace-scoped metrics (API key auth)
+	// Metrics include workspace_id labels; customers use Prometheus relabeling to filter
+	workspaceMetrics := api.Group("/workspaces/:id")
+	workspaceMetrics.Use(APIKeyAuthMiddleware(db))
+	workspaceMetrics.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
 	// Health
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
@@ -77,7 +84,7 @@ func BuildHTTPMux(app *fiber.App, db *gorm.DB, ch *sql.DB) http.Handler {
 
 	log.Info("WebSocket routes registered on net/http mux")
 
-	// --- Prometheus metrics endpoint ---
+	// --- Prometheus metrics endpoint (internal/controller metrics) ---
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// --- Everything else → Fiber ---

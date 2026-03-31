@@ -34,11 +34,12 @@ type ReportConfig struct {
 func (ReportConfig) TableName() string { return "report_configs" }
 
 type ReportConfigJSON struct {
-	TimeRangeDays int64  `json:"time_range_days"`
-	AgentIDs      []uint `json:"agent_ids,omitempty"`
-	ProbeIDs      []uint `json:"probe_ids,omitempty"`
-	IncludeSLA    bool   `json:"include_sla"`
-	IncludeAlerts bool   `json:"include_alerts"`
+	TimeRangeDays int64   `json:"time_range_days"`
+	AgentIDs      []uint  `json:"agent_ids,omitempty"`
+	ProbeIDs      []uint  `json:"probe_ids,omitempty"`
+	IncludeSLA    bool    `json:"include_sla"`
+	IncludeAlerts bool    `json:"include_alerts"`
+	SLATarget     float64 `json:"sla_target,omitempty"`
 }
 
 type ReportConfigDetails struct {

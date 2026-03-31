@@ -3,11 +3,13 @@ package email
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net/smtp"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SMTPConfig holds SMTP configuration
@@ -74,7 +76,6 @@ func (s *Sender) Send(email *EmailQueue) error {
 		return fmt.Errorf("SMTP not configured")
 	}
 
-	// Build headers
 	from := s.config.FromEmail
 	if s.config.FromName != "" {
 		from = fmt.Sprintf("%s <%s>", s.config.FromName, s.config.FromEmail)
@@ -85,27 +86,13 @@ func (s *Sender) Send(email *EmailQueue) error {
 		to = fmt.Sprintf("%s <%s>", email.ToName, email.ToEmail)
 	}
 
-	// Determine content type
-	var body string
-	contentType := "text/plain"
-	if email.BodyHTML != "" {
-		body = email.BodyHTML
-		contentType = "text/html"
+	var msg []byte
+	if len(email.AttachmentContent) > 0 {
+		msg = s.buildMultipartMessage(from, to, email.Subject, email.BodyHTML, email.Body, email.AttachmentName, email.AttachmentContent)
 	} else {
-		body = email.Body
+		msg = s.buildSimpleMessage(from, to, email.Subject, email.BodyHTML, email.Body)
 	}
 
-	// Build message
-	msg := fmt.Sprintf("From: %s\r\n"+
-		"To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"MIME-Version: 1.0\r\n"+
-		"Content-Type: %s; charset=\"utf-8\"\r\n"+
-		"\r\n"+
-		"%s",
-		from, to, email.Subject, contentType, body)
-
-	// Connect and send
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 
 	var auth smtp.Auth
@@ -114,10 +101,105 @@ func (s *Sender) Send(email *EmailQueue) error {
 	}
 
 	if s.config.UseTLS {
-		return s.sendWithTLS(addr, auth, s.config.FromEmail, []string{email.ToEmail}, []byte(msg))
+		return s.sendWithTLS(addr, auth, s.config.FromEmail, []string{email.ToEmail}, msg)
 	}
 
-	return smtp.SendMail(addr, auth, s.config.FromEmail, []string{email.ToEmail}, []byte(msg))
+	return smtp.SendMail(addr, auth, s.config.FromEmail, []string{email.ToEmail}, msg)
+}
+
+func (s *Sender) buildSimpleMessage(from, to, subject, bodyHTML, body string) []byte {
+	var contentType string
+	var bodyContent string
+	if bodyHTML != "" {
+		contentType = "text/html; charset=\"utf-8\""
+		bodyContent = bodyHTML
+	} else {
+		contentType = "text/plain; charset=\"utf-8\""
+		bodyContent = body
+	}
+
+	msg := fmt.Sprintf("From: %s\r\n"+
+		"To: %s\r\n"+
+		"Subject: %s\r\n"+
+		"MIME-Version: 1.0\r\n"+
+		"Content-Type: %s\r\n"+
+		"Date: %s\r\n"+
+		"\r\n"+
+		"%s",
+		from, to, subject, contentType, time.Now().Format(time.RFC1123Z), bodyContent)
+	return []byte(msg)
+}
+
+func (s *Sender) buildMultipartMessage(from, to, subject, bodyHTML, body, attachmentName string, attachmentContent []byte) []byte {
+	boundary := fmt.Sprintf("==%d==", time.Now().UnixNano())
+
+	var alternativePart string
+	if bodyHTML != "" {
+		alternativePart = fmt.Sprintf(
+			"--%s\r\n"+
+				"Content-Type: text/html; charset=\"utf-8\"\r\n"+
+				"\r\n"+
+				"%s\r\n"+
+				"\r\n"+
+				"--%s\r\n"+
+				"Content-Type: text/plain; charset=\"utf-8\"\r\n"+
+				"\r\n"+
+				"%s\r\n",
+			boundary, bodyHTML, boundary, body)
+	} else {
+		alternativePart = fmt.Sprintf(
+			"--%s\r\n"+
+				"Content-Type: text/plain; charset=\"utf-8\"\r\n"+
+				"\r\n"+
+				"%s\r\n",
+			boundary, body)
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(attachmentContent)
+	encodedLines := s.splitBase64Lines(encoded)
+
+	attachmentPart := fmt.Sprintf(
+		"--%s\r\n"+
+			"Content-Type: application/pdf; name=\"%s\"\r\n"+
+			"Content-Transfer-Encoding: base64\r\n"+
+			"Content-Disposition: attachment; filename=\"%s\"\r\n"+
+			"\r\n"+
+			"%s\r\n",
+		boundary, attachmentName, attachmentName, strings.Join(encodedLines, "\r\n"))
+
+	msg := fmt.Sprintf("From: %s\r\n"+
+		"To: %s\r\n"+
+		"Subject: %s\r\n"+
+		"MIME-Version: 1.0\r\n"+
+		"Content-Type: multipart/mixed; boundary=\"%s\"\r\n"+
+		"Date: %s\r\n"+
+		"\r\n"+
+		"--%s\r\n"+
+		"Content-Type: multipart/alternative; boundary=\"%s\"\r\n"+
+		"\r\n"+
+		"%s"+
+		"--%s--\r\n"+
+		"\r\n"+
+		"%s"+
+		"--%s--\r\n",
+		from, to, subject, boundary, time.Now().Format(time.RFC1123Z),
+		boundary, boundary, alternativePart,
+		boundary, attachmentPart, boundary)
+
+	return []byte(msg)
+}
+
+func (s *Sender) splitBase64Lines(encoded string) []string {
+	const lineLen = 76
+	lines := make([]string, 0, (len(encoded)+lineLen-1)/lineLen)
+	for i := 0; i < len(encoded); i += lineLen {
+		end := i + lineLen
+		if end > len(encoded) {
+			end = len(encoded)
+		}
+		lines = append(lines, encoded[i:end])
+	}
+	return lines
 }
 
 // sendWithTLS sends email using STARTTLS

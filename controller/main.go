@@ -158,7 +158,7 @@ func main() {
 
 	probe.InitWorkers(ch, db)
 
-	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore, ouiStore)
+	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore, ouiStore, reportScheduler)
 
 	// ---- Build unified HTTP mux ----
 	// WebSocket routes are served by net/http (supports http.Hijacker).

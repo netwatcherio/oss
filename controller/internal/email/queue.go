@@ -51,6 +51,11 @@ type EmailQueue struct {
 	WorkspaceID *uint  `gorm:"index" json:"workspace_id,omitempty"`
 	RelatedID   *uint  `json:"related_id,omitempty"` // e.g., member ID for invites
 	RelatedType string `gorm:"size:50" json:"related_type,omitempty"`
+
+	// Attachment support
+	AttachmentName    string `gorm:"size:255" json:"attachment_name,omitempty"`
+	AttachmentContent []byte `gorm:"type:text" json:"attachment_content,omitempty"` // base64 encoded in JSON, stored as text
+	AttachmentCID     string `gorm:"size:255" json:"attachment_cid,omitempty"`      // Content-ID for inline attachments
 }
 
 func (EmailQueue) TableName() string { return "email_queue" }

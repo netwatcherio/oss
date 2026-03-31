@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -22,6 +23,7 @@ type Scheduler struct {
 	generator  *Generator
 	emailStore *email.QueueStore
 	cron       *cron.Cron
+	jobEntries map[uint]cron.EntryID
 }
 
 func NewScheduler(db *gorm.DB, ch *sql.DB, store *Store, generator *Generator, emailStore *email.QueueStore) *Scheduler {
@@ -32,6 +34,7 @@ func NewScheduler(db *gorm.DB, ch *sql.DB, store *Store, generator *Generator, e
 		generator:  generator,
 		emailStore: emailStore,
 		cron:       cron.New(),
+		jobEntries: make(map[uint]cron.EntryID),
 	}
 }
 
@@ -64,19 +67,30 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) addJob(cfg ReportConfig) {
-	_, err := s.cron.AddFunc(cfg.Schedule, func() {
+	entryID, err := s.cron.AddFunc(cfg.Schedule, func() {
 		s.runReport(cfg.ID)
 	})
 	if err != nil {
 		log.Errorf("[reports] failed to add cron job for report %d: %v", cfg.ID, err)
 	} else {
-		log.Infof("[reports] scheduled report %d with cron: %s", cfg.ID, cfg.Schedule)
+		s.jobEntries[cfg.ID] = entryID
+		log.Infof("[reports] scheduled report %d with cron: %s (entry %d)", cfg.ID, cfg.Schedule, entryID)
 	}
 }
 
 func (s *Scheduler) RemoveJob(reportID uint) {
-	entryID := cron.EntryID(reportID + 1)
-	s.cron.Remove(entryID)
+	if entryID, ok := s.jobEntries[reportID]; ok {
+		s.cron.Remove(entryID)
+		delete(s.jobEntries, reportID)
+		log.Infof("[reports] removed cron job for report %d", reportID)
+	}
+}
+
+func (s *Scheduler) RescheduleJob(cfg ReportConfig) {
+	s.RemoveJob(cfg.ID)
+	if cfg.Schedule != "" {
+		s.addJob(cfg)
+	}
 }
 
 func (s *Scheduler) runReport(reportID uint) {
@@ -120,6 +134,7 @@ func (s *Scheduler) runReport(reportID uint) {
 
 func (s *Scheduler) sendReportEmail(ctx context.Context, cfg *ReportConfig, recipients []string, pdfData []byte) error {
 	subject := fmt.Sprintf("NetWatcher Report: %s", cfg.Name)
+	panelLink := getPanelEndpoint()
 	bodyHTML := fmt.Sprintf(`<html><body style="font-family: Arial, sans-serif; color: #333;">
 <h2 style="color: #1a365d;">NetWatcher Report</h2>
 <p>Your scheduled report <strong>%s</strong> is attached.</p>
@@ -128,21 +143,46 @@ func (s *Scheduler) sendReportEmail(ctx context.Context, cfg *ReportConfig, reci
 <hr style="border: none; border-top: 1px solid #eee;">
 <p style="color: #666; font-size: 12px;">NetWatcher - Network Monitoring Platform</p>
 </body></html>`,
-		cfg.Name, cfg.ReportType, time.Now().Format("Jan 2, 2006 15:04 UTC"), getPanelEndpoint())
+		cfg.Name, cfg.ReportType, time.Now().Format("Jan 2, 2006 15:04 UTC"), panelLink)
 
-	emailQueue := &email.EmailQueue{
-		Type:     email.TypeReport,
-		ToEmail:  recipients[0],
-		Subject:  subject,
-		Body:     fmt.Sprintf("NetWatcher Report: %s is attached.", cfg.Name),
-		BodyHTML: bodyHTML,
+	attachmentName := fmt.Sprintf("%s.pdf", cfg.Name)
+
+	var lastErr error
+	for _, recipient := range recipients {
+		recipient = trimEmail(recipient)
+		if recipient == "" {
+			continue
+		}
+
+		emailQueue := &email.EmailQueue{
+			Type:              email.TypeReport,
+			ToEmail:           recipient,
+			Subject:           subject,
+			Body:              fmt.Sprintf("NetWatcher Report: %s is attached.", cfg.Name),
+			BodyHTML:          bodyHTML,
+			AttachmentName:    attachmentName,
+			AttachmentContent: pdfData,
+		}
+
+		if err := s.emailStore.Enqueue(ctx, emailQueue); err != nil {
+			log.Errorf("[reports] failed to enqueue email for %s: %v", recipient, err)
+			lastErr = err
+			continue
+		}
+		log.Infof("[reports] enqueued report email for %s", recipient)
 	}
 
-	if err := s.emailStore.Enqueue(ctx, emailQueue); err != nil {
-		return fmt.Errorf("failed to enqueue email: %w", err)
+	if lastErr != nil && len(recipients) == 0 {
+		return fmt.Errorf("failed to enqueue any email: %w", lastErr)
 	}
 
 	return nil
+}
+
+func trimEmail(email string) string {
+	email = strings.TrimSpace(email)
+	email = strings.Trim(email, "<>")
+	return strings.TrimSpace(email)
 }
 
 func getPanelEndpoint() string {

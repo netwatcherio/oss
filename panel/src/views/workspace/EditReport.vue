@@ -1,15 +1,67 @@
 <script lang="ts" setup>
-import { onMounted, reactive } from "vue";
+import { onMounted, reactive, computed } from "vue";
 import { useRouter } from "vue-router";
 import Title from "@/components/Title.vue";
-import { ReportService, WorkspaceService } from "@/services/apiService";
+import { ReportService, WorkspaceService, AgentService } from "@/services/apiService";
 import type { Workspace, ReportConfig } from "@/services/apiService";
+import { getSession } from "@/session";
 
 const router = useRouter();
+
+function getControllerEndpoint(): string {
+  const anyWindow = window as any;
+  if (anyWindow?.CONTROLLER_ENDPOINT) return anyWindow.CONTROLLER_ENDPOINT;
+  const envUrl = (import.meta as any).env?.CONTROLLER_ENDPOINT;
+  if (envUrl) return envUrl;
+  return "http://localhost:8080";
+}
+
+async function downloadReport(url: string, filename: string) {
+  const session = getSession();
+  const token = session?.token;
+  if (!token) {
+    alert("You must be logged in to download reports");
+    return;
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("Report download failed:", err);
+    alert("Failed to download report. Please try again.");
+  }
+}
+
+async function runNow() {
+  if (!state.report) return;
+  const endpoint = getControllerEndpoint();
+  const url = `${endpoint}/workspaces/${state.workspace?.id}/reports/${state.report.id}/run`;
+  await downloadReport(url, `${state.report.name.replace(/[^a-z0-9]/gi, "_")}.pdf`);
+}
 
 interface EditState {
   workspace: Workspace | null;
   report: ReportConfig | null;
+  agents: any[];
+  probes: { id: number; name: string; type: string; target: string; agentId: number }[];
   loading: boolean;
   saving: boolean;
   error: string[];
@@ -18,6 +70,8 @@ interface EditState {
 const state = reactive<EditState>({
   workspace: null,
   report: null,
+  agents: [],
+  probes: [],
   loading: true,
   saving: false,
   error: [],
@@ -33,6 +87,8 @@ const form = reactive({
   email_input: "",
   time_range_days: 7,
   include_alerts: true,
+  selected_probe_ids: [] as number[],
+  sla_target: 99.5,
 });
 
 const reportTypes = [
@@ -48,6 +104,9 @@ const schedulePresets = [
   { value: "0 9 1 * *", label: "Monthly (1st day 9 AM)" },
 ];
 
+const showProbeSelector = computed(() => form.report_type === "probe_detail");
+const showSLASettings = computed(() => form.report_type === "sla");
+
 function addRecipient() {
   const email = form.email_input.trim();
   if (email && !form.email_recipients.includes(email)) {
@@ -60,6 +119,19 @@ function removeRecipient(email: string) {
   form.email_recipients = form.email_recipients.filter(e => e !== email);
 }
 
+function toggleProbe(probeId: number) {
+  const idx = form.selected_probe_ids.indexOf(probeId);
+  if (idx >= 0) {
+    form.selected_probe_ids.splice(idx, 1);
+  } else {
+    form.selected_probe_ids.push(probeId);
+  }
+}
+
+function isProbeSelected(probeId: number): boolean {
+  return form.selected_probe_ids.includes(probeId);
+}
+
 async function submit() {
   state.error = [];
 
@@ -68,12 +140,30 @@ async function submit() {
     return;
   }
 
+  if (form.report_type === "probe_detail" && form.selected_probe_ids.length === 0) {
+    state.error.push("Please select at least one probe for Probe Detail report");
+    return;
+  }
+
   state.saving = true;
 
   try {
+    const configJSON: Record<string, any> = {
+      time_range_days: form.time_range_days,
+      include_alerts: form.include_alerts,
+    };
+
+    if (form.report_type === "probe_detail") {
+      configJSON.probe_ids = form.selected_probe_ids;
+    }
+
+    if (form.report_type === "sla") {
+      configJSON.sla_target = form.sla_target;
+    }
+
     const payload: any = {
       name: form.name,
-      description: form.description,
+      description: JSON.stringify(configJSON),
       report_type: form.report_type,
       email_enabled: form.email_enabled,
       email_recipients: form.email_recipients,
@@ -83,13 +173,6 @@ async function submit() {
       payload.schedule = form.schedule;
     }
 
-    if (form.description) {
-      payload.description = JSON.stringify({
-        time_range_days: form.time_range_days,
-        include_alerts: form.include_alerts,
-      });
-    }
-
     await ReportService.update(state.workspace!.id, state.report!.id, payload);
     await router.push(`/workspaces/${state.workspace!.id}/reports`);
   } catch (e: any) {
@@ -97,14 +180,6 @@ async function submit() {
   } finally {
     state.saving = false;
   }
-}
-
-async function runNow() {
-  if (!state.report) return;
-  window.open(
-    `/api/v1/workspaces/${state.workspace?.id}/reports/${state.report.id}/run`,
-    "_blank"
-  );
 }
 
 onMounted(async () => {
@@ -133,6 +208,32 @@ onMounted(async () => {
     form.email_recipients = [...(state.report.email_recipients || [])];
     form.time_range_days = state.report.config?.time_range_days || 7;
     form.include_alerts = state.report.config?.include_alerts ?? true;
+    form.selected_probe_ids = state.report.config?.probe_ids || [];
+    form.sla_target = state.report.config?.sla_target || 99.5;
+
+    const agentsResponse = await AgentService.list(workspaceId);
+    const agentsData = (agentsResponse as any).data || agentsResponse || [];
+    state.agents = agentsData;
+
+    const allProbes: { id: number; name: string; type: string; target: string; agentId: number }[] = [];
+    for (const agent of state.agents) {
+      try {
+        const probesResponse = await AgentService.listAgentsProbes ? AgentService.listAgentsProbes(workspaceId, agent.id) : [];
+        const probes = (probesResponse as any) || [];
+        for (const p of probes) {
+          allProbes.push({
+            id: p.id,
+            name: p.name || `Probe ${p.id}`,
+            type: p.type || "UNKNOWN",
+            target: p.target || "N/A",
+            agentId: agent.id,
+          });
+        }
+      } catch {
+        // Skip agents without probes
+      }
+    }
+    state.probes = allProbes;
   } catch (e) {
     state.error.push("Failed to load report");
   } finally {
@@ -223,6 +324,47 @@ onMounted(async () => {
                 <option :value="30">Last 30 days</option>
                 <option :value="90">Last 90 days</option>
               </select>
+            </div>
+
+            <div v-if="showProbeSelector" class="mb-3">
+              <label class="form-label fw-semibold">Select Probes</label>
+              <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+                <div v-if="state.probes.length === 0" class="text-muted small">No probes available</div>
+                <div
+                  v-for="probe in state.probes"
+                  :key="probe.id"
+                  class="form-check"
+                >
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    :id="`probe-${probe.id}`"
+                    :checked="isProbeSelected(probe.id)"
+                    @change="toggleProbe(probe.id)"
+                  />
+                  <label class="form-check-label" :for="`probe-${probe.id}`">
+                    <span class="fw-medium">{{ probe.name }}</span>
+                    <span class="text-muted small ms-2">({{ probe.type }} → {{ probe.target }})</span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-text">Select which probes to include in the report</div>
+            </div>
+
+            <div v-if="showSLASettings" class="mb-3">
+              <label class="form-label fw-semibold">SLA Uptime Target (%)</label>
+              <div class="input-group" style="max-width: 200px;">
+                <input
+                  v-model.number="form.sla_target"
+                  type="number"
+                  class="form-control"
+                  min="90"
+                  max="99.99"
+                  step="0.1"
+                />
+                <span class="input-group-text">%</span>
+              </div>
+              <div class="form-text">Probes with uptime below this threshold will be flagged</div>
             </div>
 
             <div class="mb-3">

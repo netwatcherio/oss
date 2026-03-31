@@ -4,8 +4,63 @@ import { useRouter } from "vue-router";
 import Title from "@/components/Title.vue";
 import { ReportService, type ReportConfig, WorkspaceService } from "@/services/apiService";
 import type { Workspace } from "@/types";
+import { getSession } from "@/session";
 
 const router = useRouter();
+
+function getControllerEndpoint(): string {
+  const anyWindow = window as any;
+  if (anyWindow?.CONTROLLER_ENDPOINT) return anyWindow.CONTROLLER_ENDPOINT;
+  const envUrl = (import.meta as any).env?.CONTROLLER_ENDPOINT;
+  if (envUrl) return envUrl;
+  return "http://localhost:8080";
+}
+
+async function downloadReport(url: string, filename: string) {
+  const session = getSession();
+  const token = session?.token;
+  if (!token) {
+    alert("You must be logged in to download reports");
+    return;
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("Report download failed:", err);
+    alert("Failed to download report. Please try again.");
+  }
+}
+
+async function runReport(report: ReportConfig) {
+  const endpoint = getControllerEndpoint();
+  const url = `${endpoint}/workspaces/${state.workspace?.id}/reports/${report.id}/run`;
+  await downloadReport(url, `${report.name.replace(/[^a-z0-9]/gi, "_")}.pdf`);
+}
+
+async function previewReport() {
+  const endpoint = getControllerEndpoint();
+  const url = `${endpoint}/workspaces/${state.workspace?.id}/reports/preview?time_range_days=7`;
+  await downloadReport(url, "report_preview.pdf");
+}
 
 interface ReportState {
   reports: ReportConfig[];
@@ -50,20 +105,6 @@ function navigateToNew() {
 
 function navigateToEdit(report: ReportConfig) {
   router.push(`/workspaces/${state.workspace?.id}/reports/${report.id}/edit`);
-}
-
-async function runReport(report: ReportConfig) {
-  window.open(
-    `/api/v1/workspaces/${state.workspace?.id}/reports/${report.id}/run`,
-    "_blank"
-  );
-}
-
-async function previewReport() {
-  window.open(
-    `/api/v1/workspaces/${state.workspace?.id}/reports/preview?time_range_days=7`,
-    "_blank"
-  );
 }
 
 async function deleteReport(report: ReportConfig) {

@@ -163,6 +163,10 @@ func CreateIndexes(db *gorm.DB) error {
 		return fmt.Errorf("workspace automigrate: %w", err)
 	}
 
+	if err := workspace.NewStore(db).AutoMigrateAPIKeys(context.TODO()); err != nil {
+		return fmt.Errorf("workspace api keys automigrate: %w", err)
+	}
+
 	// 2) Remaining models (ordered loosely by dependency)
 	if err := db.WithContext(context.TODO()).AutoMigrate(
 		&users.User{},

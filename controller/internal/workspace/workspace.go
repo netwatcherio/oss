@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -663,3 +666,116 @@ type wsAgentPin struct {
 }
 
 func (wsAgentPin) TableName() string { return "agent_pins" }
+
+// --- Workspace API Keys ---
+
+type WorkspaceAPIKey struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	WorkspaceID uint           `gorm:"not null;index" json:"workspace_id"`
+	Name        string         `gorm:"size:100;not null" json:"name"`
+	KeyHash     string         `gorm:"size:64;not null" json:"-"`         // SHA256 hash of the key
+	KeyPrefix   string         `gorm:"size:8;not null" json:"key_prefix"` // First 8 chars for display
+	CreatedAt   time.Time      `json:"created_at"`
+	LastUsedAt  *time.Time     `json:"last_used_at,omitempty"`
+	ExpiresAt   *time.Time     `gorm:"index" json:"expires_at,omitempty"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (WorkspaceAPIKey) TableName() string { return "workspace_api_keys" }
+
+func (s *Store) AutoMigrateAPIKeys(ctx context.Context) error {
+	return s.db.WithContext(ctx).AutoMigrate(&WorkspaceAPIKey{})
+}
+
+type CreateAPIKeyInput struct {
+	WorkspaceID uint       `json:"workspace_id"`
+	Name        string     `json:"name"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+func (s *Store) CreateAPIKey(ctx context.Context, in CreateAPIKeyInput) (*WorkspaceAPIKey, string, error) {
+	if in.WorkspaceID == 0 || strings.TrimSpace(in.Name) == "" {
+		return nil, "", ErrInvalidInput
+	}
+
+	rawKey, err := generateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate key: %w", err)
+	}
+
+	h := sha256.Sum256([]byte(rawKey))
+	keyHash := fmt.Sprintf("%x", h)
+	keyPrefix := rawKey[:8]
+
+	ak := &WorkspaceAPIKey{
+		WorkspaceID: in.WorkspaceID,
+		Name:        strings.TrimSpace(in.Name),
+		KeyHash:     keyHash,
+		KeyPrefix:   keyPrefix,
+		ExpiresAt:   in.ExpiresAt,
+	}
+
+	if err := s.db.WithContext(ctx).Create(ak).Error; err != nil {
+		return nil, "", err
+	}
+
+	return ak, rawKey, nil
+}
+
+func (s *Store) ValidateAPIKey(ctx context.Context, workspaceID uint, rawKey string) (*WorkspaceAPIKey, error) {
+	if workspaceID == 0 || rawKey == "" {
+		return nil, ErrInvalidInput
+	}
+
+	h := sha256.Sum256([]byte(rawKey))
+	keyHash := fmt.Sprintf("%x", h)
+
+	var ak WorkspaceAPIKey
+	err := s.db.WithContext(ctx).
+		Where("workspace_id = ? AND key_hash = ? AND deleted_at IS NULL", workspaceID, keyHash).
+		First(&ak).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if ak.ExpiresAt != nil && ak.ExpiresAt.Before(time.Now()) {
+		return nil, nil
+	}
+
+	s.db.WithContext(ctx).Model(&ak).Update("last_used_at", time.Now())
+
+	return &ak, nil
+}
+
+func (s *Store) ListAPIKeys(ctx context.Context, workspaceID uint) ([]WorkspaceAPIKey, error) {
+	var keys []WorkspaceAPIKey
+	err := s.db.WithContext(ctx).
+		Where("workspace_id = ? AND deleted_at IS NULL", workspaceID).
+		Order("created_at DESC").
+		Find(&keys).Error
+	return keys, err
+}
+
+func (s *Store) DeleteAPIKey(ctx context.Context, id, workspaceID uint) error {
+	res := s.db.WithContext(ctx).
+		Where("id = ? AND workspace_id = ?", id, workspaceID).
+		Delete(&WorkspaceAPIKey{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func generateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
