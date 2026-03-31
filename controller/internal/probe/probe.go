@@ -52,7 +52,8 @@ var (
 func (t Type) Valid() bool {
 	switch t {
 	case TypeRPerf, TypeMTR, TypePing, TypeNetInfo, TypeSysInfo,
-		TypeSpeedtest, TypeSpeedtestServer, TypeAgent, TypeTrafficSim, TypeDNS:
+		TypeSpeedtest, TypeSpeedtestServer, TypeAgent, TypeTrafficSim, TypeDNS,
+		TypeHTTP, TypeTLS, TypeSNMP:
 		return true
 	default:
 		return false
