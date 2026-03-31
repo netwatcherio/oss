@@ -514,11 +514,18 @@ async function submit() {
       return;
     }
 
+    // Normalize host input: prepend https:// for HTTP, strip scheme for TLS
+    const normalizedHost = state.hostInput;
+
     // HTTP probes — set HTTP-specific metadata
     if (state.selected.value === 'HTTP') {
+      // Prepend https:// if no scheme present
+      const httpUrl = normalizedHost.startsWith('http://') || normalizedHost.startsWith('https://')
+        ? normalizedHost
+        : 'https://' + normalizedHost;
       newProbe.metadata = {
         method: state.httpConfig.method,
-        url: state.hostInput,
+        url: httpUrl,
         expected_status: state.httpConfig.expectedStatus,
         expected_content: state.httpConfig.expectedContent,
         content_match_type: state.httpConfig.contentMatchType,
@@ -531,8 +538,15 @@ async function submit() {
 
     // TLS probes — set TLS-specific metadata
     if (state.selected.value === 'TLS') {
+      // Strip scheme if present
+      let tlsTarget = normalizedHost;
+      if (tlsTarget.startsWith('https://')) {
+        tlsTarget = tlsTarget.substring(8);
+      } else if (tlsTarget.startsWith('http://')) {
+        tlsTarget = tlsTarget.substring(7);
+      }
       newProbe.metadata = {
-        target: state.hostInput,
+        target: tlsTarget,
         timeout_sec: state.probe.timeout_sec,
         insecure_skip_verify: state.tlsConfig.insecureTls
       };
