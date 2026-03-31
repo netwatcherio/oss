@@ -389,8 +389,8 @@ const isValidProbe = computed(() => {
     case "TLS":
     case "SNMP":
     case "SPEEDTEST":
-      if (state.targetAgent && α5.value) {
-        return state.α1 !== null;
+      if (state.targetAgent && showTargetAgentOption.value) {
+        return state.targetAgentSelected !== null;
       } else {
         return state.hostInput.trim() !== "";
       }
@@ -534,7 +534,7 @@ async function submit() {
       newProbe.metadata = {
         target: state.hostInput,
         timeout_sec: state.probe.timeout_sec,
-        insecure_skip_verify: state.tlsConfig.α6
+        insecure_skip_verify: state.tlsConfig.insecureTls
       };
     }
 
@@ -676,7 +676,7 @@ watch(() => state.selected.value, async (newType) => {
   state.tlsConfig = {
     target: '',
     timeoutSec: 10,
-    α6: false
+    insecureTls: false
   };
 
   // Reset SNMP configuration
@@ -1120,11 +1120,11 @@ onMounted(async () => {
                 <div class="mt-3">
                   <div class="form-check form-switch">
                     <input
-                        id="α6Check"
-                        v-model="state.tlsConfig.α6"
+                        id="tlsSkipVerifyCheck"
+                        v-model="state.tlsConfig.insecureTls"
                         class="form-check-input"
                         type="checkbox">
-                    <label class="form-check-label" for="α6Check">
+                    <label class="form-check-label" for="tlsSkipVerifyCheck">
                       Skip TLS Verification
                       <small class="text-muted d-block">Use only for testing with self-signed certificates</small>
                     </label>
