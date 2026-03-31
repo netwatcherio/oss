@@ -15,9 +15,23 @@ const error = ref<string | null>(null)
 const webData = ref<WebDashboardData | null>(null)
 const expandedRows = ref<Record<string, boolean>>({})
 const lookback = ref(60)
+const selectedCert = ref<{ subject: string; issuer: string; not_before: string; not_after: string; issuer_org?: string; cert_type?: string; fingerprint?: string; signature_algorithm?: string; public_key_algorithm?: string; serial_number?: string } | null>(null)
+const showCertModal = ref(false)
 
 function isHTTP(entry: WebGroupEntry): boolean {
   return !!entry.payload.status_code || !!entry.payload.url
+}
+
+function isEntryFailing(entry: WebGroupEntry): boolean {
+  const r = entry.payload
+  if (r?.error) return true
+  if (isHTTP(entry)) {
+    const code = r?.status_code || 0
+    if (code >= 400) return true
+  } else {
+    if (r?.is_expired || r?.is_expiring_soon) return true
+  }
+  return false
 }
 
 interface TargetGroup {
@@ -75,6 +89,10 @@ const targetGroups = computed<TargetGroup[]>(() => {
     }
   })
 })
+
+const httpPassingGroups = computed(() => targetGroups.value.filter(g => g.type === 'HTTP' && !isEntryFailing(g.latest)))
+const httpFailingGroups = computed(() => targetGroups.value.filter(g => g.type === 'HTTP' && isEntryFailing(g.latest)))
+const tlsGroups = computed(() => targetGroups.value.filter(g => g.type === 'TLS' || g.type === 'mixed'))
 
 const healthSummary = computed(() => {
   let totalTargets = 0
@@ -202,6 +220,25 @@ function getCertInfo(entry: WebGroupEntry) {
   return null
 }
 
+function viewCertificate(entry: WebGroupEntry) {
+  const cert = getCertInfo(entry)
+  if (cert) {
+    selectedCert.value = {
+      subject: cert.subject || 'Unknown',
+      issuer: cert.issuer || 'Unknown',
+      not_before: cert.not_before || 'Unknown',
+      not_after: cert.not_after || 'Unknown',
+      issuer_org: entry.payload?.certificate?.issuer_org,
+      cert_type: entry.payload?.certificate?.cert_type,
+      fingerprint: entry.payload?.certificate?.fingerprint,
+      signature_algorithm: entry.payload?.certificate?.signature_algorithm,
+      public_key_algorithm: entry.payload?.certificate?.public_key_algorithm,
+      serial_number: entry.payload?.certificate?.serial_number
+    }
+    showCertModal.value = true
+  }
+}
+
 async function fetchData() {
   loading.value = true
   error.value = null
@@ -283,155 +320,445 @@ onMounted(fetchData)
       <p>No HTTP/TLS probes are configured for this agent, or no data has been collected yet.</p>
     </div>
 
-    <div v-else class="web-groups">
-      <Element
-        v-for="group in targetGroups"
-        :key="group.target"
-        :title="group.target"
-        icon="bi bi-globe"
-        :subtitle="`${group.totalChecks} checks · ${group.type}`"
-      >
-        <template #secondary>
-          <div class="target-status" :class="group.overallStatus">
-            <i class="bi" :class="getOverallStatusIcon(group.overallStatus)"></i>
+    <div v-else class="web-sections">
+      <!-- HTTP Passing Section -->
+      <div v-if="httpPassingGroups.length" class="web-section">
+        <div class="section-header">
+          <div class="section-title">
+            <i class="bi bi-check-circle-fill text-success"></i>
+            <span>HTTP <span class="text-muted">/ Passing</span></span>
           </div>
-        </template>
-
-        <div class="web-table-wrap">
-          <table class="web-table">
-            <thead>
-              <tr>
-                <th>URL / Host</th>
-                <th>Status</th>
-                <th>Latency</th>
-                <th>TLS</th>
-                <th>Cert Expiry</th>
-                <th>Last Check</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="(entry, idx) in group.entries" :key="`${group.target}-${idx}`">
-                <tr class="web-row">
-                  <td class="mono url-cell">
-                    <span class="url-text" :title="entry.payload?.url || entry.target">{{ entry.payload?.url || entry.target }}</span>
-                    <span v-if="isHTTP(entry)" class="probe-type-badge http">HTTP</span>
-                    <span v-else class="probe-type-badge tls">TLS</span>
-                  </td>
-                  <td>
-                    <span class="status-badge" :class="getStatusColor(entry)">
-                      <i class="bi" :class="getStatusIcon(entry)"></i>
-                      {{ getStatusText(entry) }}
-                    </span>
-                  </td>
-                  <td>
-                    <span v-if="isHTTP(entry)" class="mono" :class="latencyClass(entry.payload?.total_ms)">
-                      {{ formatLatency(entry.payload?.total_ms) }}
-                    </span>
-                    <span v-else class="mono" :class="latencyClass(entry.payload?.total_ms)">
-                      {{ formatLatency(entry.payload?.total_ms) }}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="badge-tls">{{ entry.payload?.tls_version || '—' }}</span>
-                  </td>
-                  <td>
-                    <span v-if="getCertInfo(entry)" class="cert-badge" :class="certExpiryClass(getCertInfo(entry)?.days_until_expiry)">
-                      {{ getCertInfo(entry)?.days_until_expiry }}d
-                    </span>
-                    <span v-else-if="entry.payload?.days_until_expiry !== undefined" class="cert-badge" :class="certExpiryClass(entry.payload.days_until_expiry)">
-                      {{ entry.payload.days_until_expiry }}d
-                    </span>
-                    <span v-else class="muted">—</span>
-                  </td>
-                  <td class="time-cell">
-                    {{ since(entry.created_at, true) }}
-                  </td>
-                  <td class="action-cell">
-                    <button
-                      v-if="group.entries.length > 1"
-                      @click="toggleExpand(`${group.target}-${idx}`)"
-                      class="expand-btn"
-                      :title="`${group.entries.length} historical results`"
-                    >
-                      <i class="bi" :class="expandedRows[`${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
-                    </button>
-                  </td>
-                </tr>
-
-                <tr v-if="expandedRows[`${group.target}-${idx}`]" class="detail-row">
-                  <td colspan="7">
-                    <div class="detail-panel">
-                      <div v-if="isHTTP(entry)" class="detail-grid">
-                        <div class="detail-item">
-                          <span class="detail-label">DNS Lookup</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.dns_lookup_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">TCP Connect</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.tcp_connect_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">TLS Handshake</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.tls_handshake_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">First Byte</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.first_byte_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Total</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Body Size</span>
-                          <span class="detail-value mono">{{ entry.payload?.body_size || 0 }} bytes</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Protocol</span>
-                          <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Cipher Suite</span>
-                          <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
-                        </div>
-                      </div>
-                      <div v-else class="detail-grid">
-                        <div class="detail-item">
-                          <span class="detail-label">Connect</span>
-                          <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Protocol</span>
-                          <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">Cipher Suite</span>
-                          <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
-                        </div>
-                        <div class="detail-item">
-                          <span class="detail-label">RemoteAddr</span>
-                          <span class="detail-value mono">{{ entry.payload?.remote_addr || '—' }}</span>
-                        </div>
-                      </div>
-                      <div v-if="getCertInfo(entry)" class="cert-info">
-                        <div class="cert-title">Certificate</div>
-                        <div class="cert-details">
-                          <span><strong>Subject:</strong> {{ getCertInfo(entry)?.subject }}</span>
-                          <span><strong>Issuer:</strong> {{ getCertInfo(entry)?.issuer }}</span>
-                          <span><strong>Valid:</strong> {{ getCertInfo(entry)?.not_before }} to {{ getCertInfo(entry)?.not_after }}</span>
-                          <span v-if="entry.payload?.certificate?.issuer_org"><strong>Issuer Org:</strong> {{ entry.payload.certificate.issuer_org }}</span>
-                          <span v-if="entry.payload?.certificate?.cert_type"><strong>Cert Type:</strong> {{ entry.payload.certificate.cert_type }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+          <span class="section-count">{{ httpPassingGroups.length }}</span>
         </div>
-      </Element>
+        <div class="web-groups">
+          <Element
+            v-for="group in httpPassingGroups"
+            :key="group.target"
+            :title="group.target"
+            icon="bi bi-globe"
+            :subtitle="`${group.totalChecks} checks`"
+          >
+            <template #secondary>
+              <div class="target-status healthy">
+                <i class="bi bi-check-circle-fill"></i>
+              </div>
+            </template>
+
+            <div class="web-table-wrap">
+              <table class="web-table">
+                <thead>
+                  <tr>
+                    <th>URL</th>
+                    <th>Status</th>
+                    <th>Latency</th>
+                    <th>TLS</th>
+                    <th>Cert Expiry</th>
+                    <th>Last Check</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="(entry, idx) in group.entries.filter(e => isHTTP(e))" :key="`${group.target}-${idx}`">
+                    <tr class="web-row">
+                      <td class="mono url-cell">
+                        <span class="url-text" :title="entry.payload?.url">{{ entry.payload?.url }}</span>
+                        <span class="probe-type-badge http">HTTP</span>
+                      </td>
+                      <td>
+                        <span class="status-badge" :class="getStatusColor(entry)">
+                          <i class="bi" :class="getStatusIcon(entry)"></i>
+                          {{ getStatusText(entry) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="mono" :class="latencyClass(entry.payload?.total_ms)">
+                          {{ formatLatency(entry.payload?.total_ms) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="badge-tls">{{ entry.payload?.tls_version || '—' }}</span>
+                      </td>
+                      <td>
+                        <span v-if="getCertInfo(entry)" class="cert-badge cert-clickable" :class="certExpiryClass(getCertInfo(entry)?.days_until_expiry)" @click="viewCertificate(entry)">
+                          {{ getCertInfo(entry)?.days_until_expiry }}d <i class="bi bi-search"></i>
+                        </span>
+                        <span v-else class="muted">—</span>
+                      </td>
+                      <td class="time-cell">
+                        {{ since(entry.created_at, true) }}
+                      </td>
+                      <td class="action-cell">
+                        <button
+                          v-if="group.entries.filter(e => isHTTP(e)).length > 1"
+                          @click="toggleExpand(`http-${group.target}-${idx}`)"
+                          class="expand-btn"
+                          :title="`${group.entries.filter(e => isHTTP(e)).length} historical results`"
+                        >
+                          <i class="bi" :class="expandedRows[`http-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                        </button>
+                      </td>
+                    </tr>
+
+                    <tr v-if="expandedRows[`http-${group.target}-${idx}`]" class="detail-row">
+                      <td colspan="7">
+                        <div class="detail-panel">
+                          <div class="detail-grid">
+                            <div class="detail-item">
+                              <span class="detail-label">DNS Lookup</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.dns_lookup_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">TCP Connect</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tcp_connect_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">TLS Handshake</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tls_handshake_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">First Byte</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.first_byte_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Total</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Body Size</span>
+                              <span class="detail-value mono">{{ entry.payload?.body_size || 0 }} bytes</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Protocol</span>
+                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Cipher Suite</span>
+                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
+                            </div>
+                          </div>
+                          <div v-if="getCertInfo(entry)" class="cert-info">
+                            <button class="cert-view-btn" @click="viewCertificate(entry)">
+                              <i class="bi bi-certificate"></i> View Full Certificate
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </Element>
+        </div>
+      </div>
+
+      <!-- HTTP Failing Section -->
+      <div v-if="httpFailingGroups.length" class="web-section">
+        <div class="section-header failing">
+          <div class="section-title">
+            <i class="bi bi-x-circle-fill text-danger"></i>
+            <span>HTTP <span class="text-muted">/ Failing</span></span>
+          </div>
+          <span class="section-count">{{ httpFailingGroups.length }}</span>
+        </div>
+        <div class="web-groups">
+          <Element
+            v-for="group in httpFailingGroups"
+            :key="group.target"
+            :title="group.target"
+            icon="bi bi-globe"
+            :subtitle="`${group.totalChecks} checks`"
+          >
+            <template #secondary>
+              <div class="target-status critical">
+                <i class="bi bi-x-circle-fill"></i>
+              </div>
+            </template>
+
+            <div class="web-table-wrap">
+              <table class="web-table">
+                <thead>
+                  <tr>
+                    <th>URL</th>
+                    <th>Status</th>
+                    <th>Latency</th>
+                    <th>TLS</th>
+                    <th>Cert Expiry</th>
+                    <th>Last Check</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="(entry, idx) in group.entries.filter(e => isHTTP(e))" :key="`${group.target}-${idx}`">
+                    <tr class="web-row failing">
+                      <td class="mono url-cell">
+                        <span class="url-text" :title="entry.payload?.url">{{ entry.payload?.url }}</span>
+                        <span class="probe-type-badge http">HTTP</span>
+                      </td>
+                      <td>
+                        <span class="status-badge" :class="getStatusColor(entry)">
+                          <i class="bi" :class="getStatusIcon(entry)"></i>
+                          {{ getStatusText(entry) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="mono" :class="latencyClass(entry.payload?.total_ms)">
+                          {{ formatLatency(entry.payload?.total_ms) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="badge-tls">{{ entry.payload?.tls_version || '—' }}</span>
+                      </td>
+                      <td>
+                        <span v-if="getCertInfo(entry)" class="cert-badge cert-clickable" :class="certExpiryClass(getCertInfo(entry)?.days_until_expiry)" @click="viewCertificate(entry)">
+                          {{ getCertInfo(entry)?.days_until_expiry }}d <i class="bi bi-search"></i>
+                        </span>
+                        <span v-else class="muted">—</span>
+                      </td>
+                      <td class="time-cell">
+                        {{ since(entry.created_at, true) }}
+                      </td>
+                      <td class="action-cell">
+                        <button
+                          v-if="group.entries.filter(e => isHTTP(e)).length > 1"
+                          @click="toggleExpand(`http-${group.target}-${idx}`)"
+                          class="expand-btn"
+                          :title="`${group.entries.filter(e => isHTTP(e)).length} historical results`"
+                        >
+                          <i class="bi" :class="expandedRows[`http-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                        </button>
+                      </td>
+                    </tr>
+
+                    <tr v-if="expandedRows[`http-${group.target}-${idx}`]" class="detail-row">
+                      <td colspan="7">
+                        <div class="detail-panel">
+                          <div class="detail-grid">
+                            <div class="detail-item">
+                              <span class="detail-label">DNS Lookup</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.dns_lookup_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">TCP Connect</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tcp_connect_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">TLS Handshake</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tls_handshake_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">First Byte</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.first_byte_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Total</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Body Size</span>
+                              <span class="detail-value mono">{{ entry.payload?.body_size || 0 }} bytes</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Protocol</span>
+                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Cipher Suite</span>
+                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
+                            </div>
+                          </div>
+                          <div v-if="getCertInfo(entry)" class="cert-info">
+                            <button class="cert-view-btn" @click="viewCertificate(entry)">
+                              <i class="bi bi-certificate"></i> View Full Certificate
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </Element>
+        </div>
+      </div>
+
+      <!-- TLS Section -->
+      <div v-if="tlsGroups.length" class="web-section">
+        <div class="section-header tls">
+          <div class="section-title">
+            <i class="bi bi-shield-lock-fill text-purple"></i>
+            <span>TLS <span class="text-muted">/ Certificates</span></span>
+          </div>
+          <span class="section-count">{{ tlsGroups.length }}</span>
+        </div>
+        <div class="web-groups">
+          <Element
+            v-for="group in tlsGroups"
+            :key="group.target"
+            :title="group.target"
+            icon="bi bi-shield-lock"
+            :subtitle="`${group.totalChecks} checks`"
+          >
+            <template #secondary>
+              <div class="target-status" :class="group.overallStatus">
+                <i class="bi" :class="getOverallStatusIcon(group.overallStatus)"></i>
+              </div>
+            </template>
+
+            <div class="web-table-wrap">
+              <table class="web-table">
+                <thead>
+                  <tr>
+                    <th>Host</th>
+                    <th>Status</th>
+                    <th>Latency</th>
+                    <th>Protocol</th>
+                    <th>Cert Expiry</th>
+                    <th>Last Check</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="(entry, idx) in group.entries.filter(e => !isHTTP(e))" :key="`${group.target}-${idx}`">
+                    <tr class="web-row">
+                      <td class="mono url-cell">
+                        <span class="url-text" :title="entry.payload?.remote_addr || entry.target">{{ entry.payload?.remote_addr || entry.target }}</span>
+                        <span class="probe-type-badge tls">TLS</span>
+                      </td>
+                      <td>
+                        <span class="status-badge" :class="getStatusColor(entry)">
+                          <i class="bi" :class="getStatusIcon(entry)"></i>
+                          {{ getStatusText(entry) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="mono" :class="latencyClass(entry.payload?.total_ms)">
+                          {{ formatLatency(entry.payload?.total_ms) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="badge-tls">{{ entry.payload?.tls_version || '—' }}</span>
+                      </td>
+                      <td>
+                        <span v-if="getCertInfo(entry)" class="cert-badge cert-clickable" :class="certExpiryClass(getCertInfo(entry)?.days_until_expiry)" @click="viewCertificate(entry)">
+                          {{ getCertInfo(entry)?.days_until_expiry }}d <i class="bi bi-search"></i>
+                        </span>
+                        <span v-else-if="entry.payload?.days_until_expiry !== undefined" class="cert-badge" :class="certExpiryClass(entry.payload.days_until_expiry)">
+                          {{ entry.payload.days_until_expiry }}d
+                        </span>
+                        <span v-else class="muted">—</span>
+                      </td>
+                      <td class="time-cell">
+                        {{ since(entry.created_at, true) }}
+                      </td>
+                      <td class="action-cell">
+                        <button
+                          v-if="group.entries.filter(e => !isHTTP(e)).length > 1"
+                          @click="toggleExpand(`tls-${group.target}-${idx}`)"
+                          class="expand-btn"
+                          :title="`${group.entries.filter(e => !isHTTP(e)).length} historical results`"
+                        >
+                          <i class="bi" :class="expandedRows[`tls-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                        </button>
+                      </td>
+                    </tr>
+
+                    <tr v-if="expandedRows[`tls-${group.target}-${idx}`]" class="detail-row">
+                      <td colspan="7">
+                        <div class="detail-panel">
+                          <div class="detail-grid">
+                            <div class="detail-item">
+                              <span class="detail-label">Connect</span>
+                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Protocol</span>
+                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">Cipher Suite</span>
+                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
+                            </div>
+                            <div class="detail-item">
+                              <span class="detail-label">RemoteAddr</span>
+                              <span class="detail-value mono">{{ entry.payload?.remote_addr || '—' }}</span>
+                            </div>
+                          </div>
+                          <div v-if="getCertInfo(entry)" class="cert-info">
+                            <button class="cert-view-btn" @click="viewCertificate(entry)">
+                              <i class="bi bi-certificate"></i> View Full Certificate
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </Element>
+        </div>
+      </div>
+    </div>
+
+    <!-- Certificate Modal -->
+    <div v-if="showCertModal && selectedCert" class="cert-modal-overlay" @click.self="showCertModal = false">
+      <div class="cert-modal">
+        <div class="cert-modal-header">
+          <div class="cert-modal-title">
+            <i class="bi bi-certificate"></i>
+            Certificate Details
+          </div>
+          <button class="cert-modal-close" @click="showCertModal = false">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+        <div class="cert-modal-body">
+          <div class="cert-modal-grid">
+            <div class="cert-modal-item">
+              <span class="cert-modal-label">Subject</span>
+              <span class="cert-modal-value">{{ selectedCert.subject }}</span>
+            </div>
+            <div class="cert-modal-item">
+              <span class="cert-modal-label">Issuer</span>
+              <span class="cert-modal-value">{{ selectedCert.issuer }}</span>
+            </div>
+            <div class="cert-modal-item">
+              <span class="cert-modal-label">Valid From</span>
+              <span class="cert-modal-value">{{ selectedCert.not_before }}</span>
+            </div>
+            <div class="cert-modal-item">
+              <span class="cert-modal-label">Valid Until</span>
+              <span class="cert-modal-value">{{ selectedCert.not_after }}</span>
+            </div>
+            <div v-if="selectedCert.issuer_org" class="cert-modal-item">
+              <span class="cert-modal-label">Issuer Organization</span>
+              <span class="cert-modal-value">{{ selectedCert.issuer_org }}</span>
+            </div>
+            <div v-if="selectedCert.cert_type" class="cert-modal-item">
+              <span class="cert-modal-label">Certificate Type</span>
+              <span class="cert-modal-value">{{ selectedCert.cert_type }}</span>
+            </div>
+            <div v-if="selectedCert.fingerprint" class="cert-modal-item full-width">
+              <span class="cert-modal-label">Fingerprint</span>
+              <span class="cert-modal-value mono fingerprint">{{ selectedCert.fingerprint }}</span>
+            </div>
+            <div v-if="selectedCert.signature_algorithm" class="cert-modal-item">
+              <span class="cert-modal-label">Signature Algorithm</span>
+              <span class="cert-modal-value">{{ selectedCert.signature_algorithm }}</span>
+            </div>
+            <div v-if="selectedCert.public_key_algorithm" class="cert-modal-item">
+              <span class="cert-modal-label">Public Key Algorithm</span>
+              <span class="cert-modal-value">{{ selectedCert.public_key_algorithm }}</span>
+            </div>
+            <div v-if="selectedCert.serial_number" class="cert-modal-item full-width">
+              <span class="cert-modal-label">Serial Number</span>
+              <span class="cert-modal-value mono">{{ selectedCert.serial_number }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -879,5 +1206,280 @@ onMounted(fetchData)
 
 [data-theme="dark"] .muted {
   color: #6b7280;
+}
+
+/* Web Sections */
+.web-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.web-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+}
+
+.section-header.failing {
+  border-left: 3px solid var(--danger, #ef4444);
+}
+
+.section-header.tls {
+  border-left: 3px solid #a855f7;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 0.5rem;
+  background: var(--bg-subtle, #f8f9fa);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+
+.text-success { color: var(--success, #10b981); }
+.text-danger { color: var(--danger, #ef4444); }
+.text-purple { color: #a855f7; }
+.text-muted { color: var(--muted, #6b7280); }
+
+.web-row.failing td {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+/* Certificate Clickable */
+.cert-clickable {
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cert-clickable:hover {
+  opacity: 0.8;
+}
+
+.cert-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-subtle, #f8f9fa);
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text, #374151);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cert-view-btn:hover {
+  background: var(--border-color, #e5e7eb);
+}
+
+/* Certificate Modal */
+.cert-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.cert-modal {
+  background: var(--card-bg, #fff);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.cert-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-subtle, #f8f9fa);
+}
+
+.cert-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text, #1f2937);
+}
+
+.cert-modal-title i {
+  color: #a855f7;
+  font-size: 1.25rem;
+}
+
+.cert-modal-close {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.cert-modal-close:hover {
+  background: var(--bg-subtle, #f8f9fa);
+  color: var(--text, #1f2937);
+}
+
+.cert-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  max-height: calc(80vh - 70px);
+}
+
+.cert-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.cert-modal-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cert-modal-item.full-width {
+  grid-column: span 2;
+}
+
+.cert-modal-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+
+.cert-modal-value {
+  font-size: 0.85rem;
+  color: var(--text, #1f2937);
+  word-break: break-word;
+}
+
+.cert-modal-value.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+}
+
+.cert-modal-value.fingerprint {
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+/* Dark mode for new elements */
+[data-theme="dark"] .section-header {
+  background: #1a1f2e;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .section-header.failing {
+  border-left-color: #f87171;
+}
+
+[data-theme="dark"] .section-header.tls {
+  border-left-color: #c084fc;
+}
+
+[data-theme="dark"] .section-count {
+  background: #232838;
+  color: #8890a0;
+}
+
+[data-theme="dark"] .cert-view-btn {
+  background: #232838;
+  border-color: #2a3042;
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .cert-view-btn:hover {
+  background: #2a3042;
+}
+
+[data-theme="dark"] .cert-modal {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .cert-modal-header {
+  background: #232838;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .cert-modal-title {
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .cert-modal-close {
+  color: #8890a0;
+}
+
+[data-theme="dark"] .cert-modal-close:hover {
+  background: #2a3042;
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .cert-modal-body {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .cert-modal-label {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .cert-modal-value {
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .web-row.failing td {
+  background: rgba(248, 113, 113, 0.08);
+}
+
+[data-theme="dark"] .cert-clickable:hover {
+  opacity: 0.7;
 }
 </style>
