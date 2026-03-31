@@ -34,6 +34,7 @@ import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIServi
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
 import DnsDashboard from "@/views/agent/DNS.vue";
+import WebDashboard from "@/views/agent/Web.vue";
 import AgentHeader from "@/components/agent/AgentHeader.vue";
 import QuickStatsBar from "@/components/agent/QuickStatsBar.vue";
 import UninitializedState from "@/components/agent/UninitializedState.vue";
@@ -99,7 +100,7 @@ const loadingState = reactive<LoadingState>({
 })
 
 // Active tab for the new layout
-const activeTab = ref<'overview' | 'probes' | 'system' | 'dns'>('overview')
+const activeTab = ref<'overview' | 'probes' | 'system' | 'dns' | 'web'>('overview')
 
 // Overall loading computed
 const isInitializing = computed(() => {
@@ -681,8 +682,8 @@ onMounted(async () => {
         const pL = res as Probe[];
         state.probes = pL;
 
-        // Exclude DNS probes from the normal probe list — they have a dedicated DNS tab
-        const nonDnsProbes = pL.filter(p => p.type !== 'DNS');
+        // Exclude DNS, HTTP, and TLS probes from the normal probe list — they have dedicated tabs
+        const nonDnsProbes = pL.filter(p => p.type !== 'DNS' && p.type !== 'HTTP' && p.type !== 'TLS');
         const grouped = groupProbesByTarget(nonDnsProbes, { excludeDefaults: true, excludeServers: true });
 
         state.targetGroups = grouped.groups;
@@ -818,6 +819,7 @@ onMounted(async () => {
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'probes' }" @click="activeTab = 'probes'"><i class="bi bi-diagram-2"></i> Probes <span class="tab-badge" v-if="!loadingState.probes">{{ totalProbesCount }}</span></button>
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'"><i class="bi bi-cpu"></i> System</button>
         <button type="button" class="tab-btn" :class="{ active: activeTab === 'dns' }" @click="activeTab = 'dns'"><i class="bi bi-globe2"></i> DNS</button>
+        <button type="button" class="tab-btn" :class="{ active: activeTab === 'web' }" @click="activeTab = 'web'"><i class="bi bi-globe"></i> Web</button>
       </div>
 
       <!-- OVERVIEW TAB -->
@@ -848,6 +850,15 @@ onMounted(async () => {
       <!-- DNS TAB - Dedicated DNS Monitoring Dashboard -->
       <div v-show="activeTab === 'dns'" class="tab-panel">
         <DnsDashboard
+          v-if="state.workspace.id && state.agent.id"
+          :workspace-id="String(state.workspace.id)"
+          :agent-id="String(state.agent.id)"
+        />
+      </div>
+
+      <!-- WEB TAB - Dedicated HTTP/TLS Monitoring Dashboard -->
+      <div v-show="activeTab === 'web'" class="tab-panel">
+        <WebDashboard
           v-if="state.workspace.id && state.agent.id"
           :workspace-id="String(state.workspace.id)"
           :agent-id="String(state.agent.id)"

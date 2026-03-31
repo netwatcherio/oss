@@ -434,6 +434,105 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 			"lookback": lookbackMin,
 		})
 	})
+
+	// ------------------------------------------
+	// GET /workspaces/:id/probe-data/agents/:agentID/http
+	// HTTP/TLS dashboard data - returns HTTP and TLS probe results grouped by target URL
+	// Query: limit (default 500), lookback (minutes, default 60)
+	// ------------------------------------------
+	base.Get("/agents/:agentID/http", func(c *fiber.Ctx) error {
+		agentID := uint64(uintParam(c, "agentID"))
+		limit := intOrDefault(c.Query("limit"), 500)
+		lookbackMin := intOrDefault(c.Query("lookback"), 60)
+
+		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)
+
+		httpType := string(probe.TypeHTTP)
+		tlsType := string(probe.TypeTLS)
+
+		var allRows []probe.ProbeData
+		var err error
+
+		rows, err := probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
+			Type:    &httpType,
+			AgentID: &agentID,
+			From:    from,
+			Limit:   limit,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		allRows = append(allRows, rows...)
+
+		rows, err = probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
+			Type:    &tlsType,
+			AgentID: &agentID,
+			From:    from,
+			Limit:   limit,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		allRows = append(allRows, rows...)
+
+		type httpGroupEntry struct {
+			CreatedAt time.Time       `json:"created_at"`
+			ProbeID   uint            `json:"probe_id"`
+			Payload   json.RawMessage `json:"payload"`
+			Target    string          `json:"target"`
+		}
+		type httpGroup struct {
+			Target  string           `json:"target"`
+			Count   int              `json:"count"`
+			Entries []httpGroupEntry `json:"entries"`
+		}
+
+		groupMap := make(map[string]*httpGroup)
+		var groupOrder []string
+
+		for _, row := range allRows {
+			target := row.Target
+			if target == "" {
+				var p struct {
+					Target string `json:"target"`
+					URL    string `json:"url"`
+				}
+				if err := json.Unmarshal(row.Payload, &p); err == nil && p.Target != "" {
+					target = p.Target
+				} else if p.URL != "" {
+					target = p.URL
+				} else {
+					target = "unknown"
+				}
+			}
+
+			g, exists := groupMap[target]
+			if !exists {
+				g = &httpGroup{Target: target}
+				groupMap[target] = g
+				groupOrder = append(groupOrder, target)
+			}
+			g.Count++
+			g.Entries = append(g.Entries, httpGroupEntry{
+				CreatedAt: row.CreatedAt,
+				ProbeID:   row.ProbeID,
+				Payload:   row.Payload,
+				Target:    target,
+			})
+		}
+
+		groups := make([]httpGroup, 0, len(groupOrder))
+		for _, key := range groupOrder {
+			groups = append(groups, *groupMap[key])
+		}
+
+		return c.JSON(fiber.Map{
+			"agent_id": agentID,
+			"total":    len(allRows),
+			"groups":   groups,
+			"lookback": lookbackMin,
+		})
+	})
 }
 
 // ---------- helpers (parsing & Postgres lookups) ----------

@@ -420,6 +420,16 @@ export const ProbeDataService = {
         );
         return data;
     },
+
+    async httpDashboard(workspaceId: number | string, agentId: number | string, params?: { limit?: number; lookback?: number }) {
+        const qs = new URLSearchParams();
+        if (params?.limit) qs.set("limit", String(params.limit));
+        if (params?.lookback) qs.set("lookback", String(params.lookback));
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/probe-data/agents/${agentId}/http${qs.toString() ? `?${qs}` : ""}`
+        );
+        return data;
+    },
 };
 
 /** ===== Probes (scoped to workspace + agent) ===== */

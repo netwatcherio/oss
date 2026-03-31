@@ -514,6 +514,115 @@ func RegisterShareRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB) {
 			"lookback": lookbackMin,
 		})
 	})
+
+	// HTTP/TLS dashboard data for shared agent
+	// Mirrors the authenticated endpoint in data.go: GET /workspaces/:id/probe-data/agents/:agentID/http
+	shareAPI.Get("/:token/http", func(c *fiber.Ctx) error {
+		token := c.Params("token")
+		password := c.Query("password")
+
+		link, err := share.Validate(c.UserContext(), db, share.ValidateInput{
+			Token:    token,
+			Password: password,
+		})
+		if err != nil {
+			return fiberHandleShareError(c, err)
+		}
+
+		_ = share.RecordAccess(c.UserContext(), db, link.ID)
+
+		limit := intOrDefault(c.Query("limit"), 500)
+		lookbackMin := intOrDefault(c.Query("lookback"), 60)
+
+		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)
+
+		agentID := uint64(link.AgentID)
+		httpType := string(probe.TypeHTTP)
+		tlsType := string(probe.TypeTLS)
+
+		var allRows []probe.ProbeData
+		var rows []probe.ProbeData
+
+		rows, err = probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
+			Type:    &httpType,
+			AgentID: &agentID,
+			From:    from,
+			Limit:   limit,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to query HTTP data"})
+		}
+		allRows = append(allRows, rows...)
+
+		rows, err = probe.FindProbeData(c.UserContext(), ch, probe.FindParams{
+			Type:    &tlsType,
+			AgentID: &agentID,
+			From:    from,
+			Limit:   limit,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to query TLS data"})
+		}
+		allRows = append(allRows, rows...)
+
+		type httpGroupEntry struct {
+			CreatedAt time.Time       `json:"created_at"`
+			ProbeID   uint            `json:"probe_id"`
+			Payload   json.RawMessage `json:"payload"`
+			Target    string          `json:"target"`
+		}
+		type httpGroup struct {
+			Target  string           `json:"target"`
+			Count   int              `json:"count"`
+			Entries []httpGroupEntry `json:"entries"`
+		}
+
+		groupMap := make(map[string]*httpGroup)
+		var groupOrder []string
+
+		for _, row := range allRows {
+			target := row.Target
+			if target == "" {
+				var p struct {
+					Target string `json:"target"`
+					URL    string `json:"url"`
+				}
+				if err := json.Unmarshal(row.Payload, &p); err == nil && p.Target != "" {
+					target = p.Target
+				} else if p.URL != "" {
+					target = p.URL
+				} else {
+					target = "unknown"
+				}
+			}
+
+			g, exists := groupMap[target]
+			if !exists {
+				g = &httpGroup{Target: target}
+				groupMap[target] = g
+				groupOrder = append(groupOrder, target)
+			}
+			g.Count++
+			g.Entries = append(g.Entries, httpGroupEntry{
+				CreatedAt: row.CreatedAt,
+				ProbeID:   row.ProbeID,
+				Payload:   row.Payload,
+				Target:    target,
+			})
+		}
+
+		groups := make([]httpGroup, 0, len(groupOrder))
+		for _, key := range groupOrder {
+			groups = append(groups, *groupMap[key])
+		}
+
+		return c.JSON(fiber.Map{
+			"agent_id": agentID,
+			"total":    len(allRows),
+			"groups":   groups,
+			"lookback": lookbackMin,
+		})
+	})
 }
 
 // fiberHandleShareError handles common share link errors.

@@ -698,3 +698,50 @@ export interface DNSDashboardData {
     groups: DNSGroup[];
     lookback: number;
 }
+
+export interface WebResult {
+    url: string;
+    status_code: number;
+    status_text: string;
+    protocol: string;
+    tls_version: string;
+    tls_cipher_suite: string;
+    dns_lookup_ms: number;
+    tcp_connect_ms: number;
+    tls_handshake_ms: number;
+    first_byte_ms: number;
+    total_ms: number;
+    body_size: number;
+    content_type: string;
+    remote_addr: string;
+    certificate_info?: {
+        subject: string;
+        issuer: string;
+        not_before: string;
+        not_after: string;
+        days_until_expiry: number;
+        sans: string[];
+    };
+    content_match: boolean;
+    error?: string;
+}
+
+export interface WebGroupEntry {
+    created_at: string;
+    probe_id: number;
+    payload: WebResult;
+    target: string;
+}
+
+export interface WebGroup {
+    target: string;
+    count: number;
+    entries: WebGroupEntry[];
+}
+
+export interface WebDashboardData {
+    agent_id: number;
+    total: number;
+    groups: WebGroup[];
+    lookback: number;
+}
