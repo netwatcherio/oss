@@ -436,11 +436,6 @@ onMounted(fetchData)
                               <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
                             </div>
                           </div>
-                          <div v-if="getCertInfo(entry)" class="cert-info">
-                            <button class="cert-view-btn" @click="viewCertificate(entry)">
-                              <i class="bi bi-certificate"></i> View Full Certificate
-                            </button>
-                          </div>
                         </div>
                       </td>
                     </tr>
@@ -567,11 +562,6 @@ onMounted(fetchData)
                               <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
                             </div>
                           </div>
-                          <div v-if="getCertInfo(entry)" class="cert-info">
-                            <button class="cert-view-btn" @click="viewCertificate(entry)">
-                              <i class="bi bi-certificate"></i> View Full Certificate
-                            </button>
-                          </div>
                         </div>
                       </td>
                     </tr>
@@ -684,11 +674,6 @@ onMounted(fetchData)
                               <span class="detail-label">RemoteAddr</span>
                               <span class="detail-value mono">{{ entry.payload?.remote_addr || '—' }}</span>
                             </div>
-                          </div>
-                          <div v-if="getCertInfo(entry)" class="cert-info">
-                            <button class="cert-view-btn" @click="viewCertificate(entry)">
-                              <i class="bi bi-certificate"></i> View Full Certificate
-                            </button>
                           </div>
                         </div>
                       </td>
