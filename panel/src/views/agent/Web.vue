@@ -995,28 +995,44 @@ onMounted(fetchData)
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
+}
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 500px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.03));
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
 }
 
 .detail-label {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  opacity: 0.5;
+  opacity: 0.6;
   font-weight: 600;
   color: var(--muted);
 }
 
 .detail-value {
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   color: var(--text);
+  font-weight: 500;
 }
 
 .cert-info {
@@ -1114,6 +1130,11 @@ onMounted(fetchData)
 
 [data-theme="dark"] .detail-value {
   color: #c8cdd8;
+}
+
+[data-theme="dark"] .detail-item {
+  background: rgba(35, 40, 56, 0.5);
+  border-color: #2a3042;
 }
 
 [data-theme="dark"] .cert-info {
