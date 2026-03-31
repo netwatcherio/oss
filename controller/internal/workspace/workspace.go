@@ -76,13 +76,14 @@ func (Member) TableName() string { return "workspace_members" }
 // --- Public Errors ---
 
 var (
-	ErrNotFound          = errors.New("not found")
-	ErrInvalidInput      = errors.New("invalid input")
-	ErrInvalidRole       = errors.New("invalid role")
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrForbidden         = errors.New("forbidden")
-	ErrEmailRequired     = errors.New("email required")
-	ErrWorkspaceHasOwner = errors.New("workspace already has an owner")
+	ErrNotFound             = errors.New("not found")
+	ErrInvalidInput         = errors.New("invalid input")
+	ErrInvalidRole          = errors.New("invalid role")
+	ErrAlreadyExists        = errors.New("already exists")
+	ErrForbidden            = errors.New("forbidden")
+	ErrEmailRequired        = errors.New("email required")
+	ErrWorkspaceHasOwner    = errors.New("workspace already has an owner")
+	ErrMemberNotInWorkspace = errors.New("member does not belong to this workspace")
 )
 
 // --- Store (single simple entrypoint) ---
@@ -457,12 +458,23 @@ func (s *Store) ListMembers(ctx context.Context, workspaceID uint) ([]Member, er
 	return ms, nil
 }
 
-func (s *Store) UpdateMemberRole(ctx context.Context, memberID uint, newRole Role) (*Member, error) {
+func (s *Store) GetMemberByID(ctx context.Context, memberID uint) (*Member, error) {
+	var m Member
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", memberID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (s *Store) UpdateMemberRole(ctx context.Context, workspaceID, memberID uint, newRole Role) (*Member, error) {
 	if !newRole.Valid() || newRole == RoleOwner {
 		return nil, ErrInvalidRole
 	}
 	var m Member
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", memberID).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&m, "id = ? AND workspace_id = ?", memberID, workspaceID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -474,8 +486,8 @@ func (s *Store) UpdateMemberRole(ctx context.Context, memberID uint, newRole Rol
 	return &m, nil
 }
 
-func (s *Store) RemoveMember(ctx context.Context, memberID uint) error {
-	res := s.db.WithContext(ctx).Delete(&Member{}, "id = ?", memberID)
+func (s *Store) RemoveMember(ctx context.Context, workspaceID, memberID uint) error {
+	res := s.db.WithContext(ctx).Delete(&Member{}, "id = ? AND workspace_id = ?", memberID, workspaceID)
 	if res.Error != nil {
 		return res.Error
 	}

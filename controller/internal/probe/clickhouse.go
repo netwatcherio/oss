@@ -431,6 +431,9 @@ func GetLatestByTypeAndAgent(
 	agentID uint64,
 	probeID *uint64,
 ) (*ProbeData, error) {
+	if !Type(typ).Valid() {
+		return nil, ErrBadInput
+	}
 
 	var clauses []string
 	clauses = append(clauses,
@@ -493,6 +496,10 @@ type FindParams struct {
 
 // REWRITE FindProbeData: inline literals (no args / ? placeholders)
 func FindProbeData(ctx context.Context, db *sql.DB, p FindParams) ([]ProbeData, error) {
+	if p.Type != nil && !Type(*p.Type).Valid() {
+		return nil, ErrBadInput
+	}
+
 	var clauses []string
 
 	if p.Type != nil {

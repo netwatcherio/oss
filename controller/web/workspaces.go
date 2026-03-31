@@ -281,6 +281,7 @@ func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore
 
 	// PATCH /workspaces/:id/members/:memberId - requires CanManage (ADMIN+)
 	wsID.Patch("/members/:memberId", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		wsIDv := uintParam(c, "id")
 		memberID := uintParam(c, "memberId")
 		var body struct {
 			Role workspace.Role `json:"role"`
@@ -288,7 +289,7 @@ func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 		}
-		m, err := store.UpdateMemberRole(c.UserContext(), memberID, body.Role)
+		m, err := store.UpdateMemberRole(c.UserContext(), wsIDv, memberID, body.Role)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
@@ -303,8 +304,9 @@ func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore
 
 	// DELETE /workspaces/:id/members/:memberId - requires CanManage (ADMIN+)
 	wsID.Delete("/members/:memberId", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		wsIDv := uintParam(c, "id")
 		memberID := uintParam(c, "memberId")
-		if err := store.RemoveMember(c.UserContext(), memberID); err != nil {
+		if err := store.RemoveMember(c.UserContext(), wsIDv, memberID); err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {
 				status = http.StatusNotFound

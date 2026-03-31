@@ -442,6 +442,10 @@ func readFindParams(c *fiber.Ctx) (probe.FindParams, error) {
 	var p probe.FindParams
 
 	if s := c.Query("type"); s != "" {
+		probeType := probe.Type(s)
+		if !probeType.Valid() {
+			return p, errors.New("type must be a valid probe type")
+		}
 		p.Type = &s
 	}
 	if v := c.Query("probeId"); v != "" {

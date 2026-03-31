@@ -46,6 +46,16 @@ var (
 	ErrSelfTarget   = errors.New("probe cannot target itself")
 )
 
+func (t Type) Valid() bool {
+	switch t {
+	case TypeRPerf, TypeMTR, TypePing, TypeNetInfo, TypeSysInfo,
+		TypeSpeedtest, TypeSpeedtestServer, TypeAgent, TypeTrafficSim, TypeDNS:
+		return true
+	default:
+		return false
+	}
+}
+
 // -------------------- Models --------------------
 
 // Probe is owned by an agent, scoped to a workspace.
@@ -318,6 +328,8 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		Enabled:       boolOr(&in.Enabled, true),
 		IntervalSec:   ifZero(in.IntervalSec, 60),
 		TimeoutSec:    ifZero(in.TimeoutSec, 10),
+		Count:         in.Count,
+		DurationSec:   in.DurationSec,
 		Server:        in.Server, // TRAFFICSIM server mode
 		BindInterface: in.BindInterface,
 		Labels:        coalesceJSON(in.Labels),
@@ -373,6 +385,8 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 					Enabled:     boolOr(&in.Enabled, true),
 					IntervalSec: ifZero(in.IntervalSec, 60),
 					TimeoutSec:  ifZero(in.TimeoutSec, 10),
+					Count:       in.Count,
+					DurationSec: in.DurationSec,
 					Server:      in.Server,
 					Labels:      coalesceJSON(in.Labels),
 					Metadata:    coalesceJSON(in.Metadata),

@@ -377,7 +377,15 @@ func adminUpdateMemberHandler(db *gorm.DB) fiber.Handler {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid role"})
 		}
 
-		member, err := store.UpdateMemberRole(context.Background(), mID, role)
+		member, err := store.GetMemberByID(context.Background(), mID)
+		if err != nil {
+			if err == workspace.ErrNotFound {
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
+			}
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		member, err = store.UpdateMemberRole(context.Background(), member.WorkspaceID, mID, role)
 		if err != nil {
 			if err == workspace.ErrNotFound {
 				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
@@ -393,7 +401,15 @@ func adminRemoveMemberHandler(db *gorm.DB) fiber.Handler {
 		store := workspace.NewStore(db)
 		mID := uintParam(c, "mID")
 
-		if err := store.RemoveMember(context.Background(), mID); err != nil {
+		member, err := store.GetMemberByID(context.Background(), mID)
+		if err != nil {
+			if err == workspace.ErrNotFound {
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
+			}
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		if err := store.RemoveMember(context.Background(), member.WorkspaceID, mID); err != nil {
 			if err == workspace.ErrNotFound {
 				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
 			}
