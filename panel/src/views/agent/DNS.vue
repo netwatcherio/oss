@@ -357,41 +357,43 @@ onMounted(fetchData)
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="(h, hIdx) in srv.history" :key="hIdx">
-                            <td class="time-cell">{{ formatTime(h.created_at) }}</td>
-                            <td>
-                              <span class="status-badge sm" :class="getStatusColor(h.payload?.response_code || '', h.payload?.error)">
-                                <i class="bi" :class="getStatusIcon(h.payload?.response_code || '', h.payload?.error)"></i>
-                                {{ h.payload?.error || h.payload?.response_code }}
-                              </span>
-                            </td>
-                            <td>
-                              <span class="mono" :class="latencyClass(h.payload?.query_time_ms || 0)">
-                                {{ formatLatency(h.payload?.query_time_ms || 0) }}
-                              </span>
-                            </td>
-                            <td class="answer-cell mono">
-                              {{ answersPreview(h.payload?.answers || []) }}
-                            </td>
-                            <td class="action-cell">
-                              <button
-                                @click="toggleRaw(`${host.target}::${srv.server}::${hIdx}`)"
-                                class="raw-toggle-btn sm"
-                                title="Raw"
-                              >
-                                <i class="bi bi-code-slash"></i>
-                              </button>
-                            </td>
-                          </tr>
+                          <template v-for="(h, hIdx) in srv.history" :key="hIdx">
+                            <tr>
+                              <td class="time-cell">{{ formatTime(h.created_at) }}</td>
+                              <td>
+                                <span class="status-badge sm" :class="getStatusColor(h.payload?.response_code || '', h.payload?.error)">
+                                  <i class="bi" :class="getStatusIcon(h.payload?.response_code || '', h.payload?.error)"></i>
+                                  {{ h.payload?.error || h.payload?.response_code }}
+                                </span>
+                              </td>
+                              <td>
+                                <span class="mono" :class="latencyClass(h.payload?.query_time_ms || 0)">
+                                  {{ formatLatency(h.payload?.query_time_ms || 0) }}
+                                </span>
+                              </td>
+                              <td class="answer-cell mono">
+                                {{ answersPreview(h.payload?.answers || []) }}
+                              </td>
+                              <td class="action-cell">
+                                <button
+                                  @click="toggleRaw(`${host.target}::${srv.server}::${hIdx}`)"
+                                  class="raw-toggle-btn sm"
+                                  title="Raw"
+                                >
+                                  <i class="bi bi-code-slash"></i>
+                                </button>
+                              </td>
+                            </tr>
+                            <!-- Inline raw response immediately after the history row -->
+                            <tr v-if="expandedRaw[`${host.target}::${srv.server}::${hIdx}`]" class="raw-inline-row">
+                              <td colspan="5" class="raw-cell">
+                                <div class="raw-header">{{ srv.server }} · {{ formatTime(h.created_at) }}</div>
+                                <pre>{{ h.payload?.raw_response }}</pre>
+                              </td>
+                            </tr>
+                          </template>
                         </tbody>
                       </table>
-                      <!-- Inline raw responses for history items -->
-                      <template v-for="(h, hIdx) in srv.history" :key="`raw-${hIdx}`">
-                        <div v-if="expandedRaw[`${host.target}::${srv.server}::${hIdx}`]" class="history-raw">
-                          <div class="raw-header">{{ srv.server }} · {{ formatTime(h.created_at) }}</div>
-                          <pre>{{ h.payload?.raw_response }}</pre>
-                        </div>
-                      </template>
                     </div>
                   </td>
                 </tr>
@@ -690,19 +692,25 @@ onMounted(fetchData)
   background: rgba(0, 0, 0, 0.02);
 }
 
-.history-raw {
-  margin: 0;
+/* Inline raw response row styles */
+.raw-inline-row {
+  background: transparent;
 }
 
-.history-raw .raw-header {
+.raw-inline-row td {
+  padding: 0 !important;
+}
+
+.raw-inline-row .raw-header {
   padding: 0.3rem 0.75rem;
   font-size: 0.65rem;
   opacity: 0.5;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   border-top: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-subtle, #f8f9fa);
 }
 
-.history-raw pre {
+.raw-inline-row pre {
   margin: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.65rem;
@@ -804,14 +812,15 @@ onMounted(fetchData)
 }
 
 [data-theme="dark"] .raw-cell pre,
-[data-theme="dark"] .history-raw pre {
+[data-theme="dark"] .raw-inline-row pre {
   background: #0f1219;
   color: #a5b4c8;
 }
 
-[data-theme="dark"] .history-raw .raw-header {
+[data-theme="dark"] .raw-inline-row .raw-header {
   border-color: #2a3042;
   color: #6b7280;
+  background: #161a26;
 }
 
 [data-theme="dark"] .dns-status-ok {

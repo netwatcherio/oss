@@ -448,8 +448,8 @@ onMounted(fetchData)
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   flex-wrap: wrap;
 }
@@ -460,12 +460,12 @@ onMounted(fetchData)
   gap: 0.5rem;
   padding: 0.4rem 0.75rem;
   border-radius: 6px;
-  background: var(--bg-subtle);
+  background: var(--bg-subtle, #f8f9fa);
 }
-.web-summary-stat.healthy { color: var(--success); }
-.web-summary-stat.warning { color: var(--warning); }
-.web-summary-stat.critical { color: var(--danger); }
-.web-summary-stat.unknown { color: var(--muted); }
+.web-summary-stat.healthy { color: var(--success, #10b981); }
+.web-summary-stat.warning { color: var(--warning, #f59e0b); }
+.web-summary-stat.critical { color: var(--danger, #ef4444); }
+.web-summary-stat.unknown { color: var(--muted, #6b7280); }
 
 .stat-text { display: flex; flex-direction: column; line-height: 1.2; }
 .stat-value { font-weight: 700; font-size: 1.1rem; }
@@ -481,24 +481,24 @@ onMounted(fetchData)
 .lookback-select {
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-subtle);
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-subtle, #f8f9fa);
   font-size: 0.8rem;
   cursor: pointer;
-  color: var(--text);
+  color: inherit;
 }
 
 .btn-refresh {
   padding: 0.35rem 0.5rem;
   border-radius: 6px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-subtle);
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-subtle, #f8f9fa);
   cursor: pointer;
   font-size: 0.85rem;
-  color: var(--text);
+  color: inherit;
   transition: background 0.15s;
 }
-.btn-refresh:hover { background: var(--border-color); }
+.btn-refresh:hover { background: var(--border-color, #e5e7eb); }
 .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .spin { animation: spin 1s linear infinite; }
@@ -511,14 +511,14 @@ onMounted(fetchData)
   justify-content: center;
   padding: 3rem 1rem;
   gap: 0.75rem;
-  color: var(--muted);
+  color: var(--muted, #6b7280);
 }
-.web-error { color: var(--danger); }
+.web-error { color: var(--danger, #ef4444); }
 .web-empty i { font-size: 2.5rem; opacity: 0.3; }
-.web-empty h4 { margin: 0; font-weight: 600; color: var(--text); }
-.web-empty p { margin: 0; opacity: 0.6; font-size: 0.9rem; color: var(--muted); }
+.web-empty h4 { margin: 0; font-weight: 600; }
+.web-empty p { margin: 0; opacity: 0.6; font-size: 0.9rem; }
 .retry-btn { padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid currentColor; background: transparent; cursor: pointer; color: inherit; }
-.spinner { width: 24px; height: 24px; border: 2px solid var(--border-color); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
+.spinner { width: 24px; height: 24px; border: 2px solid var(--border-color, #d1d5db); border-top-color: var(--primary, #3b82f6); border-radius: 50%; animation: spin 0.6s linear infinite; }
 
 .web-groups { display: flex; flex-direction: column; gap: 0.75rem; }
 
@@ -729,5 +729,155 @@ onMounted(fetchData)
   gap: 0.25rem;
   font-size: 0.78rem;
   color: var(--text);
+}
+
+/* ==================== Dark Mode ==================== */
+[data-theme="dark"] .web-summary {
+  background: #1a1f2e;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .web-summary-stat {
+  background: #232838;
+}
+
+[data-theme="dark"] .lookback-select,
+[data-theme="dark"] .btn-refresh {
+  background: #232838;
+  border-color: #2a3042;
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .lookback-select:hover,
+[data-theme="dark"] .btn-refresh:hover {
+  background: #2a3042;
+}
+
+[data-theme="dark"] .web-table thead th {
+  border-color: #2a3042;
+  color: #8890a0;
+}
+
+[data-theme="dark"] .web-table tbody td {
+  border-color: #1e2333;
+}
+
+[data-theme="dark"] .web-row:hover td {
+  background: #1e2333;
+}
+
+[data-theme="dark"] .probe-type-badge.http {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .probe-type-badge.tls {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+[data-theme="dark"] .badge-tls {
+  background: #232838;
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .expand-btn {
+  border-color: #2a3042;
+  color: #8890a0;
+}
+
+[data-theme="dark"] .expand-btn:hover {
+  background: #232838;
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .detail-panel {
+  background: #161a26;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .detail-label {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .detail-value {
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .cert-info {
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .cert-title {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .cert-details {
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .web-loading,
+[data-theme="dark"] .web-empty {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .web-empty i {
+  opacity: 0.2;
+}
+
+[data-theme="dark"] .spinner {
+  border-color: #2a3042;
+  border-top-color: #60a5fa;
+}
+
+[data-theme="dark"] .retry-btn {
+  color: #f87171;
+  border-color: #f87171;
+}
+
+[data-theme="dark"] .target-status.healthy { color: #34d399; }
+[data-theme="dark"] .target-status.warning { color: #fbbf24; }
+[data-theme="dark"] .target-status.critical { color: #f87171; }
+[data-theme="dark"] .target-status.unknown { color: #6b7280; }
+
+[data-theme="dark"] .latency-good { color: #34d399; }
+[data-theme="dark"] .latency-warn { color: #fbbf24; }
+[data-theme="dark"] .latency-bad { color: #f87171; }
+
+[data-theme="dark"] .time-cell { color: #6b7280; }
+[data-theme="dark"] .mono { color: #c8cdd8; }
+
+[data-theme="dark"] .web-status-ok {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+}
+
+[data-theme="dark"] .web-status-warn {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+[data-theme="dark"] .web-status-error {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+[data-theme="dark"] .cert-ok {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+}
+
+[data-theme="dark"] .cert-warn {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+[data-theme="dark"] .cert-expired {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+[data-theme="dark"] .muted {
+  color: #6b7280;
 }
 </style>
