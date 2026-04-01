@@ -190,6 +190,16 @@ function formatLatency(ms: number | undefined): string {
   return `${ms.toFixed(0)}ms`
 }
 
+function formatBodySize(bytes: number | undefined): string {
+  if (bytes === undefined || bytes === null) return '—'
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  const value = bytes / Math.pow(1024, i)
+  if (i === 0) return `${bytes} B`
+  return `${value.toFixed(1)} ${units[i]}`
+}
+
 function formatTime(t: string): string {
   try {
     const d = new Date(t)
@@ -425,15 +435,15 @@ onMounted(fetchData)
                             </div>
                             <div class="detail-item">
                               <span class="detail-label">Body Size</span>
-                              <span class="detail-value mono">{{ entry.payload?.body_size || 0 }} bytes</span>
+                              <span class="detail-value mono">{{ formatBodySize(entry.payload?.body_size) }}</span>
                             </div>
                             <div class="detail-item">
                               <span class="detail-label">Protocol</span>
                               <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
                             </div>
-                            <div class="detail-item">
+                            <div class="detail-item wide">
                               <span class="detail-label">Cipher Suite</span>
-                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
+                              <span class="detail-value mono truncate" :title="entry.payload?.tls_cipher_suite">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
                             </div>
                           </div>
                         </div>
@@ -551,15 +561,15 @@ onMounted(fetchData)
                             </div>
                             <div class="detail-item">
                               <span class="detail-label">Body Size</span>
-                              <span class="detail-value mono">{{ entry.payload?.body_size || 0 }} bytes</span>
+                              <span class="detail-value mono">{{ formatBodySize(entry.payload?.body_size) }}</span>
                             </div>
                             <div class="detail-item">
                               <span class="detail-label">Protocol</span>
                               <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
                             </div>
-                            <div class="detail-item">
+                            <div class="detail-item wide">
                               <span class="detail-label">Cipher Suite</span>
-                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
+                              <span class="detail-value mono truncate" :title="entry.payload?.tls_cipher_suite">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
                             </div>
                           </div>
                         </div>
@@ -995,16 +1005,10 @@ onMounted(fetchData)
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.75rem;
 }
-@media (max-width: 900px) {
-  .detail-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 500px) {
+@media (max-width: 600px) {
   .detail-grid {
     grid-template-columns: 1fr;
   }
@@ -1018,6 +1022,17 @@ onMounted(fetchData)
   background: var(--bg-elevated, rgba(255, 255, 255, 0.03));
   border-radius: 6px;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+  min-width: 0;
+}
+
+.detail-item.wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 600px) {
+  .detail-item.wide {
+    grid-column: span 1;
+  }
 }
 
 .detail-label {
@@ -1033,6 +1048,14 @@ onMounted(fetchData)
   font-size: 0.9rem;
   color: var(--text);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-value.truncate {
+  display: block;
+  max-width: 100%;
 }
 
 .cert-info {
