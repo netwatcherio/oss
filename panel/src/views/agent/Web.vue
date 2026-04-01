@@ -410,9 +410,9 @@ onMounted(fetchData)
                         <button
                           @click="viewHTTPDetails(entry)"
                           class="details-btn"
-                          title="View details"
+                          title="View HTTP details"
                         >
-                          <i class="bi bi-info-circle"></i>
+                          <i class="bi bi-rulers"></i>
                         </button>
                       </td>
                     </tr>
@@ -494,9 +494,9 @@ onMounted(fetchData)
                         <button
                           @click="viewHTTPDetails(entry)"
                           class="details-btn"
-                          title="View details"
+                          title="View HTTP details"
                         >
-                          <i class="bi bi-info-circle"></i>
+                          <i class="bi bi-rulers"></i>
                         </button>
                       </td>
                     </tr>
@@ -583,7 +583,7 @@ onMounted(fetchData)
                           class="details-btn"
                           title="View TLS details"
                         >
-                          <i class="bi bi-info-circle"></i>
+                          <i class="bi bi-shield-check"></i>
                         </button>
                       </td>
                     </tr>
@@ -659,7 +659,7 @@ onMounted(fetchData)
       <div class="http-modal">
         <div class="http-modal-header">
           <div class="http-modal-title">
-            <i class="bi bi-globe"></i>
+            <i class="bi bi-rulers"></i>
             HTTP Details
           </div>
           <button class="http-modal-close" @click="showHTTPModal = false">
@@ -688,8 +688,30 @@ onMounted(fetchData)
               </span>
             </div>
             <div class="http-modal-item">
-              <span class="http-modal-label">Method</span>
-              <span class="http-modal-value">{{ selectedHTTP.payload?.method || '—' }}</span>
+              <span class="http-modal-label">TTFB</span>
+              <span class="http-modal-value mono" :class="latencyClass(selectedHTTP.payload?.first_byte_ms)">
+                {{ formatLatency(selectedHTTP.payload?.first_byte_ms) }}
+              </span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">DNS Lookup</span>
+              <span class="http-modal-value mono">{{ formatLatency(selectedHTTP.payload?.dns_lookup_ms) }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">TCP Connect</span>
+              <span class="http-modal-value mono">{{ formatLatency(selectedHTTP.payload?.tcp_connect_ms) }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">TLS Handshake</span>
+              <span class="http-modal-value mono">{{ formatLatency(selectedHTTP.payload?.tls_handshake_ms) }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Body Size</span>
+              <span class="http-modal-value mono">{{ formatBodySize(selectedHTTP.payload?.body_size) }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Content-Type</span>
+              <span class="http-modal-value">{{ selectedHTTP.payload?.content_type || '—' }}</span>
             </div>
             <div class="http-modal-item">
               <span class="http-modal-label">RemoteAddr</span>
@@ -698,6 +720,10 @@ onMounted(fetchData)
             <div class="http-modal-item">
               <span class="http-modal-label">TLS Version</span>
               <span class="http-modal-value">{{ selectedHTTP.payload?.tls_version || '—' }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Cipher Suite</span>
+              <span class="http-modal-value mono">{{ selectedHTTP.payload?.tls_cipher_suite || '—' }}</span>
             </div>
             <div v-if="selectedHTTP.payload?.error" class="http-modal-item full-width">
               <span class="http-modal-label">Error</span>
@@ -712,7 +738,7 @@ onMounted(fetchData)
       <div class="tls-modal">
         <div class="tls-modal-header">
           <div class="tls-modal-title">
-            <i class="bi bi-shield-lock"></i>
+            <i class="bi bi-shield-check"></i>
             TLS Details
           </div>
           <button class="tls-modal-close" @click="showTLSDetailsModal = false">
@@ -1118,7 +1144,25 @@ onMounted(fetchData)
   color: #c8cdd8;
 }
 
-[data-theme="dark"] .expand-btn {
+.details-btn, .expand-btn {
+  background: none;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  transition: all 0.15s;
+}
+.details-btn:hover, .expand-btn:hover {
+  background: var(--bg-subtle, #f1f5f9);
+  color: var(--text, #111);
+}
+
+.expand-btn {
   border-color: #2a3042;
   color: #8890a0;
 }
