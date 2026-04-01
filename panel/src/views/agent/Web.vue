@@ -13,10 +13,13 @@ const props = defineProps<{
 const loading = ref(true)
 const error = ref<string | null>(null)
 const webData = ref<WebDashboardData | null>(null)
-const expandedRows = ref<Record<string, boolean>>({})
 const lookback = ref(60)
 const selectedCert = ref<{ subject: string; issuer: string; not_before: string; not_after: string; issuer_org?: string; cert_type?: string; fingerprint?: string; signature_algorithm?: string; public_key_algorithm?: string; serial_number?: string } | null>(null)
 const showCertModal = ref(false)
+const selectedHTTP = ref<WebGroupEntry | null>(null)
+const showHTTPModal = ref(false)
+const selectedTLSDetails = ref<WebGroupEntry | null>(null)
+const showTLSDetailsModal = ref(false)
 
 function isHTTP(entry: WebGroupEntry): boolean {
   return !!entry.payload.status_code || !!entry.payload.url
@@ -179,10 +182,6 @@ function getOverallStatusIcon(status: string): string {
   }
 }
 
-function toggleExpand(key: string) {
-  expandedRows.value[key] = !expandedRows.value[key]
-}
-
 function formatLatency(ms: number | undefined): string {
   if (ms === undefined || ms === null) return '—'
   if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`
@@ -247,6 +246,16 @@ function viewCertificate(entry: WebGroupEntry) {
     }
     showCertModal.value = true
   }
+}
+
+function viewHTTPDetails(entry: WebGroupEntry) {
+  selectedHTTP.value = entry
+  showHTTPModal.value = true
+}
+
+function viewTLSDetails(entry: WebGroupEntry) {
+  selectedTLSDetails.value = entry
+  showTLSDetailsModal.value = true
 }
 
 async function fetchData() {
@@ -399,54 +408,12 @@ onMounted(fetchData)
                       </td>
                       <td class="action-cell">
                         <button
-                          v-if="group.entries.filter(e => isHTTP(e)).length > 1"
-                          @click="toggleExpand(`http-${group.target}-${idx}`)"
-                          class="expand-btn"
-                          :title="`${group.entries.filter(e => isHTTP(e)).length} historical results`"
+                          @click="viewHTTPDetails(entry)"
+                          class="details-btn"
+                          title="View details"
                         >
-                          <i class="bi" :class="expandedRows[`http-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                          <i class="bi bi-info-circle"></i>
                         </button>
-                      </td>
-                    </tr>
-
-                    <tr v-if="expandedRows[`http-${group.target}-${idx}`]" class="detail-row">
-                      <td colspan="7">
-                        <div class="detail-panel">
-                          <div class="detail-grid">
-                            <div class="detail-item">
-                              <span class="detail-label">DNS Lookup</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.dns_lookup_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">TCP Connect</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tcp_connect_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">TLS Handshake</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tls_handshake_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">First Byte</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.first_byte_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Total</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Body Size</span>
-                              <span class="detail-value mono">{{ formatBodySize(entry.payload?.body_size) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Protocol</span>
-                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
-                            </div>
-                            <div class="detail-item wide">
-                              <span class="detail-label">Cipher Suite</span>
-                              <span class="detail-value mono truncate" :title="entry.payload?.tls_cipher_suite">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
-                            </div>
-                          </div>
-                        </div>
                       </td>
                     </tr>
                   </template>
@@ -525,54 +492,12 @@ onMounted(fetchData)
                       </td>
                       <td class="action-cell">
                         <button
-                          v-if="group.entries.filter(e => isHTTP(e)).length > 1"
-                          @click="toggleExpand(`http-${group.target}-${idx}`)"
-                          class="expand-btn"
-                          :title="`${group.entries.filter(e => isHTTP(e)).length} historical results`"
+                          @click="viewHTTPDetails(entry)"
+                          class="details-btn"
+                          title="View details"
                         >
-                          <i class="bi" :class="expandedRows[`http-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                          <i class="bi bi-info-circle"></i>
                         </button>
-                      </td>
-                    </tr>
-
-                    <tr v-if="expandedRows[`http-${group.target}-${idx}`]" class="detail-row">
-                      <td colspan="7">
-                        <div class="detail-panel">
-                          <div class="detail-grid">
-                            <div class="detail-item">
-                              <span class="detail-label">DNS Lookup</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.dns_lookup_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">TCP Connect</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tcp_connect_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">TLS Handshake</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.tls_handshake_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">First Byte</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.first_byte_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Total</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Body Size</span>
-                              <span class="detail-value mono">{{ formatBodySize(entry.payload?.body_size) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Protocol</span>
-                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
-                            </div>
-                            <div class="detail-item wide">
-                              <span class="detail-label">Cipher Suite</span>
-                              <span class="detail-value mono truncate" :title="entry.payload?.tls_cipher_suite">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
-                            </div>
-                          </div>
-                        </div>
                       </td>
                     </tr>
                   </template>
@@ -654,38 +579,12 @@ onMounted(fetchData)
                       </td>
                       <td class="action-cell">
                         <button
-                          v-if="group.entries.filter(e => !isHTTP(e)).length > 1"
-                          @click="toggleExpand(`tls-${group.target}-${idx}`)"
-                          class="expand-btn"
-                          :title="`${group.entries.filter(e => !isHTTP(e)).length} historical results`"
+                          @click="viewTLSDetails(entry)"
+                          class="details-btn"
+                          title="View TLS details"
                         >
-                          <i class="bi" :class="expandedRows[`tls-${group.target}-${idx}`] ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                          <i class="bi bi-info-circle"></i>
                         </button>
-                      </td>
-                    </tr>
-
-                    <tr v-if="expandedRows[`tls-${group.target}-${idx}`]" class="detail-row">
-                      <td colspan="7">
-                        <div class="detail-panel">
-                          <div class="detail-grid">
-                            <div class="detail-item">
-                              <span class="detail-label">Connect</span>
-                              <span class="detail-value mono">{{ formatLatency(entry.payload?.total_ms) }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Protocol</span>
-                              <span class="detail-value">{{ entry.payload?.protocol || '—' }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">Cipher Suite</span>
-                              <span class="detail-value mono">{{ entry.payload?.tls_cipher_suite || '—' }}</span>
-                            </div>
-                            <div class="detail-item">
-                              <span class="detail-label">RemoteAddr</span>
-                              <span class="detail-value mono">{{ entry.payload?.remote_addr || '—' }}</span>
-                            </div>
-                          </div>
-                        </div>
                       </td>
                     </tr>
                   </template>
@@ -750,6 +649,93 @@ onMounted(fetchData)
             <div v-if="selectedCert.serial_number" class="cert-modal-item full-width">
               <span class="cert-modal-label">Serial Number</span>
               <span class="cert-modal-value mono">{{ selectedCert.serial_number }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- HTTP Details Modal -->
+    <div v-if="showHTTPModal && selectedHTTP" class="http-modal-overlay" @click.self="showHTTPModal = false">
+      <div class="http-modal">
+        <div class="http-modal-header">
+          <div class="http-modal-title">
+            <i class="bi bi-globe"></i>
+            HTTP Details
+          </div>
+          <button class="http-modal-close" @click="showHTTPModal = false">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+        <div class="http-modal-body">
+          <div class="http-modal-grid">
+            <div class="http-modal-item full-width">
+              <span class="http-modal-label">URL</span>
+              <span class="http-modal-value mono">{{ selectedHTTP.payload?.url || '—' }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Status</span>
+              <span class="http-modal-value">
+                <span class="status-badge" :class="getStatusColor(selectedHTTP)">
+                  <i class="bi" :class="getStatusIcon(selectedHTTP)"></i>
+                  {{ getStatusText(selectedHTTP) }}
+                </span>
+              </span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Latency</span>
+              <span class="http-modal-value mono" :class="latencyClass(selectedHTTP.payload?.total_ms)">
+                {{ formatLatency(selectedHTTP.payload?.total_ms) }}
+              </span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">Method</span>
+              <span class="http-modal-value">{{ selectedHTTP.payload?.method || '—' }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">RemoteAddr</span>
+              <span class="http-modal-value mono">{{ selectedHTTP.payload?.remote_addr || '—' }}</span>
+            </div>
+            <div class="http-modal-item">
+              <span class="http-modal-label">TLS Version</span>
+              <span class="http-modal-value">{{ selectedHTTP.payload?.tls_version || '—' }}</span>
+            </div>
+            <div v-if="selectedHTTP.payload?.error" class="http-modal-item full-width">
+              <span class="http-modal-label">Error</span>
+              <span class="http-modal-value error">{{ selectedHTTP.payload.error }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- TLS Details Modal -->
+    <div v-if="showTLSDetailsModal && selectedTLSDetails" class="tls-modal-overlay" @click.self="showTLSDetailsModal = false">
+      <div class="tls-modal">
+        <div class="tls-modal-header">
+          <div class="tls-modal-title">
+            <i class="bi bi-shield-lock"></i>
+            TLS Details
+          </div>
+          <button class="tls-modal-close" @click="showTLSDetailsModal = false">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+        <div class="tls-modal-body">
+          <div class="tls-modal-grid">
+            <div class="tls-modal-item">
+              <span class="tls-modal-label">Connect</span>
+              <span class="tls-modal-value mono">{{ formatLatency(selectedTLSDetails.payload?.total_ms) }}</span>
+            </div>
+            <div class="tls-modal-item">
+              <span class="tls-modal-label">Protocol</span>
+              <span class="tls-modal-value">{{ selectedTLSDetails.payload?.protocol || '—' }}</span>
+            </div>
+            <div class="tls-modal-item">
+              <span class="tls-modal-label">Cipher Suite</span>
+              <span class="tls-modal-value mono">{{ selectedTLSDetails.payload?.tls_cipher_suite || '—' }}</span>
+            </div>
+            <div class="tls-modal-item">
+              <span class="tls-modal-label">RemoteAddr</span>
+              <span class="tls-modal-value mono">{{ selectedTLSDetails.payload?.remote_addr || '—' }}</span>
             </div>
           </div>
         </div>
@@ -1510,5 +1496,295 @@ onMounted(fetchData)
 
 [data-theme="dark"] .cert-clickable:hover {
   opacity: 0.7;
+}
+
+/* TLS Details Modal */
+.tls-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.tls-modal {
+  background: var(--card-bg, #fff);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.tls-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-subtle, #f8f9fa);
+}
+
+.tls-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text, #1f2937);
+}
+
+.tls-modal-title i {
+  color: #a855f7;
+  font-size: 1.25rem;
+}
+
+.tls-modal-close {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.tls-modal-close:hover {
+  background: var(--bg-subtle, #f8f9fa);
+  color: var(--text, #1f2937);
+}
+
+.tls-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  max-height: calc(80vh - 70px);
+}
+
+.tls-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.tls-modal-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tls-modal-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+
+.tls-modal-value {
+  font-size: 0.9rem;
+  color: var(--text, #1f2937);
+  word-break: break-word;
+}
+
+.tls-modal-value.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+}
+
+/* Dark mode for TLS modal */
+[data-theme="dark"] .tls-modal {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .tls-modal-header {
+  background: #232838;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .tls-modal-title {
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .tls-modal-close {
+  color: #8890a0;
+}
+
+[data-theme="dark"] .tls-modal-close:hover {
+  background: #2a3042;
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .tls-modal-body {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .tls-modal-label {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .tls-modal-value {
+  color: #c8cdd8;
+}
+
+/* HTTP Details Modal */
+.http-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.http-modal {
+  background: var(--card-bg, #fff);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.http-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-subtle, #f8f9fa);
+}
+
+.http-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text, #1f2937);
+}
+
+.http-modal-title i {
+  color: #3b82f6;
+  font-size: 1.25rem;
+}
+
+.http-modal-close {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.http-modal-close:hover {
+  background: var(--bg-subtle, #f8f9fa);
+  color: var(--text, #1f2937);
+}
+
+.http-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  max-height: calc(80vh - 70px);
+}
+
+.http-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.http-modal-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.http-modal-item.full-width {
+  grid-column: span 2;
+}
+
+.http-modal-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+
+.http-modal-value {
+  font-size: 0.9rem;
+  color: var(--text, #1f2937);
+  word-break: break-word;
+}
+
+.http-modal-value.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+}
+
+.http-modal-value.error {
+  color: var(--danger, #ef4444);
+}
+
+/* Dark mode for HTTP modal */
+[data-theme="dark"] .http-modal {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .http-modal-header {
+  background: #232838;
+  border-color: #2a3042;
+}
+
+[data-theme="dark"] .http-modal-title {
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .http-modal-close {
+  color: #8890a0;
+}
+
+[data-theme="dark"] .http-modal-close:hover {
+  background: #2a3042;
+  color: #e0e4ec;
+}
+
+[data-theme="dark"] .http-modal-body {
+  background: #1a1f2e;
+}
+
+[data-theme="dark"] .http-modal-label {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .http-modal-value {
+  color: #c8cdd8;
+}
+
+[data-theme="dark"] .http-modal-value.error {
+  color: #f87171;
 }
 </style>
