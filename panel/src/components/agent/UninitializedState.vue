@@ -48,13 +48,13 @@ const linuxInstallCmd = computed(() => {
 const windowsInstallCmd = computed(() => {
   if (!props.agent.id || !props.pendingPin) return '';
   const { host, ssl } = controllerInfo.value;
-  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
+  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL $${ssl} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
 });
 
 const windowsRunCmd = computed(() => {
   if (!props.agent.id || !props.pendingPin) return '';
   const { host, ssl } = controllerInfo.value;
-  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL $${ssl ? '$true' : '$false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin '${props.pendingPin}'"`;
+  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL $${ssl} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin '${props.pendingPin}'"`;
 });
 
 const dockerInstallCmd = computed(() => {
