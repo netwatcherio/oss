@@ -49,7 +49,7 @@ const windowsInstallCmd = computed(() => {
   if (!props.agent.id || !props.pendingPin) return '';
   const { host, ssl } = controllerInfo.value;
   return `Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
-.\\install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
+powershell -ExecutionPolicy Bypass -File install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
 });
 
 const dockerInstallCmd = computed(() => {
