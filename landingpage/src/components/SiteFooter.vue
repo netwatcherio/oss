@@ -39,7 +39,7 @@
                         <a href="https://github.com/netwatcherio/oss" target="_blank">GitHub</a>
                         <a href="https://github.com/netwatcherio/oss/blob/master/CONTRIBUTING.md"
                             target="_blank">Contributing</a>
-                        <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE" target="_blank">License
+                        <a href="https://github.com/netwatcherio/oss/blob/master/LICENSE.md" target="_blank">License
                             (AGPL-3.0)</a>
                     </div>
                     <div class="footer-column">
