@@ -142,21 +142,6 @@ async function copyPinText(text: string, field: string) {
           </button>
         </div>
 
-        <!-- Windows Run Box -->
-        <h6 class="mt-3">
-          <i class="bi bi-box me-2"></i>Windows Run Box (Win+R)
-        </h6>
-        <div class="code-block">
-          <pre class="mb-0">{{ windowsRunCmd }}</pre>
-          <button 
-            class="btn btn-sm copy-btn" 
-            @click="copyPinText(windowsRunCmd, 'windowsRun')"
-          >
-            <i :class="copiedPinField === 'windowsRun' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
-            Copy
-          </button>
-        </div>
-
         <!-- Docker Install -->
         <h6 class="mt-3">
           <i class="bi bi-box me-2"></i>Docker

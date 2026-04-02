@@ -307,17 +307,6 @@ async function copyCommand(command: string) {
                       <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
                     </button>
                   </div>
-                  
-                  <p class="text-muted small mb-2 mt-3">Or run from Win+R (Run dialog):</p>
-                  <div class="position-relative">
-                    <pre class="bg-dark text-light p-3 rounded mb-0 small"><code>{{ windowsRunCommand }}</code></pre>
-                    <button 
-                      class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
-                      @click="copyCommand(windowsRunCommand)"
-                    >
-                      <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
-                    </button>
-                  </div>
                 </div>
                 
                 <!-- Docker -->

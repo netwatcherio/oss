@@ -247,24 +247,6 @@ function goToAgent() {
             </div>
           </div>
 
-          <!-- Windows Run Box -->
-          <div class="card mb-3">
-            <div class="card-header">
-              <h6 class="mb-0"><i class="bi bi-box me-2"></i>Windows Run Box (Win+R)</h6>
-            </div>
-            <div class="card-body p-0">
-              <div class="command-block">
-                <pre class="command-code">{{ windowsRunCommand }}</pre>
-                <button 
-                  class="btn btn-sm copy-btn"
-                  @click="copyToClipboard(windowsRunCommand, 'windowsRun')"
-                >
-                  <i class="bi" :class="copied === 'windowsRun' ? 'bi-check' : 'bi-clipboard'"></i> Copy
-                </button>
-              </div>
-            </div>
-          </div>
-
           <!-- Docker -->
           <div class="card mb-3">
             <div class="card-header">
