@@ -48,8 +48,13 @@ const linuxInstallCmd = computed(() => {
 const windowsInstallCmd = computed(() => {
   if (!props.agent.id || !props.pendingPin) return '';
   const { host, ssl } = controllerInfo.value;
-  return `Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
-powershell -ExecutionPolicy Bypass -File install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
+  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin "${props.pendingPin}"`;
+});
+
+const windowsRunCmd = computed(() => {
+  if (!props.agent.id || !props.pendingPin) return '';
+  const { host, ssl } = controllerInfo.value;
+  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL $${ssl ? '$true' : '$false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin '${props.pendingPin}'"`;
 });
 
 const dockerInstallCmd = computed(() => {
@@ -139,6 +144,21 @@ async function copyPinText(text: string, field: string) {
             @click="copyPinText(windowsInstallCmd, 'windows')"
           >
             <i :class="copiedPinField === 'windows' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
+            Copy
+          </button>
+        </div>
+
+        <!-- Windows Run Box -->
+        <h6 class="mt-3">
+          <i class="bi bi-box me-2"></i>Windows Run Box (Win+R)
+        </h6>
+        <div class="code-block">
+          <pre class="mb-0">{{ windowsRunCmd }}</pre>
+          <button 
+            class="btn btn-sm copy-btn" 
+            @click="copyPinText(windowsRunCmd, 'windowsRun')"
+          >
+            <i :class="copiedPinField === 'windowsRun' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
             Copy
           </button>
         </div>

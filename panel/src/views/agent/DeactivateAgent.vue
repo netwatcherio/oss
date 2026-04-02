@@ -54,14 +54,18 @@ const linuxInstallCommand = computed(() => {
   --pin ${state.newPin}`;
 });
 
-// Windows PowerShell install command  
+// Windows PowerShell install command (one-liner)
 const windowsInstallCommand = computed(() => {
   if (!state.agent || !state.newPin) return "";
   const { host, ssl } = getControllerInfo();
-  return `# Download the installer
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
-# Run the installer
-powershell -ExecutionPolicy Bypass -File install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.newPin}"`;
+  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.newPin}"`;
+});
+
+// Windows PowerShell Run box command
+const windowsRunCommand = computed(() => {
+  if (!state.agent || !state.newPin) return "";
+  const { host, ssl } = getControllerInfo();
+  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL $${ssl ? '$true' : '$false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.newPin}'"`;
 });
 
 // Docker command
@@ -300,12 +304,23 @@ async function copyCommand(command: string) {
                 
                 <!-- Windows -->
                 <div class="tab-pane fade" id="windows-tab">
-                  <p class="text-muted small mb-2">Run these commands in PowerShell (as Administrator):</p>
+                  <p class="text-muted small mb-2">Run this command in PowerShell (as Administrator):</p>
                   <div class="position-relative">
                     <pre class="bg-dark text-light p-3 rounded mb-0 small"><code>{{ windowsInstallCommand }}</code></pre>
                     <button 
                       class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
                       @click="copyCommand(windowsInstallCommand)"
+                    >
+                      <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
+                    </button>
+                  </div>
+                  
+                  <p class="text-muted small mb-2 mt-3">Or run from Win+R (Run dialog):</p>
+                  <div class="position-relative">
+                    <pre class="bg-dark text-light p-3 rounded mb-0 small"><code>{{ windowsRunCommand }}</code></pre>
+                    <button 
+                      class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
+                      @click="copyCommand(windowsRunCommand)"
                     >
                       <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
                     </button>

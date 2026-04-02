@@ -48,14 +48,18 @@ const linuxInstallCommand = computed(() => {
   --pin ${state.agentPin}`;
 });
 
-// Windows PowerShell install command  
+// Windows PowerShell install command (one-liner)
 const windowsInstallCommand = computed(() => {
   if (!state.agent.id || !state.agentPin) return "";
   const { host, ssl } = getControllerInfo();
-  return `# Download the installer
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "install.ps1"
-# Run the installer
-powershell -ExecutionPolicy Bypass -File install.ps1 -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.agentPin}"`;
+  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL $${ssl ? 'true' : 'false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.agentPin}"`;
+});
+
+// Windows PowerShell Run box command
+const windowsRunCommand = computed(() => {
+  if (!state.agent.id || !state.agentPin) return "";
+  const { host, ssl } = getControllerInfo();
+  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL $${ssl ? '$true' : '$false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.agentPin}'"`;
 });
 
 // Docker command
@@ -245,6 +249,24 @@ function goToAgent() {
                   @click="copyToClipboard(windowsInstallCommand, 'windows')"
                 >
                   <i class="bi" :class="copied === 'windows' ? 'bi-check' : 'bi-clipboard'"></i> Copy
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Windows Run Box -->
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0"><i class="bi bi-box me-2"></i>Windows Run Box (Win+R)</h6>
+            </div>
+            <div class="card-body p-0">
+              <div class="command-block">
+                <pre class="command-code">{{ windowsRunCommand }}</pre>
+                <button 
+                  class="btn btn-sm copy-btn"
+                  @click="copyToClipboard(windowsRunCommand, 'windowsRun')"
+                >
+                  <i class="bi" :class="copied === 'windowsRun' ? 'bi-check' : 'bi-clipboard'"></i> Copy
                 </button>
               </div>
             </div>
