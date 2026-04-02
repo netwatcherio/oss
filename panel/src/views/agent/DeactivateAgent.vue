@@ -58,14 +58,7 @@ const linuxInstallCommand = computed(() => {
 const windowsInstallCommand = computed(() => {
   if (!state.agent || !state.newPin) return "";
   const { host, ssl } = getControllerInfo();
-  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\install.ps1" -ControllerHost "${host}" -SSL \${ssl} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin "${state.newPin}"`;
-});
-
-// Windows PowerShell Run box command
-const windowsRunCommand = computed(() => {
-  if (!state.agent || !state.newPin) return "";
-  const { host, ssl } = getControllerInfo();
-  return `powershell -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1' -OutFile '$env:TEMP\\install.ps1'; & '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL \${ssl} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.newPin}'"`;
+  return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -Command "& '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL ${ssl ? '\`$true' : '\`$false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.newPin}'"`;
 });
 
 // Docker command
