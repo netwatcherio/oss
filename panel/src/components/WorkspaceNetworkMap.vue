@@ -214,7 +214,7 @@
 <script lang="ts" setup>
 import { ref, onMounted, watch, onUnmounted, computed, nextTick } from 'vue';
 import * as d3 from 'd3';
-import type { NetworkMapNode, NetworkMapEdge, NetworkMapData } from '@/types';
+import type { NetworkMapNode, NetworkMapEdge, NetworkMapData, DestinationSummary, EndpointInfo } from '@/types';
 import { useWebSocket } from '@/composables/useWebSocket';
 import request from '@/services/request';
 
@@ -458,6 +458,14 @@ const aggregatedRoutes = computed(() => {
     .sort((a, b) => b.count - a.count)
     .slice(0, 8); // Show top 8 unique routes
 });
+
+// Get displayed endpoints for a destination (first 3)
+const getDisplayedEndpoints = (dest: DestinationSummary): EndpointInfo[] => {
+  if (!dest.endpoints?.length) {
+    return [];
+  }
+  return dest.endpoints.slice(0, 3);
+};
 
 // Check if destination target is an agent
 const isAgentTarget = (target: string): boolean => {

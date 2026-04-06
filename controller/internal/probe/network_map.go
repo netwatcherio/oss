@@ -75,17 +75,29 @@ type NetworkMapEdge struct {
 	PathIDs    []string `json:"path_ids,omitempty"` // All path identifiers that use this edge (agent:target format)
 }
 
+// EndpointInfo contains IP with associated agent context
+// Used for displaying which agent owns/runs a probe targeting this endpoint
+type EndpointInfo struct {
+	IP              string `json:"ip"`
+	AgentID         uint   `json:"agent_id,omitempty"`          // Probe owner (ProbeAgentID)
+	AgentName       string `json:"agent_name,omitempty"`        // Probe owner name
+	TargetAgentID   uint   `json:"target_agent_id,omitempty"`   // Target agent (if agent-to-agent)
+	TargetAgentName string `json:"target_agent_name,omitempty"` // Target agent name
+}
+
 // DestinationSummary provides quick overview of a destination's health
 type DestinationSummary struct {
-	Target      string   `json:"target"`
-	Hostname    string   `json:"hostname,omitempty"`
-	HopCount    int      `json:"hop_count"`
-	AvgLatency  float64  `json:"avg_latency"` // Combined from PING + TrafficSim + MTR
-	PacketLoss  float64  `json:"packet_loss"`
-	Status      string   `json:"status"`       // "healthy", "degraded", "critical"
-	AgentCount  int      `json:"agent_count"`  // Number of agents testing this
-	ProbeTypes  []string `json:"probe_types"`  // ["MTR", "PING", "TRAFFICSIM"]
-	EndpointIPs []string `json:"endpoint_ips"` // Actual final hop IPs that respond for this target
+	Target     string         `json:"target"`
+	Hostname   string         `json:"hostname,omitempty"`
+	HopCount   int            `json:"hop_count"`
+	AvgLatency float64        `json:"avg_latency"` // Combined from PING + TrafficSim + MTR
+	PacketLoss float64        `json:"packet_loss"`
+	Status     string         `json:"status"`      // "healthy", "degraded", "critical"
+	AgentCount int            `json:"agent_count"` // Number of agents testing this
+	ProbeTypes []string       `json:"probe_types"` // ["MTR", "PING", "TRAFFICSIM"]
+	Endpoints  []EndpointInfo `json:"endpoints"`   // Endpoints with agent context
+	// Deprecated: EndpointIPs is kept for backwards compatibility
+	EndpointIPs []string `json:"endpoint_ips,omitempty"`
 	LastUpdated string   `json:"last_updated,omitempty"`
 }
 
@@ -187,10 +199,11 @@ type mtrHop struct {
 
 // mtrTrace represents a complete MTR trace from agent to target
 type mtrTrace struct {
-	AgentID     uint
-	Target      string
-	TargetAgent uint // 0 if not agent-to-agent probe
-	Hops        []mtrHop
+	AgentID      uint
+	Target       string
+	TargetAgent  uint // 0 if not agent-to-agent probe
+	ProbeAgentID uint // Probe owner (for reverse probes, differs from AgentID)
+	Hops         []mtrHop
 }
 
 func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, pg *gorm.DB, agentIDs []uint, from time.Time) ([]mtrTrace, error) {
@@ -211,6 +224,7 @@ SELECT
     agent_id,
     target,
     target_agent,
+    probe_agent_id,
     probe_id,
     payload_raw
 FROM probe_data
@@ -241,10 +255,11 @@ LIMIT 1000
 		var agentID uint64
 		var target string
 		var targetAgent uint64
+		var probeAgentID uint64
 		var probeID uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &targetAgent, &probeID, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &probeAgentID, &probeID, &payloadRaw); err != nil {
 			log.Printf("[NetworkMap] Row scan error: %v", err)
 			continue
 		}
@@ -358,10 +373,11 @@ LIMIT 1000
 
 		log.Printf("[NetworkMap] Trace: agent %d -> %s has %d hops", agentID, target, len(hops))
 		traces = append(traces, mtrTrace{
-			AgentID:     uint(agentID),
-			Target:      target,
-			TargetAgent: uint(targetAgent),
-			Hops:        hops,
+			AgentID:      uint(agentID),
+			Target:       target,
+			TargetAgent:  uint(targetAgent),
+			ProbeAgentID: uint(probeAgentID),
+			Hops:         hops,
 		})
 	}
 
@@ -373,7 +389,8 @@ type pingStats struct {
 	AvgLatency  float64
 	PacketLoss  float64
 	Count       int
-	TargetAgent uint // Agent ID if target is an agent, 0 otherwise
+	TargetAgent uint   // Agent ID if target is an agent, 0 otherwise
+	ProbeAgents []uint // All unique probe agent IDs (owners) that contributed to these metrics
 }
 
 func getWorkspacePingMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]pingStats, error) {
@@ -394,6 +411,7 @@ SELECT
     agent_id,
     target,
     target_agent,
+    probe_agent_id,
     payload_raw
 FROM probe_data
 WHERE type = 'PING'
@@ -415,6 +433,7 @@ LIMIT 5000
 		totalLoss    float64
 		count        int
 		targetAgent  uint
+		probeAgents  map[uint]bool // Track all unique probe agent IDs
 	}
 	accum := make(map[string]*pingAccum)
 
@@ -422,9 +441,10 @@ LIMIT 5000
 		var agentID uint64
 		var target string
 		var targetAgent uint64
+		var probeAgentID uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &probeAgentID, &payloadRaw); err != nil {
 			continue
 		}
 
@@ -443,21 +463,34 @@ LIMIT 5000
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
 		if accum[key] == nil {
-			accum[key] = &pingAccum{targetAgent: uint(targetAgent)}
+			accum[key] = &pingAccum{
+				targetAgent: uint(targetAgent),
+				probeAgents: make(map[uint]bool),
+			}
 		}
 		accum[key].totalLatency += float64(payload.AvgRTT) / 1000000.0 // ns to ms
 		accum[key].totalLoss += payload.PacketLoss
 		accum[key].count++
+		// Track unique probe agent IDs
+		if probeAgentID > 0 {
+			accum[key].probeAgents[uint(probeAgentID)] = true
+		}
 	}
 
 	results := make(map[string]pingStats)
 	for key, a := range accum {
 		if a.count > 0 {
+			// Convert probe agents map to slice
+			probeAgents := make([]uint, 0, len(a.probeAgents))
+			for agentID := range a.probeAgents {
+				probeAgents = append(probeAgents, agentID)
+			}
 			results[key] = pingStats{
 				AvgLatency:  a.totalLatency / float64(a.count),
 				PacketLoss:  a.totalLoss / float64(a.count),
 				Count:       a.count,
 				TargetAgent: a.targetAgent,
+				ProbeAgents: probeAgents,
 			}
 		}
 	}
@@ -469,7 +502,8 @@ type trafficStats struct {
 	AvgRTT      float64
 	PacketLoss  float64
 	Count       int
-	TargetAgent uint // Track if this is targeting another agent
+	TargetAgent uint   // Track if this is targeting another agent
+	ProbeAgents []uint // All unique probe agent IDs (owners) that contributed to these metrics
 }
 
 func getWorkspaceTrafficSimMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]trafficStats, error) {
@@ -490,6 +524,7 @@ SELECT
     agent_id,
     target,
     target_agent,
+    probe_agent_id,
     payload_raw
 FROM probe_data
 WHERE type = 'TRAFFICSIM'
@@ -511,6 +546,7 @@ LIMIT 5000
 		totalLoss   float64
 		count       int
 		targetAgent uint
+		probeAgents map[uint]bool // Track all unique probe agent IDs
 	}
 	accum := make(map[string]*trafficAccum)
 
@@ -518,9 +554,10 @@ LIMIT 5000
 		var agentID uint64
 		var target string
 		var targetAgent uint64
+		var probeAgentID uint64
 		var payloadRaw string
 
-		if err := rows.Scan(&agentID, &target, &targetAgent, &payloadRaw); err != nil {
+		if err := rows.Scan(&agentID, &target, &targetAgent, &probeAgentID, &payloadRaw); err != nil {
 			continue
 		}
 
@@ -539,21 +576,34 @@ LIMIT 5000
 
 		key := fmt.Sprintf("%d:%s", agentID, target)
 		if accum[key] == nil {
-			accum[key] = &trafficAccum{targetAgent: uint(targetAgent)}
+			accum[key] = &trafficAccum{
+				targetAgent: uint(targetAgent),
+				probeAgents: make(map[uint]bool),
+			}
 		}
 		accum[key].totalRTT += payload.AverageRTT
 		accum[key].totalLoss += payload.LossPercentage
 		accum[key].count++
+		// Track unique probe agent IDs
+		if probeAgentID > 0 {
+			accum[key].probeAgents[uint(probeAgentID)] = true
+		}
 	}
 
 	results := make(map[string]trafficStats)
 	for key, a := range accum {
 		if a.count > 0 {
+			// Convert probe agents map to slice
+			probeAgents := make([]uint, 0, len(a.probeAgents))
+			for agentID := range a.probeAgents {
+				probeAgents = append(probeAgents, agentID)
+			}
 			results[key] = trafficStats{
 				AvgRTT:      a.totalRTT / float64(a.count),
 				PacketLoss:  a.totalLoss / float64(a.count),
 				Count:       a.count,
 				TargetAgent: a.targetAgent,
+				ProbeAgents: probeAgents,
 			}
 		}
 	}
@@ -569,7 +619,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 	destMetrics := make(map[string]*DestinationSummary)
 	destAgents := make(map[string]map[uint]bool)
 	destProbes := make(map[string]map[string]bool)
-	destEndpoints := make(map[string]map[string]bool) // Track unique endpoint IPs per target
+	destEndpoints := make(map[string]map[string]EndpointInfo) // target -> ip -> EndpointInfo with agent context
 
 	// Create agent lookup for resolving target agent IPs
 	agentByID := make(map[uint]agentInfo)
@@ -744,7 +794,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
-			destEndpoints[destKey] = make(map[string]bool)
+			destEndpoints[destKey] = make(map[string]EndpointInfo)
 		}
 		destAgents[destKey][trace.AgentID] = true
 		destProbes[destKey]["MTR"] = true
@@ -755,7 +805,24 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		if !isAgentTarget && len(trace.Hops) > 0 {
 			lastHop := trace.Hops[len(trace.Hops)-1]
 			if lastHop.IP != "" {
-				destEndpoints[destKey][lastHop.IP] = true
+				endpointInfo := EndpointInfo{
+					IP: lastHop.IP,
+				}
+				// If this is a reverse probe, associate endpoint with the probe owner
+				if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
+					endpointInfo.AgentID = trace.ProbeAgentID
+					if probeAgent, ok := agentByID[trace.ProbeAgentID]; ok {
+						endpointInfo.AgentName = probeAgent.Name
+					}
+				}
+				// If targeting an agent, set target agent info
+				if trace.TargetAgent > 0 {
+					endpointInfo.TargetAgentID = trace.TargetAgent
+					if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
+						endpointInfo.TargetAgentName = targetAgent.Name
+					}
+				}
+				destEndpoints[destKey][lastHop.IP] = endpointInfo
 			}
 		}
 
@@ -1181,9 +1248,11 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 
 		// Add endpoint IPs (actual final hop IPs for DNS targets)
 		if endpoints := destEndpoints[target]; len(endpoints) > 0 {
+			summary.Endpoints = make([]EndpointInfo, 0, len(endpoints))
 			summary.EndpointIPs = make([]string, 0, len(endpoints))
-			for ip := range endpoints {
-				summary.EndpointIPs = append(summary.EndpointIPs, ip)
+			for _, endpointInfo := range endpoints {
+				summary.Endpoints = append(summary.Endpoints, endpointInfo)
+				summary.EndpointIPs = append(summary.EndpointIPs, endpointInfo.IP)
 			}
 		}
 

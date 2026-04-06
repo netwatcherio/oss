@@ -383,6 +383,16 @@ export interface NetworkMapEdge {
     path_ids?: string[]; // All paths that use this edge
 }
 
+// EndpointInfo contains IP with associated agent context for network map
+// Used for displaying which agent owns/runs a probe targeting this endpoint
+export interface EndpointInfo {
+    ip: string;
+    agent_id?: number;           // Probe owner (ProbeAgentID)
+    agent_name?: string;         // Probe owner name
+    target_agent_id?: number;    // Target agent (if agent-to-agent)
+    target_agent_name?: string;  // Target agent name
+}
+
 export interface DestinationSummary {
     target: string;
     hostname?: string;
@@ -392,7 +402,9 @@ export interface DestinationSummary {
     status: 'healthy' | 'degraded' | 'critical';
     agent_count: number;
     probe_types: string[];
-    endpoint_ips?: string[]; // Actual final hop IPs for DNS targets
+    endpoints?: EndpointInfo[];  // NEW: Endpoints with agent context
+    // Deprecated: endpoint_ips is kept for backwards compatibility
+    endpoint_ips?: string[];      // Legacy raw IPs
     last_updated?: string;
 }
 
