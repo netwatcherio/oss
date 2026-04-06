@@ -78,7 +78,8 @@ type NetworkMapEdge struct {
 // EndpointInfo contains IP with associated agent context
 // Used for displaying which agent owns/runs a probe targeting this endpoint
 type EndpointInfo struct {
-	IP              string `json:"ip"`
+	IP              string `json:"ip"`                          // The IP used (override if set, else resolved)
+	ResolvedIP      string `json:"resolved_ip,omitempty"`       // Original resolved IP (if different from IP)
 	AgentID         uint   `json:"agent_id,omitempty"`          // Probe owner (ProbeAgentID)
 	AgentName       string `json:"agent_name,omitempty"`        // Probe owner name
 	TargetAgentID   uint   `json:"target_agent_id,omitempty"`   // Target agent (if agent-to-agent)
@@ -805,8 +806,26 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		if !isAgentTarget && len(trace.Hops) > 0 {
 			lastHop := trace.Hops[len(trace.Hops)-1]
 			if lastHop.IP != "" {
-				endpointInfo := EndpointInfo{
-					IP: lastHop.IP,
+				endpointInfo := EndpointInfo{}
+				// If targeting an agent, use PublicIPOverride as primary IP if available
+				if trace.TargetAgent > 0 {
+					endpointInfo.TargetAgentID = trace.TargetAgent
+					if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
+						endpointInfo.TargetAgentName = targetAgent.Name
+						// Use PublicIPOverride as primary, show resolved IP if different
+						if targetAgent.PublicIPOverride != "" {
+							endpointInfo.IP = targetAgent.PublicIPOverride
+							if targetAgent.PublicIPOverride != lastHop.IP {
+								endpointInfo.ResolvedIP = lastHop.IP
+							}
+						} else {
+							endpointInfo.IP = lastHop.IP
+						}
+					} else {
+						endpointInfo.IP = lastHop.IP
+					}
+				} else {
+					endpointInfo.IP = lastHop.IP
 				}
 				// If this is a reverse probe, associate endpoint with the probe owner
 				if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
@@ -815,13 +834,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 						endpointInfo.AgentName = probeAgent.Name
 					}
 				}
-				// If targeting an agent, set target agent info
-				if trace.TargetAgent > 0 {
-					endpointInfo.TargetAgentID = trace.TargetAgent
-					if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
-						endpointInfo.TargetAgentName = targetAgent.Name
-					}
-				}
+				// Use the actual IP as key for destEndpoints map
 				destEndpoints[destKey][lastHop.IP] = endpointInfo
 			}
 		}
@@ -1115,6 +1128,44 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 				}
 			}
 		}
+
+		// Create EndpointInfo for agent-to-agent PING probes
+		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
+			// Initialize destEndpoints map if needed
+			if destEndpoints[destKey] == nil {
+				destEndpoints[destKey] = make(map[string]EndpointInfo)
+			}
+
+			// Get target agent info
+			endpointInfo := EndpointInfo{
+				TargetAgentID: stats.TargetAgent,
+			}
+			if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+				endpointInfo.TargetAgentName = targetAgent.Name
+				// Use PublicIPOverride as primary IP if available
+				if targetAgent.PublicIPOverride != "" {
+					endpointInfo.IP = targetAgent.PublicIPOverride
+					// Set ResolvedIP if target (actual IP) differs from override
+					if targetAgent.PublicIPOverride != target {
+						endpointInfo.ResolvedIP = target
+					}
+				} else {
+					endpointInfo.IP = target
+				}
+			} else {
+				endpointInfo.IP = target
+			}
+
+			// Set probe owner (AgentID/AgentName) from first ProbeAgent
+			probeAgentID := stats.ProbeAgents[0]
+			endpointInfo.AgentID = probeAgentID
+			if probeAgent, ok := agentByID[probeAgentID]; ok {
+				endpointInfo.AgentName = probeAgent.Name
+			}
+
+			// Add to destEndpoints using the IP as key
+			destEndpoints[destKey][endpointInfo.IP] = endpointInfo
+		}
 	}
 
 	// Process TrafficSim metrics
@@ -1218,6 +1269,44 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					PathCount:  1,
 				}
 			}
+		}
+
+		// Create EndpointInfo for agent-to-agent TrafficSim probes
+		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
+			// Initialize destEndpoints map if needed
+			if destEndpoints[destKey] == nil {
+				destEndpoints[destKey] = make(map[string]EndpointInfo)
+			}
+
+			// Get target agent info
+			endpointInfo := EndpointInfo{
+				TargetAgentID: stats.TargetAgent,
+			}
+			if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+				endpointInfo.TargetAgentName = targetAgent.Name
+				// Use PublicIPOverride as primary IP if available
+				if targetAgent.PublicIPOverride != "" {
+					endpointInfo.IP = targetAgent.PublicIPOverride
+					// Set ResolvedIP if rawTarget (actual IP) differs from override
+					if targetAgent.PublicIPOverride != rawTarget {
+						endpointInfo.ResolvedIP = rawTarget
+					}
+				} else {
+					endpointInfo.IP = rawTarget
+				}
+			} else {
+				endpointInfo.IP = rawTarget
+			}
+
+			// Set probe owner (AgentID/AgentName) from first ProbeAgent
+			probeAgentID := stats.ProbeAgents[0]
+			endpointInfo.AgentID = probeAgentID
+			if probeAgent, ok := agentByID[probeAgentID]; ok {
+				endpointInfo.AgentName = probeAgent.Name
+			}
+
+			// Add to destEndpoints using the IP as key
+			destEndpoints[destKey][endpointInfo.IP] = endpointInfo
 		}
 	}
 

@@ -107,7 +107,38 @@
                   </template>
                 </td>
                 <td class="endpoints-cell">
-                  <template v-if="dest.endpoint_ips?.length">
+                  <template v-if="dest.endpoints?.length">
+                    <span class="endpoint-list">
+                      <span 
+                        v-for="(endpoint, idx) in getDisplayedEndpoints(dest)" 
+                        :key="idx"
+                        class="endpoint-item"
+                        :title="endpoint.resolved_ip ? `Resolved: ${endpoint.resolved_ip}` : endpoint.ip"
+                      >
+                        <template v-if="endpoint.agent_name">
+                          {{ endpoint.agent_name }}
+                          <template v-if="endpoint.resolved_ip">
+                            ({{ endpoint.ip }}, resolved: {{ endpoint.resolved_ip }})
+                          </template>
+                          <template v-else>
+                            ({{ endpoint.ip }})
+                          </template>
+                        </template>
+                        <template v-else>
+                          {{ endpoint.ip }}
+                          <template v-if="endpoint.resolved_ip">
+                            (resolved: {{ endpoint.resolved_ip }})
+                          </template>
+                        </template>
+                        <span v-if="idx < getDisplayedEndpoints(dest).length - 1">, </span>
+                      </span>
+                      <span v-if="dest.endpoints.length > 3" class="text-muted">
+                        +{{ dest.endpoints.length - 3 }} more
+                      </span>
+                    </span>
+                  </template>
+                  <template v-else-if="dest.endpoint_ips?.length">
+                    <!-- Fallback to legacy endpoint_ips -->
                     <span class="endpoint-list">
                       {{ dest.endpoint_ips.slice(0, 3).join(', ') }}
                       <span v-if="dest.endpoint_ips.length > 3" class="text-muted">

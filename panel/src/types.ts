@@ -386,11 +386,12 @@ export interface NetworkMapEdge {
 // EndpointInfo contains IP with associated agent context for network map
 // Used for displaying which agent owns/runs a probe targeting this endpoint
 export interface EndpointInfo {
-    ip: string;
-    agent_id?: number;           // Probe owner (ProbeAgentID)
-    agent_name?: string;         // Probe owner name
-    target_agent_id?: number;    // Target agent (if agent-to-agent)
-    target_agent_name?: string;  // Target agent name
+    ip: string;                         // The IP used (PublicIPOverride if set, else resolved)
+    resolved_ip?: string;               // Original resolved IP (if different from ip)
+    agent_id?: number;                  // Probe owner (ProbeAgentID)
+    agent_name?: string;                // Probe owner name
+    target_agent_id?: number;           // Target agent (if agent-to-agent)
+    target_agent_name?: string;         // Target agent name
 }
 
 export interface DestinationSummary {
