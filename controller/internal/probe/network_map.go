@@ -1053,11 +1053,24 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		// Check if target is an agent
 		var destKey, destLabel string
 		isAgentTarget := false
-		if matchedAgentID, ok := agentIPToID[target]; ok {
-			if targetAgent, ok := agentByID[matchedAgentID]; ok {
-				destKey = fmt.Sprintf("agent:%d", matchedAgentID)
+
+		// First check explicit target_agent field
+		if stats.TargetAgent > 0 {
+			if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+				destKey = fmt.Sprintf("agent:%d", stats.TargetAgent)
 				destLabel = targetAgent.Name
 				isAgentTarget = true
+			}
+		}
+
+		// Fallback: check if target IP matches any agent's PublicIPOverride
+		if !isAgentTarget {
+			if matchedAgentID, ok := agentIPToID[target]; ok {
+				if targetAgent, ok := agentByID[matchedAgentID]; ok {
+					destKey = fmt.Sprintf("agent:%d", matchedAgentID)
+					destLabel = targetAgent.Name
+					isAgentTarget = true
+				}
 			}
 		}
 		if !isAgentTarget {
