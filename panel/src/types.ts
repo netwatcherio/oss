@@ -394,6 +394,24 @@ export interface EndpointInfo {
     target_agent_name?: string;         // Target agent name
 }
 
+export interface ProbeEndpointDetail {
+    agent_id: number;
+    agent_name: string;
+    target_agent_id?: number;
+    target_agent_name?: string;
+    ip?: string;
+    target: string;
+    resolved_ip?: string;
+    probe_types: string[];
+    has_mtr: boolean;
+    has_ping: boolean;
+    has_trafficsim: boolean;
+    avg_latency: number;
+    packet_loss: number;
+    is_bidirectional: boolean;
+    hop_count: number;
+}
+
 export interface DestinationSummary {
     target: string;
     hostname?: string;
@@ -403,10 +421,12 @@ export interface DestinationSummary {
     status: 'healthy' | 'degraded' | 'critical';
     agent_count: number;
     probe_types: string[];
-    endpoints?: EndpointInfo[];  // NEW: Endpoints with agent context
+    endpoints?: EndpointInfo[];  // Endpoints with agent context
     // Deprecated: endpoint_ips is kept for backwards compatibility
     endpoint_ips?: string[];      // Legacy raw IPs
     last_updated?: string;
+    has_bidirectional?: boolean;
+    expanded_endpoints?: ProbeEndpointDetail[];
 }
 
 export interface NetworkMapData {

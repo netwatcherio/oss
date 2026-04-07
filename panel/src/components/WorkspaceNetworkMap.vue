@@ -78,21 +78,27 @@
           <table class="destinations-table">
             <thead>
               <tr>
-                <th>Status</th>
+                <th style="width: 30px;"></th>
                 <th>Target</th>
-                <th>Endpoints</th>
+                <th>Agents</th>
                 <th>Hops</th>
                 <th>Latency</th>
                 <th>Loss</th>
-                <th>Agents</th>
                 <th>Probes</th>
+                <th>Endpoints</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="dest in mapData.destinations" :key="dest.target" 
-                  @click="highlightDestination(dest.target)"
-                  class="dest-row">
+              <template v-for="dest in mapData.destinations" :key="dest.target">
+              <tr 
+                  @click="toggleExpand(dest.target)"
+                  class="dest-row expandable"
+                  :class="{ expanded: expandedDest === dest.target }"
+              >
                 <td>
+                  <span class="expand-icon" :class="{ rotated: expandedDest === dest.target }">
+                    <i class="bi bi-chevron-right"></i>
+                  </span>
                   <span class="status-indicator" :class="'status-' + dest.status">
                     <i :class="getStatusIcon(dest.status)"></i>
                   </span>
@@ -105,49 +111,11 @@
                     <div class="target-name">{{ dest.hostname || dest.target }}</div>
                     <div v-if="dest.hostname && dest.hostname !== dest.target" class="target-ip">{{ dest.target }}</div>
                   </template>
+                  <span v-if="dest.has_bidirectional" class="bidir-badge" title="Bidirectional probes exist">
+                    <i class="bi bi-arrow-left-right"></i>
+                  </span>
                 </td>
-                <td class="endpoints-cell">
-                  <template v-if="dest.endpoints?.length">
-                    <span class="endpoint-list">
-                      <span 
-                        v-for="(endpoint, idx) in getDisplayedEndpoints(dest)" 
-                        :key="idx"
-                        class="endpoint-item"
-                        :title="endpoint.resolved_ip ? `Resolved: ${endpoint.resolved_ip}` : endpoint.ip"
-                      >
-                        <template v-if="endpoint.agent_name">
-                          {{ endpoint.agent_name }}
-                          <template v-if="endpoint.resolved_ip">
-                            ({{ endpoint.ip }}, resolved: {{ endpoint.resolved_ip }})
-                          </template>
-                          <template v-else>
-                            ({{ endpoint.ip }})
-                          </template>
-                        </template>
-                        <template v-else>
-                          {{ endpoint.ip }}
-                          <template v-if="endpoint.resolved_ip">
-                            (resolved: {{ endpoint.resolved_ip }})
-                          </template>
-                        </template>
-                        <span v-if="idx < getDisplayedEndpoints(dest).length - 1">, </span>
-                      </span>
-                      <span v-if="dest.endpoints.length > 3" class="text-muted">
-                        +{{ dest.endpoints.length - 3 }} more
-                      </span>
-                    </span>
-                  </template>
-                  <template v-else-if="dest.endpoint_ips?.length">
-                    <!-- Fallback to legacy endpoint_ips -->
-                    <span class="endpoint-list">
-                      {{ dest.endpoint_ips.slice(0, 3).join(', ') }}
-                      <span v-if="dest.endpoint_ips.length > 3" class="text-muted">
-                        +{{ dest.endpoint_ips.length - 3 }} more
-                      </span>
-                    </span>
-                  </template>
-                  <span v-else class="text-muted">-</span>
-                </td>
+                <td class="text-center">{{ dest.agent_count }}</td>
                 <td class="text-center">{{ dest.hop_count || '-' }}</td>
                 <td :class="getLatencyClass(dest.avg_latency)">
                   {{ dest.avg_latency?.toFixed(1) || '0' }} ms
@@ -155,14 +123,72 @@
                 <td :class="getPacketLossClass(dest.packet_loss)">
                   {{ dest.packet_loss?.toFixed(1) || '0' }}%
                 </td>
-                <td class="text-center">{{ dest.agent_count }}</td>
                 <td>
                   <span v-for="pt in dest.probe_types" :key="pt" 
                         class="probe-badge" :class="'probe-' + pt.toLowerCase()">
                     {{ pt }}
                   </span>
                 </td>
+                <td class="text-center">
+                  {{ dest.expanded_endpoints?.length || 0 }}
+                </td>
               </tr>
+              <!-- Expanded endpoint details row -->
+              <tr v-if="expandedDest === dest.target && dest.expanded_endpoints?.length" 
+                  class="endpoint-detail-row">
+                <td colspan="8">
+                  <div class="endpoint-detail-content">
+                    <div class="endpoint-detail-header">
+                      <span class="col-agent">Agent</span>
+                      <span class="col-target">Target</span>
+                      <span class="col-probe">MTR</span>
+                      <span class="col-probe">PING</span>
+                      <span class="col-probe">TRAFFICSIM</span>
+                      <span class="col-latency">Latency</span>
+                      <span class="col-loss">Loss</span>
+                      <span class="col-bidir">Bidir</span>
+                    </div>
+                    <div v-for="(ep, idx) in dest.expanded_endpoints" :key="idx" 
+                         class="endpoint-detail-item"
+                         :class="{ 'bidirectional': ep.is_bidirectional }">
+                      <span class="col-agent">
+                        <i class="bi bi-hdd-network"></i> {{ ep.agent_name || `Agent #${ep.agent_id}` }}
+                      </span>
+                      <span class="col-target">
+                        <template v-if="ep.target_agent_id">
+                          <i class="bi bi-arrow-right"></i> {{ ep.target_agent_name || `Agent #${ep.target_agent_id}` }}
+                        </template>
+                        <template v-else>
+                          {{ ep.target }}
+                        </template>
+                      </span>
+                      <span class="col-probe">
+                        <i v-if="ep.has_mtr" class="bi bi-check-circle-fill text-success"></i>
+                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                      </span>
+                      <span class="col-probe">
+                        <i v-if="ep.has_ping" class="bi bi-check-circle-fill text-success"></i>
+                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                      </span>
+                      <span class="col-probe">
+                        <i v-if="ep.has_trafficsim" class="bi bi-check-circle-fill text-success"></i>
+                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                      </span>
+                      <span class="col-latency" :class="getLatencyClass(ep.avg_latency)">
+                        {{ ep.avg_latency?.toFixed(1) || '0' }} ms
+                      </span>
+                      <span class="col-loss" :class="getPacketLossClass(ep.packet_loss)">
+                        {{ ep.packet_loss?.toFixed(1) || '0' }}%
+                      </span>
+                      <span class="col-bidir">
+                        <i v-if="ep.is_bidirectional" class="bi bi-arrow-left-right text-success" title="Bidirectional"></i>
+                        <i v-else class="bi bi-dash text-muted"></i>
+                      </span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -270,6 +296,7 @@ const isPulsing = ref(false);
 const isLive = ref(false);
 const panelLocked = ref(false);
 const panelMinimized = ref(false);
+const expandedDest = ref<string | null>(null);
 
 let visualization: WorkspaceNetworkVisualization | null = null;
 
@@ -277,6 +304,10 @@ const closePanel = () => {
   selectedNode.value = null;
   panelLocked.value = false;
   panelMinimized.value = false;
+};
+
+const toggleExpand = (target: string) => {
+  expandedDest.value = expandedDest.value === target ? null : target;
 };
 
 // WebSocket subscription for live updates
@@ -1773,4 +1804,130 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .probe-trafficsim { background: rgba(var(--bs-info-rgb), 0.2); color: var(--bs-info); }
 
 .text-center { text-align: center; }
+
+/* Expandable destination rows */
+.dest-row.expandable {
+  cursor: pointer;
+}
+
+.expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  transition: transform 0.2s;
+}
+
+.expand-icon i {
+  font-size: 12px;
+  color: var(--bs-secondary-color);
+}
+
+.expand-icon.rotated {
+  transform: rotate(90deg);
+}
+
+.bidir-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--bs-success);
+  font-size: 12px;
+}
+
+.bidir-badge i {
+  font-size: 14px;
+}
+
+/* Expanded endpoint details */
+.endpoint-detail-row {
+  background: var(--bs-tertiary-bg);
+}
+
+.endpoint-detail-row td {
+  padding: 0;
+  border-bottom: 2px solid var(--bs-border-color);
+}
+
+.endpoint-detail-content {
+  padding: 12px 16px 16px 48px;
+}
+
+.endpoint-detail-header {
+  display: grid;
+  grid-template-columns: 180px 180px 60px 60px 90px 80px 60px 60px;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--bs-secondary-color);
+  border-bottom: 1px solid var(--bs-border-color);
+  margin-bottom: 8px;
+}
+
+.endpoint-detail-item {
+  display: grid;
+  grid-template-columns: 180px 180px 60px 60px 90px 80px 60px 60px;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  align-items: center;
+  border-bottom: 1px solid var(--bs-border-color);
+  transition: background 0.15s;
+}
+
+.endpoint-detail-item:last-child {
+  border-bottom: none;
+}
+
+.endpoint-detail-item:hover {
+  background: rgba(var(--bs-primary-rgb), 0.05);
+}
+
+.endpoint-detail-item.bidirectional {
+  background: rgba(var(--bs-success-rgb), 0.05);
+}
+
+.col-agent,
+.col-target,
+.col-latency,
+.col-loss {
+  display: flex;
+  align-items: center;
+}
+
+.col-agent i,
+.col-target i {
+  margin-right: 6px;
+  font-size: 12px;
+}
+
+.col-probe {
+  text-align: center;
+}
+
+.col-probe i {
+  font-size: 16px;
+}
+
+.col-latency,
+.col-loss {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.col-bidir {
+  text-align: center;
+}
+
+.col-bidir i {
+  font-size: 16px;
+}
+
+.text-success { color: var(--bs-success); }
+.text-muted { color: var(--bs-secondary-color); opacity: 0.5; }
 </style>

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +22,18 @@ func sanitizeFloat(f float64) float64 {
 		return 0
 	}
 	return f
+}
+
+// healthPriority returns a number representing health priority for sorting
+// Lower numbers = worse health (critical=0, degraded=1, healthy=2)
+func healthPriority(packetLoss, avgLatency float64) int {
+	if packetLoss >= 50 {
+		return 0 // critical
+	}
+	if packetLoss >= 10 || avgLatency > 100 {
+		return 1 // degraded
+	}
+	return 2 // healthy
 }
 
 // stripPort removes the port suffix from a target if present
@@ -86,6 +99,25 @@ type EndpointInfo struct {
 	TargetAgentName string `json:"target_agent_name,omitempty"` // Target agent name
 }
 
+// ProbeEndpointDetail stores per-agent-per-target probe data for expanded view
+type ProbeEndpointDetail struct {
+	AgentID         uint     `json:"agent_id"`
+	AgentName       string   `json:"agent_name"`
+	TargetAgentID   uint     `json:"target_agent_id,omitempty"`
+	TargetAgentName string   `json:"target_agent_name,omitempty"`
+	IP              string   `json:"ip,omitempty"` // Resolved IP (PublicIPOverride)
+	Target          string   `json:"target"`       // Original target (IP or hostname)
+	ResolvedIP      string   `json:"resolved_ip,omitempty"`
+	ProbeTypes      []string `json:"probe_types"` // ["MTR", "PING", "TRAFFICSIM"]
+	HasMTR          bool     `json:"has_mtr"`
+	HasPing         bool     `json:"has_ping"`
+	HasTrafficSim   bool     `json:"has_trafficsim"`
+	AvgLatency      float64  `json:"avg_latency"`
+	PacketLoss      float64  `json:"packet_loss"`
+	IsBidirectional bool     `json:"is_bidirectional"` // reverse probe exists targeting back
+	HopCount        int      `json:"hop_count"`
+}
+
 // DestinationSummary provides quick overview of a destination's health
 type DestinationSummary struct {
 	Target     string         `json:"target"`
@@ -98,8 +130,10 @@ type DestinationSummary struct {
 	ProbeTypes []string       `json:"probe_types"` // ["MTR", "PING", "TRAFFICSIM"]
 	Endpoints  []EndpointInfo `json:"endpoints"`   // Endpoints with agent context
 	// Deprecated: EndpointIPs is kept for backwards compatibility
-	EndpointIPs []string `json:"endpoint_ips,omitempty"`
-	LastUpdated string   `json:"last_updated,omitempty"`
+	EndpointIPs       []string              `json:"endpoint_ips,omitempty"`
+	LastUpdated       string                `json:"last_updated,omitempty"`
+	HasBidirectional  bool                  `json:"has_bidirectional"`  // ANY bidirectional probe exists
+	ExpandedEndpoints []ProbeEndpointDetail `json:"expanded_endpoints"` // ALL endpoints with per-agent details
 }
 
 // NetworkMapData contains the complete topology data for a workspace
@@ -620,7 +654,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 	destMetrics := make(map[string]*DestinationSummary)
 	destAgents := make(map[string]map[uint]bool)
 	destProbes := make(map[string]map[string]bool)
-	destEndpoints := make(map[string]map[string]EndpointInfo) // target -> ip -> EndpointInfo with agent context
+	destEndpointDetails := make(map[string]map[uint][]ProbeEndpointDetail) // target -> sourceAgentID -> details
+	destEndpointLegacy := make(map[string]map[string]EndpointInfo)         // target -> ip -> EndpointInfo (legacy, for backwards compat)
 
 	// Create agent lookup for resolving target agent IPs
 	agentByID := make(map[uint]agentInfo)
@@ -795,16 +830,47 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
-			destEndpoints[destKey] = make(map[string]EndpointInfo)
+			destEndpointDetails[destKey] = make(map[uint][]ProbeEndpointDetail)
+			destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
 		}
 		destAgents[destKey][trace.AgentID] = true
 		destProbes[destKey]["MTR"] = true
 		destMetrics[destKey].HopCount = len(trace.Hops)
 
+		// Get last hop for agent-to-agent endpoint tracking
+		var lastHop mtrHop
+		if len(trace.Hops) > 0 {
+			lastHop = trace.Hops[len(trace.Hops)-1]
+		}
+
+		// Track endpoint detail for expanded view (agent-to-agent)
+		if isAgentTarget && trace.TargetAgent > 0 {
+			sourceAgentID := trace.AgentID
+			if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
+				sourceAgentID = trace.ProbeAgentID // reverse probe - use probe owner
+			}
+			detail := ProbeEndpointDetail{
+				AgentID:       sourceAgentID,
+				TargetAgentID: trace.TargetAgent,
+				Target:        fmt.Sprintf("agent:%d", trace.TargetAgent),
+				HasMTR:        true,
+				AvgLatency:    lastHop.AvgLatency,
+				PacketLoss:    lastHop.PacketLoss,
+				HopCount:      len(trace.Hops),
+			}
+			if agent, ok := agentByID[sourceAgentID]; ok {
+				detail.AgentName = agent.Name
+			}
+			if targetAgent, ok := agentByID[trace.TargetAgent]; ok {
+				detail.TargetAgentName = targetAgent.Name
+			}
+			// Append to list (same agent may have multiple entries for different targets)
+			destEndpointDetails[destKey][sourceAgentID] = append(destEndpointDetails[destKey][sourceAgentID], detail)
+		}
+
 		// Track the final responding hop IP as an endpoint (for DNS targets that resolve to multiple IPs)
 		// IMPORTANT: Don't track endpoints for agent-to-agent paths - the destination IS the agent
 		if !isAgentTarget && len(trace.Hops) > 0 {
-			lastHop := trace.Hops[len(trace.Hops)-1]
 			if lastHop.IP != "" {
 				endpointInfo := EndpointInfo{}
 				// If targeting an agent, use PublicIPOverride as primary IP if available
@@ -835,7 +901,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					}
 				}
 				// Use the actual IP as key for destEndpoints map
-				destEndpoints[destKey][lastHop.IP] = endpointInfo
+				destEndpointLegacy[destKey][lastHop.IP] = endpointInfo
 			}
 		}
 
@@ -1030,7 +1096,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 	// Build reverse mapping: endpoint IP -> destination key
 	// This allows PING probes that target a resolved IP to be merged with their hostname destination
 	endpointIPToDestKey := make(map[string]string)
-	for destKey, endpoints := range destEndpoints {
+	for destKey, endpoints := range destEndpointLegacy {
 		for ip := range endpoints {
 			// Only map if the endpoint IP is not already a direct destination
 			if _, existsAsDirectDest := destMetrics[ip]; !existsAsDirectDest {
@@ -1093,6 +1159,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			destMetrics[destKey] = &DestinationSummary{Target: destKey, Hostname: destLabel}
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
+			destEndpointDetails[destKey] = make(map[uint][]ProbeEndpointDetail)
+			destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
 		}
 		destAgents[destKey][agentID] = true
 		destProbes[destKey]["PING"] = true
@@ -1142,13 +1210,39 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 		}
 
-		// Create EndpointInfo for agent-to-agent PING probes
+		// Track endpoint detail for expanded view (agent-to-agent)
 		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
-			// Initialize destEndpoints map if needed
-			if destEndpoints[destKey] == nil {
-				destEndpoints[destKey] = make(map[string]EndpointInfo)
+			for _, probeAgentID := range stats.ProbeAgents {
+				detail := ProbeEndpointDetail{
+					AgentID:       probeAgentID,
+					TargetAgentID: stats.TargetAgent,
+					Target:        target,
+					HasPing:       true,
+					AvgLatency:    stats.AvgLatency,
+					PacketLoss:    stats.PacketLoss,
+				}
+				if probeAgent, ok := agentByID[probeAgentID]; ok {
+					detail.AgentName = probeAgent.Name
+				}
+				if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+					detail.TargetAgentName = targetAgent.Name
+					if targetAgent.PublicIPOverride != "" {
+						detail.IP = targetAgent.PublicIPOverride
+						if targetAgent.PublicIPOverride != target {
+							detail.ResolvedIP = target
+						}
+					} else {
+						detail.IP = target
+					}
+				} else {
+					detail.IP = target
+				}
+				destEndpointDetails[destKey][probeAgentID] = append(destEndpointDetails[destKey][probeAgentID], detail)
 			}
+		}
 
+		// Create EndpointInfo for agent-to-agent PING probes (legacy)
+		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
 			// Get target agent info
 			endpointInfo := EndpointInfo{
 				TargetAgentID: stats.TargetAgent,
@@ -1177,7 +1271,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 
 			// Add to destEndpoints using the IP as key
-			destEndpoints[destKey][endpointInfo.IP] = endpointInfo
+			destEndpointLegacy[destKey][endpointInfo.IP] = endpointInfo
 		}
 	}
 
@@ -1235,6 +1329,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			destMetrics[destKey] = &DestinationSummary{Target: destKey, Hostname: destLabel}
 			destAgents[destKey] = make(map[uint]bool)
 			destProbes[destKey] = make(map[string]bool)
+			destEndpointDetails[destKey] = make(map[uint][]ProbeEndpointDetail)
+			destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
 		}
 		destAgents[destKey][agentID] = true
 		destProbes[destKey]["TRAFFICSIM"] = true
@@ -1284,13 +1380,39 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 		}
 
-		// Create EndpointInfo for agent-to-agent TrafficSim probes
+		// Track endpoint detail for expanded view (agent-to-agent)
 		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
-			// Initialize destEndpoints map if needed
-			if destEndpoints[destKey] == nil {
-				destEndpoints[destKey] = make(map[string]EndpointInfo)
+			for _, probeAgentID := range stats.ProbeAgents {
+				detail := ProbeEndpointDetail{
+					AgentID:       probeAgentID,
+					TargetAgentID: stats.TargetAgent,
+					Target:        rawTarget,
+					HasTrafficSim: true,
+					AvgLatency:    stats.AvgRTT,
+					PacketLoss:    stats.PacketLoss,
+				}
+				if probeAgent, ok := agentByID[probeAgentID]; ok {
+					detail.AgentName = probeAgent.Name
+				}
+				if targetAgent, ok := agentByID[stats.TargetAgent]; ok {
+					detail.TargetAgentName = targetAgent.Name
+					if targetAgent.PublicIPOverride != "" {
+						detail.IP = targetAgent.PublicIPOverride
+						if targetAgent.PublicIPOverride != rawTarget {
+							detail.ResolvedIP = rawTarget
+						}
+					} else {
+						detail.IP = rawTarget
+					}
+				} else {
+					detail.IP = rawTarget
+				}
+				destEndpointDetails[destKey][probeAgentID] = append(destEndpointDetails[destKey][probeAgentID], detail)
 			}
+		}
 
+		// Create EndpointInfo for agent-to-agent TrafficSim probes (legacy)
+		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
 			// Get target agent info
 			endpointInfo := EndpointInfo{
 				TargetAgentID: stats.TargetAgent,
@@ -1319,14 +1441,14 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 
 			// Add to destEndpoints using the IP as key
-			destEndpoints[destKey][endpointInfo.IP] = endpointInfo
+			destEndpointLegacy[destKey][endpointInfo.IP] = endpointInfo
 		}
 	}
 
 	// Build a set of ALL endpoint IPs across all destinations
 	// These should NOT appear as separate destinations (they're already endpoints of hostnames)
 	allEndpointIPs := make(map[string]bool)
-	for _, endpoints := range destEndpoints {
+	for _, endpoints := range destEndpointLegacy {
 		for ip := range endpoints {
 			allEndpointIPs[ip] = true
 		}
@@ -1339,7 +1461,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			continue
 		}
 		// Skip if this target is an endpoint IP of another destination (not the parent)
-		if allEndpointIPs[target] && destEndpoints[target] == nil {
+		if allEndpointIPs[target] && destEndpointLegacy[target] == nil {
 			continue // This target IP is an endpoint of a different hostname destination
 		}
 		summary.AgentCount = len(destAgents[target])
@@ -1349,13 +1471,75 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 
 		// Add endpoint IPs (actual final hop IPs for DNS targets)
-		if endpoints := destEndpoints[target]; len(endpoints) > 0 {
+		if endpoints := destEndpointLegacy[target]; len(endpoints) > 0 {
 			summary.Endpoints = make([]EndpointInfo, 0, len(endpoints))
 			summary.EndpointIPs = make([]string, 0, len(endpoints))
 			for _, endpointInfo := range endpoints {
 				summary.Endpoints = append(summary.Endpoints, endpointInfo)
 				summary.EndpointIPs = append(summary.EndpointIPs, endpointInfo.IP)
 			}
+		}
+
+		// Build ExpandedEndpoints with all probe details per agent
+		// Also detect bidirectional probes
+		if agentDetails, ok := destEndpointDetails[target]; ok {
+			// Build a set of bidirectional pairs for quick lookup
+			bidirectionalPairs := make(map[string]bool) // "sourceID:targetID" format
+			for sourceAgentID, details := range agentDetails {
+				for _, detail := range details {
+					if detail.TargetAgentID > 0 {
+						// Check if reverse exists
+						if reverseDetails, ok := agentDetails[detail.TargetAgentID]; ok {
+							for _, rev := range reverseDetails {
+								if rev.TargetAgentID == sourceAgentID {
+									// Bidirectional found!
+									bidirectionalPairs[fmt.Sprintf("%d:%d", sourceAgentID, detail.TargetAgentID)] = true
+									bidirectionalPairs[fmt.Sprintf("%d:%d", detail.TargetAgentID, sourceAgentID)] = true
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Collect all details
+			var allDetails []ProbeEndpointDetail
+			for _, details := range agentDetails {
+				for _, detail := range details {
+					// Build probe types list
+					detail.ProbeTypes = []string{}
+					if detail.HasMTR {
+						detail.ProbeTypes = append(detail.ProbeTypes, "MTR")
+					}
+					if detail.HasPing {
+						detail.ProbeTypes = append(detail.ProbeTypes, "PING")
+					}
+					if detail.HasTrafficSim {
+						detail.ProbeTypes = append(detail.ProbeTypes, "TRAFFICSIM")
+					}
+					// Mark bidirectional
+					if detail.TargetAgentID > 0 {
+						detail.IsBidirectional = bidirectionalPairs[fmt.Sprintf("%d:%d", detail.AgentID, detail.TargetAgentID)]
+					}
+					allDetails = append(allDetails, detail)
+				}
+			}
+
+			// Sort by worst health first (critical > degraded > healthy, then by latency desc, then packet_loss desc)
+			sort.Slice(allDetails, func(i, j int) bool {
+				pi := healthPriority(allDetails[i].PacketLoss, allDetails[i].AvgLatency)
+				pj := healthPriority(allDetails[j].PacketLoss, allDetails[j].AvgLatency)
+				if pi != pj {
+					return pi < pj // Lower priority number = worse
+				}
+				if allDetails[i].PacketLoss != allDetails[j].PacketLoss {
+					return allDetails[i].PacketLoss > allDetails[j].PacketLoss
+				}
+				return allDetails[i].AvgLatency > allDetails[j].AvgLatency
+			})
+
+			summary.ExpandedEndpoints = allDetails
+			summary.HasBidirectional = len(bidirectionalPairs) > 0
 		}
 
 		// Determine status
