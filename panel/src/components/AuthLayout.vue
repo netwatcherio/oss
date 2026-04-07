@@ -216,10 +216,8 @@
   border-radius: 0.5rem;
 }
 
-[data-theme="light"] .auth-layout .form-control:focus {
-  background-color: white;
-  border-color: var(--bs-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+[data-theme="light"] .auth-layout .form-floating label {
+  color: #64748b;
 }
 
 [data-theme="light"] .auth-layout .error-message {

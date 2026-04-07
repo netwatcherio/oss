@@ -149,7 +149,6 @@ async function submit(e: MouseEvent) {
               v-model="state.user.name"
               class="form-control"
               name="name"
-              placeholder="John Doe"
               required
               type="text"
               autocomplete="name"
@@ -163,7 +162,6 @@ async function submit(e: MouseEvent) {
               v-model="state.user.email"
               class="form-control"
               name="email"
-              placeholder="john@example.com"
               required
               type="email"
               autocomplete="email"
@@ -177,7 +175,6 @@ async function submit(e: MouseEvent) {
               v-model="state.user.password"
               class="form-control"
               name="password"
-              placeholder="*****"
               required
               type="password"
               autocomplete="new-password"
@@ -192,7 +189,6 @@ async function submit(e: MouseEvent) {
               class="form-control"
               :class="{ 'is-invalid': state.confirmPassword && state.confirmPassword !== state.user.password }"
               name="confirm_password"
-              placeholder="*****"
               required
               type="password"
               autocomplete="new-password"

@@ -148,7 +148,6 @@ async function submit(e: Event) {
               v-model="state.user.email"
               class="form-control"
               name="email"
-              placeholder="name@example.com"
               required
               type="email"
               autocomplete="email"
@@ -162,7 +161,6 @@ async function submit(e: Event) {
               v-model="state.user.password"
               class="form-control"
               name="password"
-              placeholder="*****"
               required
               type="password"
               autocomplete="current-password"
