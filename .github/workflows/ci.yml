@@ -14,7 +14,7 @@ jobs:
   # Panel (Vue/TypeScript) Quality Checks
   panel:
     name: Panel - Lint & Typecheck
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: panel
@@ -42,7 +42,7 @@ jobs:
   # Controller (Go) Quality Checks
   controller:
     name: Controller - Lint & Vet
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: controller
@@ -69,7 +69,7 @@ jobs:
   # CodeQL Security Analysis
   codeql:
     name: CodeQL Security Scan
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
