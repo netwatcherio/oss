@@ -227,6 +227,14 @@ function goToAgent() {
                 </button>
               </div>
             </div>
+            <div class="card-footer bg-white">
+              <div class="alert alert-info mb-0 py-2">
+                <i class="bi bi-apple me-1"></i>
+                <strong>For macOS:</strong> On macOS, the agent can run as a user-level service (starts on login) or system-level service (runs as root).
+                By default it installs as user-level. For full installation options including system-level, see the 
+                <a href="/docs/agent-installation-macos.md" target="_blank">macOS Installation Guide</a>.
+              </div>
+            </div>
           </div>
 
           <!-- Windows PowerShell -->

@@ -293,6 +293,11 @@ async function copyCommand(command: string) {
                       <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
                     </button>
                   </div>
+                  <div class="alert alert-info mb-0 mt-3 py-2">
+                    <i class="bi bi-apple me-1"></i>
+                    <strong>For macOS:</strong> The agent can run as user-level (starts on login) or system-level (runs as root).
+                    See the <a href="/docs/agent-installation-macos.md" target="_blank">macOS Installation Guide</a> for full options including <code>--system</code> flag.
+                  </div>
                 </div>
                 
                 <!-- Windows -->
