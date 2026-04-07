@@ -116,6 +116,7 @@ type ProbeEndpointDetail struct {
 	PacketLoss      float64  `json:"packet_loss"`
 	IsBidirectional bool     `json:"is_bidirectional"` // reverse probe exists targeting back
 	HopCount        int      `json:"hop_count"`
+	ProbeID         uint     `json:"probe_id,omitempty"` // Primary probe ID for this endpoint
 }
 
 // DestinationSummary provides quick overview of a destination's health
@@ -238,6 +239,7 @@ type mtrTrace struct {
 	Target       string
 	TargetAgent  uint // 0 if not agent-to-agent probe
 	ProbeAgentID uint // Probe owner (for reverse probes, differs from AgentID)
+	ProbeID      uint // Probe ID for grouping
 	Hops         []mtrHop
 }
 
@@ -412,6 +414,7 @@ LIMIT 1000
 			Target:       target,
 			TargetAgent:  uint(targetAgent),
 			ProbeAgentID: uint(probeAgentID),
+			ProbeID:      uint(probeID),
 			Hops:         hops,
 		})
 	}
@@ -844,43 +847,63 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			lastHop = trace.Hops[len(trace.Hops)-1]
 		}
 
-		// Track endpoint detail for expanded view (agent-to-agent)
-		if isAgentTarget && trace.TargetAgent > 0 {
-			sourceAgentID := trace.AgentID
-			if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
-				sourceAgentID = trace.ProbeAgentID // reverse probe - use probe owner
-			}
-			targetAgentID := trace.TargetAgent
+		// Track source agent (who ran this probe)
+		sourceAgentID := trace.AgentID
+		if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
+			sourceAgentID = trace.ProbeAgentID // reverse probe - use probe owner
+		}
 
-			// Merge with existing entry if present
-			if existing, ok := destEndpointDetails[destKey][sourceAgentID][targetAgentID]; ok {
-				existing.HasMTR = true
-				existing.AvgLatency = (existing.AvgLatency + lastHop.AvgLatency) / 2
-				existing.PacketLoss = (existing.PacketLoss + lastHop.PacketLoss) / 2
-				if len(trace.Hops) > existing.HopCount {
-					existing.HopCount = len(trace.Hops)
-				}
-			} else {
-				detail := ProbeEndpointDetail{
-					AgentID:       sourceAgentID,
-					TargetAgentID: targetAgentID,
-					Target:        fmt.Sprintf("agent:%d", targetAgentID),
-					HasMTR:        true,
-					AvgLatency:    lastHop.AvgLatency,
-					PacketLoss:    lastHop.PacketLoss,
-					HopCount:      len(trace.Hops),
-				}
-				if agent, ok := agentByID[sourceAgentID]; ok {
-					detail.AgentName = agent.Name
-				}
-				if targetAgent, ok := agentByID[targetAgentID]; ok {
+		// Track endpoint detail for expanded view (ALL probes, agent or not)
+		// Use targetAgentID=0 for non-agent targets as grouping key
+		var targetAgentIDKey uint
+		var targetStr string
+		if isAgentTarget && trace.TargetAgent > 0 {
+			targetAgentIDKey = trace.TargetAgent
+			targetStr = fmt.Sprintf("agent:%d", trace.TargetAgent)
+		} else {
+			targetAgentIDKey = 0 // Non-agent target
+			targetStr = trace.Target
+		}
+
+		// Ensure nested maps exist
+		if destEndpointDetails[destKey] == nil {
+			destEndpointDetails[destKey] = make(map[uint]map[uint]*ProbeEndpointDetail)
+		}
+		if destEndpointDetails[destKey][sourceAgentID] == nil {
+			destEndpointDetails[destKey][sourceAgentID] = make(map[uint]*ProbeEndpointDetail)
+		}
+
+		// Merge with existing entry if present
+		if existing, ok := destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey]; ok {
+			existing.HasMTR = true
+			existing.AvgLatency = (existing.AvgLatency + lastHop.AvgLatency) / 2
+			existing.PacketLoss = (existing.PacketLoss + lastHop.PacketLoss) / 2
+			if len(trace.Hops) > existing.HopCount {
+				existing.HopCount = len(trace.Hops)
+			}
+			if trace.ProbeID > 0 && existing.ProbeID == 0 {
+				existing.ProbeID = trace.ProbeID
+			}
+		} else {
+			detail := ProbeEndpointDetail{
+				AgentID:       sourceAgentID,
+				TargetAgentID: targetAgentIDKey,
+				Target:        targetStr,
+				HasMTR:        true,
+				AvgLatency:    lastHop.AvgLatency,
+				PacketLoss:    lastHop.PacketLoss,
+				HopCount:      len(trace.Hops),
+				ProbeID:       trace.ProbeID,
+			}
+			if agent, ok := agentByID[sourceAgentID]; ok {
+				detail.AgentName = agent.Name
+			}
+			if targetAgentIDKey > 0 {
+				if targetAgent, ok := agentByID[targetAgentIDKey]; ok {
 					detail.TargetAgentName = targetAgent.Name
 				}
-				if destEndpointDetails[destKey][sourceAgentID] == nil {
-					destEndpointDetails[destKey][sourceAgentID] = make(map[uint]*ProbeEndpointDetail)
-				}
-				destEndpointDetails[destKey][sourceAgentID][targetAgentID] = &detail
 			}
+			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
 
 		// Track the final responding hop IP as an endpoint (for DNS targets that resolve to multiple IPs)
@@ -916,6 +939,9 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					}
 				}
 				// Use the actual IP as key for destEndpoints map
+				if destEndpointLegacy[destKey] == nil {
+					destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
+				}
 				destEndpointLegacy[destKey][lastHop.IP] = endpointInfo
 			}
 		}
@@ -1225,47 +1251,59 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 		}
 
-		// Track endpoint detail for expanded view (agent-to-agent) - MERGE with existing
-		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
-			for _, probeAgentID := range stats.ProbeAgents {
-				targetAgentID := stats.TargetAgent
+		// Track endpoint detail for expanded view (ALL probes) - MERGE with existing
+		// Source agent is the reporting agent (agentID)
+		sourceAgentID := agentID
+		var targetAgentIDKey uint
+		if stats.TargetAgent > 0 {
+			targetAgentIDKey = stats.TargetAgent
+		} else {
+			targetAgentIDKey = 0 // Non-agent target
+		}
 
-				// Merge with existing entry if present
-				if existing, ok := destEndpointDetails[destKey][probeAgentID][targetAgentID]; ok {
-					existing.HasPing = true
-					existing.AvgLatency = (existing.AvgLatency + stats.AvgLatency) / 2
-					existing.PacketLoss = (existing.PacketLoss + stats.PacketLoss) / 2
-				} else {
-					detail := ProbeEndpointDetail{
-						AgentID:       probeAgentID,
-						TargetAgentID: targetAgentID,
-						Target:        target,
-						HasPing:       true,
-						AvgLatency:    stats.AvgLatency,
-						PacketLoss:    stats.PacketLoss,
-					}
-					if probeAgent, ok := agentByID[probeAgentID]; ok {
-						detail.AgentName = probeAgent.Name
-					}
-					if targetAgent, ok := agentByID[targetAgentID]; ok {
-						detail.TargetAgentName = targetAgent.Name
-						if targetAgent.PublicIPOverride != "" {
-							detail.IP = targetAgent.PublicIPOverride
-							if targetAgent.PublicIPOverride != target {
-								detail.ResolvedIP = target
-							}
-						} else {
-							detail.IP = target
+		// Ensure nested maps exist
+		if destEndpointDetails[destKey] == nil {
+			destEndpointDetails[destKey] = make(map[uint]map[uint]*ProbeEndpointDetail)
+		}
+		if destEndpointDetails[destKey][sourceAgentID] == nil {
+			destEndpointDetails[destKey][sourceAgentID] = make(map[uint]*ProbeEndpointDetail)
+		}
+
+		// Merge with existing entry if present
+		if existing, ok := destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey]; ok {
+			existing.HasPing = true
+			existing.AvgLatency = (existing.AvgLatency + stats.AvgLatency) / 2
+			existing.PacketLoss = (existing.PacketLoss + stats.PacketLoss) / 2
+		} else {
+			detail := ProbeEndpointDetail{
+				AgentID:       sourceAgentID,
+				TargetAgentID: targetAgentIDKey,
+				Target:        target,
+				HasPing:       true,
+				AvgLatency:    stats.AvgLatency,
+				PacketLoss:    stats.PacketLoss,
+			}
+			if agent, ok := agentByID[sourceAgentID]; ok {
+				detail.AgentName = agent.Name
+			}
+			if targetAgentIDKey > 0 {
+				if targetAgent, ok := agentByID[targetAgentIDKey]; ok {
+					detail.TargetAgentName = targetAgent.Name
+					if targetAgent.PublicIPOverride != "" {
+						detail.IP = targetAgent.PublicIPOverride
+						if targetAgent.PublicIPOverride != target {
+							detail.ResolvedIP = target
 						}
 					} else {
 						detail.IP = target
 					}
-					if destEndpointDetails[destKey][probeAgentID] == nil {
-						destEndpointDetails[destKey][probeAgentID] = make(map[uint]*ProbeEndpointDetail)
-					}
-					destEndpointDetails[destKey][probeAgentID][targetAgentID] = &detail
+				} else {
+					detail.IP = target
 				}
+			} else {
+				detail.IP = target
 			}
+			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
 
 		// Create EndpointInfo for agent-to-agent PING probes (legacy)
@@ -1298,6 +1336,9 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 
 			// Add to destEndpoints using the IP as key
+			if destEndpointLegacy[destKey] == nil {
+				destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
+			}
 			destEndpointLegacy[destKey][endpointInfo.IP] = endpointInfo
 		}
 	}
@@ -1407,47 +1448,59 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 		}
 
-		// Track endpoint detail for expanded view (agent-to-agent) - MERGE with existing
-		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
-			for _, probeAgentID := range stats.ProbeAgents {
-				targetAgentID := stats.TargetAgent
+		// Track endpoint detail for expanded view (ALL probes) - MERGE with existing
+		// Source agent is the reporting agent (agentID)
+		sourceAgentID := agentID
+		var targetAgentIDKey uint
+		if stats.TargetAgent > 0 {
+			targetAgentIDKey = stats.TargetAgent
+		} else {
+			targetAgentIDKey = 0 // Non-agent target
+		}
 
-				// Merge with existing entry if present
-				if existing, ok := destEndpointDetails[destKey][probeAgentID][targetAgentID]; ok {
-					existing.HasTrafficSim = true
-					existing.AvgLatency = (existing.AvgLatency + stats.AvgRTT) / 2
-					existing.PacketLoss = (existing.PacketLoss + stats.PacketLoss) / 2
-				} else {
-					detail := ProbeEndpointDetail{
-						AgentID:       probeAgentID,
-						TargetAgentID: targetAgentID,
-						Target:        rawTarget,
-						HasTrafficSim: true,
-						AvgLatency:    stats.AvgRTT,
-						PacketLoss:    stats.PacketLoss,
-					}
-					if probeAgent, ok := agentByID[probeAgentID]; ok {
-						detail.AgentName = probeAgent.Name
-					}
-					if targetAgent, ok := agentByID[targetAgentID]; ok {
-						detail.TargetAgentName = targetAgent.Name
-						if targetAgent.PublicIPOverride != "" {
-							detail.IP = targetAgent.PublicIPOverride
-							if targetAgent.PublicIPOverride != rawTarget {
-								detail.ResolvedIP = rawTarget
-							}
-						} else {
-							detail.IP = rawTarget
+		// Ensure nested maps exist
+		if destEndpointDetails[destKey] == nil {
+			destEndpointDetails[destKey] = make(map[uint]map[uint]*ProbeEndpointDetail)
+		}
+		if destEndpointDetails[destKey][sourceAgentID] == nil {
+			destEndpointDetails[destKey][sourceAgentID] = make(map[uint]*ProbeEndpointDetail)
+		}
+
+		// Merge with existing entry if present
+		if existing, ok := destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey]; ok {
+			existing.HasTrafficSim = true
+			existing.AvgLatency = (existing.AvgLatency + stats.AvgRTT) / 2
+			existing.PacketLoss = (existing.PacketLoss + stats.PacketLoss) / 2
+		} else {
+			detail := ProbeEndpointDetail{
+				AgentID:       sourceAgentID,
+				TargetAgentID: targetAgentIDKey,
+				Target:        rawTarget,
+				HasTrafficSim: true,
+				AvgLatency:    stats.AvgRTT,
+				PacketLoss:    stats.PacketLoss,
+			}
+			if agent, ok := agentByID[sourceAgentID]; ok {
+				detail.AgentName = agent.Name
+			}
+			if targetAgentIDKey > 0 {
+				if targetAgent, ok := agentByID[targetAgentIDKey]; ok {
+					detail.TargetAgentName = targetAgent.Name
+					if targetAgent.PublicIPOverride != "" {
+						detail.IP = targetAgent.PublicIPOverride
+						if targetAgent.PublicIPOverride != rawTarget {
+							detail.ResolvedIP = rawTarget
 						}
 					} else {
 						detail.IP = rawTarget
 					}
-					if destEndpointDetails[destKey][probeAgentID] == nil {
-						destEndpointDetails[destKey][probeAgentID] = make(map[uint]*ProbeEndpointDetail)
-					}
-					destEndpointDetails[destKey][probeAgentID][targetAgentID] = &detail
+				} else {
+					detail.IP = rawTarget
 				}
+			} else {
+				detail.IP = rawTarget
 			}
+			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
 
 		// Create EndpointInfo for agent-to-agent TrafficSim probes (legacy)
@@ -1480,6 +1533,9 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 
 			// Add to destEndpoints using the IP as key
+			if destEndpointLegacy[destKey] == nil {
+				destEndpointLegacy[destKey] = make(map[string]EndpointInfo)
+			}
 			destEndpointLegacy[destKey][endpointInfo.IP] = endpointInfo
 		}
 	}

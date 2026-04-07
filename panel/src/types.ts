@@ -410,6 +410,7 @@ export interface ProbeEndpointDetail {
     packet_loss: number;
     is_bidirectional: boolean;
     hop_count: number;
+    probe_id?: number;
 }
 
 export interface DestinationSummary {
