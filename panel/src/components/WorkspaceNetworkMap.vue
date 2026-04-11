@@ -7,15 +7,42 @@
         <span v-if="isLive" class="live-badge" :class="{ pulse: isPulsing }">
           <i class="bi bi-broadcast"></i> Live
         </span>
+        <span v-if="graphStats" class="graph-stats">
+          <span class="stat" title="Agents"><i class="bi bi-hdd-network"></i> {{ graphStats.agentCount }}</span>
+          <span class="stat" title="Hops"><i class="bi bi-arrow-down-up"></i> {{ graphStats.hopCount }}</span>
+          <span class="stat" title="Destinations"><i class="bi bi-geo-alt"></i> {{ graphStats.destCount }}</span>
+          <span class="stat" title="Avg Latency"><i class="bi bi-clock"></i> {{ graphStats.avgLatency.toFixed(0) }}ms</span>
+        </span>
       </h3>
       <div class="controls">
-        <button @click="refreshData" class="control-btn" :disabled="loading">
+        <button @click="refreshData" class="control-btn" :disabled="loading" title="Refresh (R)">
           <i class="bi bi-arrow-clockwise" :class="{ 'spin': loading }"></i>
           Refresh
         </button>
-        <button @click="resetView" class="control-btn">
+        <button @click="zoomIn" class="control-btn" title="Zoom In (+)">
+          <i class="bi bi-plus-lg"></i>
+        </button>
+        <button @click="zoomOut" class="control-btn" title="Zoom Out (-)">
+          <i class="bi bi-dash-lg"></i>
+        </button>
+        <button @click="fitToScreen" class="control-btn" title="Fit to Screen (F)">
+          <i class="bi bi-arrows-fullscreen"></i>
+        </button>
+        <button @click="toggleFullscreen" class="control-btn" title="Fullscreen (Shift+F)">
+          <i :class="isFullscreen ? 'bi bi-fullscreen-exit' : 'bi bi-fullscreen'"></i>
+        </button>
+        <div class="control-divider"></div>
+        <button @click="exportSVG" class="control-btn" title="Export SVG">
+          <i class="bi bi-download"></i>
+          SVG
+        </button>
+        <button @click="exportPNG" class="control-btn" title="Export PNG">
+          <i class="bi bi-image"></i>
+          PNG
+        </button>
+        <div class="control-divider"></div>
+        <button @click="resetView" class="control-btn" title="Reset Zoom">
           <i class="bi bi-aspect-ratio"></i>
-          Reset View
         </button>
         <div class="layout-toggle">
           <button 
@@ -70,10 +97,33 @@
       
       <!-- Destination Summary Panel -->
       <div v-if="mapData?.destinations?.length" class="destinations-panel">
-        <h5 class="panel-title">
-          <i class="bi bi-geo-alt"></i>
-          Destination Overview
-        </h5>
+        <div class="panel-header-row">
+          <h5 class="panel-title">
+            <i class="bi bi-geo-alt"></i>
+            Destination Overview
+            <span class="dest-count">({{ filteredDestinations.length }} of {{ mapData.destinations.length }})</span>
+          </h5>
+          <div class="dest-filters">
+            <select v-model="statusFilter" class="dest-status-filter">
+              <option value="all">All Status</option>
+              <option value="healthy">Healthy</option>
+              <option value="degraded">Degraded</option>
+              <option value="critical">Critical</option>
+            </select>
+            <div class="dest-search">
+              <i class="bi bi-search"></i>
+              <input 
+                v-model="destinationSearch" 
+                type="text" 
+                placeholder="Search targets..." 
+                class="dest-search-input"
+              />
+              <button v-if="destinationSearch" @click="destinationSearch = ''" class="dest-search-clear">
+                <i class="bi bi-x"></i>
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="destinations-table-wrapper">
           <table class="destinations-table">
             <thead>
@@ -89,7 +139,7 @@
               </tr>
             </thead>
             <tbody>
-              <template v-for="dest in mapData.destinations" :key="dest.target">
+              <template v-for="dest in filteredDestinations" :key="dest.target">
               <tr 
                   @click="toggleExpand(dest.target)"
                   class="dest-row expandable"
@@ -290,6 +340,7 @@ const colorMode = ref<'combined' | 'latency' | 'packetLoss'>('combined');
 const layoutMode = ref<'force' | 'hierarchical' | 'concentric'>('hierarchical');
 const selectedLookback = ref<number>(60);
 const loading = ref(false);
+const statusFilter = ref<'all' | 'healthy' | 'degraded' | 'critical'>('all');
 const mapData = ref<NetworkMapData | null>(props.initialData || null);
 const selectedNode = ref<NetworkMapNode | null>(null);
 const isPulsing = ref(false);
@@ -297,6 +348,8 @@ const isLive = ref(false);
 const panelLocked = ref(false);
 const panelMinimized = ref(false);
 const expandedDest = ref<string | null>(null);
+const isFullscreen = ref(false);
+const destinationSearch = ref('');
 
 let visualization: WorkspaceNetworkVisualization | null = null;
 
@@ -346,6 +399,40 @@ const handleNetworkMapUpdate = (data: NetworkMapData) => {
 
 const resetView = () => {
   visualization?.resetZoom();
+};
+
+const zoomIn = () => {
+  visualization?.zoomIn();
+};
+
+const zoomOut = () => {
+  visualization?.zoomOut();
+};
+
+const fitToScreen = () => {
+  visualization?.fitToScreen();
+};
+
+const toggleFullscreen = async () => {
+  try {
+    if (!document.fullscreenElement) {
+      await containerRef.value?.closest('.workspace-network-map-container')?.requestFullscreen();
+      isFullscreen.value = true;
+    } else {
+      await document.exitFullscreen();
+      isFullscreen.value = false;
+    }
+  } catch (err) {
+    console.error('[WorkspaceNetworkMap] Fullscreen error:', err);
+  }
+};
+
+const exportSVG = () => {
+  visualization?.exportSVG();
+};
+
+const exportPNG = () => {
+  visualization?.exportPNG();
 };
 
 const updateLayout = () => {
@@ -432,6 +519,14 @@ onMounted(async () => {
   // Add resize listener for responsive visualization
   window.addEventListener('resize', handleResize);
   
+  // Keyboard shortcuts
+  window.addEventListener('keydown', handleKeydown);
+  
+  // Fullscreen change listener
+  document.addEventListener('fullscreenchange', () => {
+    isFullscreen.value = !!document.fullscreenElement;
+  });
+  
   // Subscribe to workspace updates
   if (props.workspaceId) {
     subscribe(props.workspaceId, 0, (data: any) => {
@@ -443,8 +538,40 @@ onMounted(async () => {
   }
 });
 
+const handleKeydown = (e: KeyboardEvent) => {
+  // Ignore if user is typing in an input
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  
+  switch (e.key.toLowerCase()) {
+    case 'r':
+      if (!e.ctrlKey && !e.metaKey) {
+        refreshData();
+      }
+      break;
+    case 'escape':
+      closePanel();
+      visualization?.clearHighlight();
+      break;
+    case '+':
+    case '=':
+      zoomIn();
+      break;
+    case '-':
+      zoomOut();
+      break;
+    case 'f':
+      if (e.shiftKey) {
+        toggleFullscreen();
+      } else {
+        fitToScreen();
+      }
+      break;
+  }
+};
+
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize);
+  window.removeEventListener('keydown', handleKeydown);
   if (resizeTimeout) clearTimeout(resizeTimeout);
   visualization?.destroy();
 });
@@ -533,6 +660,54 @@ const getDisplayedEndpoints = (dest: DestinationSummary): EndpointInfo[] => {
 const isAgentTarget = (target: string): boolean => {
   return target.startsWith('agent:');
 };
+
+// Filtered destinations based on search and status
+const filteredDestinations = computed(() => {
+  if (!mapData.value?.destinations) return [];
+  
+  let results = mapData.value.destinations;
+  
+  // Filter by status if not 'all'
+  if (statusFilter.value !== 'all') {
+    results = results.filter(dest => dest.status === statusFilter.value);
+  }
+  
+  // Filter by search term
+  if (destinationSearch.value.trim()) {
+    const search = destinationSearch.value.toLowerCase().trim();
+    results = results.filter(dest => {
+      const targetMatch = dest.target.toLowerCase().includes(search);
+      const hostnameMatch = dest.hostname?.toLowerCase().includes(search);
+      return targetMatch || hostnameMatch;
+    });
+  }
+  
+  return results;
+});
+
+// Graph statistics
+const graphStats = computed(() => {
+  if (!mapData.value) return null;
+  const nodes = mapData.value.nodes;
+  const edges = mapData.value.edges;
+  
+  const agentCount = nodes.filter(n => n.type === 'agent').length;
+  const hopCount = nodes.filter(n => n.type === 'hop').length;
+  const destCount = nodes.filter(n => n.type === 'destination').length;
+  
+  const avgLatency = nodes.length > 0 
+    ? nodes.reduce((sum, n) => sum + (n.avg_latency || 0), 0) / nodes.length 
+    : 0;
+  
+  return {
+    agentCount,
+    hopCount,
+    destCount,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    avgLatency
+  };
+});
 
 // Expose refresh method for parent components
 defineExpose({
@@ -741,14 +916,35 @@ class WorkspaceNetworkVisualization {
     });
 
     // Agent labels - below the node
-    nodeSelection.filter(d => d.type === 'agent').append('text')
-      .attr('dy', 24)
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#475569')
-      .style('font-size', '10px')
-      .style('font-weight', '500')
-      .style('pointer-events', 'none')
-      .text(d => d.label || 'Agent');
+    nodeSelection.filter(d => d.type === 'agent').each((d, i, nodes) => {
+      if (!d) return;
+      const nodeEl = nodes[i];
+      if (!nodeEl) return;
+      const agentGroup = d3.select(nodeEl);
+      
+      // Label (agent name)
+      agentGroup.append('text')
+        .attr('class', 'agent-label')
+        .attr('dy', 24)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#475569')
+        .style('font-size', '10px')
+        .style('font-weight', '500')
+        .style('pointer-events', 'none')
+        .text(d.label || 'Agent');
+      
+      // IP address below label (if available)
+      if (d.ip) {
+        agentGroup.append('text')
+          .attr('class', 'agent-ip')
+          .attr('dy', 36)
+          .attr('text-anchor', 'middle')
+          .attr('fill', '#94a3b8')
+          .style('font-size', '8px')
+          .style('pointer-events', 'none')
+          .text(d.ip.length > 15 ? d.ip.slice(0, 15) + '...' : d.ip);
+      }
+    });
 
     // Interactions
     nodeSelection
@@ -758,7 +954,16 @@ class WorkspaceNetworkVisualization {
       .on('click', (event, d) => {
         event.stopPropagation();
         if (this.onNodeClick) this.onNodeClick(d as NetworkMapNode);
+      })
+      .on('dblclick', (event, d) => {
+        event.stopPropagation();
+        this.centerOnNode(d);
       });
+
+    // Click on background to deselect
+    this.svg.on('click', () => {
+      this.onNodeClick?.(null as any);
+    });
 
     // Tick
     this.simulation.on('tick', () => {
@@ -1063,33 +1268,67 @@ class WorkspaceNetworkVisualization {
   }
 
   private createLegend() {
-    const legendData = [
-      { color: 'var(--bs-primary)', label: 'Agent (Online)', shape: 'circle' },
-      { color: 'var(--bs-info)', label: 'Destination', shape: 'circle' },
-      { color: 'var(--bs-success)', label: 'Excellent', shape: 'rect' },
-      { color: 'var(--bs-warning)', label: 'Fair', shape: 'rect' },
-      { color: 'var(--bs-danger)', label: 'Critical', shape: 'rect' },
-    ];
+    const healthColors = ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444'];
+    
+    let legendData: Array<{ color: string; label: string; shape: string }> = [];
+    
+    // Node type legend (always shown)
+    legendData.push(
+      { color: '#22c55e', label: 'Agent', shape: 'circle' },
+      { color: '#8b5cf6', label: 'Destination', shape: 'circle' },
+      { color: '#94a3b8', label: 'Hop (unknown)', shape: 'circle' }
+    );
+    
+    // Health scale legend (changes based on color mode)
+    if (this.colorMode === 'latency') {
+      legendData.push(
+        { color: healthColors[0], label: '< 40ms', shape: 'rect' },
+        { color: healthColors[1], label: '40-80ms', shape: 'rect' },
+        { color: healthColors[2], label: '80-120ms', shape: 'rect' },
+        { color: healthColors[3], label: '120-160ms', shape: 'rect' },
+        { color: healthColors[4], label: '> 160ms', shape: 'rect' }
+      );
+    } else if (this.colorMode === 'packetLoss') {
+      legendData.push(
+        { color: healthColors[0], label: '< 20%', shape: 'rect' },
+        { color: healthColors[1], label: '20-40%', shape: 'rect' },
+        { color: healthColors[2], label: '40-60%', shape: 'rect' },
+        { color: healthColors[3], label: '60-80%', shape: 'rect' },
+        { color: healthColors[4], label: '> 80%', shape: 'rect' }
+      );
+    } else {
+      legendData.push(
+        { color: healthColors[0], label: 'Excellent', shape: 'rect' },
+        { color: healthColors[1], label: 'Good', shape: 'rect' },
+        { color: healthColors[2], label: 'Fair', shape: 'rect' },
+        { color: healthColors[3], label: 'Poor', shape: 'rect' },
+        { color: healthColors[4], label: 'Critical', shape: 'rect' }
+      );
+    }
 
+    // Remove old legend if exists
+    this.svg.select('.legend').remove();
+    
     const legend = this.svg.append('g')
+      .attr('class', 'legend')
       .attr('transform', `translate(${this.margin.left},${this.height + this.margin.top + 25})`);
 
     const items = legend.selectAll('.legend-item')
       .data(legendData)
       .enter()
       .append('g')
-      .attr('transform', (_, i) => `translate(${i * 110},0)`);
+      .attr('transform', (_, i) => `translate(${i * 90},0)`);
 
     items.append('rect')
-      .attr('width', 16)
-      .attr('height', 16)
-      .attr('rx', d => d.shape === 'circle' ? 8 : 2)
+      .attr('width', 14)
+      .attr('height', 14)
+      .attr('rx', d => d.shape === 'circle' ? 7 : 2)
       .attr('fill', d => d.color);
 
     items.append('text')
-      .attr('x', 22)
-      .attr('y', 12)
-      .style('font-size', '11px')
+      .attr('x', 18)
+      .attr('y', 11)
+      .style('font-size', '10px')
       .style('fill', 'var(--bs-secondary-color)')
       .text(d => d.label);
   }
@@ -1116,6 +1355,126 @@ class WorkspaceNetworkVisualization {
     this.svg.transition()
       .duration(750)
       .call(this.zoom.transform, d3.zoomIdentity);
+  }
+
+  public zoomIn() {
+    this.svg.transition()
+      .duration(300)
+      .call(this.zoom.scaleBy, 1.3);
+  }
+
+  public zoomOut() {
+    this.svg.transition()
+      .duration(300)
+      .call(this.zoom.scaleBy, 0.7);
+  }
+
+  public fitToScreen() {
+    if (this.nodes.length === 0) return;
+    
+    const padding = 40;
+    const nodes = this.nodes.filter(n => n.x !== undefined && n.y !== undefined);
+    if (nodes.length === 0) return;
+    
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(n => {
+      minX = Math.min(minX, n.x!);
+      maxX = Math.max(maxX, n.x!);
+      minY = Math.min(minY, n.y!);
+      maxY = Math.max(maxY, n.y!);
+    });
+    
+    const graphWidth = maxX - minX + padding * 2;
+    const graphHeight = maxY - minY + padding * 2;
+    const viewWidth = this.width + this.margin.left + this.margin.right;
+    const viewHeight = this.height + this.margin.top + this.margin.bottom;
+    
+    const scaleX = viewWidth / graphWidth;
+    const scaleY = viewHeight / graphHeight;
+    const scale = Math.min(scaleX, scaleY, 2);
+    
+    const centerX = (minX + maxX) / 2 + this.margin.left;
+    const centerY = (minY + maxY) / 2 + this.margin.top;
+    
+    const tx = viewWidth / 2 - scale * centerX;
+    const ty = viewHeight / 2 - scale * centerY;
+    
+    this.svg.transition()
+      .duration(750)
+      .call(
+        this.zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+  }
+
+  public centerOnNode(node: D3Node) {
+    if (node.x === undefined || node.y === undefined) return;
+    
+    const viewWidth = this.width + this.margin.left + this.margin.right;
+    const viewHeight = this.height + this.margin.top + this.margin.bottom;
+    
+    const tx = viewWidth / 2 - node.x * 1;
+    const ty = viewHeight / 2 - node.y * 1;
+    
+    this.svg.transition()
+      .duration(500)
+      .call(
+        this.zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(1.5)
+      );
+  }
+
+  public exportSVG() {
+    const svgData = new XMLSerializer().serializeToString(this.svg.node()!);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `network-map-${Date.now()}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  public exportPNG() {
+    const svgNode = this.svg.node()!;
+    const svgData = new XMLSerializer().serializeToString(svgNode);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    
+    const svgWidth = this.width + this.margin.left + this.margin.right;
+    const svgHeight = this.height + this.margin.top + this.margin.bottom + 40; // Extra for legend
+    
+    canvas.width = svgWidth * 2; // 2x for retina
+    canvas.height = svgHeight * 2;
+    ctx.scale(2, 2);
+    
+    const img = new Image();
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    
+    img.onload = () => {
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bs-body-bg') || '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        const pngUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = pngUrl;
+        link.download = `network-map-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(pngUrl);
+      }, 'image/png');
+    };
+    
+    img.src = url;
   }
 
   public destroy() {
@@ -1390,6 +1749,27 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   100% { transform: scale(1); }
 }
 
+.graph-stats {
+  display: inline-flex;
+  gap: 12px;
+  margin-left: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--bs-border-color);
+}
+
+.graph-stats .stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  font-weight: 500;
+}
+
+.graph-stats .stat i {
+  font-size: 0.7rem;
+}
+
 .controls {
   display: flex;
   gap: 8px;
@@ -1443,6 +1823,13 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 .control-select option {
   background: var(--map-control-bg);
   color: var(--map-control-text);
+}
+
+.control-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--map-control-border);
+  margin: 0 4px;
 }
 
 /* Layout toggle segmented control */
@@ -1716,13 +2103,91 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 .destinations-panel .panel-title {
-  margin: 0 0 12px 0;
+  margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--bs-body-color);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 16px;
+}
+
+.dest-count {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+}
+
+.dest-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+.dest-search i {
+  color: var(--bs-secondary-color);
+  font-size: 14px;
+}
+
+.dest-search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--bs-body-color);
+  font-size: 13px;
+  width: 180px;
+}
+
+.dest-search-input::placeholder {
+  color: var(--bs-secondary-color);
+}
+
+.dest-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--bs-secondary-color);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+.dest-search-clear:hover {
+  color: var(--bs-body-color);
+}
+
+.dest-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dest-status-filter {
+  padding: 6px 12px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+  color: var(--bs-body-color);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dest-status-filter option {
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
 }
 
 .destinations-table-wrapper {
