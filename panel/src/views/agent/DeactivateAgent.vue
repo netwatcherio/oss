@@ -42,11 +42,23 @@ function getControllerInfo() {
   }
 }
 
-// Linux/macOS install script command
+// Linux install script command
 const linuxInstallCommand = computed(() => {
   if (!state.agent || !state.newPin) return "";
   const { host, ssl } = getControllerInfo();
   return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
+  --host ${host} \\
+  --ssl ${ssl} \\
+  --workspace ${state.workspace.id} \\
+  --id ${state.agent.id} \\
+  --pin ${state.newPin}`;
+});
+
+// macOS install script command
+const macosInstallCommand = computed(() => {
+  if (!state.agent || !state.newPin) return "";
+  const { host, ssl } = getControllerInfo();
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install-macos.sh | sudo bash -s -- \\
   --host ${host} \\
   --ssl ${ssl} \\
   --workspace ${state.workspace.id} \\
@@ -59,20 +71,6 @@ const windowsInstallCommand = computed(() => {
   if (!state.agent || !state.newPin) return "";
   const { host, ssl } = getControllerInfo();
   return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -Command "& '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL ${ssl ? '\`$true' : '\`$false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.newPin}'"`;
-});
-
-// Docker command
-const dockerInstallCommand = computed(() => {
-  if (!state.agent || !state.newPin) return "";
-  const { host, ssl } = getControllerInfo();
-  return `docker run -d --name netwatcher-agent \\
-  -e CONTROLLER_HOST="${host}" \\
-  -e CONTROLLER_SSL="${ssl}" \\
-  -e WORKSPACE_ID="${state.workspace.id}" \\
-  -e AGENT_ID="${state.agent.id}" \\
-  -e AGENT_PIN="${state.newPin}" \\
-  --restart unless-stopped \\
-  netwatcher/agent:latest`;
 });
 
 onMounted(async () => {
@@ -265,7 +263,12 @@ async function copyCommand(command: string) {
               <ul class="nav nav-tabs" role="tablist">
                 <li class="nav-item">
                   <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#linux-tab" type="button">
-                    <i class="bi bi-terminal me-1"></i>Linux/macOS
+                    <i class="bi bi-terminal me-1"></i>Linux (Recommended)
+                  </button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" data-bs-toggle="tab" data-bs-target="#macos-tab" type="button">
+                    <i class="bi bi-apple me-1"></i>macOS
                   </button>
                 </li>
                 <li class="nav-item">
@@ -273,15 +276,10 @@ async function copyCommand(command: string) {
                     <i class="bi bi-windows me-1"></i>Windows
                   </button>
                 </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-bs-toggle="tab" data-bs-target="#docker-tab" type="button">
-                    <i class="bi bi-box me-1"></i>Docker
-                  </button>
-                </li>
               </ul>
               
               <div class="tab-content border border-top-0 rounded-bottom p-3">
-                <!-- Linux/macOS -->
+                <!-- Linux -->
                 <div class="tab-pane fade show active" id="linux-tab">
                   <p class="text-muted small mb-2">Run this command in your terminal:</p>
                   <div class="position-relative">
@@ -293,10 +291,25 @@ async function copyCommand(command: string) {
                       <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
                     </button>
                   </div>
+                </div>
+                
+                <!-- macOS -->
+                <div class="tab-pane fade" id="macos-tab">
+                  <p class="text-muted small mb-2">Run this command in your terminal:</p>
+                  <div class="position-relative">
+                    <pre class="bg-dark text-light p-3 rounded mb-0 small"><code>{{ macosInstallCommand }}</code></pre>
+                    <button 
+                      class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
+                      @click="copyCommand(macosInstallCommand)"
+                    >
+                      <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
+                    </button>
+                  </div>
                   <div class="alert alert-info mb-0 mt-3 py-2">
-                    <i class="bi bi-apple me-1"></i>
-                    <strong>For macOS:</strong> The agent can run as user-level (starts on login) or system-level (runs as root).
-                    See the <a href="/docs/agent-installation-macos.md" target="_blank">macOS Installation Guide</a> for full options including <code>--system</code> flag.
+                    <i class="bi bi-info-circle me-1"></i>
+                    The agent can run as user-level (starts on login) or system-level (runs as root).
+                    By default it installs as user-level. For full installation options including system-level, see the 
+                    <a href="/docs/agent-installation-macos.md" target="_blank">macOS Installation Guide</a> for the <code>--system</code> flag.
                   </div>
                 </div>
                 
@@ -308,20 +321,6 @@ async function copyCommand(command: string) {
                     <button 
                       class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
                       @click="copyCommand(windowsInstallCommand)"
-                    >
-                      <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
-                    </button>
-                  </div>
-                </div>
-                
-                <!-- Docker -->
-                <div class="tab-pane fade" id="docker-tab">
-                  <p class="text-muted small mb-2">Run the agent in a Docker container:</p>
-                  <div class="position-relative">
-                    <pre class="bg-dark text-light p-3 rounded mb-0 small"><code>{{ dockerInstallCommand }}</code></pre>
-                    <button 
-                      class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2"
-                      @click="copyCommand(dockerInstallCommand)"
                     >
                       <i :class="state.copied ? 'bi bi-check' : 'bi bi-clipboard'"></i>
                     </button>

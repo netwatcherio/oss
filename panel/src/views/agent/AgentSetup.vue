@@ -36,11 +36,23 @@ function getControllerInfo() {
   }
 }
 
-// Linux/macOS install script command
+// Linux install script command
 const linuxInstallCommand = computed(() => {
   if (!state.agent.id || !state.agentPin) return "";
   const { host, ssl } = getControllerInfo();
   return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.sh | sudo bash -s -- \\
+  --host ${host} \\
+  --ssl ${ssl} \\
+  --workspace ${state.workspace.id} \\
+  --id ${state.agent.id} \\
+  --pin ${state.agentPin}`;
+});
+
+// macOS install script command
+const macosInstallCommand = computed(() => {
+  if (!state.agent.id || !state.agentPin) return "";
+  const { host, ssl } = getControllerInfo();
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install-macos.sh | sudo bash -s -- \\
   --host ${host} \\
   --ssl ${ssl} \\
   --workspace ${state.workspace.id} \\
@@ -53,20 +65,6 @@ const windowsInstallCommand = computed(() => {
   if (!state.agent.id || !state.agentPin) return "";
   const { host, ssl } = getControllerInfo();
   return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -Command "& '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL ${ssl ? '\`$true' : '\`$false'} -Workspace ${state.workspace.id} -Id ${state.agent.id} -Pin '${state.agentPin}'"`;
-});
-
-// Docker command
-const dockerInstallCommand = computed(() => {
-  if (!state.agent.id || !state.agentPin) return "";
-  const { host, ssl } = getControllerInfo();
-  return `docker run -d --name netwatcher-agent \\
-  -e CONTROLLER_HOST="${host}" \\
-  -e CONTROLLER_SSL="${ssl}" \\
-  -e WORKSPACE_ID="${state.workspace.id}" \\
-  -e AGENT_ID="${state.agent.id}" \\
-  -e AGENT_PIN="${state.agentPin}" \\
-  --restart unless-stopped \\
-  netwatcher/agent:latest`;
 });
 
 onMounted(async () => {
@@ -211,10 +209,10 @@ function goToAgent() {
             </div>
           </div>
 
-          <!-- Linux/macOS Install -->
+          <!-- Linux Install (Recommended) -->
           <div class="card mb-3">
             <div class="card-header">
-              <h6 class="mb-0"><i class="bi bi-terminal me-2"></i>Linux / macOS (Recommended)</h6>
+              <h6 class="mb-0"><i class="bi bi-terminal me-2"></i>Linux (Recommended)</h6>
             </div>
             <div class="card-body p-0">
               <div class="command-block">
@@ -227,10 +225,28 @@ function goToAgent() {
                 </button>
               </div>
             </div>
+          </div>
+
+          <!-- macOS Install -->
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0"><i class="bi bi-apple me-2"></i>macOS</h6>
+            </div>
+            <div class="card-body p-0">
+              <div class="command-block">
+                <pre class="command-code">{{ macosInstallCommand }}</pre>
+                <button 
+                  class="btn btn-sm copy-btn"
+                  @click="copyToClipboard(macosInstallCommand, 'macos')"
+                >
+                  <i class="bi" :class="copied === 'macos' ? 'bi-check' : 'bi-clipboard'"></i> Copy
+                </button>
+              </div>
+            </div>
             <div class="card-footer bg-white">
               <div class="alert alert-info mb-0 py-2">
-                <i class="bi bi-apple me-1"></i>
-                <strong>For macOS:</strong> On macOS, the agent can run as a user-level service (starts on login) or system-level service (runs as root).
+                <i class="bi bi-info-circle me-1"></i>
+                The agent can run as a user-level service (starts on login) or system-level service (runs as root).
                 By default it installs as user-level. For full installation options including system-level, see the 
                 <a href="/docs/agent-installation-macos.md" target="_blank">macOS Installation Guide</a>.
               </div>
@@ -250,24 +266,6 @@ function goToAgent() {
                   @click="copyToClipboard(windowsInstallCommand, 'windows')"
                 >
                   <i class="bi" :class="copied === 'windows' ? 'bi-check' : 'bi-clipboard'"></i> Copy
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Docker -->
-          <div class="card mb-3">
-            <div class="card-header">
-              <h6 class="mb-0"><i class="bi bi-box me-2"></i>Docker (Alternative)</h6>
-            </div>
-            <div class="card-body p-0">
-              <div class="command-block">
-                <pre class="command-code">{{ dockerInstallCommand }}</pre>
-                <button 
-                  class="btn btn-sm copy-btn"
-                  @click="copyToClipboard(dockerInstallCommand, 'docker')"
-                >
-                  <i class="bi" :class="copied === 'docker' ? 'bi-check' : 'bi-clipboard'"></i> Copy
                 </button>
               </div>
             </div>

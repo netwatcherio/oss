@@ -45,23 +45,21 @@ const linuxInstallCmd = computed(() => {
   --pin ${props.pendingPin}`;
 });
 
+const macosInstallCmd = computed(() => {
+  if (!props.agent.id || !props.pendingPin) return '';
+  const { host, ssl } = controllerInfo.value;
+  return `curl -fsSL https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install-macos.sh | sudo bash -s -- \\
+  --host ${host} \\
+  --ssl ${ssl} \\
+  --workspace ${props.workspace.id} \\
+  --id ${props.agent.id} \\
+  --pin ${props.pendingPin}`;
+});
+
 const windowsInstallCmd = computed(() => {
   if (!props.agent.id || !props.pendingPin) return '';
   const { host, ssl } = controllerInfo.value;
   return `irm "https://raw.githubusercontent.com/netwatcherio/agent/refs/heads/master/install.ps1" -OutFile "$env:TEMP\\install.ps1"; powershell -ExecutionPolicy Bypass -Command "& '$env:TEMP\\install.ps1' -ControllerHost '${host}' -SSL ${ssl ? '\`$true' : '\`$false'} -Workspace ${props.workspace.id} -Id ${props.agent.id} -Pin '${props.pendingPin}'"`;
-});
-
-const dockerInstallCmd = computed(() => {
-  if (!props.agent.id || !props.pendingPin) return '';
-  const { host, ssl } = controllerInfo.value;
-  return `docker run -d --name netwatcher-agent \\
-  -e CONTROLLER_HOST="${host}" \\
-  -e CONTROLLER_SSL="${ssl}" \\
-  -e WORKSPACE_ID="${props.workspace.id}" \\
-  -e AGENT_ID="${props.agent.id}" \\
-  -e AGENT_PIN="${props.pendingPin}" \\
-  --restart unless-stopped \\
-  netwatcher/agent:latest`;
 });
 
 async function copyPinText(text: string, field: string) {
@@ -114,7 +112,7 @@ async function copyPinText(text: string, field: string) {
 
         <!-- Linux Install -->
         <h6 class="mt-3">
-          <i class="bi bi-terminal me-2"></i>Linux / macOS
+          <i class="bi bi-terminal me-2"></i>Linux (Recommended)
         </h6>
         <div class="code-block">
           <pre class="mb-0">{{ linuxInstallCmd }}</pre>
@@ -123,6 +121,21 @@ async function copyPinText(text: string, field: string) {
             @click="copyPinText(linuxInstallCmd, 'linux')"
           >
             <i :class="copiedPinField === 'linux' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
+            Copy
+          </button>
+        </div>
+
+        <!-- macOS Install -->
+        <h6 class="mt-3">
+          <i class="bi bi-apple me-2"></i>macOS
+        </h6>
+        <div class="code-block">
+          <pre class="mb-0">{{ macosInstallCmd }}</pre>
+          <button 
+            class="btn btn-sm copy-btn" 
+            @click="copyPinText(macosInstallCmd, 'macos')"
+          >
+            <i :class="copiedPinField === 'macos' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
             Copy
           </button>
         </div>
@@ -138,21 +151,6 @@ async function copyPinText(text: string, field: string) {
             @click="copyPinText(windowsInstallCmd, 'windows')"
           >
             <i :class="copiedPinField === 'windows' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
-            Copy
-          </button>
-        </div>
-
-        <!-- Docker Install -->
-        <h6 class="mt-3">
-          <i class="bi bi-box me-2"></i>Docker
-        </h6>
-        <div class="code-block">
-          <pre class="mb-0">{{ dockerInstallCmd }}</pre>
-          <button 
-            class="btn btn-sm copy-btn" 
-            @click="copyPinText(dockerInstallCmd, 'docker')"
-          >
-            <i :class="copiedPinField === 'docker' ? 'bi bi-check' : 'bi bi-clipboard'"></i> 
             Copy
           </button>
         </div>
