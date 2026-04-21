@@ -1115,7 +1115,7 @@ watch(
 
 // WebSocket subscription for real-time updates
 const workspaceIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
-const probeIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
+const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);
 
 const isLiveMode = computed(() => {
   if (!state.timeRange[1]) return false;
