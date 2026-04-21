@@ -1,0 +1,20 @@
+wing: oss
+rooms:
+- name: panel
+  description: Files from panel/
+- name: security
+  description: Files from security/
+- name: agent
+  description: Files from agent/
+- name: documentation
+  description: Files from docs/
+- name: controller
+  description: Files from controller/
+- name: scripts
+  description: Files from scripts/
+- name: landingpage
+  description: Files from landingpage/
+- name: design
+  description: Files from assets/
+- name: general
+  description: Files that don't fit other rooms

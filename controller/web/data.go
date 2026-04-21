@@ -358,18 +358,12 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	// ------------------------------------------
 	// GET /workspaces/:id/probe-data/agents/:agentID/dns
 	// DNS dashboard data - returns DNS probe results grouped by target hostname
-	// Query: limit (default 500), lookback (minutes, default 60)
+	// Query: limit (default 50), lookback (minutes, default 60)
 	// ------------------------------------------
 	base.Get("/agents/:agentID/dns", func(c *fiber.Ctx) error {
 		agentID := uint64(uintParam(c, "agentID"))
 		limit := intOrDefault(c.Query("limit"), 500)
 		lookbackMin := intOrDefault(c.Query("lookback"), 60)
-
-		// Cap limit server-side: 5000 max, scales with lookback for large ranges
-		limit = min(limit, 5000)
-		if lookbackMin > 1440 {
-			limit = min(limit, 5000)
-		}
 
 		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)
 
@@ -450,12 +444,6 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		agentID := uint64(uintParam(c, "agentID"))
 		limit := intOrDefault(c.Query("limit"), 500)
 		lookbackMin := intOrDefault(c.Query("lookback"), 60)
-
-		// Cap limit server-side: 5000 max, scales with lookback for large ranges
-		limit = min(limit, 5000)
-		if lookbackMin > 1440 {
-			limit = min(limit, 5000)
-		}
 
 		from := time.Now().UTC().Add(-time.Duration(lookbackMin) * time.Minute)
 

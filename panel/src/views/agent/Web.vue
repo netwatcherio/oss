@@ -262,11 +262,10 @@ async function fetchData() {
   loading.value = true
   error.value = null
   try {
-    const limit = Math.min(lookback.value * 2, 5000);
     webData.value = await ProbeDataService.httpDashboard(
       props.workspaceId,
       props.agentId,
-      { lookback: lookback.value, limit }
+      { lookback: lookback.value, limit: 500 }
     )
   } catch (err: any) {
     error.value = err?.message || 'Failed to load web probe data'
@@ -313,7 +312,6 @@ onMounted(fetchData)
         <select v-model.number="lookback" @change="fetchData" class="lookback-select">
           <option :value="15">Last 15m</option>
           <option :value="60">Last 1h</option>
-          <option :value="180">Last 3h</option>
           <option :value="360">Last 6h</option>
           <option :value="1440">Last 24h</option>
           <option :value="10080">Last 7d</option>

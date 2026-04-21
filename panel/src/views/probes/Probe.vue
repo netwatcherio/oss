@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {nextTick, onMounted, onUnmounted, reactive, ref, watch} from "vue";
+import {nextTick, onMounted, onUnmounted, reactive, ref, watch, computed} from "vue";
 import core from "@/core";
 import type {Agent, MtrResult, PingResult, Probe, ProbeData, ProbeType, TrafficSimResult, Workspace,} from "@/types";
 import Title from "@/components/Title.vue";
@@ -1118,7 +1118,7 @@ const workspaceIdRef = ref<number | undefined>(Number(workspaceID) || undefined)
 const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);
 
 const isLiveMode = computed(() => {
-  if (!state.timeRange[1]) return false;
+  if (!state.timeRange?.[1]) return false;
   const diffMs = Date.now() - state.timeRange[1].getTime();
   return diffMs < 5 * 60 * 1000;
 });

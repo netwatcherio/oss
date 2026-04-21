@@ -683,7 +683,7 @@ async function connectWebSocket() {
 }
 
 const isLiveMode = computed(() => {
-    if (!state.timeRange[1]) return false;
+    if (!state.timeRange?.[1]) return false;
     const diffMs = Date.now() - state.timeRange[1].getTime();
     return diffMs < 5 * 60 * 1000;
 });
