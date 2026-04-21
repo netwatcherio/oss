@@ -1115,10 +1115,17 @@ watch(
 
 // WebSocket subscription for real-time updates
 const workspaceIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
-const probeIdRef = ref<number | undefined>(Number(probeID) || undefined);
+const probeIdRef = ref<number | undefined>(Number(workspaceID) || undefined);
+
+const isLiveMode = computed(() => {
+  if (!state.timeRange[1]) return false;
+  const diffMs = Date.now() - state.timeRange[1].getTime();
+  return diffMs < 5 * 60 * 1000;
+});
 
 // Handler for incoming live probe data
 const handleLiveProbeData = (data: ProbeDataEvent) => {
+  if (!isLiveMode.value) return;
   // Filter: Only accept data for the current probe or its reciprocal
   const mainProbeId = state.probe?.id;
   const recipProbeId = state.reciprocalProbe?.id;

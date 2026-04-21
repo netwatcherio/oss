@@ -682,9 +682,16 @@ async function connectWebSocket() {
     }
 }
 
+const isLiveMode = computed(() => {
+    if (!state.timeRange[1]) return false;
+    const diffMs = Date.now() - state.timeRange[1].getTime();
+    return diffMs < 5 * 60 * 1000;
+});
+
 // Handle real-time probe data from WebSocket
 function handleWebSocketData(data: ProbeDataPayload) {
-    if (!state.ready) return;  // Ignore if not ready yet
+    if (!state.ready) return;
+    if (!isLiveMode.value) return;
     
     // Convert WebSocket payload to ProbeData format
     const probeData: ProbeData = {
