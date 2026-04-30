@@ -534,6 +534,10 @@ function handleLiveProbeData(data: ProbeDataEvent) {
         state.systemData = updateSystemData(sysPayload);
         state.hasData = true;
         loadingState.systemInfo = false;
+        // Trigger OUI lookups for MACs
+        if (sysPayload.hostInfo?.mac) {
+          sysPayload.hostInfo.mac.forEach(mac => getVendorFromMac(mac));
+        }
       }
       break;
 
@@ -542,6 +546,12 @@ function handleLiveProbeData(data: ProbeDataEvent) {
       if (netPayload) {
         state.networkInfo = netPayload;
         loadingState.networkInfo = false;
+        // Trigger OUI lookups for interface MACs
+        if (netPayload.interfaces) {
+          netPayload.interfaces.forEach(iface => {
+            if (iface.mac) getVendorFromMac(iface.mac);
+          });
+        }
       }
       break;
 
