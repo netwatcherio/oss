@@ -224,6 +224,93 @@ const probeStats = computed(() => {
   };
 });
 
+// ========== Agent Health Score ==========
+// Track previous score for trend detection
+const previousHealthScore = ref<number | null>(null);
+const previousHealthTimestamp = ref<number>(0);
+
+function statusToScore(status?: string): number {
+  switch (status) {
+    case 'healthy': return 95;
+    case 'warning': return 75;
+    case 'critical': return 40;
+    default: return 50;
+  }
+}
+
+function scoreToGrade(score: number): string {
+  if (score >= 90) return 'A';
+  if (score >= 80) return 'B';
+  if (score >= 70) return 'C';
+  if (score >= 60) return 'D';
+  return 'F';
+}
+
+function scoreToStatus(score: number): 'healthy' | 'degraded' | 'outage' | 'unknown' {
+  if (score >= 90) return 'healthy';
+  if (score >= 70) return 'degraded';
+  return 'outage';
+}
+
+const agentHealthScore = computed(() => {
+  if (loadingState.agent) return null;
+  if (!isOnline.value) return 0;
+
+  const groupKeys = Object.keys(state.groupStats);
+  const groupsWithData = groupKeys.filter(key => state.groupStats[key].hasData);
+
+  if (groupsWithData.length === 0) {
+    // No probe data yet — return unknown state
+    return null;
+  }
+
+  let totalScore = 0;
+  groupsWithData.forEach(key => {
+    const stats = state.groupStats[key];
+    if (stats.successRate !== undefined) {
+      totalScore += stats.successRate;
+    } else {
+      totalScore += statusToScore(stats.status);
+    }
+  });
+
+  return Math.round(totalScore / groupsWithData.length);
+});
+
+const agentHealthGrade = computed(() => {
+  const score = agentHealthScore.value;
+  if (score === null) return '—';
+  return scoreToGrade(score);
+});
+
+const agentHealthStatus = computed((): 'healthy' | 'degraded' | 'outage' | 'unknown' => {
+  if (loadingState.agent) return 'unknown';
+  if (!isOnline.value) return 'outage';
+  const score = agentHealthScore.value;
+  if (score === null) return 'unknown';
+  return scoreToStatus(score);
+});
+
+const agentHealthTrend = computed((): 'improving' | 'degrading' | 'stable' => {
+  const score = agentHealthScore.value;
+  const prev = previousHealthScore.value;
+  if (score === null || prev === null) return 'stable';
+  if (score > prev + 2) return 'improving';
+  if (score < prev - 2) return 'degrading';
+  return 'stable';
+});
+
+// Update previous score whenever it changes (with debounce to avoid jitter)
+let healthScoreUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
+watch(agentHealthScore, (newScore) => {
+  if (newScore === null) return;
+  if (healthScoreUpdateTimeout) clearTimeout(healthScoreUpdateTimeout);
+  healthScoreUpdateTimeout = setTimeout(() => {
+    previousHealthScore.value = newScore;
+    previousHealthTimestamp.value = Date.now();
+  }, 5000);
+});
+
 // Function to get active probes by type
 function getActiveProbesByType(type: string): number {
   return state.totalsByType[type]?.enabled || 0;
@@ -801,6 +888,10 @@ onMounted(async () => {
       :system-data="state.systemData"
       :total-probes="totalProbesCount"
       :target-groups-length="state.targetGroups.length"
+      :health-score="agentHealthScore"
+      :health-grade="agentHealthGrade"
+      :health-status="agentHealthStatus"
+      :health-trend="agentHealthTrend"
     />
 
 

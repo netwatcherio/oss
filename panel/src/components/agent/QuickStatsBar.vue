@@ -30,6 +30,10 @@ interface Props {
   systemData: SystemData;
   totalProbes: number;
   targetGroupsLength: number;
+  healthScore: number | null;
+  healthGrade: string;
+  healthStatus: 'healthy' | 'degraded' | 'outage' | 'unknown';
+  healthTrend: 'improving' | 'degrading' | 'stable';
 }
 
 const props = defineProps<Props>();
@@ -79,6 +83,41 @@ const hasSystemData = computed(() => {
   return props.systemInfo && props.systemInfo.hostInfo && !props.loadingState.systemInfo;
 });
 
+// Health ring calculations
+const healthRingOffset = computed(() => {
+  const score = props.healthScore ?? 0;
+  return ringCircumference - (score / 100) * ringCircumference;
+});
+
+const healthStatusLevel = computed(() => {
+  switch (props.healthStatus) {
+    case 'healthy': return 'healthy';
+    case 'degraded': return 'warning';
+    case 'outage': return 'critical';
+    default: return 'unknown';
+  }
+});
+
+const healthTrendIcon = computed(() => {
+  switch (props.healthTrend) {
+    case 'improving': return 'bi-arrow-up-right';
+    case 'degrading': return 'bi-arrow-down-right';
+    default: return 'bi-dash';
+  }
+});
+
+const healthTrendLabel = computed(() => {
+  switch (props.healthTrend) {
+    case 'improving': return 'Improving';
+    case 'degrading': return 'Degrading';
+    default: return 'Stable';
+  }
+});
+
+const isHealthLoading = computed(() => {
+  return props.loadingState.agent || props.loadingState.probes || props.healthScore === null;
+});
+
 // Helper functions
 function bytesToString(bytes: number, si: boolean = true, dp: number = 2): string {
   const thresh = si ? 1000 : 1024;
@@ -104,6 +143,60 @@ function bytesToString(bytes: number, si: boolean = true, dp: number = 2): strin
 
 <template>
   <div class="quick-stats">
+    <!-- Overall Health Score -->
+    <div
+      class="stat-item glass health-stat"
+      :class="{
+        'loading': isHealthLoading,
+        [`status-${healthStatusLevel}`]: !isHealthLoading
+      }"
+    >
+      <div class="progress-ring-container">
+        <svg class="progress-ring" width="68" height="68">
+          <circle
+            class="progress-ring-bg"
+            stroke-width="6"
+            fill="transparent"
+            r="28"
+            cx="34"
+            cy="34"
+          />
+          <circle
+            class="progress-ring-fill"
+            :class="healthStatusLevel"
+            stroke-width="6"
+            fill="transparent"
+            r="28"
+            cx="34"
+            cy="34"
+            :style="{
+              strokeDasharray: ringCircumference,
+              strokeDashoffset: isHealthLoading ? ringCircumference : healthRingOffset
+            }"
+          />
+        </svg>
+        <div class="ring-icon">
+          <i class="bi bi-heart-pulse"></i>
+        </div>
+      </div>
+
+      <div class="stat-content">
+        <div class="stat-value health-value">
+          <span v-if="isHealthLoading" class="skeleton-text">--</span>
+          <template v-else>
+            {{ healthScore }}<small class="health-grade">{{ healthGrade }}</small>
+          </template>
+        </div>
+        <div class="stat-label">Health Score</div>
+        <div class="stat-breakdown" v-if="!isHealthLoading">
+          <span class="health-status-text" :class="`status-${healthStatus}`">
+            <i class="bi" :class="healthTrendIcon"></i>
+            {{ healthTrendLabel }}
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- CPU Usage with Circular Ring -->
     <div 
       class="stat-item glass" 
@@ -457,5 +550,71 @@ function bytesToString(bytes: number, si: boolean = true, dp: number = 2): strin
     flex-direction: column;
     gap: 0.25rem;
   }
+}
+
+/* Health Stat Specific Styles */
+.health-stat {
+  position: relative;
+}
+
+.health-value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.health-grade {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.05);
+  margin-left: 0.25rem;
+}
+
+.health-status-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  text-transform: capitalize;
+}
+
+.health-status-text.status-healthy {
+  color: #198754;
+}
+
+.health-status-text.status-degraded {
+  color: #997404;
+}
+
+.health-status-text.status-outage {
+  color: #dc3545;
+}
+
+.health-status-text.status-unknown {
+  color: #6c757d;
+}
+
+/* Make health stat slightly more prominent */
+.stat-item.health-stat {
+  border-left: 3px solid transparent;
+}
+
+.stat-item.health-stat.status-healthy {
+  border-left-color: #198754;
+}
+
+.stat-item.health-stat.status-warning {
+  border-left-color: #ffc107;
+}
+
+.stat-item.health-stat.status-critical {
+  border-left-color: #dc3545;
+}
+
+.stat-item.health-stat.status-unknown {
+  border-left-color: #6c757d;
 }
 </style>
