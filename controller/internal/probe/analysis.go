@@ -845,12 +845,14 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	}
 
 	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type) — source agent only
+	// For non-AGENT probes, also fetch TrafficSim to use as fallback when MTR end-hop is needed
+	tsMetrics := ProbeMetrics{}
 	if p.Type == TypeAgent {
-		tsMetrics := probeTrafficSimMetrics(ctx, ch, []uint{p.AgentID}, probeID, from)
+		tsMetrics = probeTrafficSimMetrics(ctx, ch, []uint{p.AgentID}, probeID, from)
 		log.Debugf("[Analysis] Probe %d AGENT: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
 			probeID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
 		if tsMetrics.SampleCount > 0 {
-			// If PING data was empty, use TrafficSim as primary metrics
+			// If PING data was empty, use TrafficSim as primary (not blended)
 			if metrics.SampleCount == 0 {
 				metrics.AvgLatency = tsMetrics.AvgLatency
 				metrics.P95Latency = tsMetrics.P95Latency
@@ -868,6 +870,8 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	// For non-AGENT probes (standalone MTR, etc.), if PING metrics are empty
 	// but MTR path analysis found data, derive metrics from MTR end-hop stats.
 	// This ensures standalone MTR probes get proper health scores.
+	// Prefer TrafficSim data if available (indicates ICMP is blocked in that direction).
+	var fallbackSignals []AnalysisSignal
 	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
 		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
 			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitter)
@@ -876,6 +880,13 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		metrics.PacketLoss = pathAnalysis.AvgEndHopLoss
 		metrics.Jitter = pathAnalysis.AvgEndHopJitter
 		metrics.SampleCount = pathAnalysis.TraceCount
+		fallbackSignals = append(fallbackSignals, AnalysisSignal{
+			Type:       "icmp_latency_incomplete",
+			Severity:   "info",
+			Title:      "Latency from MTR End-Hop",
+			Evidence:   fmt.Sprintf("ICMP appears blocked; latency derived from MTR end-hop (%.1fms). Consider enabling TrafficSim for accurate measurement.", pathAnalysis.AvgEndHopLatency),
+			Confidence: 0.70,
+		})
 	}
 
 	// Route stability from MTR (100% if no MTR data)
@@ -890,6 +901,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	// Build combined signals
 	var signals []AnalysisSignal
 	signals = append(signals, mtrSignals...)
+	signals = append(signals, fallbackSignals...)
 
 	// Add metric-based signals
 	if metrics.AvgLatency > 150 {
