@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,10 +52,21 @@ type MtrPayload struct {
 type MtrMetrics struct {
 	EndHopLoss    float64 // Packet loss at final destination
 	EndHopLatency float64 // Avg latency at final destination
-	WorstHopLoss  float64 // Worst packet loss on any hop
+	WorstHopLoss  float64 // Worst packet loss on any hop (excluding destination)
 	WorstHopIndex int     // Index of hop with worst loss
 	HopCount      int     // Total number of hops
+
+	// Enhanced worst hop metrics that consider both loss AND latency
+	// This addresses the issue where latency spikes can occur even when loss is low
+	WorstHopLossLatency float64 // Combined score: considers both loss and latency
+	WorstHopCombinedIndex int    // Index of hop with worst combined score
 }
+
+const (
+	lossWeight    = 0.6  // Weight for loss in combined score (60%)
+	latencyWeight = 0.4  // Weight for latency in combined score (40%)
+	maxLatencyMs  = 5000 // Cap latency values to prevent skewing (5s max)
+)
 
 // ParseMtrPayload parses raw MTR JSON payload
 func ParseMtrPayload(payloadJSON []byte) (*MtrPayload, error) {
@@ -81,16 +93,46 @@ func ExtractMtrMetrics(mtr *MtrPayload) *MtrMetrics {
 	metrics.EndHopLoss, _ = strconv.ParseFloat(lastHop.LossPct, 64)
 	metrics.EndHopLatency, _ = strconv.ParseFloat(lastHop.Avg, 64)
 
-	// Find worst hop loss (excluding destination - that's end_hop_loss)
+	// Find worst hop loss and worst combined score (considering both loss and latency)
 	for i, hop := range hops {
 		loss, _ := strconv.ParseFloat(hop.LossPct, 64)
+
+		// Parse latency - handle formats like "10.5ms" or just numbers
+		latency := parseHopLatency(hop.Avg)
+
+		// Update worst hop loss
 		if loss > metrics.WorstHopLoss {
 			metrics.WorstHopLoss = loss
 			metrics.WorstHopIndex = i
 		}
+
+		// Calculate combined score considering both loss and latency
+		// Normalize latency to 0-100 scale (capped at maxLatencyMs)
+		normalizedLatency := (latency / maxLatencyMs) * 100
+		combinedScore := (loss * lossWeight) + (normalizedLatency * latencyWeight)
+
+		if combinedScore > metrics.WorstHopLossLatency {
+			metrics.WorstHopLossLatency = combinedScore
+			metrics.WorstHopCombinedIndex = i
+		}
 	}
 
 	return metrics
+}
+
+// parseHopLatency extracts latency value from hop.Avg string
+func parseHopLatency(avg string) float64 {
+	if avg == "" || avg == "*" {
+		return 0
+	}
+	// Try parsing as "10.5ms" format
+	var val float64
+	_, err := fmt.Sscanf(avg, "%fms", &val)
+	if err != nil {
+		// Try parsing as plain number
+		_, err = fmt.Sscanf(avg, "%f", &val)
+	}
+	return val
 }
 
 // GetRouteFingerprint generates a deterministic hash of the route path

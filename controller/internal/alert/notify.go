@@ -13,6 +13,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // NotificationPayload is the webhook payload structure
@@ -73,7 +74,7 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB, rule *AlertRule, al
 		go sendWebhookNotification(rule.WebhookURL, rule.WebhookSecret, payload)
 	}
 
-	// Email notification (TODO: integrate with existing email queue)
+	// Email notification
 	if rule.NotifyEmail {
 		go sendEmailNotification(ctx, db, rule, alertInstance)
 	}
@@ -121,22 +122,206 @@ func sendWebhookNotification(webhookURL, secret string, payload NotificationPayl
 }
 
 // sendEmailNotification queues an email for workspace members
-// TODO: Integrate with the existing email queue system
 func sendEmailNotification(ctx context.Context, db *gorm.DB, rule *AlertRule, alertInstance *Alert) {
-	// For now, just log that we would send an email
-	// Full implementation would:
-	// 1. Get workspace members with email notifications enabled
-	// 2. Queue emails via the email.QueueStore
+	members, err := getWorkspaceMembersWithEmailAlerts(ctx, db, rule.WorkspaceID)
+	if err != nil {
+		log.Errorf("alert.sendEmailNotification: failed to get workspace members: %v", err)
+		return
+	}
 
-	log.Infof("alert.sendEmailNotification: would send email for alert %d (workspace %d)",
-		alertInstance.ID, alertInstance.WorkspaceID)
+	for _, member := range members {
+		alertEmail := buildAlertEmailContent(rule, alertInstance)
+		emailEntry := &emailQueueEntry{
+			ToEmail:     member.Email,
+			ToName:      member.Name,
+			Subject:     alertEmail.Subject,
+			Body:        alertEmail.Body,
+			BodyHTML:    alertEmail.BodyHTML,
+			Type:        emailTypeAlert,
+			WorkspaceID: &rule.WorkspaceID,
+			RelatedID:   &alertInstance.ID,
+			RelatedType: "alert",
+		}
+		if err := queueEmailEntry(ctx, db, emailEntry); err != nil {
+			log.Warnf("alert.sendEmailNotification: failed to queue email for member %s: %v", member.Email, err)
+		}
+	}
 
-	// Future implementation:
-	// members := workspace.GetMembersWithEmailAlerts(ctx, db, rule.WorkspaceID)
-	// for _, member := range members {
-	//     emailStore.Queue(email.AlertNotification{
-	//         To: member.Email,
-	//         Alert: alertInstance,
-	//     })
-	// }
+	log.Infof("alert.sendEmailNotification: queued %d emails for alert %d (workspace %d)",
+		len(members), alertInstance.ID, alertInstance.WorkspaceID)
+}
+
+type emailType string
+
+const (
+	emailTypeAlert       emailType = "alert"
+	emailTypeAlertDigest emailType = "alert_digest"
+)
+
+type memberEmailInfo struct {
+	Email string
+	Name  string
+}
+
+func getWorkspaceMembersWithEmailAlerts(ctx context.Context, db *gorm.DB, workspaceID uint) ([]memberEmailInfo, error) {
+	var members []struct {
+		Email string
+		Name  string
+	}
+	err := db.WithContext(ctx).
+		Table("workspace_members").
+		Select("COALESCE(users.name, workspace_members.email) as name, workspace_members.email").
+		Joins("LEFT JOIN users ON users.id = workspace_members.user_id").
+		Where("workspace_members.workspace_id = ? AND workspace_members.deleted_at IS NULL", workspaceID).
+		Where("workspace_members.email != ''").
+		Find(&members).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]memberEmailInfo, 0, len(members))
+	for _, m := range members {
+		result = append(result, memberEmailInfo{Email: m.Email, Name: m.Name})
+	}
+	return result, nil
+}
+
+type emailQueueEntry struct {
+	ToEmail     string
+	ToName      string
+	Subject     string
+	Body        string
+	BodyHTML    string
+	Type        emailType
+	WorkspaceID *uint
+	RelatedID   *uint
+	RelatedType string
+}
+
+func queueEmailEntry(ctx context.Context, db *gorm.DB, entry *emailQueueEntry) error {
+	now := time.Now()
+	queueEntry := emailQueueTableEntry{
+		Type:        string(entry.Type),
+		ToEmail:     entry.ToEmail,
+		ToName:      entry.ToName,
+		Subject:     entry.Subject,
+		Body:        entry.Body,
+		BodyHTML:    entry.BodyHTML,
+		Status:      "pending",
+		Attempts:    0,
+		MaxAttempts: 3,
+		WorkspaceID: entry.WorkspaceID,
+		RelatedID:   entry.RelatedID,
+		RelatedType: entry.RelatedType,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&queueEntry).Error
+}
+
+type emailQueueTableEntry struct {
+	Type        string
+	ToEmail     string
+	ToName      string
+	Subject     string
+	Body        string
+	BodyHTML    string
+	Status      string
+	Attempts    int
+	MaxAttempts int
+	WorkspaceID *uint
+	RelatedID   *uint
+	RelatedType string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (e emailQueueTableEntry) TableName() string { return "email_queue" }
+
+type alertEmailContent struct {
+	Subject  string
+	Body     string
+	BodyHTML string
+}
+
+func buildAlertEmailContent(rule *AlertRule, alertInstance *Alert) alertEmailContent {
+	severityLabel := "Warning"
+	if alertInstance.Severity == SeverityCritical {
+		severityLabel = "Critical"
+	}
+
+	metricLabel := string(alertInstance.Metric)
+	panelURL := buildPanelURL(alertInstance)
+
+	subject := fmt.Sprintf("[%s] NetWatcher Alert: %s on %s", severityLabel, metricLabel, alertInstance.ProbeName)
+	body := fmt.Sprintf(`NetWatcher Alert
+
+Severity: %s
+Metric: %s
+Value: %.2f (threshold: %.2f)
+Probe: %s (%s)
+Target: %s
+Message: %s
+
+Time: %s
+
+View details: %s
+
+---
+NetWatcher.io - Open Source Network Monitoring`,
+		severityLabel, metricLabel, alertInstance.Value, alertInstance.Threshold,
+		alertInstance.ProbeName, alertInstance.ProbeType, alertInstance.ProbeTarget,
+		alertInstance.Message, alertInstance.TriggeredAt.Format(time.RFC822), panelURL)
+
+	bodyHTML := buildAlertEmailHTML(severityLabel, metricLabel, alertInstance, panelURL)
+
+	return alertEmailContent{
+		Subject:  subject,
+		Body:     body,
+		BodyHTML: bodyHTML,
+	}
+}
+
+func buildAlertEmailHTML(severityLabel, metricLabel string, alertInstance *Alert, panelURL string) string {
+	bgColor := "#f59e0b" // warning amber
+	if alertInstance.Severity == SeverityCritical {
+		bgColor = "#ef4444" // critical red
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NetWatcher Alert</title>
+</head>
+<body style="margin:0;padding:20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#0a0e17;">
+<div style="max-width:600px;margin:0 auto;background:#151b28;border-radius:12px;overflow:hidden;border:1px solid #1e2a3a;">
+<div style="background:%s;padding:16px 24px;">
+<h1 style="margin:0;color:#fff;font-size:18px;font-weight:600;">%s Alert</h1>
+</div>
+<div style="padding:24px;color:#8b9cb3;">
+<table style="width:100%%;border-collapse:collapse;">
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Metric</td><td style="padding:8px 0;">%s</td></tr>
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Value</td><td style="padding:8px 0;">%.2f (threshold: %.2f)</td></tr>
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Probe</td><td style="padding:8px 0;">%s (%s)</td></tr>
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Target</td><td style="padding:8px 0;">%s</td></tr>
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Message</td><td style="padding:8px 0;">%s</td></tr>
+<tr><td style="padding:8px 0;font-weight:600;color:#f0f4f8;">Time</td><td style="padding:8px 0;">%s</td></tr>
+</table>
+<div style="margin-top:24px;text-align:center;">
+<a href="%s" style="display:inline-block;padding:12px 32px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">View Details</a>
+</div>
+</div>
+<div style="padding:16px 24px;background:#1e2a3a;text-align:center;color:#5a6a7e;font-size:12px;">
+&copy; 2026 NetWatcher.io
+</div>
+</div>
+</body>
+</html>`,
+		bgColor, severityLabel, metricLabel,
+		alertInstance.Value, alertInstance.Threshold,
+		alertInstance.ProbeName, alertInstance.ProbeType,
+		alertInstance.ProbeTarget, alertInstance.Message,
+		alertInstance.TriggeredAt.Format(time.RFC822), panelURL)
 }

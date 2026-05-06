@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -66,6 +67,10 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, ch *sql.DB, pctx ProbeC
 			result = evaluateDnsRule(&rule, pctx, payloadJSON)
 		case "HTTP":
 			result = evaluateHttpRule(ctx, db, ch, &rule, pctx, payloadJSON)
+		case "TLS":
+			result = evaluateTlsRule(&rule, pctx, payloadJSON)
+		case "SNMP":
+			result = evaluateSnmpRule(&rule, pctx, payloadJSON)
 		default:
 			result = evaluateStandardRule(ctx, db, ch, &rule, pctx, payloadJSON)
 		}
@@ -74,7 +79,19 @@ func EvaluateProbeData(ctx context.Context, db *gorm.DB, ch *sql.DB, pctx ProbeC
 			continue // Rule not applicable
 		}
 
+		// Check if rule is in maintenance window
+		if isInMaintenanceWindow(ctx, db, &rule) {
+			log.Debugf("Alert rule %d is in maintenance window, skipping", rule.ID)
+			continue
+		}
+
 		if result.Triggered {
+			// Check cooldown - skip if we're in the quiet period after last alert
+			if isInCooldown(ctx, db, &rule, pctx.ProbeID) {
+				log.Debugf("Alert rule %d is in cooldown period, skipping", rule.ID)
+				continue
+			}
+
 			// Check if there's already an active alert for this rule
 			var existing Alert
 			err := db.WithContext(ctx).
@@ -339,6 +356,39 @@ func getMetricValue(payload *ProbeDataPayload, metric Metric, probeType string) 
 		}
 	}
 	return nil
+}
+
+// isInCooldown checks if the rule is in its quiet period after firing
+// Returns true if the last alert for this rule was within the cooldown window
+func isInCooldown(ctx context.Context, db *gorm.DB, rule *AlertRule, probeID uint) bool {
+	if rule.CooldownMinutes <= 0 {
+		return false // No cooldown configured
+	}
+
+	cooldownCutoff := time.Now().Add(-time.Duration(rule.CooldownMinutes) * time.Minute)
+
+	var recentAlert Alert
+	err := db.WithContext(ctx).
+		Where("alert_rule_id = ? AND probe_id = ? AND triggered_at > ?", rule.ID, probeID, cooldownCutoff).
+		Order("triggered_at DESC").
+		First(&recentAlert).Error
+
+	return err == nil // If we found an alert within the cooldown window, we're in cooldown
+}
+
+// isInMaintenanceWindow checks if the rule's maintenance window is currently active
+func isInMaintenanceWindow(ctx context.Context, db *gorm.DB, rule *AlertRule) bool {
+	if rule.MaintenanceWindowID == nil {
+		return false // No maintenance window configured
+	}
+
+	var mw MaintenanceWindow
+	err := db.WithContext(ctx).First(&mw, *rule.MaintenanceWindowID).Error
+	if err != nil {
+		return false // Window not found, proceed with evaluation
+	}
+
+	return mw.IsCurrentlyActive()
 }
 
 // ShouldTrigger checks if the value meets the threshold condition
