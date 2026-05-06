@@ -828,8 +828,8 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		}
 	}
 
-	// Fetch PING metrics (from this probe or its PING sibling)
-	metrics, err := probeAnalysisMetrics(ctx, ch, agentIDs, pingProbeID, from)
+	// Fetch PING metrics for this probe — source agent only
+	metrics, err := probeAnalysisMetrics(ctx, ch, []uint{p.AgentID}, pingProbeID, from)
 	if err != nil {
 		log.Warnf("[Analysis] Failed to fetch PING metrics for probe %d: %v", pingProbeID, err)
 		metrics = ProbeMetrics{}
@@ -838,15 +838,15 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	log.Debugf("[Analysis] Probe %d (type=%s): PING samples=%d (queried pid=%d), avgLat=%.1f, loss=%.2f%%, agentIDs=%v",
 		probeID, p.Type, metrics.SampleCount, pingProbeID, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
 
-	// Fetch MTR path analysis (from this probe or its MTR sibling)
-	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, mtrProbeID, from, agentIPToID, agentByID)
+	// Fetch MTR path analysis — source agent only
+	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, []uint{p.AgentID}, mtrProbeID, from, agentIPToID, agentByID)
 	if err != nil {
 		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", mtrProbeID, err)
 	}
 
-	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type)
+	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type) — source agent only
 	if p.Type == TypeAgent {
-		tsMetrics := probeTrafficSimMetrics(ctx, ch, agentIDs, probeID, from)
+		tsMetrics := probeTrafficSimMetrics(ctx, ch, []uint{p.AgentID}, probeID, from)
 		log.Debugf("[Analysis] Probe %d AGENT: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
 			probeID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
 		if tsMetrics.SampleCount > 0 {
@@ -953,9 +953,9 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		if err == nil {
 			for _, rp := range reverseProbes {
 				if rp.AgentID == targetAgentID {
-					// Found the reverse probe — compute its analysis
-					revMetrics, _ := probeAnalysisMetrics(ctx, ch, agentIDs, rp.ID, from)
-					revPath, revSignals, _ := analyzeMtrForProbe(ctx, ch, agentIDs, rp.ID, from, agentIPToID, agentByID)
+					// Found the reverse probe — compute its analysis using target agent data only
+					revMetrics, _ := probeAnalysisMetrics(ctx, ch, []uint{targetAgentID}, rp.ID, from)
+					revPath, revSignals, _ := analyzeMtrForProbe(ctx, ch, []uint{targetAgentID}, rp.ID, from, agentIPToID, agentByID)
 					revRouteStab := 100.0
 					if revPath != nil {
 						revRouteStab = revPath.RouteStabilityPct
@@ -1156,11 +1156,10 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 			}
 		}
 
-		if !isOnline && !dataGap {
-			agentHealth.OverallHealth = math.Max(0, agentHealth.OverallHealth-20)
-			agentHealth.Grade = gradeFromScore(agentHealth.OverallHealth)
-		}
-		if isOnline && dataGap {
+		if !isOnline {
+			agentHealth.OverallHealth = 0
+			agentHealth.Grade = gradeFromScore(0)
+		} else if isOnline && dataGap {
 			agentHealth.OverallHealth = math.Max(0, agentHealth.OverallHealth-10)
 			agentHealth.Grade = gradeFromScore(agentHealth.OverallHealth)
 		}
