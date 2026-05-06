@@ -2958,25 +2958,27 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 			}
 
 			// Index hops for shared-hop computation
-			for _, ip := range pri.LatestHops[:len(pri.LatestHops)-1] {
-				if ip == "" || ip == "*" {
-					continue
-				}
-				if hopIndex[ip] == nil {
-					hopIndex[ip] = make(map[uint]HopMetrics)
-				}
-				metrics := HopMetrics{Count: 1}
-				for _, ih := range pri.IntermediateHops {
-					if ih.IP == ip {
-						metrics.TotalLoss += ih.Loss
-						metrics.TotalLatency += ih.Latency
-						if ih.Loss > 0 || ih.Latency > 100 {
-							metrics.HasIssues = true
-						}
-						break
+			if len(pri.LatestHops) > 1 {
+				for _, ip := range pri.LatestHops[:len(pri.LatestHops)-1] {
+					if ip == "" || ip == "*" {
+						continue
 					}
+					if hopIndex[ip] == nil {
+						hopIndex[ip] = make(map[uint]HopMetrics)
+					}
+					metrics := HopMetrics{Count: 1}
+					for _, ih := range pri.IntermediateHops {
+						if ih.IP == ip {
+							metrics.TotalLoss += ih.Loss
+							metrics.TotalLatency += ih.Latency
+							if ih.Loss > 0 || ih.Latency > 100 {
+								metrics.HasIssues = true
+							}
+							break
+						}
+					}
+					hopIndex[ip][a.ID] = metrics
 				}
-				hopIndex[ip][a.ID] = metrics
 			}
 
 			ari.Routes = append(ari.Routes, pri)
