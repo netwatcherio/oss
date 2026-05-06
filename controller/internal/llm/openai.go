@@ -12,19 +12,25 @@ import (
 // OpenAIProvider implements Provider using the OpenAI API (also compatible with
 // any OpenAI-compatible endpoint like Azure, Together, Groq, etc.)
 type OpenAIProvider struct {
-	apiURL string
-	apiKey string
-	model  string
-	client *http.Client
+	apiURL    string
+	apiKey    string
+	model     string
+	client    *http.Client
+	maxTokens int
 }
 
 // NewOpenAIProvider creates a new OpenAI-compatible provider
 func NewOpenAIProvider(cfg Config) *OpenAIProvider {
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 512
+	}
 	return &OpenAIProvider{
-		apiURL: cfg.APIURL,
-		apiKey: cfg.APIKey,
-		model:  cfg.Model,
-		client: &http.Client{Timeout: cfg.Timeout},
+		apiURL:    cfg.APIURL,
+		apiKey:    cfg.APIKey,
+		model:     cfg.Model,
+		client:    &http.Client{Timeout: cfg.Timeout},
+		maxTokens: maxTokens,
 	}
 }
 
@@ -43,7 +49,7 @@ func (p *OpenAIProvider) Summarize(ctx context.Context, req SummarizeRequest) (s
 			{"role": "system", "content": SystemPrompt},
 			{"role": "user", "content": fmt.Sprintf("Summarize this network analysis:\n\n```json\n%s\n```", string(contextJSON))},
 		},
-		"max_tokens":  256,
+		"max_tokens":  p.maxTokens,
 		"temperature": 0.3,
 	}
 

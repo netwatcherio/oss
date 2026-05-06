@@ -12,17 +12,23 @@ import (
 // OllamaProvider implements Provider using a local Ollama instance.
 // No external API calls — works in air-gapped environments.
 type OllamaProvider struct {
-	url    string
-	model  string
-	client *http.Client
+	url       string
+	model     string
+	client    *http.Client
+	maxTokens int
 }
 
 // NewOllamaProvider creates a new Ollama provider for local/self-hosted models
 func NewOllamaProvider(cfg Config) *OllamaProvider {
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 512
+	}
 	return &OllamaProvider{
 		url:    cfg.OllamaURL,
 		model:  cfg.OllamaModel,
 		client: &http.Client{Timeout: cfg.Timeout},
+		maxTokens: maxTokens,
 	}
 }
 
@@ -42,7 +48,7 @@ func (p *OllamaProvider) Summarize(ctx context.Context, req SummarizeRequest) (s
 		"stream": false,
 		"options": map[string]any{
 			"temperature": 0.3,
-			"num_predict": 256,
+			"num_predict": p.maxTokens,
 		},
 	}
 
