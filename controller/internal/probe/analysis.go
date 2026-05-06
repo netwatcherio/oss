@@ -540,6 +540,9 @@ LIMIT 100
 	var maxHops int
 	var firstPayload *mtrPayload // For building hop details
 
+	hopMetrics := make(map[int]hopAgg)
+	rateLimitedSet := make(map[int]bool)
+
 	for rows.Next() {
 		var payloadRaw string
 		if err := rows.Scan(&payloadRaw); err != nil || payloadRaw == "" {
@@ -563,6 +566,17 @@ LIMIT 100
 		totalTraces++
 		if len(payload.Report.Hops) > maxHops {
 			maxHops = len(payload.Report.Hops)
+		}
+
+		// Aggregate per-hop metrics
+		for i, hop := range payload.Report.Hops {
+			if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" && hop.Hosts[0].IP != "*" {
+				ha := hopMetrics[i]
+				ha.totalLatency += parseFloat(hop.Avg)
+				ha.totalLoss += parseFloat(hop.LossPct)
+				ha.count++
+				hopMetrics[i] = ha
+			}
 		}
 
 		// Build route signature (responding hops only)
@@ -600,6 +614,7 @@ LIMIT 100
 				// Rate limit detection: intermediate loss that doesn't propagate
 				if hopLoss > 10 && endLoss < 1 && hopIP != "" {
 					rateLimitedHops = append(rateLimitedHops, i+1)
+					rateLimitedSet[i] = true
 				}
 
 				// Timeout segment detection
@@ -646,9 +661,9 @@ LIMIT 100
 		TimeoutSegments:   timeoutSegments,
 	}
 
-	// Build enriched hop details with agent names
+	// Build enriched hop details with agent names and per-hop metrics
 	if firstPayload != nil {
-		analysis.LatestHopsDetail = buildHopDetailsForMtrPayload(firstPayload, agentIPToID, agentByID)
+		analysis.LatestHopsDetail = buildHopDetailsForMtrPayload(firstPayload, agentIPToID, agentByID, hopMetrics, rateLimitedSet)
 	}
 
 	// Generate signals
@@ -2554,12 +2569,22 @@ func (routeBaseline) TableName() string { return "route_baselines" }
 
 // HopDetail holds enriched hop information for route analysis display
 type HopDetail struct {
-	IP         string `json:"ip"`
-	Hostname   string `json:"hostname,omitempty"`
-	IsAgent    bool   `json:"is_agent"`
-	AgentID    uint   `json:"agent_id,omitempty"`
-	AgentName  string `json:"agent_name,omitempty"`
-	IsFinalHop bool   `json:"is_final_hop"`
+	IP            string  `json:"ip"`
+	Hostname      string  `json:"hostname,omitempty"`
+	IsAgent       bool    `json:"is_agent"`
+	AgentID       uint    `json:"agent_id,omitempty"`
+	AgentName     string  `json:"agent_name,omitempty"`
+	IsFinalHop    bool    `json:"is_final_hop"`
+	Latency       float64 `json:"latency,omitempty"`
+	Loss          float64 `json:"loss,omitempty"`
+	IsRateLimited bool    `json:"is_rate_limited,omitempty"`
+}
+
+// hopAgg holds aggregated metrics for a single hop index across traces
+type hopAgg struct {
+	totalLatency float64
+	totalLoss    float64
+	count        int
 }
 
 // buildHopDetails creates enriched hop details from raw MTR hops, matching IPs to agents (uses MtrPayload from clickhouse.go)
@@ -2594,7 +2619,7 @@ func buildHopDetails(mtrPayload *MtrPayload, agentIPToID map[string]uint, agentB
 }
 
 // buildHopDetailsForMtrPayload creates enriched hop details from agent MTR payload (uses mtrPayload from mtr.go)
-func buildHopDetailsForMtrPayload(mtrPayload *mtrPayload, agentIPToID map[string]uint, agentByID map[uint]agentInfo) []HopDetail {
+func buildHopDetailsForMtrPayload(mtrPayload *mtrPayload, agentIPToID map[string]uint, agentByID map[uint]agentInfo, hopMetrics map[int]hopAgg, rateLimitedSet map[int]bool) []HopDetail {
 	var details []HopDetail
 	hopCount := len(mtrPayload.Report.Hops)
 	for i, hop := range mtrPayload.Report.Hops {
@@ -2604,6 +2629,14 @@ func buildHopDetailsForMtrPayload(mtrPayload *mtrPayload, agentIPToID map[string
 		hd := HopDetail{
 			IP:       hop.Hosts[0].IP,
 			Hostname: hop.Hosts[0].Hostname,
+		}
+		// Populate per-hop aggregated metrics
+		if ha, ok := hopMetrics[i]; ok && ha.count > 0 {
+			hd.Latency = sanitizeFloat(ha.totalLatency / float64(ha.count))
+			hd.Loss = sanitizeFloat(ha.totalLoss / float64(ha.count))
+		}
+		if rateLimitedSet[i] {
+			hd.IsRateLimited = true
 		}
 		// Check if this hop IP matches any agent's PublicIPOverride
 		if agentID, ok := agentIPToID[hop.Hosts[0].IP]; ok {
