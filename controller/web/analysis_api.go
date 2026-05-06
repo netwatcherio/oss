@@ -82,6 +82,36 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	})
 
 	// ------------------------------------------
+	// GET /workspaces/:id/analysis/routes
+	// Route/path analysis for cross-agent route comparison and divergence detection
+	// ------------------------------------------
+	api.Get("/workspaces/:id/analysis/routes", func(c *fiber.Ctx) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[analysis] routes PANIC: %v", r)
+				_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+			}
+		}()
+
+		wID := uintParam(c, "id")
+
+		analysis, err := probe.ComputeWorkspaceRouteAnalysis(c.UserContext(), ch, pg, wID)
+		if err != nil {
+			log.Printf("[analysis] routes workspace=%d error: %v", wID, err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		jsonBytes, err := json.Marshal(analysis)
+		if err != nil {
+			log.Printf("[analysis] routes JSON marshal error: %v", err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "json serialization failed"})
+		}
+
+		c.Set("Content-Type", "application/json")
+		return c.Send(jsonBytes)
+	})
+
+	// ------------------------------------------
 	// GET /workspaces/:id/analysis/history
 	// Historical analysis snapshots for trend analysis
 	// Query: from=<RFC3339>, to=<RFC3339>, limit=<int, default 288>

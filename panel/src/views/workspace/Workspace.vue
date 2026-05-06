@@ -8,6 +8,7 @@ import AgentCard from "@/components/AgentCard.vue";
 import WorkspaceNetworkMap from "@/components/WorkspaceNetworkMap.vue";
 import ConnectivityMatrix from "@/components/ConnectivityMatrix.vue";
 import WorkspaceHealthView from "@/components/analysis/WorkspaceHealthView.vue";
+import RoutePathAnalysis from "@/components/analysis/RoutePathAnalysis.vue";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 import type {Agent, NetInfoPayload, Workspace, Role} from "@/types"
 import {usePermissions} from "@/composables/usePermissions";
@@ -29,7 +30,7 @@ const state = reactive({
   loadingNetInfo: false,
   searchQuery: '',
   sortBy: 'status' as 'status' | 'name' | 'description' | 'updated',
-  currentView: 'grid' as 'grid' | 'network' | 'matrix' | 'status'
+  currentView: 'grid' as 'grid' | 'network' | 'matrix' | 'status' | 'routes'
 })
 
 // Permissions based on user's role in this workspace
@@ -281,6 +282,13 @@ onUnmounted(() => {
       >
         <i class="bi bi-cpu"></i> AI Status
       </button>
+      <button 
+        @click="state.currentView = 'routes'" 
+        class="btn" 
+        :class="state.currentView === 'routes' ? 'btn-primary' : 'btn-outline-secondary'"
+      >
+        <i class="bi bi-diagram-2"></i> Route Analysis
+      </button>
     </div>
 
     <!-- Network Map View -->
@@ -299,6 +307,11 @@ onUnmounted(() => {
     <!-- AI Status View -->
     <div v-if="state.currentView === 'status' && !state.loading && state.workspace.id" class="mb-4">
       <WorkspaceHealthView :workspace-id="state.workspace.id" />
+    </div>
+
+    <!-- Route Analysis View -->
+    <div v-if="state.currentView === 'routes' && !state.loading && state.workspace.id" class="mb-4">
+      <RoutePathAnalysis :workspace-id="state.workspace.id" />
     </div>
 
     <!-- Loading State -->

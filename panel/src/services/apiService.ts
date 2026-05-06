@@ -408,6 +408,17 @@ export const ProbeDataService = {
     },
 
     /**
+     * Workspace-level route/path analysis for cross-agent route comparison.
+     * GET /workspaces/{id}/analysis/routes
+     */
+    async workspaceRouteAnalysis(workspaceId: number | string) {
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/analysis/routes`
+        );
+        return data;
+    },
+
+    /**
      * DNS dashboard data — DNS probe results grouped by target hostname.
      * GET /workspaces/{id}/probe-data/agents/{agentID}/dns
      */

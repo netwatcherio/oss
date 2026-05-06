@@ -132,3 +132,60 @@ export const severityIcons: Record<string, string> = {
     warning: 'bi-exclamation-triangle',
     critical: 'bi-x-octagon',
 }
+
+// ── Route / Path Analysis Types ──
+
+export interface ProbeRouteInfo {
+    probe_id: number
+    target: string
+    baseline_fingerprint?: string
+    baseline_hop_count?: number
+    baseline_route_path?: string
+    latest_signature?: string
+    latest_hops?: string[]
+    has_route_change: boolean
+    trace_count?: number
+    route_stability_pct?: number
+    avg_end_hop_latency?: number
+    avg_end_hop_loss?: number
+}
+
+export interface AgentRouteInfo {
+    agent_id: number
+    agent_name: string
+    public_ip?: string
+    isp?: string
+    has_ip_change: boolean
+    has_isp_change: boolean
+    routes: ProbeRouteInfo[]
+}
+
+export interface SharedHopInfo {
+    hop_ip: string
+    agent_ids: number[]
+    agent_names: string[]
+    hop_count: number
+}
+
+export interface RouteIncident {
+    id: string
+    type: 'ip_change' | 'isp_change' | 'route_change'
+    severity: string
+    agent_id: number
+    agent_name: string
+    probe_id?: number
+    target?: string
+    message: string
+    evidence?: string[]
+    detected_at?: string
+}
+
+export interface WorkspaceRouteAnalysis {
+    workspace_id: number
+    agents: AgentRouteInfo[]
+    shared_hops: SharedHopInfo[]
+    incidents: RouteIncident[]
+    total_agents: number
+    total_routes: number
+    generated_at: string
+}

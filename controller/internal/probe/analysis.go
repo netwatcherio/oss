@@ -2521,3 +2521,325 @@ func formatBytes(b uint64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
+
+// ── Route / Path Analysis ──
+
+// RouteBaseline mirrors the alert package model so we can query without importing alert.
+type routeBaseline struct {
+	ID          uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	ProbeID     uint   `gorm:"uniqueIndex;not null" json:"probe_id"`
+	Fingerprint string `gorm:"size:64;not null" json:"fingerprint"`
+	RoutePath   string `gorm:"size:2048" json:"route_path,omitempty"`
+	HopCount    int    `json:"hop_count"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (routeBaseline) TableName() string { return "route_baselines" }
+
+// ProbeRouteInfo holds route data for a single MTR probe.
+type ProbeRouteInfo struct {
+	ProbeID            uint     `json:"probe_id"`
+	Target             string   `json:"target"`
+	BaselineFingerprint string  `json:"baseline_fingerprint,omitempty"`
+	BaselineHopCount   int      `json:"baseline_hop_count,omitempty"`
+	BaselineRoutePath  string   `json:"baseline_route_path,omitempty"`
+	LatestSignature    string   `json:"latest_signature,omitempty"`
+	LatestHops         []string `json:"latest_hops,omitempty"`
+	HasRouteChange     bool     `json:"has_route_change"`
+	TraceCount         int      `json:"trace_count,omitempty"`
+	RouteStabilityPct  float64  `json:"route_stability_pct,omitempty"`
+	AvgEndHopLatency   float64  `json:"avg_end_hop_latency,omitempty"`
+	AvgEndHopLoss      float64  `json:"avg_end_hop_loss,omitempty"`
+}
+
+// AgentRouteInfo holds route/path data for a single agent.
+type AgentRouteInfo struct {
+	AgentID       uint             `json:"agent_id"`
+	AgentName     string           `json:"agent_name"`
+	PublicIP      string           `json:"public_ip,omitempty"`
+	ISP           string           `json:"isp,omitempty"`
+	HasIPChange   bool             `json:"has_ip_change"`
+	HasISPChange  bool             `json:"has_isp_change"`
+	Routes        []ProbeRouteInfo `json:"routes"`
+}
+
+// SharedHopInfo represents a hop that appears in multiple agent routes.
+type SharedHopInfo struct {
+	HopIP       string   `json:"hop_ip"`
+	AgentIDs    []uint   `json:"agent_ids"`
+	AgentNames  []string `json:"agent_names"`
+	HopCount    int      `json:"hop_count"`
+}
+
+// RouteIncident is a lightweight incident specifically for route/path issues.
+type RouteIncident struct {
+	ID             string   `json:"id"`
+	Type           string   `json:"type"` // ip_change, isp_change, route_change
+	Severity       string   `json:"severity"`
+	AgentID        uint     `json:"agent_id"`
+	AgentName      string   `json:"agent_name"`
+	ProbeID        uint     `json:"probe_id,omitempty"`
+	Target         string   `json:"target,omitempty"`
+	Message        string   `json:"message"`
+	Evidence       []string `json:"evidence,omitempty"`
+	DetectedAt     string   `json:"detected_at,omitempty"`
+}
+
+// WorkspaceRouteAnalysis is the top-level response for route/path visualization.
+type WorkspaceRouteAnalysis struct {
+	WorkspaceID    uint             `json:"workspace_id"`
+	Agents         []AgentRouteInfo `json:"agents"`
+	SharedHops     []SharedHopInfo  `json:"shared_hops"`
+	Incidents      []RouteIncident  `json:"incidents"`
+	TotalAgents    int              `json:"total_agents"`
+	TotalRoutes    int              `json:"total_routes"`
+	GeneratedAt    time.Time        `json:"generated_at"`
+}
+
+// ComputeWorkspaceRouteAnalysis aggregates route/path data across all agents in a workspace
+// for the route/path matching visualization.
+func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspaceID uint) (*WorkspaceRouteAnalysis, error) {
+	// 1. Get agents
+	agents, err := getWorkspaceAgents(ctx, pg, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get agents: %w", err)
+	}
+
+	if len(agents) == 0 {
+		return &WorkspaceRouteAnalysis{
+			WorkspaceID: workspaceID,
+			Agents:      []AgentRouteInfo{},
+			SharedHops:  []SharedHopInfo{},
+			Incidents:   []RouteIncident{},
+			GeneratedAt: time.Now().UTC(),
+		}, nil
+	}
+
+	agentIDs := make([]uint, len(agents))
+	agentByID := make(map[uint]agentInfo)
+	for i, a := range agents {
+		agentIDs[i] = a.ID
+		agentByID[a.ID] = a
+	}
+
+	// Look back 24 hours for MTR data and 1 hour for net-info changes
+	mtrFrom := time.Now().UTC().Add(-24 * time.Hour)
+	netInfoFrom := time.Now().UTC().Add(-60 * time.Minute)
+
+	// 2. Get latest NETINFO per agent (for IP/ISP)
+	netInfoByAgent := make(map[uint]*netInfoPayload)
+	for _, a := range agents {
+		row, err := GetLatestNetInfoForAgent(ctx, ch, uint64(a.ID), nil)
+		if err != nil || row == nil {
+			continue
+		}
+		var p netInfoPayload
+		if err := json.Unmarshal(row.Payload, &p); err == nil {
+			p.NormalizeFromLegacy()
+			netInfoByAgent[a.ID] = &p
+		}
+	}
+
+	// 3. Detect IP/ISP changes
+	netInfoChanges, _ := getWorkspaceNetInfoChanges(ctx, ch, agentIDs, netInfoFrom)
+	changeByAgent := make(map[uint][]netInfoChange)
+	for _, c := range netInfoChanges {
+		changeByAgent[c.AgentID] = append(changeByAgent[c.AgentID], c)
+	}
+
+	// 4. Get MTR probes per agent from Postgres
+	agentRoutes := make([]AgentRouteInfo, 0, len(agents))
+	hopIndex := make(map[string]map[uint]bool) // hopIP -> set of agent IDs
+	routeIncidents := make([]RouteIncident, 0)
+	totalRoutes := 0
+
+	for _, a := range agents {
+		ari := AgentRouteInfo{
+			AgentID:   a.ID,
+			AgentName: a.Name,
+		}
+
+		// Populate IP/ISP from netinfo
+		if ni := netInfoByAgent[a.ID]; ni != nil {
+			ari.PublicIP = ni.PublicAddress
+			ari.ISP = ni.GetISP()
+		}
+
+		// Check for changes
+		if changes, ok := changeByAgent[a.ID]; ok {
+			for _, c := range changes {
+				switch c.Field {
+				case "public_ip":
+					ari.HasIPChange = true
+					routeIncidents = append(routeIncidents, RouteIncident{
+						ID:         fmt.Sprintf("ip_change_%d", a.ID),
+						Type:       "ip_change",
+						Severity:   "info",
+						AgentID:    a.ID,
+						AgentName:  a.Name,
+						Message:    fmt.Sprintf("Public IP changed from %s to %s", c.OldValue, c.NewValue),
+						Evidence:   []string{fmt.Sprintf("Previous: %s", c.OldValue), fmt.Sprintf("Current: %s", c.NewValue)},
+						DetectedAt: c.DetectedAt.Format(time.RFC3339),
+					})
+				case "isp":
+					ari.HasISPChange = true
+					routeIncidents = append(routeIncidents, RouteIncident{
+						ID:         fmt.Sprintf("isp_change_%d", a.ID),
+						Type:       "isp_change",
+						Severity:   "warning",
+						AgentID:    a.ID,
+						AgentName:  a.Name,
+						Message:    fmt.Sprintf("ISP changed from %s to %s", c.OldValue, c.NewValue),
+						Evidence:   []string{fmt.Sprintf("Previous ISP: %s", c.OldValue), fmt.Sprintf("Current ISP: %s", c.NewValue)},
+						DetectedAt: c.DetectedAt.Format(time.RFC3339),
+					})
+				}
+			}
+		}
+
+		// Get probes for this agent
+		probes, err := ListByAgent(ctx, pg, a.ID)
+		if err != nil {
+			agentRoutes = append(agentRoutes, ari)
+			continue
+		}
+
+		for _, p := range probes {
+			if p.Type != TypeMTR || !p.Enabled {
+				continue
+			}
+			// Determine target string
+			target := ""
+			for _, t := range p.Targets {
+				if t.Target != "" {
+					target = t.Target
+					break
+				}
+			}
+
+			pri := ProbeRouteInfo{
+				ProbeID: p.ID,
+				Target:  target,
+			}
+
+			// Get route baseline
+			var baseline routeBaseline
+			if err := pg.WithContext(ctx).Where("probe_id = ?", p.ID).First(&baseline).Error; err == nil {
+				pri.BaselineFingerprint = baseline.Fingerprint
+				pri.BaselineHopCount = baseline.HopCount
+				pri.BaselineRoutePath = baseline.RoutePath
+			}
+
+			// Get latest MTR data for this probe
+			mtrRows, err := GetProbeDataByProbe(ctx, ch, uint64(p.ID), nil, mtrFrom, time.Now().UTC(), false, 50)
+			if err == nil && len(mtrRows) > 0 {
+				// Build route signatures and compute stability
+				sigs := make(map[string]int)
+				var latestPayload *MtrPayload
+				for i := range mtrRows {
+					var mp MtrPayload
+					if err := json.Unmarshal(mtrRows[i].Payload, &mp); err != nil {
+						continue
+					}
+					sig := getMtrRouteSignature(mp.Report.Hops)
+					sigs[sig]++
+					if latestPayload == nil {
+						latestPayload = &mp
+						pri.LatestSignature = sig
+						for _, hop := range mp.Report.Hops {
+							if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" {
+								pri.LatestHops = append(pri.LatestHops, hop.Hosts[0].IP)
+							}
+						}
+					}
+				}
+				if latestPayload != nil {
+					pri.TraceCount = len(mtrRows)
+					if len(sigs) > 1 {
+						maxCount := 0
+						for _, c := range sigs {
+							if c > maxCount {
+								maxCount = c
+							}
+						}
+						pri.RouteStabilityPct = math.Round(float64(maxCount)/float64(len(mtrRows))*100*10)/10
+						pri.HasRouteChange = true
+					} else {
+						pri.RouteStabilityPct = 100
+					}
+					// End-hop metrics
+					if len(latestPayload.Report.Hops) > 0 {
+						lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
+						pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
+						pri.AvgEndHopLoss = parseLossPct(lastHop.LossPct)
+					}
+				}
+			}
+
+			// Index hops for shared-hop computation
+			for _, ip := range pri.LatestHops {
+				if ip == "" || ip == "*" {
+					continue
+				}
+				if hopIndex[ip] == nil {
+					hopIndex[ip] = make(map[uint]bool)
+				}
+				hopIndex[ip][a.ID] = true
+			}
+
+			ari.Routes = append(ari.Routes, pri)
+			totalRoutes++
+
+			// Add route_change incident if detected
+			if pri.HasRouteChange {
+				routeIncidents = append(routeIncidents, RouteIncident{
+					ID:        fmt.Sprintf("route_change_%d_%d", a.ID, p.ID),
+					Type:      "route_change",
+					Severity:  "warning",
+					AgentID:   a.ID,
+					AgentName: a.Name,
+					ProbeID:   p.ID,
+					Target:    target,
+					Message:   fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", a.Name, target, pri.RouteStabilityPct),
+					Evidence: []string{
+						fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint),
+						fmt.Sprintf("Current signature: %s", pri.LatestSignature),
+						fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount),
+					},
+				})
+			}
+		}
+
+		agentRoutes = append(agentRoutes, ari)
+	}
+
+	// 5. Build shared hops list
+	sharedHops := make([]SharedHopInfo, 0)
+	for hopIP, agentSet := range hopIndex {
+		if len(agentSet) < 2 {
+			continue
+		}
+		sh := SharedHopInfo{
+			HopIP:    hopIP,
+			HopCount: len(agentSet),
+		}
+		for aid := range agentSet {
+			sh.AgentIDs = append(sh.AgentIDs, aid)
+			if a, ok := agentByID[aid]; ok {
+				sh.AgentNames = append(sh.AgentNames, a.Name)
+			}
+		}
+		sharedHops = append(sharedHops, sh)
+	}
+
+	return &WorkspaceRouteAnalysis{
+		WorkspaceID: workspaceID,
+		Agents:      agentRoutes,
+		SharedHops:  sharedHops,
+		Incidents:   routeIncidents,
+		TotalAgents: len(agents),
+		TotalRoutes: totalRoutes,
+		GeneratedAt: time.Now().UTC(),
+	}, nil
+}
