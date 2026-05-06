@@ -462,6 +462,7 @@ LIMIT 2000
 	defer rows.Close()
 
 	var latencies []float64
+	var jitters []float64
 	var totalLoss float64
 	var count int
 
@@ -473,6 +474,7 @@ LIMIT 2000
 
 		var payload struct {
 			AverageRTT     float64 `json:"averageRTT"`
+			StdDevRTT      float64 `json:"stdDevRTT"`
 			LossPercentage float64 `json:"lossPercentage"`
 		}
 		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
@@ -480,6 +482,7 @@ LIMIT 2000
 		}
 
 		latencies = append(latencies, payload.AverageRTT)
+		jitters = append(jitters, payload.StdDevRTT)
 		totalLoss += payload.LossPercentage
 		count++
 	}
@@ -492,6 +495,7 @@ LIMIT 2000
 		AvgLatency:  sanitizeFloat(avg(latencies)),
 		P95Latency:  sanitizeFloat(percentile(latencies, 95)),
 		PacketLoss:  sanitizeFloat(totalLoss / float64(count)),
+		Jitter:      sanitizeFloat(avg(jitters)),
 		SampleCount: count,
 	}
 }
