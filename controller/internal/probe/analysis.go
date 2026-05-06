@@ -868,6 +868,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	// For non-AGENT probes (standalone MTR, etc.), if PING metrics are empty
 	// but MTR path analysis found data, derive metrics from MTR end-hop stats.
 	// This ensures standalone MTR probes get proper health scores.
+	usedMtrFallback := false
 	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
 		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
 			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitter)
@@ -876,6 +877,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		metrics.PacketLoss = pathAnalysis.AvgEndHopLoss
 		metrics.Jitter = pathAnalysis.AvgEndHopJitter
 		metrics.SampleCount = pathAnalysis.TraceCount
+		usedMtrFallback = true
 	}
 
 	// Route stability from MTR (100% if no MTR data)
@@ -889,6 +891,15 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 
 	// Build combined signals
 	var signals []AnalysisSignal
+	if usedMtrFallback {
+		signals = append(signals, AnalysisSignal{
+			Type:       "icmp_latency_incomplete",
+			Severity:   "info",
+			Title:      "Latency Estimated from MTR",
+			Evidence:   "ICMP probe returned no data; latency derived from MTR end-hop RTT",
+			Confidence: 0.7,
+		})
+	}
 	signals = append(signals, mtrSignals...)
 
 	// Add metric-based signals

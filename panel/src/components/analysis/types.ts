@@ -19,7 +19,7 @@ export interface ProbeMetrics {
 }
 
 export interface AnalysisSignal {
-    type: string       // icmp_artifact, route_change, high_loss, high_latency, jitter_anomaly
+    type: string       // icmp_artifact, route_change, high_loss, high_latency, jitter_anomaly, icmp_latency_incomplete
     severity: string   // info, warning, critical
     title: string
     evidence: string
