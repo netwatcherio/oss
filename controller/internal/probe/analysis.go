@@ -176,6 +176,7 @@ type DetectedIncident struct {
 	AffectedTargets []string `json:"affected_targets"`
 	Evidence        []string `json:"evidence"`
 	Recommendations []string `json:"recommendations"`
+	Confidence      float64  `json:"confidence"` // 0-1.0, based on proportion of agents affected
 }
 
 // StatusSummary is a high-level "what's happening right now" overview
@@ -1118,6 +1119,7 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 
 		// Compute agent-level health
 		var agentHealth HealthVector
+		var dataGap bool
 		if len(probeEntries) > 0 {
 			avgLat := avg(agentLatencies)
 			avgLossVal := avg(agentLoss)
@@ -1130,6 +1132,7 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 			}
 			agentHealth = computeHealthVector(agentMetrics, 100)
 		} else {
+			dataGap = true
 			agentHealth = HealthVector{
 				Grade:          "unknown",
 				RouteStability: 100,
@@ -1137,9 +1140,12 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 			}
 		}
 
-		if !isOnline && agentHealth.Grade != "unknown" {
-			// Penalize offline agents
+		if !isOnline && !dataGap {
 			agentHealth.OverallHealth = math.Max(0, agentHealth.OverallHealth-20)
+			agentHealth.Grade = gradeFromScore(agentHealth.OverallHealth)
+		}
+		if isOnline && dataGap {
+			agentHealth.OverallHealth = math.Max(0, agentHealth.OverallHealth-10)
 			agentHealth.Grade = gradeFromScore(agentHealth.OverallHealth)
 		}
 
@@ -1186,11 +1192,20 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 	changeIncidents := detectTemporalChanges(pingMetrics, baselinePing, trafficMetrics, baselineTraffic, netInfoChanges, sysInfoMetrics, agentByID)
 	incidents = append(incidents, changeIncidents...)
 
+	// ── Speedtest Bandwidth Regression Detection ──
+	speedtestIncidents := detectSpeedtestIncidents(ctx, ch, agentIDs, from, baselineFrom, agentByID)
+	incidents = append(incidents, speedtestIncidents...)
+
+	// ── DNS Pattern Detection ──
+	dnsIncidents := detectDNSIncidents(ctx, ch, agentIDs, from, agentByID)
+	incidents = append(incidents, dnsIncidents...)
+
 	// Build status summary
 	status := buildStatusSummary(overallHealth, agentSummaries, incidents)
 
 	// ── Optional LLM Enrichment ──
-	if llmProvider != nil && llmProvider.Available() && len(incidents) > 0 {
+	// Trigger on incidents OR healthy state (periodic "all clear" summaries)
+	if llmProvider != nil && llmProvider.Available() && (len(incidents) > 0 || status.Status == "healthy") {
 		enriched := enrichWithLLM(ctx, status, incidents, agentSummaries, overallHealth, totalProbes)
 		if enriched != "" {
 			status.Message = enriched
@@ -1395,6 +1410,15 @@ func detectIncidents(
 ) []DetectedIncident {
 	var incidents []DetectedIncident
 
+	// Confidence scaling: number of affected agents / total agents in workspace
+	totalAgents := len(agents)
+	confScale := func(affected int) float64 {
+		if totalAgents == 0 {
+			return 0.3
+		}
+		return math.Min(1.0, float64(affected)/float64(totalAgents)*1.5+0.2)
+	}
+
 	// 1. Shared-target correlation: find targets seen by multiple agents with degradation
 	type targetIssue struct {
 		target        string
@@ -1486,6 +1510,7 @@ func detectIncidents(
 					fmt.Sprintf("Detected via: %s", strings.Join(probeTypeList, ", ")),
 				},
 				Recommendations: suggestRemediation(cause, severity),
+				Confidence:      confScale(len(uniqueAgents)),
 			})
 		} else if len(uniqueAgents) == 1 && (avgLoss > 3 || avgLat > 200) {
 			// Only one agent sees degradation to this target → agent-specific or local ISP
@@ -1511,6 +1536,7 @@ func detectIncidents(
 					"Review MTR traces for the specific degraded hops",
 					"Compare with other probe destinations from this agent",
 				},
+				Confidence: 0.4,
 			})
 		}
 	}
@@ -1532,6 +1558,7 @@ func detectIncidents(
 					"Verify the agent service is running (systemctl status netwatcher-agent)",
 					"Check host resources (disk, memory, CPU)",
 				},
+				Confidence: 0.95,
 			})
 		} else if agent.Health.Grade == "critical" || agent.Health.Grade == "poor" {
 			var worstTargets []string
@@ -1556,6 +1583,7 @@ func detectIncidents(
 					"Review ISP status/outage pages for the agent's provider",
 					"Compare latency trends to identify when degradation started",
 				},
+				Confidence: 0.75,
 			})
 		}
 	}
@@ -1582,6 +1610,7 @@ func detectIncidents(
 				"Review if a recent change (firewall rule, route update) could explain this",
 				"Check external status pages (cloudflare, aws, etc.) for regional issues",
 			},
+			Confidence: confScale(degradedCount),
 		})
 	}
 
@@ -2229,6 +2258,251 @@ func detectTemporalChanges(
 					"Review SD-WAN or dual-WAN configuration if applicable",
 				},
 			})
+		}
+	}
+
+	return incidents
+}
+
+// ── Speedtest Bandwidth Regression Detection ──
+
+func detectSpeedtestIncidents(ctx context.Context, ch *sql.DB, agentIDs []uint, from, baselineFrom time.Time, agentByID map[uint]agentInfo) []DetectedIncident {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+
+	current, err := getWorkspaceSpeedtestMetrics(ctx, ch, agentIDs, from)
+	if err != nil || len(current) == 0 {
+		return nil
+	}
+
+	baseline, _ := getWorkspaceSpeedtestMetrics(ctx, ch, agentIDs, baselineFrom)
+	if len(baseline) == 0 {
+		return nil
+	}
+
+	var incidents []DetectedIncident
+	for key, curr := range current {
+		base, exists := baseline[key]
+		if !exists || base.Count < 3 || curr.Count < 3 {
+			continue
+		}
+
+		agentName := resolveAgentName(key, agentByID)
+		target := extractTarget(key)
+
+		// Download regression: >50% drop when baseline was >10 Mbps
+		if base.AvgDownload > 10 && curr.AvgDownload < base.AvgDownload*0.5 {
+			severity := "warning"
+			if curr.AvgDownload < base.AvgDownload*0.25 {
+				severity = "critical"
+			}
+			incidents = append(incidents, DetectedIncident{
+				ID:              fmt.Sprintf("speedtest_dl_regression_%s", sanitizeKey(key)),
+				Title:           fmt.Sprintf("Bandwidth regression detected for %s (%s)", agentName, stripPort(target)),
+				Severity:        severity,
+				Scope:           "agent-specific",
+				SuggestedCause:  fmt.Sprintf("Download speed dropped from %.1f Mbps to %.1f Mbps — possible ISP throttling, link degradation, or network congestion", base.AvgDownload, curr.AvgDownload),
+				AffectedAgents:  []string{agentName},
+				AffectedTargets: []string{stripPort(target)},
+				Evidence: []string{
+					fmt.Sprintf("Baseline download: %.1f Mbps (from %d tests)", base.AvgDownload, base.Count),
+					fmt.Sprintf("Current download: %.1f Mbps (from %d tests)", curr.AvgDownload, curr.Count),
+					fmt.Sprintf("Latency: %.1fms, Jitter: %.1fms", curr.AvgLatency, curr.AvgJitter),
+				},
+				Recommendations: []string{
+					"Run a manual speed test to confirm results",
+					"Check for ISP SLA violations or data caps",
+					"Review interface error counts on the agent's host",
+				},
+				Confidence: 0.75,
+			})
+		}
+
+		// Upload regression
+		if base.AvgUpload > 10 && curr.AvgUpload < base.AvgUpload*0.5 {
+			severity := "warning"
+			if curr.AvgUpload < base.AvgUpload*0.25 {
+				severity = "critical"
+			}
+			incidents = append(incidents, DetectedIncident{
+				ID:              fmt.Sprintf("speedtest_ul_regression_%s", sanitizeKey(key)),
+				Title:           fmt.Sprintf("Upload bandwidth regression for %s (%s)", agentName, stripPort(target)),
+				Severity:        severity,
+				Scope:           "agent-specific",
+				SuggestedCause:  fmt.Sprintf("Upload speed dropped from %.1f Mbps to %.1f Mbps — possible upstream congestion or ISP shaping", base.AvgUpload, curr.AvgUpload),
+				AffectedAgents:  []string{agentName},
+				AffectedTargets: []string{stripPort(target)},
+				Evidence: []string{
+					fmt.Sprintf("Baseline upload: %.1f Mbps", base.AvgUpload),
+					fmt.Sprintf("Current upload: %.1f Mbps", curr.AvgUpload),
+				},
+				Recommendations: []string{
+					"Check for upstream ISP issues or contention ratio",
+					"Verify QoS settings haven't changed",
+				},
+				Confidence: 0.70,
+			})
+		}
+	}
+
+	return incidents
+}
+
+// ── DNS Pattern Detection ──
+
+func detectDNSIncidents(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time, agentByID map[uint]agentInfo) []DetectedIncident {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+
+	q := fmt.Sprintf(`
+SELECT agent_id, target, payload_raw
+FROM probe_data
+WHERE type = 'DNS'
+  AND agent_id IN (%s)
+  AND created_at >= %s
+ORDER BY created_at DESC
+LIMIT 1000
+`, strings.Join(agentIDStrs, ", "), chQuoteTime(from))
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	type dnsAccum struct {
+		queryTimes  []float64
+		nxdomain    int
+		total       int
+		servfail     int
+		respondIPs  map[string]int
+	}
+	acc := make(map[string]*dnsAccum)
+
+	for rows.Next() {
+		var agentID uint64
+		var target, payloadRaw string
+		if err := rows.Scan(&agentID, &target, &payloadRaw); err != nil || payloadRaw == "" {
+			continue
+		}
+		var p DNSPayload
+		if err := json.Unmarshal([]byte(payloadRaw), &p); err != nil {
+			continue
+		}
+		key := fmt.Sprintf("%d:%s", agentID, target)
+		if acc[key] == nil {
+			acc[key] = &dnsAccum{respondIPs: make(map[string]int)}
+		}
+		a := acc[key]
+		a.total++
+		a.queryTimes = append(a.queryTimes, p.QueryTimeMs)
+		switch p.ResponseCode {
+		case "NXDOMAIN":
+			a.nxdomain++
+		case "SERVFAIL":
+			a.servfail++
+		}
+		if len(p.Answers) > 0 {
+			a.respondIPs[p.Answers[0].Value]++
+		}
+	}
+
+	var incidents []DetectedIncident
+	for key, a := range acc {
+		if a.total < 5 {
+			continue
+		}
+
+		agentName := resolveAgentName(key, agentByID)
+		target := extractTarget(key)
+		nxPct := float64(a.nxdomain) / float64(a.total) * 100
+		sfPct := float64(a.servfail) / float64(a.total) * 100
+
+		// NXDOMAIN storm detection: >30% NXDOMAIN rate
+		if nxPct > 30 {
+			severity := "warning"
+			if nxPct > 60 {
+				severity = "critical"
+			}
+			incidents = append(incidents, DetectedIncident{
+				ID:              fmt.Sprintf("dns_nxdomain_storm_%s", sanitizeKey(key)),
+				Title:           fmt.Sprintf("DNS NXDOMAIN storm from %s to %s", agentName, stripPort(target)),
+				Severity:        severity,
+				SuggestedCause:  fmt.Sprintf("%.1f%% of queries returned NXDOMAIN — possible domain expiry, misconfiguration, or DNS cache poisoning attack", nxPct),
+				AffectedAgents:  []string{agentName},
+				AffectedTargets: []string{stripPort(target)},
+				Evidence: []string{
+					fmt.Sprintf("%d/%d queries NXDOMAIN (%.1f%%)", a.nxdomain, a.total, nxPct),
+					fmt.Sprintf("Target: %s", target),
+				},
+				Recommendations: []string{
+					"Verify the domain is still registered and DNS records are correct",
+					"Check if the target DNS server is experiencing issues",
+					"Review firewall logs for anomalous DNS query patterns",
+				},
+				Confidence: math.Min(0.95, 0.3+nxPct/100),
+			})
+		}
+
+		// SERVFAIL storm: >20% SERVFAIL rate
+		if sfPct > 20 && nxPct < 30 {
+			severity := "warning"
+			if sfPct > 50 {
+				severity = "critical"
+			}
+			incidents = append(incidents, DetectedIncident{
+				ID:              fmt.Sprintf("dns_servfail_%s", sanitizeKey(key)),
+				Title:           fmt.Sprintf("DNS SERVFAIL errors from %s to %s", agentName, stripPort(target)),
+				Severity:        severity,
+				SuggestedCause:  fmt.Sprintf("%.1f%% of queries returned SERVFAIL — possible DNS server overload or recursive resolver failure", sfPct),
+				AffectedAgents:  []string{agentName},
+				AffectedTargets: []string{stripPort(target)},
+				Evidence: []string{
+					fmt.Sprintf("%d/%d queries SERVFAIL (%.1f%%)", a.servfail, a.total, sfPct),
+					fmt.Sprintf("Target: %s", target),
+				},
+				Recommendations: []string{
+					"Check DNS server status and resource usage",
+					"Verify upstream DNS server is reachable",
+					"Review DNSSEC validation failures if applicable",
+				},
+				Confidence: 0.75,
+			})
+		}
+
+		// High query time (possible DNS amplification)
+		if len(a.queryTimes) > 5 {
+			avgQT := avg(a.queryTimes)
+			if avgQT > 500 {
+				severity := "warning"
+				if avgQT > 2000 {
+					severity = "critical"
+				}
+				incidents = append(incidents, DetectedIncident{
+					ID:              fmt.Sprintf("dns_high_latency_%s", sanitizeKey(key)),
+					Title:           fmt.Sprintf("High DNS latency from %s to %s", agentName, stripPort(target)),
+					Severity:        severity,
+					SuggestedCause:  fmt.Sprintf("Average DNS query time: %.1fms — possible DNS server overload, network path issue, or amplification attack pattern", avgQT),
+					AffectedAgents:  []string{agentName},
+					AffectedTargets: []string{stripPort(target)},
+					Evidence: []string{
+						fmt.Sprintf("Average query time: %.1fms across %d queries", avgQT, len(a.queryTimes)),
+					},
+					Recommendations: []string{
+						"Check if the DNS server is under load or experiencing DoS",
+						"Review upstream DNS provider status",
+						"Consider switching to a faster DNS resolver (e.g., 1.1.1.1, 8.8.8.8)",
+					},
+					Confidence: 0.65,
+				})
+			}
 		}
 	}
 
