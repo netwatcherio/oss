@@ -60,6 +60,10 @@ function hopLossClass(loss: number) {
 
 const hasBidirectional = computed(() => !!analysis.value?.reverse)
 
+const hasIcmpLatencyIncomplete = computed(() =>
+  analysis.value?.signals?.some(s => s.type === 'icmp_latency_incomplete') ?? false
+)
+
 onMounted(fetchAnalysis)
 
 watch(() => props.probeId, fetchAnalysis)
@@ -144,8 +148,22 @@ watch(() => props.probeId, fetchAnalysis)
 
           <!-- Avg Latency -->
           <div class="metric-label">Avg Latency</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.avg_latency) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.avg_latency) }}</div>
+          <div class="metric-value">
+            {{ formatMs(analysis.metrics.avg_latency) }}
+            <i
+              v-if="hasIcmpLatencyIncomplete"
+              class="bi bi-info-circle text-info ms-1"
+              title="Latency estimated from MTR end-hop RTT (ICMP probe returned no data)"
+            ></i>
+          </div>
+          <div v-if="hasBidirectional" class="metric-value">
+            {{ formatMs(analysis.reverse!.metrics.avg_latency) }}
+            <i
+              v-if="analysis.reverse?.signals?.some(s => s.type === 'icmp_latency_incomplete')"
+              class="bi bi-info-circle text-info ms-1"
+              title="Latency estimated from MTR end-hop RTT (ICMP probe returned no data)"
+            ></i>
+          </div>
 
           <!-- P95 Latency -->
           <div class="metric-label">P95 Latency</div>

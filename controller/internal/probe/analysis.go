@@ -889,7 +889,6 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	// For non-AGENT probes (standalone MTR, etc.), if PING metrics are empty
 	// but MTR path analysis found data, derive metrics from MTR end-hop stats.
 	// This ensures standalone MTR probes get proper health scores.
-	// Prefer TrafficSim data if available (indicates ICMP is blocked in that direction).
 	var fallbackSignals []AnalysisSignal
 	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
 		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
@@ -902,9 +901,9 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		fallbackSignals = append(fallbackSignals, AnalysisSignal{
 			Type:       "icmp_latency_incomplete",
 			Severity:   "info",
-			Title:      "Latency from MTR End-Hop",
-			Evidence:   fmt.Sprintf("ICMP appears blocked; latency derived from MTR end-hop (%.1fms). Consider enabling TrafficSim for accurate measurement.", pathAnalysis.AvgEndHopLatency),
-			Confidence: 0.70,
+			Title:      "Latency Estimated from MTR",
+			Evidence:   "ICMP probe returned no data; latency derived from MTR end-hop RTT",
+			Confidence: 0.7,
 		})
 	}
 
