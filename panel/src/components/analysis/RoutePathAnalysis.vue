@@ -86,6 +86,21 @@ function getHopDisplay(route: any, idx: number): { ip: string; label: string; is
   }
 }
 
+// Look up intermediate hop metrics by IP
+function getHopMetrics(route: any, ip: string): { latency: number; loss: number } | null {
+  if (!route.intermediate_hops) return null
+  const m = route.intermediate_hops.find((h: any) => h.ip === ip)
+  if (!m) return null
+  return { latency: m.latency, loss: m.loss }
+}
+
+// Determine health class based on latency and loss thresholds
+function hopHealthClass(latency: number, loss: number): string {
+  if (latency > 150 || loss > 3) return 'poor'
+  if (latency >= 50 || loss > 0) return 'degraded'
+  return 'healthy'
+}
+
 const routeChangeCount = computed(() =>
   analysis.value?.incidents?.filter(i => i.type === 'route_change').length || 0
 )
@@ -221,6 +236,14 @@ onUnmounted(() => {
                 {{ name }}
               </span>
             </div>
+            <div v-if="hop.avg_latency != null || hop.avg_loss != null" class="hop-metrics-row">
+              <span v-if="hop.avg_latency != null" class="hop-metric" :class="hopHealthClass(hop.avg_latency, hop.avg_loss || 0)">
+                {{ hop.avg_latency.toFixed(0) }}ms
+              </span>
+              <span v-if="hop.avg_loss != null && hop.avg_loss > 0" class="hop-metric" :class="hopHealthClass(hop.avg_latency || 0, hop.avg_loss)">
+                {{ hop.avg_loss.toFixed(1) }}%
+              </span>
+            </div>
             <div class="hop-count">
               <span class="count-badge">{{ hop.hop_count }} agent{{ hop.hop_count !== 1 ? 's' : '' }}</span>
             </div>
@@ -309,6 +332,14 @@ onUnmounted(() => {
                       >
                         <i class="bi bi-share"></i> {{ sharedHopAgents[getHopDisplay(route, idx).ip].length }}
                       </span>
+                      <div v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)" class="hop-node-metrics">
+                        <span class="hop-node-metric" :class="hopHealthClass(getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency, getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss)">
+                          {{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency.toFixed(0) }}ms
+                        </span>
+                        <span v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss > 0" class="hop-node-metric" :class="hopHealthClass(getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency, getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss)">
+                          {{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss.toFixed(1) }}%
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div class="hop-wrapper">
@@ -794,6 +825,64 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+
+.hop-node-metrics {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.hop-node-metric {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.hop-node-metric.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.hop-node-metric.degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.hop-node-metric.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.hop-metrics-row {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.hop-metric {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.hop-metric.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.hop-metric.degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.hop-metric.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 
 .shared-badge {
