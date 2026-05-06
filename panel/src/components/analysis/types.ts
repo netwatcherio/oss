@@ -145,6 +145,9 @@ export interface HopDetail {
     agent_id?: number
     agent_name?: string
     is_final_hop: boolean
+    latency?: number
+    loss?: number
+    is_rate_limited?: boolean
 }
 
 export interface HopMetric {
