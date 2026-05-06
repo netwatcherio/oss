@@ -2922,7 +2922,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 			}
 
 			// Index hops for shared-hop computation
-			for _, ip := range pri.LatestHops {
+			for _, ip := range pri.LatestHops[:len(pri.LatestHops)-1] {
 				if ip == "" || ip == "*" {
 					continue
 				}
