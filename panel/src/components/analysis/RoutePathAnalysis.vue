@@ -69,6 +69,23 @@ const sharedHopAgents = computed(() => {
   return map
 })
 
+// Get display info for a hop - uses detail if available, otherwise falls back to IP
+function getHopDisplay(route: any, idx: number): { ip: string; label: string; isAgent: boolean } {
+  if (route.latest_hops_detail && route.latest_hops_detail[idx]) {
+    const detail = route.latest_hops_detail[idx]
+    return {
+      ip: detail.ip,
+      label: detail.hostname || detail.ip,
+      isAgent: detail.is_agent
+    }
+  }
+  return {
+    ip: route.latest_hops[idx],
+    label: route.latest_hops[idx],
+    isAgent: false
+  }
+}
+
 const routeChangeCount = computed(() =>
   analysis.value?.incidents?.filter(i => i.type === 'route_change').length || 0
 )
@@ -284,13 +301,13 @@ onUnmounted(() => {
                     <div class="hop-arrow">
                       <i class="bi bi-arrow-right"></i>
                     </div>
-                    <div class="hop-node" :class="{ shared: sharedHopAgents[hop] }">
-                      <i class="bi bi-router"></i>
-                      <span class="hop-label" :title="hop">{{ hop }}</span>
-                      <span v-if="sharedHopAgents[hop]" class="shared-badge"
-                        :title="`Shared with: ${sharedHopAgents[hop].join(', ')}`"
+                    <div class="hop-node" :class="{ shared: sharedHopAgents[getHopDisplay(route, idx).ip], 'agent-hop': getHopDisplay(route, idx).isAgent }">
+                      <i :class="getHopDisplay(route, idx).isAgent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
+                      <span class="hop-label" :title="getHopDisplay(route, idx).ip">{{ getHopDisplay(route, idx).label }}</span>
+                      <span v-if="sharedHopAgents[getHopDisplay(route, idx).ip]" class="shared-badge"
+                        :title="`Shared with: ${sharedHopAgents[getHopDisplay(route, idx).ip].join(', ')}`"
                       >
-                        <i class="bi bi-share"></i> {{ sharedHopAgents[hop].length }}
+                        <i class="bi bi-share"></i> {{ sharedHopAgents[getHopDisplay(route, idx).ip].length }}
                       </span>
                     </div>
                   </div>

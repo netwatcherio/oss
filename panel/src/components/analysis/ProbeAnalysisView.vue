@@ -223,6 +223,33 @@ watch(() => props.probeId, fetchAnalysis)
               <div class="stat-label">ICMP Limited</div>
             </div>
           </div>
+          <!-- Hop Chain with friendly names -->
+          <div v-if="analysis.path_analysis.latest_hops_detail?.length" class="hop-chain mt-3">
+            <div class="hops-chain">
+              <div class="hop-node source">
+                <i class="bi bi-pc-display"></i>
+                <span class="hop-label">{{ analysis.agent_name || 'Source' }}</span>
+              </div>
+              <div v-for="(hop, idx) in analysis.path_analysis.latest_hops_detail" :key="idx" class="hop-wrapper">
+                <div class="hop-arrow">
+                  <i class="bi bi-arrow-right"></i>
+                </div>
+                <div class="hop-node" :class="{ 'agent-hop': hop.is_agent }">
+                  <i :class="hop.is_agent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
+                  <span class="hop-label" :title="hop.ip">{{ hop.hostname || hop.ip }}</span>
+                </div>
+              </div>
+              <div class="hop-wrapper">
+                <div class="hop-arrow">
+                  <i class="bi bi-arrow-right"></i>
+                </div>
+                <div class="hop-node dest">
+                  <i class="bi bi-bullseye"></i>
+                  <span class="hop-label">{{ analysis.target || 'Target' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
