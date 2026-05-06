@@ -2640,6 +2640,23 @@ type ProbeRouteInfo struct {
 	RouteStabilityPct  float64     `json:"route_stability_pct,omitempty"`
 	AvgEndHopLatency   float64     `json:"avg_end_hop_latency,omitempty"`
 	AvgEndHopLoss      float64     `json:"avg_end_hop_loss,omitempty"`
+	IntermediateHops   []HopMetric `json:"intermediate_hops,omitempty"` // Hop metrics excluding the final hop
+}
+
+// HopMetric holds metrics for a single intermediate hop (not the final destination)
+type HopMetric struct {
+	IP       string  `json:"ip"`
+	Loss     float64 `json:"loss"`
+	Latency  float64 `json:"latency"`
+	HopIndex int     `json:"hop_index"`
+}
+
+// HopMetrics holds aggregated metrics for a hop across all agents that traverse it
+type HopMetrics struct {
+	TotalLoss    float64
+	TotalLatency float64
+	Count        int
+	HasIssues    bool
 }
 
 // AgentRouteInfo holds route/path data for a single agent.
@@ -2660,6 +2677,9 @@ type SharedHopInfo struct {
 	AgentIDs    []uint   `json:"agent_ids"`
 	AgentNames  []string `json:"agent_names"`
 	HopCount    int      `json:"hop_count"`
+	HasIssues   bool     `json:"has_issues"` // True if any intermediate hop in the shared path has loss or high latency
+	AvgLoss     float64  `json:"avg_loss,omitempty"`
+	AvgLatency  float64  `json:"avg_latency,omitempty"`
 }
 
 // RouteIncident is a lightweight incident specifically for route/path issues.
@@ -2744,7 +2764,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 
 	// 4. Get MTR probes per agent from Postgres
 	agentRoutes := make([]AgentRouteInfo, 0, len(agents))
-	hopIndex := make(map[string]map[uint]bool) // hopIP -> set of agent IDs
+	hopIndex := make(map[string]map[uint]HopMetrics) // hopIP -> agentID -> metrics
 	routeIncidents := make([]RouteIncident, 0)
 	totalRoutes := 0
 
@@ -2870,6 +2890,22 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 						pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
 						pri.AvgEndHopLoss = parseLossPct(lastHop.LossPct)
 					}
+					// Intermediate hop metrics (all hops except the last/end hop)
+					hopCount := len(latestPayload.Report.Hops)
+					if hopCount > 1 {
+						for i := 0; i < hopCount-1; i++ {
+							hop := latestPayload.Report.Hops[i]
+							if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
+								continue
+							}
+							pri.IntermediateHops = append(pri.IntermediateHops, HopMetric{
+								IP:       hop.Hosts[0].IP,
+								Loss:     parseLossPct(hop.LossPct),
+								Latency:  parseLatency(hop.Avg),
+								HopIndex: i,
+							})
+						}
+					}
 				}
 			}
 
@@ -2879,9 +2915,20 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 					continue
 				}
 				if hopIndex[ip] == nil {
-					hopIndex[ip] = make(map[uint]bool)
+					hopIndex[ip] = make(map[uint]HopMetrics)
 				}
-				hopIndex[ip][a.ID] = true
+				metrics := HopMetrics{Count: 1}
+				for _, ih := range pri.IntermediateHops {
+					if ih.IP == ip {
+						metrics.TotalLoss += ih.Loss
+						metrics.TotalLatency += ih.Latency
+						if ih.Loss > 0 || ih.Latency > 100 {
+							metrics.HasIssues = true
+						}
+						break
+					}
+				}
+				hopIndex[ip][a.ID] = metrics
 			}
 
 			ari.Routes = append(ari.Routes, pri)
@@ -2912,13 +2959,13 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 
 	// 5. Build shared hops list
 	sharedHops := make([]SharedHopInfo, 0)
-	for hopIP, agentSet := range hopIndex {
-		if len(agentSet) < 2 {
+	for hopIP, agentMetricsMap := range hopIndex {
+		if len(agentMetricsMap) < 2 {
 			continue
 		}
 		sh := SharedHopInfo{
 			HopIP:    hopIP,
-			HopCount: len(agentSet),
+			HopCount: len(agentMetricsMap),
 		}
 		// Check if this shared hop IP matches any agent
 		if aid, ok := agentIPToID[hopIP]; ok {
@@ -2926,11 +2973,25 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 				sh.HopHostname = a.Name
 			}
 		}
-		for aid := range agentSet {
+		var totalLoss, totalLatency float64
+		var metricsCount int
+		for aid, metrics := range agentMetricsMap {
 			sh.AgentIDs = append(sh.AgentIDs, aid)
 			if a, ok := agentByID[aid]; ok {
 				sh.AgentNames = append(sh.AgentNames, a.Name)
 			}
+			if metrics.Count > 0 {
+				totalLoss += metrics.TotalLoss
+				totalLatency += metrics.TotalLatency
+				metricsCount += metrics.Count
+			}
+			if metrics.HasIssues {
+				sh.HasIssues = true
+			}
+		}
+		if metricsCount > 0 {
+			sh.AvgLoss = totalLoss / float64(metricsCount)
+			sh.AvgLatency = totalLatency / float64(metricsCount)
 		}
 		sharedHops = append(sharedHops, sh)
 	}
