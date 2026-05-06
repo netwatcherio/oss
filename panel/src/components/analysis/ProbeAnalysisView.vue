@@ -46,6 +46,18 @@ function formatMos(mos: number) {
   return mos > 0 ? mos.toFixed(2) : '—'
 }
 
+function hopLatencyClass(latency: number) {
+  if (latency > 150) return 'critical'
+  if (latency > 80) return 'warning'
+  return 'good'
+}
+
+function hopLossClass(loss: number) {
+  if (loss > 5) return 'critical'
+  if (loss > 1) return 'warning'
+  return 'good'
+}
+
 const hasBidirectional = computed(() => !!analysis.value?.reverse)
 
 const hasIcmpLatencyIncomplete = computed(() =>
@@ -252,9 +264,13 @@ watch(() => props.probeId, fetchAnalysis)
                 <div class="hop-arrow">
                   <i class="bi bi-arrow-right"></i>
                 </div>
-                <div class="hop-node" :class="{ 'agent-hop': hop.is_agent }">
+                <div class="hop-node" :class="{ 'agent-hop': hop.is_agent, 'rate-limited': hop.is_rate_limited }">
                   <i :class="hop.is_agent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
                   <span class="hop-label" :title="hop.ip">{{ hop.hostname || hop.ip }}</span>
+                  <div v-if="hop.latency != null || hop.loss != null" class="hop-metrics">
+                    <span v-if="hop.latency != null" class="hop-badge latency" :class="hopLatencyClass(hop.latency)">{{ formatMs(hop.latency) }}</span>
+                    <span v-if="hop.loss != null" class="hop-badge loss" :class="hopLossClass(hop.loss)">{{ formatPct(hop.loss) }}</span>
+                  </div>
                 </div>
               </div>
               <div class="hop-wrapper">
@@ -651,5 +667,119 @@ watch(() => props.probeId, fetchAnalysis)
 }
 [data-theme="light"] .analysis-tabs {
   border-bottom-color: #e5e7eb;
+}
+
+/* Hop Chain */
+.hops-chain {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: max-content;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.hop-wrapper {
+  display: flex;
+  align-items: center;
+}
+.hop-arrow {
+  padding: 0 6px;
+  color: var(--bs-secondary-color);
+  font-size: 12px;
+}
+.hop-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  min-width: 80px;
+  max-width: 140px;
+  position: relative;
+}
+.hop-node.source,
+.hop-node.dest {
+  background: rgba(var(--bs-primary-rgb), 0.1);
+  border-color: rgba(var(--bs-primary-rgb), 0.3);
+}
+.hop-node i {
+  font-size: 16px;
+  color: var(--bs-secondary-color);
+}
+.hop-node.source i,
+.hop-node.dest i {
+  color: var(--bs-primary);
+}
+.hop-label {
+  font-size: 10px;
+  color: var(--bs-body-color);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.hop-metrics {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.hop-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.hop-badge.latency.good {
+  background: rgba(var(--bs-success-rgb), 0.15);
+  color: var(--bs-success);
+}
+.hop-badge.latency.warning {
+  background: rgba(var(--bs-warning-rgb), 0.2);
+  color: var(--bs-warning-text-emphasis, var(--bs-warning));
+}
+.hop-badge.latency.critical {
+  background: rgba(var(--bs-danger-rgb), 0.15);
+  color: var(--bs-danger);
+}
+.hop-badge.loss.good {
+  background: rgba(var(--bs-success-rgb), 0.15);
+  color: var(--bs-success);
+}
+.hop-badge.loss.warning {
+  background: rgba(var(--bs-warning-rgb), 0.2);
+  color: var(--bs-warning-text-emphasis, var(--bs-warning));
+}
+.hop-badge.loss.critical {
+  background: rgba(var(--bs-danger-rgb), 0.15);
+  color: var(--bs-danger);
+}
+.hop-node.rate-limited {
+  border-style: dashed;
+  border-color: var(--bs-info);
+}
+.hop-node.rate-limited::after {
+  content: 'ICMP';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 8px;
+  background: var(--bs-info);
+  color: white;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+[data-theme="dark"] .hop-node {
+  background: var(--bs-tertiary-bg);
+}
+[data-theme="dark"] .hop-node.source,
+[data-theme="dark"] .hop-node.dest {
+  background: rgba(var(--bs-primary-rgb), 0.15);
 }
 </style>

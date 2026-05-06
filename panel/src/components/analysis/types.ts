@@ -145,6 +145,16 @@ export interface HopDetail {
     agent_id?: number
     agent_name?: string
     is_final_hop: boolean
+    latency?: number
+    loss?: number
+    is_rate_limited?: boolean
+}
+
+export interface HopMetric {
+    ip: string
+    loss: number
+    latency: number
+    hop_index: number
 }
 
 export interface ProbeRouteInfo {
@@ -161,6 +171,7 @@ export interface ProbeRouteInfo {
     route_stability_pct?: number
     avg_end_hop_latency?: number
     avg_end_hop_loss?: number
+    intermediate_hops?: HopMetric[]
 }
 
 export interface AgentRouteInfo {
@@ -179,6 +190,9 @@ export interface SharedHopInfo {
     agent_ids: number[]
     agent_names: string[]
     hop_count: number
+    has_issues?: boolean
+    avg_loss?: number
+    avg_latency?: number
 }
 
 export interface RouteIncident {
