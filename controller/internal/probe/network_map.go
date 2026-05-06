@@ -150,6 +150,7 @@ type NetworkMapData struct {
 type agentInfo struct {
 	ID               uint
 	Name             string
+	Description      string
 	PublicIPOverride string `gorm:"column:public_ip_override"`
 	Location         string
 	UpdatedAt        time.Time
@@ -216,7 +217,7 @@ func getWorkspaceAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]a
 	var agents []agentInfo
 	err := pg.WithContext(ctx).
 		Table("agents").
-		Select("id, name, public_ip_override, location, updated_at").
+		Select("id, name, description, public_ip_override, location, updated_at").
 		Where("workspace_id = ?", workspaceID).
 		Scan(&agents).Error
 	if err != nil {
@@ -1000,9 +1001,32 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 				hopStatus = "unknown"
 			}
 
+			// Determine label and hostname for this hop
+			// If this hop IP matches the target agent's IP, prefer the agent's name/description
+			hopLabel := hop.IP
+			hopHostname := hop.Hostname
+			if isAgentTarget && targetAgentID > 0 {
+				if targetAgent, ok := agentByID[targetAgentID]; ok {
+					targetIP := targetAgent.PublicIPOverride
+					if targetIP == "" {
+						targetIP = trace.Target
+					}
+					// If this hop is the final hop and matches target agent's IP, use agent identity
+					if i == len(trace.Hops)-1 && hop.IP == targetIP {
+						// Use agent name as label, prefer description if available
+						if targetAgent.Description != "" {
+							hopLabel = fmt.Sprintf("%s (%s)", targetAgent.Name, targetAgent.Description)
+						} else {
+							hopLabel = targetAgent.Name
+						}
+						hopHostname = targetAgent.Name
+					}
+				}
+			}
+
 			// Create or update hop node
 			if _, exists := nodeMap[hopNodeID]; !exists {
-				label := hop.IP
+				label := hopLabel
 				if isUnknown {
 					label = "?"
 				}
@@ -1011,7 +1035,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					Type:         "hop",
 					Label:        label,
 					IP:           hop.IP,
-					Hostname:     hop.Hostname,
+					Hostname:     hopHostname,
 					HopNumber:    0, // Don't track hop number since it varies by source
 					AvgLatency:   hop.AvgLatency,
 					PacketLoss:   hop.PacketLoss,

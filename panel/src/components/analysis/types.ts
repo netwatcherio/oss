@@ -43,8 +43,11 @@ export interface MtrPathAnalysis {
     route_stability_pct: number
     avg_end_hop_latency: number
     avg_end_hop_loss: number
-    rate_limited_hops: number[]
-    timeout_segments: string[]
+    avg_end_hop_jitter?: number
+    rate_limited_hops?: number[]
+    timeout_segments?: string[]
+    trace_count?: number
+    latest_hops_detail?: HopDetail[]
 }
 
 export interface ProbeAnalysis {
@@ -135,6 +138,15 @@ export const severityIcons: Record<string, string> = {
 
 // ── Route / Path Analysis Types ──
 
+export interface HopDetail {
+    ip: string
+    hostname?: string
+    is_agent: boolean
+    agent_id?: number
+    agent_name?: string
+    is_final_hop: boolean
+}
+
 export interface ProbeRouteInfo {
     probe_id: number
     target: string
@@ -143,6 +155,7 @@ export interface ProbeRouteInfo {
     baseline_route_path?: string
     latest_signature?: string
     latest_hops?: string[]
+    latest_hops_detail?: HopDetail[]
     has_route_change: boolean
     trace_count?: number
     route_stability_pct?: number
@@ -162,6 +175,7 @@ export interface AgentRouteInfo {
 
 export interface SharedHopInfo {
     hop_ip: string
+    hop_hostname?: string
     agent_ids: number[]
     agent_names: string[]
     hop_count: number

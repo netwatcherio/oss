@@ -115,15 +115,16 @@ type AnalysisFinding struct {
 
 // MtrPathAnalysis contains route-level diagnostic data from MTR traces
 type MtrPathAnalysis struct {
-	HopCount          int      `json:"hop_count"`
-	UniqueRoutes      int      `json:"unique_routes"`
-	RouteStabilityPct float64  `json:"route_stability_pct"`
-	AvgEndHopLatency  float64  `json:"avg_end_hop_latency"`
-	AvgEndHopLoss     float64  `json:"avg_end_hop_loss"`
-	AvgEndHopJitter   float64  `json:"avg_end_hop_jitter"` // stddev from end hop
-	TraceCount        int      `json:"trace_count"`        // number of MTR traces analysed
-	RateLimitedHops   []int    `json:"rate_limited_hops"`
-	TimeoutSegments   []string `json:"timeout_segments"`
+	HopCount          int         `json:"hop_count"`
+	UniqueRoutes      int         `json:"unique_routes"`
+	RouteStabilityPct float64    `json:"route_stability_pct"`
+	AvgEndHopLatency  float64     `json:"avg_end_hop_latency"`
+	AvgEndHopLoss     float64     `json:"avg_end_hop_loss"`
+	AvgEndHopJitter   float64     `json:"avg_end_hop_jitter"` // stddev from end hop
+	TraceCount        int         `json:"trace_count"`        // number of MTR traces analysed
+	RateLimitedHops   []int       `json:"rate_limited_hops"`
+	TimeoutSegments   []string    `json:"timeout_segments"`
+	LatestHopsDetail  []HopDetail `json:"latest_hops_detail,omitempty"` // Enriched hop info with agent names
 }
 
 // ── Probe-level Analysis ──
@@ -496,7 +497,7 @@ LIMIT 2000
 }
 
 // analyzeMtrForProbe fetches MTR traces and produces path analysis + signals
-func analyzeMtrForProbe(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*MtrPathAnalysis, []AnalysisSignal, error) {
+func analyzeMtrForProbe(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time, agentIPToID map[string]uint, agentByID map[uint]agentInfo) (*MtrPathAnalysis, []AnalysisSignal, error) {
 	if len(agentIDs) == 0 {
 		return nil, nil, nil
 	}
@@ -537,6 +538,7 @@ LIMIT 100
 	var rateLimitedHops []int
 	var timeoutSegments []string
 	var maxHops int
+	var firstPayload *mtrPayload // For building hop details
 
 	for rows.Next() {
 		var payloadRaw string
@@ -551,6 +553,11 @@ LIMIT 100
 
 		if len(payload.Report.Hops) == 0 {
 			continue
+		}
+
+		// Capture first valid payload for hop details
+		if firstPayload == nil {
+			firstPayload = &payload
 		}
 
 		totalTraces++
@@ -637,6 +644,11 @@ LIMIT 100
 		TraceCount:        totalTraces,
 		RateLimitedHops:   rateLimitedHops,
 		TimeoutSegments:   timeoutSegments,
+	}
+
+	// Build enriched hop details with agent names
+	if firstPayload != nil {
+		analysis.LatestHopsDetail = buildHopDetailsForMtrPayload(firstPayload, agentIPToID, agentByID)
 	}
 
 	// Generate signals
@@ -764,9 +776,13 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	}
 	agentIDs := make([]uint, len(agents))
 	agentByID := make(map[uint]agentInfo)
+	agentIPToID := make(map[string]uint)
 	for i, a := range agents {
 		agentIDs[i] = a.ID
 		agentByID[a.ID] = a
+		if a.PublicIPOverride != "" {
+			agentIPToID[a.PublicIPOverride] = a.ID
+		}
 	}
 
 	// Get probe info
@@ -823,7 +839,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		probeID, p.Type, metrics.SampleCount, pingProbeID, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
 
 	// Fetch MTR path analysis (from this probe or its MTR sibling)
-	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, mtrProbeID, from)
+	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, agentIDs, mtrProbeID, from, agentIPToID, agentByID)
 	if err != nil {
 		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", mtrProbeID, err)
 	}
@@ -939,7 +955,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 				if rp.AgentID == targetAgentID {
 					// Found the reverse probe — compute its analysis
 					revMetrics, _ := probeAnalysisMetrics(ctx, ch, agentIDs, rp.ID, from)
-					revPath, revSignals, _ := analyzeMtrForProbe(ctx, ch, agentIDs, rp.ID, from)
+					revPath, revSignals, _ := analyzeMtrForProbe(ctx, ch, agentIDs, rp.ID, from, agentIPToID, agentByID)
 					revRouteStab := 100.0
 					if revPath != nil {
 						revRouteStab = revPath.RouteStabilityPct
@@ -2537,20 +2553,94 @@ type routeBaseline struct {
 
 func (routeBaseline) TableName() string { return "route_baselines" }
 
+// HopDetail holds enriched hop information for route analysis display
+type HopDetail struct {
+	IP         string `json:"ip"`
+	Hostname   string `json:"hostname,omitempty"`
+	IsAgent    bool   `json:"is_agent"`
+	AgentID    uint   `json:"agent_id,omitempty"`
+	AgentName  string `json:"agent_name,omitempty"`
+	IsFinalHop bool   `json:"is_final_hop"`
+}
+
+// buildHopDetails creates enriched hop details from raw MTR hops, matching IPs to agents (uses MtrPayload from clickhouse.go)
+func buildHopDetails(mtrPayload *MtrPayload, agentIPToID map[string]uint, agentByID map[uint]agentInfo) []HopDetail {
+	var details []HopDetail
+	hopCount := len(mtrPayload.Report.Hops)
+	for i, hop := range mtrPayload.Report.Hops {
+		if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
+			continue
+		}
+		hd := HopDetail{
+			IP: hop.Hosts[0].IP,
+		}
+		// Check if this hop IP matches any agent's PublicIPOverride
+		if agentID, ok := agentIPToID[hop.Hosts[0].IP]; ok {
+			hd.IsAgent = true
+			hd.AgentID = agentID
+			if a, ok := agentByID[agentID]; ok {
+				hd.AgentName = a.Name
+				// For final hop, also use description if available
+				if i == hopCount-1 && a.Description != "" {
+					hd.Hostname = fmt.Sprintf("%s (%s)", a.Name, a.Description)
+				} else {
+					hd.Hostname = a.Name
+				}
+			}
+		}
+		hd.IsFinalHop = i == hopCount-1
+		details = append(details, hd)
+	}
+	return details
+}
+
+// buildHopDetailsForMtrPayload creates enriched hop details from agent MTR payload (uses mtrPayload from mtr.go)
+func buildHopDetailsForMtrPayload(mtrPayload *mtrPayload, agentIPToID map[string]uint, agentByID map[uint]agentInfo) []HopDetail {
+	var details []HopDetail
+	hopCount := len(mtrPayload.Report.Hops)
+	for i, hop := range mtrPayload.Report.Hops {
+		if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
+			continue
+		}
+		hd := HopDetail{
+			IP:       hop.Hosts[0].IP,
+			Hostname: hop.Hosts[0].Hostname,
+		}
+		// Check if this hop IP matches any agent's PublicIPOverride
+		if agentID, ok := agentIPToID[hop.Hosts[0].IP]; ok {
+			hd.IsAgent = true
+			hd.AgentID = agentID
+			if a, ok := agentByID[agentID]; ok {
+				hd.AgentName = a.Name
+				// For final hop, also use description if available
+				if i == hopCount-1 && a.Description != "" {
+					hd.Hostname = fmt.Sprintf("%s (%s)", a.Name, a.Description)
+				} else {
+					hd.Hostname = a.Name
+				}
+			}
+		}
+		hd.IsFinalHop = i == hopCount-1
+		details = append(details, hd)
+	}
+	return details
+}
+
 // ProbeRouteInfo holds route data for a single MTR probe.
 type ProbeRouteInfo struct {
-	ProbeID            uint     `json:"probe_id"`
-	Target             string   `json:"target"`
-	BaselineFingerprint string  `json:"baseline_fingerprint,omitempty"`
-	BaselineHopCount   int      `json:"baseline_hop_count,omitempty"`
-	BaselineRoutePath  string   `json:"baseline_route_path,omitempty"`
-	LatestSignature    string   `json:"latest_signature,omitempty"`
-	LatestHops         []string `json:"latest_hops,omitempty"`
-	HasRouteChange     bool     `json:"has_route_change"`
-	TraceCount         int      `json:"trace_count,omitempty"`
-	RouteStabilityPct  float64  `json:"route_stability_pct,omitempty"`
-	AvgEndHopLatency   float64  `json:"avg_end_hop_latency,omitempty"`
-	AvgEndHopLoss      float64  `json:"avg_end_hop_loss,omitempty"`
+	ProbeID            uint        `json:"probe_id"`
+	Target             string      `json:"target"`
+	BaselineFingerprint string     `json:"baseline_fingerprint,omitempty"`
+	BaselineHopCount   int         `json:"baseline_hop_count,omitempty"`
+	BaselineRoutePath  string      `json:"baseline_route_path,omitempty"`
+	LatestSignature    string      `json:"latest_signature,omitempty"`
+	LatestHops         []string     `json:"latest_hops,omitempty"`            // IPs only (for signature computation)
+	LatestHopsDetail   []HopDetail `json:"latest_hops_detail,omitempty"`    // Enriched with agent names
+	HasRouteChange     bool        `json:"has_route_change"`
+	TraceCount         int         `json:"trace_count,omitempty"`
+	RouteStabilityPct  float64     `json:"route_stability_pct,omitempty"`
+	AvgEndHopLatency   float64     `json:"avg_end_hop_latency,omitempty"`
+	AvgEndHopLoss      float64     `json:"avg_end_hop_loss,omitempty"`
 }
 
 // AgentRouteInfo holds route/path data for a single agent.
@@ -2567,6 +2657,7 @@ type AgentRouteInfo struct {
 // SharedHopInfo represents a hop that appears in multiple agent routes.
 type SharedHopInfo struct {
 	HopIP       string   `json:"hop_ip"`
+	HopHostname string   `json:"hop_hostname,omitempty"` // Agent name if this hop is an agent
 	AgentIDs    []uint   `json:"agent_ids"`
 	AgentNames  []string `json:"agent_names"`
 	HopCount    int      `json:"hop_count"`
@@ -2618,9 +2709,13 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 
 	agentIDs := make([]uint, len(agents))
 	agentByID := make(map[uint]agentInfo)
+	agentIPToID := make(map[string]uint) // IP -> AgentID for hop matching
 	for i, a := range agents {
 		agentIDs[i] = a.ID
 		agentByID[a.ID] = a
+		if a.PublicIPOverride != "" {
+			agentIPToID[a.PublicIPOverride] = a.ID
+		}
 	}
 
 	// Look back 24 hours for MTR data and 1 hour for net-info changes
@@ -2752,6 +2847,8 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 								pri.LatestHops = append(pri.LatestHops, hop.Hosts[0].IP)
 							}
 						}
+						// Build enriched hop details with agent name matching
+						pri.LatestHopsDetail = buildHopDetails(latestPayload, agentIPToID, agentByID)
 					}
 				}
 				if latestPayload != nil {
@@ -2823,6 +2920,12 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		sh := SharedHopInfo{
 			HopIP:    hopIP,
 			HopCount: len(agentSet),
+		}
+		// Check if this shared hop IP matches any agent
+		if aid, ok := agentIPToID[hopIP]; ok {
+			if a, ok := agentByID[aid]; ok {
+				sh.HopHostname = a.Name
+			}
 		}
 		for aid := range agentSet {
 			sh.AgentIDs = append(sh.AgentIDs, aid)
