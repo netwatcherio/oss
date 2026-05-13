@@ -1000,7 +1000,6 @@ watch(
                             :dark="isDark"
                             :enable-time-picker="true"
                             :multi-calendars="true"
-                            :auto-apply="true"
                             :preset-dates="[
                                 { label: 'Last Hour', value: [new Date(Date.now() - 60*60*1000), new Date()] },
                                 { label: 'Last 3 Hours', value: [new Date(Date.now() - 3*60*60*1000), new Date()] },
