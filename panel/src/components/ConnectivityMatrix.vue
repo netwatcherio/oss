@@ -589,7 +589,7 @@ onUnmounted(() => {
       </div>
       <div class="legend-item">
         <span class="legend-bubble status-blocked"></span>
-        <span>ICMP Blocked</span>
+        <span>Blocked (ICMP firewall suspected)</span>
       </div>
       <div class="legend-item">
         <i class="bi bi-arrow-left-right legend-icon"></i>

@@ -88,7 +88,7 @@ function getProbeAbbrev(type: string): string {
 }
 
 .bubble-blocked {
-  background: linear-gradient(135deg, #6b7280, #4b5563);
+  background: linear-gradient(135deg, #9ca3af, #6b7280);
 }
 
 .matrix-cell-empty {
