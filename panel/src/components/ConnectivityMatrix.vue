@@ -12,6 +12,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const matrixData = ref<ConnectivityMatrix | null>(null)
 const selectedLookback = ref(15)
+const hideOfflineAgents = ref(false)
 const selectedCell = ref<{ entry: ConnectivityMatrixEntry; rect: DOMRect } | null>(null)
 const selectedTarget = ref<{ target: TargetLabel; rect: DOMRect } | null>(null)
 let refreshInterval: ReturnType<typeof setInterval> | null = null
@@ -258,6 +259,35 @@ const sortedTargets = computed(() => {
   })
 })
 
+// Set of offline agent IDs for quick lookup
+const offlineAgentIds = computed(() => {
+  if (!matrixData.value) return new Set<number>()
+  const ids = new Set<number>()
+  for (const agent of matrixData.value.source_agents) {
+    if (!agent.is_online) ids.add(agent.id)
+  }
+  return ids
+})
+
+// Filtered source agents based on hideOfflineAgents toggle
+const filteredSourceAgents = computed(() => {
+  if (!matrixData.value) return []
+  if (!hideOfflineAgents.value) return matrixData.value.source_agents
+  return matrixData.value.source_agents.filter(a => a.is_online)
+})
+
+// Filtered target labels based on hideOfflineAgents toggle
+const filteredTargetLabels = computed(() => {
+  if (!matrixData.value) return []
+  if (!hideOfflineAgents.value) return sortedTargets.value
+  return sortedTargets.value.filter(target => {
+    if (target.type !== 'agent') return true
+    const agentId = getAgentIdFromTarget(target)
+    if (agentId === null) return true
+    return !offlineAgentIds.value.has(agentId)
+  })
+})
+
 onMounted(() => {
   fetchMatrix()
   // Auto-refresh every 30 seconds
@@ -277,6 +307,14 @@ onUnmounted(() => {
         Connectivity Matrix
       </h3>
       <div class="controls">
+        <label class="filter-toggle">
+          <input 
+            type="checkbox" 
+            v-model="hideOfflineAgents" 
+            class="filter-checkbox"
+          />
+          <span>Hide offline</span>
+        </label>
         <button @click="fetchMatrix" class="control-btn" :disabled="loading">
           <i class="bi bi-arrow-clockwise" :class="{ 'spin': loading }"></i>
           Refresh
@@ -303,6 +341,13 @@ onUnmounted(() => {
       <button @click="fetchMatrix" class="btn btn-outline-primary">Retry</button>
     </div>
 
+    <!-- Filtered Empty State -->
+    <div v-else-if="matrixData && filteredSourceAgents.length === 0" class="empty-state">
+      <i class="bi bi-grid-3x3"></i>
+      <h5>No Online Agents</h5>
+      <p>All agents are currently offline. Disable "Hide offline" to see all agents.</p>
+    </div>
+
     <!-- Empty State -->
     <div v-else-if="!matrixData || matrixData.entries.length === 0" class="empty-state">
       <i class="bi bi-grid-3x3"></i>
@@ -312,13 +357,13 @@ onUnmounted(() => {
 
     <!-- Matrix Grid -->
     <div v-else class="matrix-wrapper">
-      <div class="matrix-grid" :style="{ '--num-cols': sortedTargets.length + 1 }">
+      <div class="matrix-grid" :style="{ '--num-cols': filteredTargetLabels.length + 1 }">
         <!-- Header Row: Empty corner + Target headers -->
         <div class="matrix-corner">
           <span class="corner-label">Source → Target</span>
         </div>
         <div 
-          v-for="target in sortedTargets" 
+          v-for="target in filteredTargetLabels" 
           :key="target.id" 
           class="matrix-header-cell"
           :class="{ 'agent-target': target.type === 'agent', 'selected': selectedTarget?.target.id === target.id }"
@@ -333,7 +378,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Data Rows: Source agent + cells -->
-        <template v-for="source in matrixData.source_agents" :key="source.id">
+        <template v-for="source in filteredSourceAgents" :key="source.id">
           <div 
             class="matrix-row-header" 
             :class="{ 'offline': !source.is_online, 'selected': selectedSource?.source.id === source.id }"
@@ -344,7 +389,7 @@ onUnmounted(() => {
             <span v-if="!source.is_online" class="offline-badge">offline</span>
           </div>
           <div 
-            v-for="target in sortedTargets" 
+            v-for="target in filteredTargetLabels" 
             :key="`${source.id}-${target.id}`"
             class="matrix-data-cell"
             :class="{ 
@@ -666,6 +711,34 @@ onUnmounted(() => {
   font-size: 0.875rem;
   color: var(--bs-body-color);
   min-height: 40px;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--bs-body-color);
+  cursor: pointer;
+  user-select: none;
+  padding: 0.5rem 0.75rem;
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+  transition: all 0.2s;
+  min-height: 40px;
+}
+
+.filter-toggle:hover {
+  background: var(--bs-secondary-bg);
+  border-color: var(--bs-primary);
+}
+
+.filter-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--bs-primary);
 }
 
 .spin {
@@ -1501,5 +1574,15 @@ onUnmounted(() => {
 [data-theme="dark"] .matrix-header-cell.selected,
 [data-theme="dark"] .matrix-row-header.selected {
   background: color-mix(in srgb, var(--bs-primary) 20%, var(--bs-body-bg)) !important;
+}
+
+[data-theme="dark"] .filter-toggle {
+  background: var(--bs-secondary-bg) !important;
+  border-color: var(--bs-border-color) !important;
+  color: var(--bs-body-color) !important;
+}
+
+[data-theme="dark"] .filter-toggle:hover {
+  background: var(--bs-tertiary-bg) !important;
 }
 </style>
