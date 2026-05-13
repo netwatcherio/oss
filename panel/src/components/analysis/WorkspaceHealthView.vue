@@ -161,6 +161,16 @@ onUnmounted(() => {
                 <li v-for="(r, i) in incident.recommendations" :key="i">{{ r }}</li>
               </ol>
             </div>
+
+            <div v-if="incident.matched_criteria || incident.lookback_minutes" class="detail-section">
+              <div class="detail-label">Analysis Context</div>
+              <div v-if="incident.matched_criteria" class="context-item">
+                <i class="bi bi-crosshair"></i> {{ incident.matched_criteria }}
+              </div>
+              <div v-if="incident.lookback_minutes" class="context-item">
+                <i class="bi bi-clock"></i> {{ incident.lookback_minutes }}min lookback window
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -474,6 +484,19 @@ onUnmounted(() => {
 
 .recommendations-list li { 
   padding: 2px 0; 
+}
+
+.context-item {
+  font-size: 12px;
+  color: var(--bs-secondary-color);
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-item i {
+  color: var(--bs-tertiary-color);
 }
 
 /* No Issues */

@@ -168,16 +168,18 @@ type AgentHealthSummary struct {
 
 // DetectedIncident is a correlated event detected across agents/probes
 type DetectedIncident struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Severity        string   `json:"severity"` // info, warning, critical
-	Scope           string   `json:"scope"`    // infrastructure, agent-specific, target-specific
-	SuggestedCause  string   `json:"suggested_cause"`
-	AffectedAgents  []string `json:"affected_agents"`
-	AffectedTargets []string `json:"affected_targets"`
-	Evidence        []string `json:"evidence"`
-	Recommendations []string `json:"recommendations"`
-	Confidence      float64  `json:"confidence"` // 0-1.0, based on proportion of agents affected
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Severity         string   `json:"severity"`          // info, warning, critical
+	Scope            string   `json:"scope"`             // infrastructure, agent-specific, target-specific
+	SuggestedCause   string   `json:"suggested_cause"`
+	AffectedAgents   []string `json:"affected_agents"`
+	AffectedTargets  []string `json:"affected_targets"`
+	Evidence         []string `json:"evidence"`
+	Recommendations  []string `json:"recommendations"`
+	Confidence       float64  `json:"confidence"`         // 0-1.0, based on proportion of agents affected
+	LookbackMinutes  int      `json:"lookback_minutes"`   // time window being analyzed
+	MatchedCriteria  string   `json:"matched_criteria"`   // what triggered the incident (e.g., "packet_loss > 1%")
 }
 
 // StatusSummary is a high-level "what's happening right now" overview
@@ -1231,7 +1233,8 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 	}
 
 	// ── Cross-Agent Correlation & Incident Detection ──
-	incidents := detectIncidents(agentSummaries, pingMetrics, mtrMetrics, trafficMetrics, agentByID)
+	agentIPToID := buildAgentIPToIDMap(agentSummaries, agentByID)
+	incidents := detectIncidents(agentSummaries, pingMetrics, mtrMetrics, trafficMetrics, agentByID, lookbackMinutes, agentIPToID)
 
 	// ── Temporal Change Detection ──
 	changeIncidents := detectTemporalChanges(pingMetrics, baselinePing, trafficMetrics, baselineTraffic, netInfoChanges, sysInfoMetrics, agentByID)
@@ -1452,6 +1455,8 @@ func detectIncidents(
 	mtrMetrics map[string]mtrStats,
 	trafficMetrics map[string]trafficStats,
 	agentByID map[uint]agentInfo,
+	lookbackMinutes int,
+	agentIPToID map[string]uint,
 ) []DetectedIncident {
 	var incidents []DetectedIncident
 
@@ -1540,15 +1545,17 @@ func detectIncidents(
 				probeTypeList = append(probeTypeList, pt)
 			}
 
-			cause := suggestCause(avgLat, avgLoss, len(uniqueAgents), len(agents))
+			cause := suggestCause(avgLat, avgLoss, len(uniqueAgents), len(agents), ti.probeTypes)
+			resolvedTarget := resolveTargetToName(stripPort(target), agentByID, agentIPToID)
+			matchedCriteria := fmt.Sprintf("packet_loss > 1%% OR latency > 100ms (avg_loss: %.1f%%, avg_lat: %.1fms)", avgLoss, avgLat)
 			incidents = append(incidents, DetectedIncident{
 				ID:              fmt.Sprintf("shared_target_%s", sanitizeKey(target)),
-				Title:           fmt.Sprintf("Shared degradation to %s", stripPort(target)),
+				Title:           fmt.Sprintf("Shared degradation to %s", resolvedTarget),
 				Severity:        severity,
 				Scope:           "infrastructure",
 				SuggestedCause:  cause,
 				AffectedAgents:  uniqueAgents,
-				AffectedTargets: []string{stripPort(target)},
+				AffectedTargets: []string{resolvedTarget},
 				Evidence: []string{
 					fmt.Sprintf("%d agents affected: %s", len(uniqueAgents), strings.Join(uniqueAgents, ", ")),
 					fmt.Sprintf("Avg latency: %.1fms, Avg loss: %.1f%%", avgLat, avgLoss),
@@ -1556,6 +1563,8 @@ func detectIncidents(
 				},
 				Recommendations: suggestRemediation(cause, severity),
 				Confidence:      confScale(len(uniqueAgents)),
+				LookbackMinutes: lookbackMinutes,
+				MatchedCriteria: matchedCriteria,
 			})
 		} else if len(uniqueAgents) == 1 && (avgLoss > 3 || avgLat > 200) {
 			// Only one agent sees degradation to this target → agent-specific or local ISP
@@ -1564,14 +1573,16 @@ func detectIncidents(
 				severity = "critical"
 			}
 
+			resolvedTarget := resolveTargetToName(stripPort(target), agentByID, agentIPToID)
+			matchedCriteria := fmt.Sprintf("packet_loss > 3%% OR latency > 200ms (avg_loss: %.1f%%, avg_lat: %.1fms)", avgLoss, avgLat)
 			incidents = append(incidents, DetectedIncident{
 				ID:              fmt.Sprintf("agent_target_%s_%s", sanitizeKey(uniqueAgents[0]), sanitizeKey(target)),
-				Title:           fmt.Sprintf("Degradation from %s to %s", uniqueAgents[0], stripPort(target)),
+				Title:           fmt.Sprintf("Degradation from %s to %s", uniqueAgents[0], resolvedTarget),
 				Severity:        severity,
 				Scope:           "agent-specific",
 				SuggestedCause:  fmt.Sprintf("Likely local to %s — possible local ISP issue, network congestion, or routing problem specific to this path", uniqueAgents[0]),
 				AffectedAgents:  uniqueAgents,
-				AffectedTargets: []string{stripPort(target)},
+				AffectedTargets: []string{resolvedTarget},
 				Evidence: []string{
 					fmt.Sprintf("Only %s sees this issue (other agents to the same target are unaffected)", uniqueAgents[0]),
 					fmt.Sprintf("Avg latency: %.1fms, Avg loss: %.1f%%", avgLat, avgLoss),
@@ -1581,7 +1592,9 @@ func detectIncidents(
 					"Review MTR traces for the specific degraded hops",
 					"Compare with other probe destinations from this agent",
 				},
-				Confidence: 0.4,
+				Confidence:      0.4,
+				LookbackMinutes: lookbackMinutes,
+				MatchedCriteria: matchedCriteria,
 			})
 		}
 	}
@@ -1663,13 +1676,20 @@ func detectIncidents(
 }
 
 // suggestCause generates a human-readable root cause hypothesis
-func suggestCause(avgLatency, avgLoss float64, affectedAgents, totalAgents int) string {
+func suggestCause(avgLatency, avgLoss float64, affectedAgents, totalAgents int, probeTypes map[string]bool) string {
 	parts := []string{}
 
 	if affectedAgents >= totalAgents && totalAgents > 1 {
 		parts = append(parts, "All agents are affected — likely an issue with the target destination or a shared upstream transit provider")
 	} else if affectedAgents > 1 {
 		parts = append(parts, fmt.Sprintf("%d of %d agents affected — possible shared peering point, transit provider, or regional network issue", affectedAgents, totalAgents))
+	}
+
+	// Detect ICMP rate limiting patterns (loss with low latency often indicates ICMP limiting)
+	if probeTypes["PING"] || probeTypes["MTR"] {
+		if avgLoss > 1 && avgLatency < 50 {
+			parts = append(parts, "ICMP rate limiting detected (ping/MTR loss with low latency) — firewall or ISP may be throttling ICMP")
+		}
 	}
 
 	if avgLoss > 10 {
@@ -1799,6 +1819,29 @@ func uniqueStrings(in []string) []string {
 		}
 	}
 	return out
+}
+
+// resolveTargetToName checks if the target IP matches any agent and returns the agent name
+func resolveTargetToName(target string, agentByID map[uint]agentInfo, agentIPToID map[string]uint) string {
+	if agentID, ok := agentIPToID[target]; ok {
+		if agent, ok := agentByID[agentID]; ok {
+			return agent.Name
+		}
+	}
+	return target
+}
+
+// buildAgentIPToIDMap builds a map from agent IP addresses to agent IDs
+func buildAgentIPToIDMap(agents []AgentHealthSummary, agentByID map[uint]agentInfo) map[string]uint {
+	agentIPToID := make(map[string]uint)
+	for _, agent := range agents {
+		if a, ok := agentByID[agent.AgentID]; ok {
+			if a.PublicIPOverride != "" {
+				agentIPToID[a.PublicIPOverride] = agent.AgentID
+			}
+		}
+	}
+	return agentIPToID
 }
 
 func sanitizeKey(s string) string {
