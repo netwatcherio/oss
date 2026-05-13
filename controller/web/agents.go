@@ -54,6 +54,8 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits
 			TrafficSimEnabled *bool          `json:"trafficsim_enabled"`
 			TrafficSimHost    string         `json:"trafficsim_host"`
 			TrafficSimPort    int            `json:"trafficsim_port"`
+			TemplateAgentID   uint           `json:"template_agent_id"`
+			Bidirectional     *bool          `json:"bidirectional"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.SendStatus(http.StatusBadRequest)
@@ -87,6 +89,25 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits
 		if err != nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
+
+		// If template_agent_id provided, copy probes from template to new agent
+		if body.TemplateAgentID != 0 {
+			bidir := true // default to true
+			if body.Bidirectional != nil {
+				bidir = *body.Bidirectional
+			}
+			copyInput := probe.CopyInput{
+				SourceAgentID: body.TemplateAgentID,
+				DestAgentIDs:  []uint{out.Agent.ID},
+				WorkspaceID:   wsID,
+				Bidirectional: &bidir,
+			}
+			if _, err := probe.CopyProbes(c.UserContext(), db, copyInput); err != nil {
+				// Log but don't fail - agent was already created
+				log.Warnf("Failed to copy probes from agent %d to %d: %v", body.TemplateAgentID, out.Agent.ID, err)
+			}
+		}
+
 		return c.Status(http.StatusCreated).JSON(out)
 	})
 

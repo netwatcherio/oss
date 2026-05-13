@@ -14,12 +14,18 @@ const state = reactive({
   agent: {
     name: "",
     location: "",
-    description: ""
+    description: "",
+    template_agent_id: null,
+    bidirectional: true
   } as Partial<Agent>,
   error: "",
   touched: {
     name: false
   },
+  advancedOpen: false,
+  templateAgentId: null,
+  bidirectional: true,
+  agents: []
 });
 
 // Validation
@@ -44,6 +50,14 @@ onMounted(async () => {
     state.workspace = workspace as Workspace;
     state.agent.workspace_id = state.workspace.id;
     state.ready = true;
+
+    // Fetch existing agents for template selection
+    try {
+      const res = await AgentService.list(state.workspace.id);
+      state.agents = res.data || [];
+    } catch(e) {
+      console.warn("Could not load agents for template", e);
+    }
   } catch (err) {
     console.error("Failed to load workspace:", err);
     state.error = "Failed to load workspace";
@@ -64,6 +78,10 @@ async function submit() {
 
   state.loading = true;
   state.error = "";
+
+  // Pass advanced options to the agent object
+  state.agent.template_agent_id = state.templateAgentId;
+  state.agent.bidirectional = state.bidirectional;
 
   try {
     const result = await AgentService.create(state.workspace.id, state.agent);
@@ -172,6 +190,40 @@ async function submit() {
               <div class="alert alert-info mb-0">
                 <i class="bi bi-info-circle me-2"></i>
                 After creating the agent, you'll receive a PIN to connect the agent software.
+              </div>
+            </div>
+
+            <!-- Advanced Options -->
+            <div class="card mt-3">
+              <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer" @click="state.advancedOpen = !state.advancedOpen">
+                <h5 class="mb-0">
+                  <i class="bi bi-gear me-2"></i>Advanced Options
+                </h5>
+                <i :class="state.advancedOpen ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+              </div>
+              <div class="card-body" v-if="state.advancedOpen">
+                <!-- Template Agent -->
+                <div class="mb-3">
+                  <label class="form-label" for="templateAgent">Copy Probes From Agent</label>
+                  <select id="templateAgent" class="form-select" v-model="state.templateAgentId">
+                    <option :value="null">— No template (start empty) —</option>
+                    <option v-for="a in state.agents" :key="a.id" :value="a.id">
+                      {{ a.name }} ({{ a.location || 'no location' }})
+                    </option>
+                  </select>
+                  <div class="form-text">Optionally copy probes from an existing agent as a template</div>
+                </div>
+
+                <!-- Bidirectional Toggle -->
+                <div class="mb-0">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="bidirectional" v-model="state.bidirectional">
+                    <label class="form-check-label" for="bidirectional">
+                      <strong>Bidirectional probes</strong>
+                    </label>
+                  </div>
+                  <div class="form-text">When enabled, probes will automatically create reverse connections. Default: ON</div>
+                </div>
               </div>
             </div>
 
