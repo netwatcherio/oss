@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { Agent, Probe } from '@/types';
 import { useAgentStatus, type AgentStatusTier } from '@/composables/useAgentStatus';
 import { since } from '@/time';
+import ProbeHealthPopup from '@/components/analysis/ProbeHealthPopup.vue';
 
 interface ProbeGroup {
   key: string;
@@ -101,75 +102,92 @@ function getStatusIcon(status?: string): string {
           class="probe-card" 
           :class="{'has-issues': groupStats[g.key]?.status === 'critical'}"
         >
-          <router-link 
-            :to="`/workspaces/${workspaceId}/agents/${agentId}/probes/${g.probes[0]?.id || ''}`" 
-            class="probe-link"
+          <ProbeHealthPopup
+            :probe-id="g.probes[0]?.id || ''"
+            :workspace-id="workspaceId"
+            :agent-name="g.kind === 'agent' ? (agentNames[Number(g.id)] || `Agent #${g.id}`) : undefined"
+            :target="g.kind === 'host' ? g.label : undefined"
+            trigger="click"
           >
-            <div class="probe-header">
-              <div class="probe-icon">
-                <i :class="g.kind === 'agent' ? 'bi bi-robot'
-                : g.kind === 'host' ? 'bi bi-diagram-2'
-                : 'bi bi-cpu'"></i>
-              </div>
-              <div class="probe-status">
-                <template v-if="g.kind === 'agent' && targetAgents[Number(g.id)] && agentStatus.getAgentStatus(targetAgents[Number(g.id)]) !== 'online'">
-                  <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))"></i>
-                </template>
-                <template v-else>
-                  <i :class="`bi ${getStatusIcon(groupStats[g.key]?.status)} ${getStatusColor(groupStats[g.key]?.status)}`"></i>
-                </template>
-              </div>
-            </div>
-
-            <div class="probe-content">
-              <h6 class="probe-title">
-                <span v-if="g.kind==='host'">{{ g.label }}</span>
-                <span v-else-if="g.kind==='agent'">{{ agentNames[Number(g.id)] || `Agent #${g.id}` }}</span>
-                <span v-else>Local on Agent {{ g.id }}</span>
-              </h6>
-
-              <div class="probe-types">
-                <span v-for="t in g.types" :key="t" class="probe-type-badge">
-                  {{ t }} ({{ g.perType[t].count }})
-                </span>
-              </div>
-
-              <div class="probe-stats" v-if="groupStats[g.key]">
-                <div v-if="groupStats[g.key].isLoading" class="probe-stat">
-                  <i class="bi bi-arrow-repeat spin-animation"></i>
-                  <span>Loading stats...</span>
-                </div>
-                <template v-else-if="groupStats[g.key].hasData">
-                  <div class="probe-stat" v-if="groupStats[g.key].successRate !== undefined">
-                    <i class="bi bi-graph-up"></i>
-                    <span>{{ groupStats[g.key].successRate.toFixed(1) }}% success</span>
+            <template #default="{ show }">
+              <div class="probe-link-wrapper">
+                <router-link 
+                  :to="`/workspaces/${workspaceId}/agents/${agentId}/probes/${g.probes[0]?.id || ''}`" 
+                  class="probe-link"
+                >
+                  <div class="probe-header">
+                    <div class="probe-icon">
+                      <i :class="g.kind === 'agent' ? 'bi bi-robot'
+                      : g.kind === 'host' ? 'bi bi-diagram-2'
+                      : 'bi bi-cpu'"></i>
+                    </div>
+                    <div class="probe-status">
+                      <template v-if="g.kind === 'agent' && targetAgents[Number(g.id)] && agentStatus.getAgentStatus(targetAgents[Number(g.id)]) !== 'online'">
+                        <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))"></i>
+                      </template>
+                      <template v-else>
+                        <i :class="`bi ${getStatusIcon(groupStats[g.key]?.status)} ${getStatusColor(groupStats[g.key]?.status)}`"></i>
+                      </template>
+                    </div>
                   </div>
-                  <div class="probe-stat" v-if="groupStats[g.key].avgResponseTime !== undefined">
-                    <i class="bi bi-stopwatch"></i>
-                    <span>{{ groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
-                  </div>
-                  <div class="probe-stat" v-if="groupStats[g.key].lastRun">
-                    <i class="bi bi-clock"></i>
-                    <span>{{ since(groupStats[g.key].lastRun, true) }}</span>
-                  </div>
-                </template>
-                <div v-else class="probe-stat text-muted">
-                  <i class="bi bi-info-circle"></i>
-                  <span>No ping data available</span>
-                </div>
-                <!-- Target agent connectivity status for agent-type groups -->
-                <div v-if="g.kind === 'agent' && targetAgents[Number(g.id)]" 
-                     class="probe-stat"
-                     :class="agentStatus.getStatusColor(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))">
-                  <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))"></i>
-                  <span>Target {{ agentStatus.getStatusLabel(agentStatus.getAgentStatus(targetAgents[Number(g.id)])) }}</span>
-                  <span class="text-muted" style="margin-left: 0.25rem;">· {{ agentStatus.getLastSeenText(targetAgents[Number(g.id)]) }}</span>
-                </div>
-              </div>
-            </div>
 
-            <i class="bi bi-chevron-right probe-arrow"></i>
-          </router-link>
+                  <div class="probe-content">
+                    <h6 class="probe-title">
+                      <span v-if="g.kind==='host'">{{ g.label }}</span>
+                      <span v-else-if="g.kind==='agent'">{{ agentNames[Number(g.id)] || `Agent #${g.id}` }}</span>
+                      <span v-else>Local on Agent {{ g.id }}</span>
+                    </h6>
+
+                    <div class="probe-types">
+                      <span v-for="t in g.types" :key="t" class="probe-type-badge">
+                        {{ t }} ({{ g.perType[t].count }})
+                      </span>
+                    </div>
+
+                    <div class="probe-stats" v-if="groupStats[g.key]">
+                      <div v-if="groupStats[g.key].isLoading" class="probe-stat">
+                        <i class="bi bi-arrow-repeat spin-animation"></i>
+                        <span>Loading stats...</span>
+                      </div>
+                      <template v-else-if="groupStats[g.key].hasData">
+                        <div class="probe-stat" v-if="groupStats[g.key].successRate !== undefined">
+                          <i class="bi bi-graph-up"></i>
+                          <span>{{ groupStats[g.key].successRate.toFixed(1) }}% success</span>
+                        </div>
+                        <div class="probe-stat" v-if="groupStats[g.key].avgResponseTime !== undefined">
+                          <i class="bi bi-stopwatch"></i>
+                          <span>{{ groupStats[g.key].avgResponseTime.toFixed(0) }}ms avg</span>
+                        </div>
+                        <div class="probe-stat" v-if="groupStats[g.key].lastRun">
+                          <i class="bi bi-clock"></i>
+                          <span>{{ since(groupStats[g.key].lastRun, true) }}</span>
+                        </div>
+                      </template>
+                      <div v-else class="probe-stat text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        <span>No ping data available</span>
+                      </div>
+                      <!-- Target agent connectivity status for agent-type groups -->
+                      <div v-if="g.kind === 'agent' && targetAgents[Number(g.id)]" 
+                           class="probe-stat"
+                           :class="agentStatus.getStatusColor(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))">
+                        <i :class="agentStatus.getStatusIcon(agentStatus.getAgentStatus(targetAgents[Number(g.id)]))"></i>
+                        <span>Target {{ agentStatus.getStatusLabel(agentStatus.getAgentStatus(targetAgents[Number(g.id)])) }}</span>
+                        <span class="text-muted" style="margin-left: 0.25rem;">· {{ agentStatus.getLastSeenText(targetAgents[Number(g.id)]) }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <i class="bi bi-chevron-right probe-arrow"></i>
+                </router-link>
+
+                <!-- AI Analysis Button -->
+                <button class="ai-analysis-btn" @click.prevent="show" title="AI Analysis">
+                  <i class="bi bi-robot"></i>
+                </button>
+              </div>
+            </template>
+          </ProbeHealthPopup>
         </div>
       </div>
 
@@ -188,3 +206,49 @@ function getStatusIcon(status?: string): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* AI Analysis Button */
+.probe-link-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.probe-link-wrapper .probe-link {
+  flex: 1;
+}
+
+.ai-analysis-btn {
+  position: absolute;
+  top: 50%;
+  right: 40px;
+  transform: translateY(-50%);
+  background: var(--bs-primary-bg-subtle);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--bs-primary);
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 5;
+}
+
+.probe-card:hover .ai-analysis-btn {
+  opacity: 1;
+}
+
+.ai-analysis-btn:hover {
+  background: var(--bs-primary);
+  color: var(--bs-body-bg);
+}
+
+.ai-analysis-btn i {
+  font-size: 14px;
+}
+</style>
