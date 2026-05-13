@@ -15217,4 +15217,25 @@ body {
   min-height: 100vh;
 }
 
+[data-theme="dark"] .alert-primary {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+[data-theme="dark"] .alert-secondary {
+  background-color: rgba(156, 163, 175, 0.15);
+  border-color: rgba(156, 163, 175, 0.3);
+  color: #d1d5db;
+}
+[data-theme="dark"] .alert-light {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #f3f4f6;
+}
+[data-theme="dark"] .alert-dark {
+  background-color: rgba(55, 65, 81, 0.5);
+  border-color: rgba(75, 85, 99, 0.5);
+  color: #e5e7eb;
+}
+
 /*# sourceMappingURL=custom.css.map */

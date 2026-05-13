@@ -1664,16 +1664,6 @@ onMounted(async () => {
   border-radius: 0.5rem;
 }
 
-.alert-danger {
-  background-color: #f8d7da;
-  color: #721c24;
-}
-
-.alert-warning {
-  background-color: #fff3cd;
-  color: #856404;
-}
-
 /* Buttons */
 .btn {
   padding: 0.5rem 1rem;

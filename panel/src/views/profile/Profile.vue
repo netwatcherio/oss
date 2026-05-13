@@ -642,6 +642,17 @@ async function changePassword() {
   color: var(--bs-danger);
 }
 
+[data-theme="dark"] .alert-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+[data-theme="dark"] .alert-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 /* Modal styling */
 .modal-content {
   border: none;
