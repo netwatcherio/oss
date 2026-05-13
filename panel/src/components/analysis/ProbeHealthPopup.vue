@@ -56,6 +56,23 @@ const healthScoreColor = computed(() => {
   return 'var(--bs-danger)'
 })
 
+const hasBidirectional = computed(() => !!analysis.value?.reverse)
+
+const reverseHealthScore = computed(() => {
+  if (!analysis.value?.reverse) return 0
+  return Math.round(analysis.value.reverse.health.overall_health)
+})
+
+const reverseHealthGrade = computed(() => analysis.value?.reverse?.health.grade || 'unknown')
+
+const reverseHealthColor = computed(() => {
+  const score = reverseHealthScore.value
+  if (score >= 90) return gradeColors.excellent
+  if (score >= 70) return gradeColors.good
+  if (score >= 50) return gradeColors.fair
+  return gradeColors.poor
+})
+
 function formatMs(ms: number) {
   return ms > 0 ? `${ms.toFixed(1)}ms` : '—'
 }
@@ -95,7 +112,7 @@ defineExpose({ showPopup, hidePopup })
 
     <Teleport to="body">
       <div v-if="isVisible" class="popup-overlay" @click.self="hidePopup">
-        <div class="popup-content" @mouseenter="() => {}" @mouseleave="hidePopup">
+        <div class="popup-content" @mouseenter="() => {}">
           <!-- Header -->
           <div class="popup-header">
             <div class="popup-title">
@@ -122,16 +139,30 @@ defineExpose({ showPopup, hidePopup })
 
           <!-- Content -->
           <div v-else-if="analysis" class="popup-body">
-            <!-- Health Score Circle -->
-            <div class="health-score-section">
-              <div class="health-circle" :style="{ borderColor: healthColor.border }">
-                <div class="health-score-value" :style="{ color: healthScoreColor }">
-                  {{ healthScore }}
+            <!-- Direction Cards for Forward and Reverse -->
+            <div class="direction-cards-mini">
+              <!-- Forward Direction -->
+              <div class="direction-card-mini" :style="{ borderColor: healthColor.border }">
+                <div class="direction-label-mini">
+                  <i class="bi bi-arrow-right me-1"></i>
+                  <span>{{ analysis.agent_name || 'Source' }} → {{ analysis.target || 'Target' }}</span>
                 </div>
-                <div class="health-score-label">Health Score</div>
+                <div class="direction-score-mini">
+                  <span class="score-value-mini" :style="{ color: healthScoreColor }">{{ healthScore }}</span>
+                  <span class="grade-mini" :style="{ background: healthColor.bg, color: healthColor.text }">{{ healthGrade }}</span>
+                </div>
               </div>
-              <div class="health-grade-badge" :style="{ background: healthColor.bg, color: healthColor.text }">
-                {{ healthGrade }}
+
+              <!-- Reverse Direction -->
+              <div v-if="hasBidirectional && analysis.reverse" class="direction-card-mini" :style="{ borderColor: reverseHealthColor.border }">
+                <div class="direction-label-mini">
+                  <i class="bi bi-arrow-left me-1"></i>
+                  <span>{{ analysis.reverse.agent_name }} → {{ analysis.reverse.target }}</span>
+                </div>
+                <div class="direction-score-mini">
+                  <span class="score-value-mini" :style="{ color: reverseHealthColor.text }">{{ reverseHealthScore }}</span>
+                  <span class="grade-mini" :style="{ background: reverseHealthColor.bg, color: reverseHealthColor.text }">{{ reverseHealthGrade }}</span>
+                </div>
               </div>
             </div>
 
@@ -362,6 +393,50 @@ defineExpose({ showPopup, hidePopup })
   font-weight: 600;
   padding: 6px 14px;
   border-radius: 20px;
+  text-transform: capitalize;
+}
+
+/* Direction Cards Mini */
+.direction-cards-mini {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.direction-card-mini {
+  flex: 1;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bs-secondary-bg);
+}
+
+.direction-label-mini {
+  font-size: 11px;
+  color: var(--bs-secondary-color);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.direction-score-mini {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.score-value-mini {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.grade-mini {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
   text-transform: capitalize;
 }
 
