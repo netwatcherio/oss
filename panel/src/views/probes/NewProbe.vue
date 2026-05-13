@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { onMounted, reactive, computed, watch } from "vue";
 import {
-  Agent,
+  type Agent,
   type InterfaceInfo,
   type Probe,
   type ProbeCreateInput,
@@ -362,7 +362,9 @@ function initializeOptions() {
 // EDIT: computed - enhance isValidProbe for TRAFFICSIM server
 const isValidProbe = computed(() => {
   if (!state.selected.value) return false;
-  if (state.probe.interval_sec <= 0) return false;
+  const interval = Number(state.probe.interval_sec);
+  if (isNaN(interval) || interval < 0) return false;
+  if (interval === 0 && state.selected.value !== 'PING') return false;
 
   switch (state.selected.value) {
     case "AGENT":
@@ -377,12 +379,7 @@ const isValidProbe = computed(() => {
       }
 
     case "RPERF":
-    {
-      const hasValidDomain = state.hostInput.includes('.');
-      const hasValidRecordTypes = state.dnsConfig.queryAll ||
-          (state.dnsConfig.selectedRecordTypes && state.dnsConfig.selectedRecordTypes.length > 0);
-      return hasValidDomain && hasValidRecordTypes;
-    }
+      return state.hostInput.trim() !== "";
 
     case "DNS":
     case "HTTP":
@@ -416,27 +413,6 @@ function applyProbeDefaults() {
     state.targetAgent = false;
   }
 }
-
-// EDIT: when changing type, keep resets
-watch(() => state.selected.value, async (newType) => {
-  if (!newType) return;
-
-  state.targetAgentSelected = null;
-  state.hostInput = "";
-  state.portInput = "5000";
-  state.duplicateWarning = "";
-  state.probe.server = false;
-
-  state.dnsConfig = {
-    queryAll: false,
-    selectedRecordTypes: ['A', 'AAAA'],
-    dnsServer: "",
-    dnssecValidation: false
-  };
-
-  applyProbeDefaults();
-  await checkForDuplicates();
-});
 
 // EDIT: submit() – TrafficSim server defaults and stricter targets/metadata
 async function submit() {
@@ -633,7 +609,7 @@ async function checkForDuplicates() {
       if (state.targetAgent && state.targetAgentSelected) {
         // Check if any existing probe targets this agent
         const hasTargetAgent = probe.targets?.some(
-            t => t.agentId === state.targetAgentSelected?.id
+            t => t.agent_id === state.targetAgentSelected?.id
         );
         if (hasTargetAgent) {
           state.duplicateWarning = `A ${state.selected.value} probe already exists for target agent: ${state.targetAgentSelected.name}`;
@@ -1291,7 +1267,7 @@ onMounted(async () => {
                 <h6 class="section-title">Probe Settings</h6>
 
                 <!-- Interval (not shown for PING — PING runs continuously, cadence = packet count × 1s) -->
-                <div class="mb-4" v-if="['MTR', 'DNS'].includes(state.selected.value)">
+                <div class="mb-4" v-if="['MTR', 'DNS', 'HTTP', 'TLS', 'SNMP'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterval">
                     <i class="bi bi-clock me-2"></i>Probe Interval
                   </label>
@@ -1354,7 +1330,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Timeout -->
-                <div class="mb-4" v-if="['PING', 'MTR'].includes(state.selected.value)">
+                <div class="mb-4" v-if="['PING', 'MTR', 'HTTP', 'TLS', 'SNMP'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeTimeout">
                     <i class="bi bi-hourglass-split me-2"></i>Timeout
                   </label>
@@ -1374,7 +1350,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Network Interface Binding -->
-                <div class="mb-4" v-if="['PING', 'MTR', 'DNS', 'AGENT'].includes(state.selected.value)">
+                <div class="mb-4" v-if="['PING', 'MTR', 'DNS', 'HTTP', 'TLS', 'SNMP', 'AGENT'].includes(state.selected.value)">
                   <label class="form-label fw-semibold" for="probeInterface">
                     <i class="bi bi-ethernet me-2"></i>Network Interface
                   </label>
