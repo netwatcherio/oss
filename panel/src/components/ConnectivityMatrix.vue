@@ -588,6 +588,10 @@ onUnmounted(() => {
         <span>No Data</span>
       </div>
       <div class="legend-item">
+        <span class="legend-bubble status-blocked"></span>
+        <span>ICMP Blocked</span>
+      </div>
+      <div class="legend-item">
         <i class="bi bi-arrow-left-right legend-icon"></i>
         <span>Bidirectional (return path)</span>
       </div>
@@ -1038,6 +1042,7 @@ onUnmounted(() => {
 .probe-status.status-degraded { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
 .probe-status.status-critical { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
 .probe-status.status-unknown { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
+.probe-status.status-blocked { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
 
 .metrics {
   display: flex;
@@ -1115,6 +1120,7 @@ onUnmounted(() => {
 .legend-bubble.status-degraded { background: var(--bs-warning); }
 .legend-bubble.status-critical { background: var(--bs-danger); }
 .legend-bubble.status-unknown { background: var(--bs-secondary); }
+.legend-bubble.status-blocked { background: var(--bs-secondary); }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -1256,6 +1262,7 @@ onUnmounted(() => {
 .mini-bubble.status-degraded { background: linear-gradient(135deg, var(--bs-warning), color-mix(in srgb, var(--bs-warning) 70%, black)); }
 .mini-bubble.status-critical { background: linear-gradient(135deg, var(--bs-danger), color-mix(in srgb, var(--bs-danger) 70%, black)); }
 .mini-bubble.status-unknown { background: linear-gradient(135deg, var(--bs-secondary), color-mix(in srgb, var(--bs-secondary) 70%, black)); }
+.mini-bubble.status-blocked { background: linear-gradient(135deg, var(--bs-secondary), color-mix(in srgb, var(--bs-secondary) 70%, black)); }
 
 .no-entries {
   text-align: center;
@@ -1482,6 +1489,11 @@ onUnmounted(() => {
 }
 
 [data-theme="dark"] .probe-status.status-unknown {
+  background: rgba(107, 114, 128, 0.3) !important;
+  color: var(--bs-secondary) !important;
+}
+
+[data-theme="dark"] .probe-status.status-blocked {
   background: rgba(107, 114, 128, 0.3) !important;
   color: var(--bs-secondary) !important;
 }
