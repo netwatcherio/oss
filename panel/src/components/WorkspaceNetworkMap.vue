@@ -863,21 +863,29 @@ class WorkspaceNetworkVisualization {
       const node = d3.select(nodeEl);
       
       if (d.type === 'agent') {
-        // Agent: Small circle with thick border
+        const color = this.getNodeColor(d);
         node.append('circle')
           .attr('r', 10)
-          .attr('fill', '#22c55e')
-          .attr('stroke', '#15803d')
+          .attr('fill', color)
+          .attr('stroke', d.is_online ? '#1e40af' : '#374151')
           .attr('stroke-width', 2)
           .style('cursor', 'pointer');
       } else if (d.type === 'destination') {
-        // Destination: Small circle, colored by status
-        const color = d.status === 'critical' ? '#ef4444' : 
-                      d.status === 'degraded' ? '#f59e0b' : '#22c55e';
-        node.append('circle')
-          .attr('r', 8)
+        // Destination: Square/rect, colored by status
+        const color = d.status === 'critical' ? '#ef4444' :
+                      d.status === 'degraded' ? '#f59e0b' :
+                      d.status === 'unknown' || d.is_online === false ? '#9ca3af' : '#22c55e';
+        const strokeColor = d.status === 'critical' ? '#dc2626' :
+                            d.status === 'degraded' ? '#d97706' :
+                            d.status === 'unknown' || d.is_online === false ? '#6b7280' : '#15803d';
+        node.append('rect')
+          .attr('width', 14)
+          .attr('height', 14)
+          .attr('x', -7)
+          .attr('y', -7)
+          .attr('rx', 2)
           .attr('fill', color)
-          .attr('stroke', d.status === 'critical' ? '#dc2626' : '#475569')
+          .attr('stroke', strokeColor)
           .attr('stroke-width', 2)
           .style('cursor', 'pointer');
         // Add label to the right
@@ -1203,10 +1211,12 @@ class WorkspaceNetworkVisualization {
 
   private getNodeColor(node: D3Node): string {
     if (node.type === 'agent') {
-      return node.is_online ? '#3b82f6' : '#64748b';
+      return node.is_online ? '#3b82f6' : '#9ca3af';
     }
     if (node.type === 'destination') {
-      return '#8b5cf6';
+      return node.status === 'critical' ? '#ef4444' :
+             node.status === 'degraded' ? '#f59e0b' :
+             node.status === 'unknown' || node.is_online === false ? '#9ca3af' : '#22c55e';
     }
 
     const colors = ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444'];
@@ -1269,16 +1279,20 @@ class WorkspaceNetworkVisualization {
 
   private createLegend() {
     const healthColors = ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444'];
-    
-    let legendData: Array<{ color: string; label: string; shape: string }> = [];
-    
+
+    let legendData: Array<{ color: string; label: string; shape: 'circle' | 'rect'; stroke?: string }> = [];
+
     // Node type legend (always shown)
     legendData.push(
-      { color: '#22c55e', label: 'Agent', shape: 'circle' },
-      { color: '#8b5cf6', label: 'Destination', shape: 'circle' },
-      { color: '#94a3b8', label: 'Hop (unknown)', shape: 'circle' }
+      { color: '#3b82f6', label: 'Agent (Online)', shape: 'circle' },
+      { color: '#9ca3af', label: 'Agent (Offline)', shape: 'circle' },
+      { color: '#22c55e', label: 'Dest (Healthy)', shape: 'rect' },
+      { color: '#f59e0b', label: 'Dest (Degraded)', shape: 'rect' },
+      { color: '#ef4444', label: 'Dest (Critical)', shape: 'rect' },
+      { color: '#9ca3af', label: 'Dest (Offline)', shape: 'rect' },
+      { color: '#94a3b8', label: 'Hop (Shared)', shape: 'circle', stroke: '#3b82f6' }
     );
-    
+
     // Health scale legend (changes based on color mode)
     if (this.colorMode === 'latency') {
       legendData.push(
@@ -1308,22 +1322,36 @@ class WorkspaceNetworkVisualization {
 
     // Remove old legend if exists
     this.svg.select('.legend').remove();
-    
+
     const legend = this.svg.append('g')
       .attr('class', 'legend')
       .attr('transform', `translate(${this.margin.left},${this.height + this.margin.top + 25})`);
 
+    const itemWidth = 88;
     const items = legend.selectAll('.legend-item')
       .data(legendData)
       .enter()
       .append('g')
-      .attr('transform', (_, i) => `translate(${i * 90},0)`);
+      .attr('transform', (_, i) => `translate(${i * itemWidth},0)`);
 
-    items.append('rect')
-      .attr('width', 14)
-      .attr('height', 14)
-      .attr('rx', d => d.shape === 'circle' ? 7 : 2)
-      .attr('fill', d => d.color);
+    items.each(function(d) {
+      const sel = d3.select(this);
+      if (d.shape === 'circle') {
+        sel.append('circle')
+          .attr('r', 7)
+          .attr('cx', 7)
+          .attr('cy', 7)
+          .attr('fill', d.color)
+          .attr('stroke', d.stroke || 'none')
+          .attr('stroke-width', d.stroke ? 2 : 0);
+      } else {
+        sel.append('rect')
+          .attr('width', 14)
+          .attr('height', 14)
+          .attr('rx', 2)
+          .attr('fill', d.color);
+      }
+    });
 
     items.append('text')
       .attr('x', 18)
