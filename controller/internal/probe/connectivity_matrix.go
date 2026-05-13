@@ -141,6 +141,9 @@ func GetWorkspaceConnectivityMatrix(ctx context.Context, ch *sql.DB, pg *gorm.DB
 		return s.AvgLatency, s.PacketLoss, s.Jitter, s.LastUpdated, s.TargetAgent
 	})
 
+	// Detect ICMP firewall blocking
+	detectICMPFirewallBlocking(entriesMap)
+
 	// Convert maps to slices
 	targetLabels := make([]TargetLabel, 0, len(targetSet))
 	for _, t := range targetSet {
@@ -420,4 +423,29 @@ func calculateProbeStatus(latency, packetLoss float64) string {
 
 	// Healthy: <5% loss and <100ms latency
 	return "healthy"
+}
+
+// detectICMPFirewallBlocking checks if ICMP is likely blocked by a firewall.
+// When both PING and MTR are critical but TRAFFICSIM is healthy, it suggests
+// ICMP is being filtered rather than the target being unreachable.
+func detectICMPFirewallBlocking(entriesMap map[string]*ConnectivityMatrixEntry) {
+	for _, entry := range entriesMap {
+		var pingStatus, mtrStatus, trafficStatus *string
+		for i := range entry.ProbeStatus {
+			switch entry.ProbeStatus[i].Type {
+			case "PING":
+				pingStatus = &entry.ProbeStatus[i].Status
+			case "MTR":
+				mtrStatus = &entry.ProbeStatus[i].Status
+			case "TRAFFICSIM":
+				trafficStatus = &entry.ProbeStatus[i].Status
+			}
+		}
+		if pingStatus != nil && mtrStatus != nil && trafficStatus != nil {
+			if *pingStatus == "critical" && *mtrStatus == "critical" && *trafficStatus == "healthy" {
+				*pingStatus = "blocked"
+				*mtrStatus = "blocked"
+			}
+		}
+	}
 }

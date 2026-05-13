@@ -441,7 +441,7 @@ export interface NetworkMapData {
 // Connectivity Matrix types for grid-based probe status visualization
 export interface ProbeStatusSummary {
     type: 'MTR' | 'PING' | 'TRAFFICSIM';
-    status: 'healthy' | 'degraded' | 'critical' | 'unknown';
+    status: 'healthy' | 'degraded' | 'critical' | 'unknown' | 'blocked';
     avg_latency: number;
     packet_loss: number;
     jitter?: number;
