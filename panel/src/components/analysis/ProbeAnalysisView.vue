@@ -58,6 +58,13 @@ function hopLossClass(loss: number) {
   return 'good'
 }
 
+// Determine health class based on latency and loss thresholds (matching RoutePathAnalysis)
+function hopHealthClass(latency: number, loss: number): string {
+  if (latency > 150 || loss > 3) return 'poor'
+  if (latency >= 50 || loss > 0) return 'degraded'
+  return 'healthy'
+}
+
 const hasBidirectional = computed(() => !!analysis.value?.reverse)
 
 const hasIcmpLatencyIncomplete = computed(() =>
@@ -264,12 +271,20 @@ watch(() => props.probeId, fetchAnalysis)
                 <div class="hop-arrow">
                   <i class="bi bi-arrow-right"></i>
                 </div>
-                <div class="hop-node" :class="{ 'agent-hop': hop.is_agent, 'rate-limited': hop.is_rate_limited }">
+                <div class="hop-node" :class="{ 
+                  'agent-hop': hop.is_agent, 
+                  'rate-limited': hop.is_rate_limited,
+                  'dest': hop.is_final_hop
+                }">
                   <i :class="hop.is_agent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
                   <span class="hop-label" :title="hop.ip">{{ hop.hostname || hop.ip }}</span>
-                  <div v-if="hop.latency != null || hop.loss != null" class="hop-metrics">
-                    <span v-if="hop.latency != null" class="hop-badge latency" :class="hopLatencyClass(hop.latency)">{{ formatMs(hop.latency) }}</span>
-                    <span v-if="hop.loss != null" class="hop-badge loss" :class="hopLossClass(hop.loss)">{{ formatPct(hop.loss) }}</span>
+                  <div v-if="hop.latency != null || hop.loss != null" class="hop-node-metrics">
+                    <span v-if="hop.latency != null" class="hop-node-metric" :class="hopHealthClass(hop.latency, hop.loss || 0)">
+                      {{ formatMs(hop.latency) }}
+                    </span>
+                    <span v-if="hop.loss != null && hop.loss > 0" class="hop-node-metric" :class="hopHealthClass(hop.latency || 0, hop.loss)">
+                      {{ hop.loss.toFixed(1) }}%
+                    </span>
                   </div>
                 </div>
               </div>
@@ -758,6 +773,35 @@ watch(() => props.probeId, fetchAnalysis)
 .hop-badge.loss.critical {
   background: rgba(var(--bs-danger-rgb), 0.15);
   color: var(--bs-danger);
+}
+.hop-node-metrics {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.hop-node-metric {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 6px;
+  white-space: nowrap;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.hop-node-metric.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.hop-node-metric.degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.hop-node-metric.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 .hop-node.rate-limited {
   border-style: dashed;
