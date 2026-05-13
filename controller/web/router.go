@@ -4,6 +4,7 @@ package web
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
@@ -59,6 +60,15 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 
 	// Health
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
+
+	// Server time (public, no auth)
+	app.Get("/api/v1/time", func(c *fiber.Ctx) error {
+		now := time.Now().UTC()
+		return c.JSON(fiber.Map{
+			"server_time":    now.Format(time.RFC3339),
+			"server_unix_ms": now.UnixMilli(),
+		})
+	})
 }
 
 // BuildHTTPMux creates a net/http.ServeMux that routes:
