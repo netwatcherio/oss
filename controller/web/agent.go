@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"netwatcher-controller/internal/agent"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -99,4 +100,42 @@ func agentAuth(api fiber.Router, db *gorm.DB) {
 	// Register handler on both routes for compatibility
 	base.Post("/", loginHandler)
 	base.Post("/login", loginHandler)
+
+	// GET /agent/time - Returns server time for agent clock synchronization
+	// Uses the same PSK authentication as login
+	base.Get("/time", func(c *fiber.Ctx) error {
+		// Verify PSK auth like login does
+		psk := c.Get("X-Agent-PSK")
+		workspaceIDStr := c.Get("X-Workspace-ID")
+		agentIDStr := c.Get("X-Agent-ID")
+
+		if psk == "" || workspaceIDStr == "" || agentIDStr == "" {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+				"error": "missing authentication headers",
+			})
+		}
+
+		workspaceID, err := strconv.ParseUint(workspaceIDStr, 10, 64)
+		if err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid workspace_id"})
+		}
+
+		agentID, err := strconv.ParseUint(agentIDStr, 10, 64)
+		if err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid agent_id"})
+		}
+
+		// Authenticate the agent
+		_, err = agent.AuthenticateWithPSK(c.UserContext(), db, uint(workspaceID), uint(agentID), psk)
+		if err != nil {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		}
+
+		// Return server time
+		now := time.Now().UTC()
+		return c.JSON(fiber.Map{
+			"server_time":     now.Format(time.RFC3339),
+			"server_unix_ms": now.UnixMilli(),
+		})
+	})
 }
