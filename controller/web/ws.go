@@ -310,7 +310,7 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 
 				// Validate timestamp drift - if agent time differs too much from backend time,
 				// the agent's clock is wrong and we should use backend time instead
-				drift := pp.ReceivedAt.Sub(pp.CreatedAt)
+				/*drift := pp.ReceivedAt.Sub(pp.CreatedAt)
 				if drift < 0 {
 					drift = -drift
 				}
@@ -319,7 +319,7 @@ func getAgentWebsocketEvents(db *gorm.DB, ch *sql.DB) neffos.Namespaces {
 					log.Warnf("[probe_post] agent %d clock drift %.1f minutes exceeds threshold, using backend time",
 						aid, drift.Minutes())
 					pp.CreatedAt = pp.ReceivedAt
-				}
+				}*/
 
 				targetInfo := pp.Target
 				if pp.TargetAgent > 0 {
