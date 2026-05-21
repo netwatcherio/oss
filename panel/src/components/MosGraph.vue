@@ -1,33 +1,5 @@
 <template>
   <div class="mos-graph-container">
-    <!-- Statistics Summary -->
-    <div class="stats-row" v-if="statistics">
-      <div class="stat-card" :class="'status-' + statistics.quality">
-        <div class="stat-icon">🎙️</div>
-        <div class="stat-content">
-          <div class="stat-label">Current MOS</div>
-          <div class="stat-value" :class="'mos-' + statistics.quality">
-            {{ statistics.current.toFixed(2) }}
-            <span class="quality-badge" :class="'badge-' + statistics.quality">{{ statistics.qualityLabel }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-content">
-          <div class="stat-label">Average MOS</div>
-          <div class="stat-value">{{ statistics.average.toFixed(2) }}</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">↕️</div>
-        <div class="stat-content">
-          <div class="stat-label">Range</div>
-          <div class="stat-value">{{ statistics.min.toFixed(2) }} – {{ statistics.max.toFixed(2) }}</div>
-        </div>
-      </div>
-    </div>
-
     <!-- Chart Container -->
     <div id="mosGraph" ref="mosGraph"></div>
 

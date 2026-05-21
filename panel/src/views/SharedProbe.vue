@@ -1057,40 +1057,7 @@ watch(
                 <!-- Data Tabs (for AGENT probes, use selected direction's data) -->
                 <!-- Order matches Probe.vue: Latency → TrafficSim → MOS → MTR -->
                 <div class="data-tabs">
-                    <!-- PING/Latency Data -->
-                    <div v-if="containsProbeType('PING') || state.isAgentProbe" class="data-section">
-                        <div class="section-header">
-                            <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
-                            <button 
-                                class="reload-btn" 
-                                @click="reloadPingData" 
-                                :disabled="state.loadingPing"
-                                title="Reload latency data"
-                            >
-                                <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                            </button>
-                        </div>
-                        <div v-if="loading && activePingData.length === 0" class="loading-state">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <span>Loading latency data...</span>
-                        </div>
-                        <div v-else-if="activePingData.length === 0" class="empty-state">
-                            <i class="bi bi-graph-down"></i>
-                            <p>No latency data available for this time range</p>
-                        </div>
-                        <div v-else class="graph-container">
-                            <LatencyGraph 
-                                :pingResults="transformPingDataMulti(activePingData)" 
-                                :aggregationBucketSec="state.aggregationBucketSec"
-                                :currentTimeRange="state.timeRange"
-                                @time-range-change="onTimeRangeUpdate"
-                            />
-                        </div>
-                    </div>
-                    
-                    <!-- TrafficSim Data (moved before MOS to match Probe.vue) -->
+                    <!-- TrafficSim Data (Primary for voice quality) -->
                     <div v-if="containsProbeType('TRAFFICSIM') || state.isAgentProbe" class="data-section">
                         <div class="section-header">
                             <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
@@ -1122,13 +1089,36 @@ watch(
                         </div>
                     </div>
                     
-                    <!-- MOS Graph (Voice Quality) -->
+                    <!-- MOS Graph (Voice Quality - derived from TrafficSim) -->
                     <div v-if="activeTrafficSimData.length > 0" class="data-section">
                         <h2><i class="bi bi-telephone"></i> Voice Quality (MOS)</h2>
                         <div class="graph-container">
                             <MosGraph 
                                 :trafficSimResults="transformToTrafficSimResult(activeTrafficSimData)"
                                 :intervalSec="state.aggregationBucketSec || 60"
+                            />
+                        </div>
+                    </div>
+                    
+                    <!-- PING/Latency Data (only if PING data available) -->
+                    <div v-if="(containsProbeType('PING') || state.isAgentProbe) && activePingData.length > 0" class="data-section">
+                        <div class="section-header">
+                            <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
+                            <button 
+                                class="reload-btn" 
+                                @click="reloadPingData" 
+                                :disabled="state.loadingPing"
+                                title="Reload latency data"
+                            >
+                                <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                            </button>
+                        </div>
+                        <div class="graph-container">
+                            <LatencyGraph 
+                                :pingResults="transformPingDataMulti(activePingData)" 
+                                :aggregationBucketSec="state.aggregationBucketSec"
+                                :currentTimeRange="state.timeRange"
+                                @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
                     </div>

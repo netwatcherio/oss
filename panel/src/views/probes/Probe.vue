@@ -1313,41 +1313,8 @@ const { connected: wsConnected } = useProbeSubscription(
           <div v-if="index === state.selectedDirection">
           
             <div class="row">
-            <!-- Ping/Latency Data -->
-            <div class="col-lg-12 mb-3">
-              <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0">
-                    <i class="bi bi-speedometer2 me-2"></i>
-                    Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
-                  </h6>
-                  <button 
-                    class="btn btn-sm btn-outline-primary" 
-                    @click="reloadPingData" 
-                    :disabled="state.loadingPing"
-                    title="Reload latency data"
-                  >
-                    <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                  </button>
-                </div>
-                <div class="card-body">
-                  <div v-if="state.loading && pair.pingData.length === 0" class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                    <span class="text-muted">Loading latency data...</span>
-                  </div>
-                  <div v-else-if="pair.pingData.length === 0" class="text-center py-4 text-muted">
-                    <i class="bi bi-graph-down fs-1 mb-2 d-block"></i>
-                    <p class="mb-0">No latency data available for this direction</p>
-                  </div>
-                  <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="row">
-            <!-- Traffic Sim Data -->
-            <div class="col-lg-12 mb-3">
+            <!-- Traffic Sim Data (Primary for voice quality) -->
+            <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
               <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                   <h6 class="mb-0">
@@ -1364,21 +1331,13 @@ const { connected: wsConnected } = useProbeSubscription(
                   </button>
                 </div>
                 <div class="card-body">
-                  <div v-if="state.loading && pair.trafficSimData.length === 0" class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                    <span class="text-muted">Loading traffic simulation data...</span>
-                  </div>
-                  <div v-else-if="pair.trafficSimData.length === 0" class="text-center py-4 text-muted">
-                    <i class="bi bi-broadcast fs-1 mb-2 d-block"></i>
-                    <p class="mb-0">No traffic simulation data available for this direction</p>
-                  </div>
-                  <TrafficSimGraph v-else :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+                  <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                 </div>
               </div>
             </div>
             
-            <!-- Combined MOS Score Graph -->
-            <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0 || pair.trafficSimData.length > 0">
+            <!-- Combined MOS Score Graph (derived from TrafficSim) -->
+            <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
               <div class="card h-100">
                 <div class="card-header">
                   <h6 class="mb-0">
@@ -1392,6 +1351,28 @@ const { connected: wsConnected } = useProbeSubscription(
                     :intervalSec="state.probe?.interval_sec || 60" 
                   />
                 </div>
+              </div>
+            </div>
+            
+            <!-- Ping/Latency Data (only if PING data available) -->
+            <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0">
+              <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <h6 class="mb-0">
+                    <i class="bi bi-speedometer2 me-2"></i>
+                    Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                  </h6>
+                  <button 
+                    class="btn btn-sm btn-outline-primary" 
+                    @click="reloadPingData" 
+                    :disabled="state.loadingPing"
+                    title="Reload latency data"
+                  >
+                    <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                  </button>
+                </div>
+                <div class="card-body">
+                  </div>
               </div>
             </div>
             
@@ -1458,109 +1439,67 @@ const { connected: wsConnected } = useProbeSubscription(
       </div>
 
 
-      <!-- Original probe views for non-AGENT probes -->
-      <template v-if="!state.isAgentProbe">
-        <!-- Ping/Latency Graph -->
-      <div class="col-sm-12" v-if="containsProbeType('PING')">
-        <div class="card mb-3">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <div>
-              <h5 class="card-title mb-0">Latency</h5>
-              <small class="text-muted">displays the stats associated with latency</small>
-            </div>
-            <button 
-              class="btn btn-sm btn-outline-primary" 
-              @click="reloadPingData" 
-              :disabled="state.loadingPing"
-              title="Reload latency data"
-            >
-              <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-            </button>
-          </div>
-          <div class="card-body">
-            <div v-if="state.loading && state.pingData.length === 0" class="text-center py-5">
-              <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+<!-- Original probe views for non-AGENT probes -->
+        <template v-if="!state.isAgentProbe">
+          <!-- TrafficSim Graph (Primary for voice quality) -->
+          <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM') && state.trafficSimData.length > 0">
+            <div class="card mb-3">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                  <h5 class="card-title mb-0">Simulated Traffic</h5>
+                  <small class="text-muted">displays the stats for simulated traffic</small>
+                </div>
+                <button 
+                  class="btn btn-sm btn-outline-primary" 
+                  @click="reloadTrafficSimData" 
+                  :disabled="state.loadingTrafficSim"
+                  title="Reload traffic simulation data"
+                >
+                  <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                </button>
               </div>
-              <h3 class="mt-3 text-muted">Loading latency data...</h3>
-              <p class="text-muted">Please wait while we fetch the data</p>
-            </div>
-            <div v-else-if="!state.loading && state.pingData.length === 0" class="text-center py-5">
-              <i class="bi bi-graph-down fs-1 text-muted mb-3"></i>
-              <h5 class="text-muted">No Latency Data Available</h5>
-              <p class="text-muted">No ping data found for the selected time range</p>
-            </div>
-            <div v-else>
-              <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+              <div class="card-body">
+                <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- TrafficSim Graph -->
-      <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM')">
-        <div class="card mb-3">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <div>
-              <h5 class="card-title mb-0">Simulated Traffic</h5>
-              <small class="text-muted">displays the stats for simulated traffic</small>
-            </div>
-            <button 
-              class="btn btn-sm btn-outline-primary" 
-              @click="reloadTrafficSimData" 
-              :disabled="state.loadingTrafficSim"
-              title="Reload traffic simulation data"
-            >
-              <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-            </button>
-          </div>
-          <div class="card-body">
-            <div v-if="state.loading && state.trafficSimData.length === 0" class="text-center py-5">
-              <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+          <!-- Combined MOS Score Graph (derived from TrafficSim) -->
+          <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM') && state.trafficSimData.length > 0">
+            <div class="card mb-3">
+              <div class="card-body">
+                <h5 class="card-title">Voice Quality Score (MOS)</h5>
+                <p class="card-text">aggregated voice quality scoring from available data sources</p>
+                <MosGraph 
+                  :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
+                  :intervalSec="state.probe?.interval_sec || 60" 
+                />
               </div>
-              <h3 class="mt-3 text-muted">Loading traffic simulation data...</h3>
-              <p class="text-muted">Please wait while we fetch the data</p>
-            </div>
-            <div v-else-if="!state.loading && state.trafficSimData.length === 0" class="text-center py-5">
-              <i class="bi bi-broadcast fs-1 text-muted mb-3"></i>
-              <h5 class="text-muted">No Traffic Simulation Data Available</h5>
-              <p class="text-muted">No traffic simulation data found for the selected time range</p>
-            </div>
-            <div v-else>
-              <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Combined MOS Score Graph (for non-agent probes) -->
-      <div class="col-sm-12" v-if="containsProbeType('PING') || containsProbeType('TRAFFICSIM')">
-        <div class="card mb-3">
-          <div class="card-body">
-            <h5 class="card-title">Voice Quality Score (MOS)</h5>
-            <p class="card-text">aggregated voice quality scoring from available data sources</p>
-            <div v-if="state.loading && state.pingData.length === 0 && state.trafficSimData.length === 0" class="text-center py-5">
-              <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+          <!-- Ping/Latency Graph (only if PING data available) -->
+          <div class="col-sm-12" v-if="containsProbeType('PING') && state.pingData.length > 0">
+            <div class="card mb-3">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                  <h5 class="card-title mb-0">Latency</h5>
+                  <small class="text-muted">displays the stats associated with latency</small>
+                </div>
+                <button 
+                  class="btn btn-sm btn-outline-primary" 
+                  @click="reloadPingData" 
+                  :disabled="state.loadingPing"
+                  title="Reload latency data"
+                >
+                  <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                </button>
               </div>
-              <h3 class="mt-3 text-muted">Loading MOS data...</h3>
-              <p class="text-muted">Please wait while we fetch the data</p>
-            </div>
-            <div v-else-if="!state.loading && state.pingData.length === 0 && state.trafficSimData.length === 0" class="text-center py-5">
-              <i class="bi bi-reception-4 fs-1 text-muted mb-3"></i>
-              <h5 class="text-muted">No MOS Data Available</h5>
-              <p class="text-muted">No latency or traffic simulation data found for the selected time range</p>
-            </div>
-            <div v-else>
-              <MosGraph 
-                :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
-                :intervalSec="state.probe?.interval_sec || 60" 
-              />
+              <div class="card-body">
+                <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
       <!-- MTR Map and Table -->
       <div class="col-sm-12" v-if="containsProbeType('MTR')">
