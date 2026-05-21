@@ -1059,15 +1059,32 @@ function switchToReciprocal() {
 // Theme subscription for date picker
 let themeUnsubscribe: (() => void) | null = null;
 
-// Handler for explicit time range updates from date picker
+// Handler for explicit time range updates from date picker or graph zoom
 const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
   if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
     console.warn('[Probe] Invalid time range update:', newRange);
     return;
   }
   console.log('[Probe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
-  // Force a new array reference to ensure reactivity
-  state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+  
+  // Handle 'all' range signal (from TrafficSimGraph)
+  const isResetAll = newRange[0].getTime() === 0 && newRange[1].getTime() === 0;
+  
+  if (isResetAll) {
+    // Reset to default: last 3 hours (or let parent decide full range)
+    state.timeRange = [new Date(Date.now() - 3 * 60 * 60 * 1000), new Date()];
+  } else {
+    state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+  }
+  
+  // Sync to URL so time range is shareable/bookmarkable
+  router.push({
+    query: {
+      ...router.currentRoute.value.query,
+      from: state.timeRange[0].toISOString(),
+      to: state.timeRange[1].toISOString()
+    }
+  });
 };
 
 onMounted(() => {
@@ -1348,7 +1365,9 @@ const { connected: wsConnected } = useProbeSubscription(
                   <div class="card-body">
                     <MosGraph 
                       :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
-                      :intervalSec="state.probe?.interval_sec || 60" 
+                      :intervalSec="state.probe?.interval_sec || 60"
+                      :currentTimeRange="state.timeRange"
+                      @time-range-change="onTimeRangeUpdate" 
                     />
                   </div>
                 </div>
@@ -1484,7 +1503,9 @@ const { connected: wsConnected } = useProbeSubscription(
                 <p class="card-text">aggregated voice quality scoring from available data sources</p>
                 <MosGraph 
                   :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
-                  :intervalSec="state.probe?.interval_sec || 60" 
+                  :intervalSec="state.probe?.interval_sec || 60"
+                  :currentTimeRange="state.timeRange"
+                  @time-range-change="onTimeRangeUpdate"
                 />
               </div>
             </div>

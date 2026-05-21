@@ -6,15 +6,15 @@
     <!-- Controls Row -->
     <div class="controls-row">
       <!-- Time Range Selector -->
-<!--      <div class="time-range-selector">
+      <div class="time-range-selector">
         <button 
           v-for="range in timeRanges" 
           :key="range.value"
           :class="['time-btn', { active: selectedRange === range.value }]"
           @click="setTimeRange(range.value)">
           {{ range.label }}
-        </button>tt
-      </div>-->
+        </button>
+      </div>
       
       <!-- Annotation Toggle -->
       <div class="annotation-toggle">
@@ -180,6 +180,23 @@ export default {
 
     const setTimeRange = (range: string) => {
       selectedRange.value = range;
+      
+      // Compute absolute time range and emit to parent so the whole page updates
+      if (range === 'all') {
+        // 'all' means let parent decide the full range - emit null to signal reset
+        emit('time-range-change', [new Date(0), new Date()]);
+      } else {
+        const ranges: Record<string, number> = {
+          '1h': 60 * 60 * 1000,
+          '6h': 6 * 60 * 60 * 1000,
+          '24h': 24 * 60 * 60 * 1000,
+          '7d': 7 * 24 * 60 * 60 * 1000
+        };
+        const now = new Date();
+        const from = new Date(now.getTime() - ranges[range]);
+        emit('time-range-change', [from, now]);
+      }
+      
       drawGraph();
     };
 

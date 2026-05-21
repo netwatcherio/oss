@@ -37,9 +37,14 @@ export default defineComponent({
     intervalSec: {
       type: Number,
       default: 60
+    },
+    currentTimeRange: {
+      type: Array as PropType<[Date, Date] | null>,
+      default: null
     }
   },
-  setup(props) {
+  emits: ['time-range-change'],
+  setup(props, { emit }) {
     const mosGraph = ref<HTMLElement | null>(null);
     const chart = ref<ApexCharts | null>(null);
     const isDark = ref(themeService.getTheme() === 'dark');
@@ -213,7 +218,24 @@ export default defineComponent({
             tools: { download: true, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true },
             autoSelected: 'zoom'
           },
-          dropShadow: { enabled: false }
+          dropShadow: { enabled: false },
+          events: {
+            zoomed: (chartContext: any, { xaxis }: any) => {
+              if (xaxis && xaxis.min && xaxis.max) {
+                const newFrom = new Date(xaxis.min);
+                const newTo = new Date(xaxis.max);
+                console.log('[MosGraph] Zoomed to:', newFrom.toISOString(), '->', newTo.toISOString());
+                emit('time-range-change', [newFrom, newTo]);
+              }
+            },
+            beforeResetZoom: () => {
+              if (props.currentTimeRange && props.currentTimeRange.length === 2) {
+                console.log('[MosGraph] Reset zoom, restoring original range');
+                emit('time-range-change', props.currentTimeRange);
+              }
+              return undefined;
+            }
+          }
         },
         colors: ['#8b5cf6'], // Purple for MOS line
         stroke: { 

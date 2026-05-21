@@ -735,15 +735,32 @@ function goBack() {
     router.push({ name: 'sharedAgent', params: { token: token.value } });
 }
 
-// Handler for explicit time range updates from date picker
+// Handler for explicit time range updates from date picker or graph zoom
 const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
     if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
         console.warn('[SharedProbe] Invalid time range update:', newRange);
         return;
     }
     console.log('[SharedProbe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
-    // Force a new array reference to ensure reactivity
-    state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+    
+    // Handle 'all' range signal (from TrafficSimGraph)
+    const isResetAll = newRange[0].getTime() === 0 && newRange[1].getTime() === 0;
+    
+    if (isResetAll) {
+        // Reset to default: last 3 hours
+        state.timeRange = [new Date(Date.now() - 3 * 60 * 60 * 1000), new Date()];
+    } else {
+        state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
+    }
+    
+    // Sync to URL so time range is shareable/bookmarkable
+    router.push({
+        query: {
+            ...router.currentRoute.value.query,
+            from: state.timeRange[0].toISOString(),
+            to: state.timeRange[1].toISOString()
+        }
+    });
 };
 
 // ---------- Per-type reload functions for independent graph refresh ----------
@@ -1096,6 +1113,8 @@ watch(
                             <MosGraph 
                                 :trafficSimResults="transformToTrafficSimResult(activeTrafficSimData)"
                                 :intervalSec="state.aggregationBucketSec || 60"
+                                :currentTimeRange="state.timeRange"
+                                @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
                     </div>
