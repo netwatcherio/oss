@@ -1310,75 +1310,87 @@ const { connected: wsConnected } = useProbeSubscription(
       <div v-if="state.isAgentProbe && state.agentPairData.length > 0" class="col-12">
         <!-- Direction content - use v-if for proper D3/NetworkMap rendering -->
         <template v-for="(pair, index) in state.agentPairData" :key="`content-${index}`">
-          <div v-if="index === state.selectedDirection">
-          
+<div v-if="index === state.selectedDirection">
+            
             <div class="row">
-            <!-- Traffic Sim Data (Primary for voice quality) -->
-            <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
-              <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0">
-                    <i class="bi bi-broadcast me-2"></i>
-                    Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
-                  </h6>
-                  <button 
-                    class="btn btn-sm btn-outline-primary" 
-                    @click="reloadTrafficSimData" 
-                    :disabled="state.loadingTrafficSim"
-                    title="Reload traffic simulation data"
-                  >
-                    <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                  </button>
-                </div>
-                <div class="card-body">
-                  <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
-                </div>
-              </div>
-            </div>
-            
-            <!-- Combined MOS Score Graph (derived from TrafficSim) -->
-            <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
-              <div class="card h-100">
-                <div class="card-header">
-                  <h6 class="mb-0">
-                    <i class="bi bi-reception-4 me-2"></i>
-                    Voice Quality Score ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
-                  </h6>
-                </div>
-                <div class="card-body">
-                  <MosGraph 
-                    :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
-                    :intervalSec="state.probe?.interval_sec || 60" 
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <!-- Ping/Latency Data (only if PING data available) -->
-            <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0">
-              <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0">
-                    <i class="bi bi-speedometer2 me-2"></i>
-                    Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
-                  </h6>
-                  <button 
-                    class="btn btn-sm btn-outline-primary" 
-                    @click="reloadPingData" 
-                    :disabled="state.loadingPing"
-                    title="Reload latency data"
-                  >
-                    <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                  </button>
-                </div>
-                <div class="card-body">
+              <!-- Traffic Sim Data (Primary for voice quality) -->
+              <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
+                <div class="card h-100">
+                  <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">
+                      <i class="bi bi-broadcast me-2"></i>
+                      Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                    </h6>
+                    <button 
+                      class="btn btn-sm btn-outline-primary" 
+                      @click="reloadTrafficSimData" 
+                      :disabled="state.loadingTrafficSim"
+                      title="Reload traffic simulation data"
+                    >
+                      <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                    </button>
                   </div>
+                  <div class="card-body">
+                    <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+                  </div>
+                </div>
               </div>
-            </div>
-            
-            <!-- MTR Data -->
-            <div class="col-12 mb-3">
-              <div class="card">
+              
+              <!-- Combined MOS Score Graph (derived from TrafficSim) -->
+              <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h6 class="mb-0">
+                      <i class="bi bi-reception-4 me-2"></i>
+                      Voice Quality Score ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                    </h6>
+                  </div>
+                  <div class="card-body">
+                    <MosGraph 
+                      :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
+                      :intervalSec="state.probe?.interval_sec || 60" 
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Ping/Latency Data (only if PING data available) -->
+              <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0">
+                <div class="card h-100">
+                  <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">
+                      <i class="bi bi-speedometer2 me-2"></i>
+                      Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
+                    </h6>
+                    <button 
+                      class="btn btn-sm btn-outline-primary" 
+                      @click="reloadPingData" 
+                      :disabled="state.loadingPing"
+                      title="Reload latency data"
+                    >
+                      <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
+                    </button>
+                  </div>
+                  <div class="card-body">
+                    <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- No data message when none of the probe types have data -->
+              <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length === 0 && pair.pingData.length === 0 && !state.loading">
+                <div class="card h-100">
+                  <div class="card-body text-center py-5">
+                    <i class="bi bi-inbox fs-1 text-muted mb-3"></i>
+                    <h5 class="text-muted">No Data Collected</h5>
+                    <p class="text-muted">Waiting for probe data to be collected. Try adjusting the time range or check agent connectivity.</p>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- MTR Data -->
+              <div class="col-12 mb-3">
+                <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                   <h6 class="mb-0">
                     <i class="bi bi-diagram-3 me-2"></i>
@@ -1418,22 +1430,22 @@ const { connected: wsConnected } = useProbeSubscription(
                       :mtr-data="pair.mtrData" 
                       @show-all-traces="showMtrModal = true; state.selectedMtrData = pair.mtrData"
                     />
-                  </template>
+</template>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
         </template>
       </div>
       
-      <!-- No data state for agent probes -->
+      <!-- No data state for agent probes when no pairs have data -->
       <div v-else-if="state.isAgentProbe && !state.loading && state.agentPairData.length === 0" class="col-12">
         <div class="card mb-3">
           <div class="card-body text-center py-5">
             <i class="bi bi-inbox fs-1 text-muted mb-3"></i>
             <h5 class="text-muted">No Agent-to-Agent Data Available</h5>
-            <p class="text-muted">No monitoring data found for the selected time range. Try adjusting the date range.</p>
+            <p class="text-muted">Waiting for probe data to be collected. Try adjusting the time range or check agent connectivity.</p>
           </div>
         </div>
       </div>
