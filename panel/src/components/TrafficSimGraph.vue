@@ -352,16 +352,36 @@ function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): T
     const avgRtts = bucketData.map(d => d.averageRTT);
     const minRtts = bucketData.map(d => d.minRTT);
     const maxRtts = bucketData.map(d => d.maxRTT);
+    const medianRtts = bucketData.map(d => d.medianRTT).filter(v => v != null && v > 0);
+    const p95Rtts = bucketData.map(d => d.p95RTT).filter(v => v != null && v > 0);
+    const p99Rtts = bucketData.map(d => d.p99RTT).filter(v => v != null && v > 0);
+    const jitterAvgs = bucketData.map(d => d.jitterAvg).filter(v => v != null && v > 0);
+    const jitterMedians = bucketData.map(d => d.jitterMedian).filter(v => v != null && v > 0);
+    const jitterP95s = bucketData.map(d => d.jitterP95).filter(v => v != null && v > 0);
     const totalPackets = bucketData.reduce((sum, d) => sum + d.totalPackets, 0);
     const lostPackets = bucketData.reduce((sum, d) => sum + d.lostPackets, 0);
     const outOfSeq = bucketData.reduce((sum, d) => sum + d.outOfSequence, 0);
+    
+    // Helper for percentile calculation
+    const percentile = (arr: number[], p: number) => {
+      if (arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const idx = Math.floor((arr.length - 1) * p / 100);
+      return sorted[idx] || sorted[sorted.length - 1];
+    };
     
     aggregated.push({
       ...bucketData[0], // Copy other properties
       reportTime: new Date(bucketTime + bucketSizeMs / 2).toISOString(), // Middle of bucket
       averageRTT: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
+      medianRTT: medianRtts.length > 0 ? percentile(medianRtts, 50) : 0,
+      p95RTT: p95Rtts.length > 0 ? percentile(p95Rtts, 50) : 0,
+      p99RTT: p99Rtts.length > 0 ? percentile(p99Rtts, 50) : 0,
       minRTT: Math.min(...minRtts),
       maxRTT: Math.max(...maxRtts),
+      jitterAvg: jitterAvgs.length > 0 ? jitterAvgs.reduce((a, b) => a + b, 0) / jitterAvgs.length : 0,
+      jitterMedian: jitterMedians.length > 0 ? percentile(jitterMedians, 50) : 0,
+      jitterP95: jitterP95s.length > 0 ? percentile(jitterP95s, 50) : 0,
       totalPackets: totalPackets,
       lostPackets: lostPackets,
       outOfSequence: outOfSeq
@@ -467,19 +487,44 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 
   const series = [
     {
-      name: 'Min RTT',
-      type: 'line',
-      data: buildSeriesData(d => d.minRTT)
-    },
-    {
       name: 'Avg RTT',
       type: 'line',
       data: buildSeriesData(d => d.averageRTT)
     },
     {
+      name: 'Median RTT',
+      type: 'line',
+      data: buildSeriesData(d => d.medianRTT || d.averageRTT)
+    },
+    {
+      name: 'P95 RTT',
+      type: 'line',
+      data: buildSeriesData(d => d.p95RTT || d.averageRTT)
+    },
+    {
+      name: 'P99 RTT',
+      type: 'line',
+      data: buildSeriesData(d => d.p99RTT || d.averageRTT)
+    },
+    {
+      name: 'Min RTT',
+      type: 'line',
+      data: buildSeriesData(d => d.minRTT)
+    },
+    {
       name: 'Max RTT',
       type: 'line',
       data: buildSeriesData(d => d.maxRTT)
+    },
+    {
+      name: 'Jitter Avg',
+      type: 'line',
+      data: buildSeriesData(d => d.jitterAvg || 0)
+    },
+    {
+      name: 'Jitter P95',
+      type: 'line',
+      data: buildSeriesData(d => d.jitterP95 || 0)
     },
     {
       name: 'Packet Loss',
@@ -491,6 +536,20 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       type: 'scatter',
       data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.outOfSequence }))
     }
+  ];
+
+  // Color palette - ordered to match series indices above
+  const seriesColors = [
+    '#3b82f6',  // Avg RTT - blue
+    '#8b5cf6',  // Median RTT - purple
+    '#06b6d4',  // P95 RTT - cyan
+    '#ec4899',  // P99 RTT - pink
+    '#10b981',  // Min RTT - green
+    '#f97316',  // Max RTT - orange
+    '#eab308',  // Jitter Avg - yellow
+    '#f59e0b',  // Jitter P95 - amber
+    '#fbbf24',  // Packet Loss - yellow gradient
+    '#a855f7'   // Out of Sequence - purple scatter
   ];
 
   // Initialize empty annotations (gaps are handled by null values in series data)
@@ -665,14 +724,14 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       redrawOnParentResize: true,
       redrawOnWindowResize: true
     },
-    colors: ['#10b981', '#3b82f6', '#f97316', '#fbbf24', '#a855f7'],
+    colors: seriesColors,
     stroke: {
-      width: [2, 3, 2, 2, 0],
+      width: [3, 2, 2, 2, 2, 2, 2, 2, 0, 0],
       curve: 'smooth',
-      dashArray: [0, 0, 0, 0, 0]
+      dashArray: [0, 0, 4, 4, 0, 0, 0, 4, 0, 0]  // Dashed for percentile lines
     },
     fill: {
-      type: ['solid', 'solid', 'solid', 'gradient', 'solid'],
+      type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid'],
       gradient: {
         shadeIntensity: 0.8,
         opacityFrom: 0.35,
@@ -681,7 +740,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     markers: {
-      size: [0, 0, 0, 0, 0],  // No markers - clean line graphs
+      size: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       strokeWidth: 0,
       hover: {
         size: 6,
@@ -706,9 +765,9 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     },
     yaxis: [
       {
-        seriesName: ['Min RTT', 'Avg RTT', 'Max RTT'],
+        seriesName: ['Avg RTT', 'Median RTT', 'P95 RTT', 'P99 RTT', 'Min RTT', 'Max RTT', 'Jitter Avg', 'Jitter P95'],
         title: {
-          text: 'Round Trip Time (ms)',
+          text: 'Latency / Jitter (ms)',
           style: {
             color: colors.foreColor,
             fontSize: '14px',
@@ -766,7 +825,6 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       shared: true,
       intersect: false,
       theme: colors.tooltipTheme,
-      // Performance: use fixed tooltip position for large datasets
       fixed: isLargeDataset ? {
         enabled: true,
         position: 'topRight',
@@ -781,13 +839,13 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       y: {
         formatter: function (y, { seriesIndex }) {
           if (y != null) {
-            if (seriesIndex <= 2) {
-              return y.toFixed(1) + " ms";
-            } else if (seriesIndex === 3) {
+            // idx 0-7: RTT/Jitter in ms, idx 8: Packet Loss %, idx 9: Out of Sequence count
+            if (seriesIndex === 8) {
               return y.toFixed(1) + "%";
-            } else {
-              return y.toFixed(0) + " packets";
+            } else if (seriesIndex === 9) {
+              return y.toFixed(0) + " pkts";
             }
+            return y.toFixed(1) + " ms";
           }
           return y;
         }
@@ -796,38 +854,91 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         const timestamp = w.config.series[0].data[dataPointIndex].x;
         const date = new Date(timestamp);
         
-        let html = '<div class="custom-tooltip">';
+        // Get the data point index in original processedData
+        const dataIdx = dataPointIndex;
+        
+        let html = '<div class="custom-tooltip traffic-sim-tooltip">';
         html += `<div class="tooltip-title">${date.toLocaleString()}</div>`;
+        html += '<div class="tooltip-section">';
+        html += '<div class="tooltip-section-title">Latency</div>';
         html += '<div class="tooltip-body">';
         
+        // RTT metrics (indices 0-5)
+        const rttNames = ['Avg RTT', 'Median RTT', 'P95 RTT', 'P99 RTT', 'Min RTT', 'Max RTT'];
+        const rttIndices = [0, 1, 2, 3, 4, 5];
+        
         w.config.series.forEach((s: any, idx: number) => {
+          if (idx === 8 || idx === 9) return; // Skip non-RTT for this section
           const value = series[idx][dataPointIndex];
+          if (value == null) return;
           const color = w.config.colors[idx];
           const name = s.name;
-          
-          // Skip null values (inserted by gap detection)
-          if (value == null) return;
-          
-          let formattedValue;
-          
-          if (idx <= 2) {
-            formattedValue = value.toFixed(1) + ' ms';
-          } else if (idx === 3) {
-            formattedValue = value.toFixed(1) + '%';
-          } else {
-            formattedValue = value.toFixed(0) + ' packets';
-          }
-          
           html += `
             <div class="tooltip-series">
               <span class="tooltip-marker" style="background-color: ${color}"></span>
               <span class="tooltip-label">${name}:</span>
-              <span class="tooltip-value">${formattedValue}</span>
+              <span class="tooltip-value">${value.toFixed(2)} ms</span>
             </div>
           `;
         });
         
         html += '</div></div>';
+        
+        // Jitter section
+        html += '<div class="tooltip-section">';
+        html += '<div class="tooltip-section-title">Jitter</div>';
+        html += '<div class="tooltip-body">';
+        
+        // Jitter metrics (indices 6-7)
+        w.config.series.forEach((s: any, idx: number) => {
+          if (idx < 6 || idx === 9) return; // Only jitter (6-7)
+          const value = series[idx][dataPointIndex];
+          if (value == null || value === 0) return;
+          const color = w.config.colors[idx];
+          const name = s.name;
+          html += `
+            <div class="tooltip-series">
+              <span class="tooltip-marker" style="background-color: ${color}"></span>
+              <span class="tooltip-label">${name}:</span>
+              <span class="tooltip-value">${value.toFixed(2)} ms</span>
+            </div>
+          `;
+        });
+        
+        html += '</div></div>';
+        
+        // Loss section
+        html += '<div class="tooltip-section">';
+        html += '<div class="tooltip-section-title">Reliability</div>';
+        html += '<div class="tooltip-body">';
+        
+        // Packet Loss (idx 8)
+        const lossValue = series[8]?.[dataPointIndex];
+        if (lossValue != null) {
+          const color = w.config.colors[8];
+          html += `
+            <div class="tooltip-series">
+              <span class="tooltip-marker" style="background-color: ${color}"></span>
+              <span class="tooltip-label">Packet Loss:</span>
+              <span class="tooltip-value">${lossValue.toFixed(1)}%</span>
+            </div>
+          `;
+        }
+        
+        // Out of Sequence (idx 9)
+        const oosValue = series[9]?.[dataPointIndex];
+        if (oosValue != null) {
+          const color = w.config.colors[9];
+          html += `
+            <div class="tooltip-series">
+              <span class="tooltip-marker" style="background-color: ${color}"></span>
+              <span class="tooltip-label">Out of Sequence:</span>
+              <span class="tooltip-value">${oosValue.toFixed(0)}</span>
+            </div>
+          `;
+        }
+        
+        html += '</div></div></div>';
         return html;
       }
     },
@@ -844,7 +955,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         radius: 12
       },
       itemMargin: {
-        horizontal: 10
+        horizontal: 8
       }
     },
     grid: {
@@ -1156,39 +1267,66 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 }
 
 /* Custom tooltip styles */
-:deep(.custom-tooltip) {
+:deep(.traffic-sim-tooltip) {
   background: white;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0.75rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+  min-width: 280px;
 }
 
 :deep(.tooltip-title) {
-  font-size: 0.75rem;
-  color: #6b7280;
-  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  color: #1f2937;
+  margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+  font-weight: 600;
+}
+
+:deep(.tooltip-section) {
+  margin-bottom: 0.75rem;
+}
+
+:deep(.tooltip-section:last-child) {
+  margin-bottom: 0;
+}
+
+:deep(.tooltip-section-title) {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+:deep(.tooltip-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 :deep(.tooltip-series) {
   display: flex;
   align-items: center;
-  margin-bottom: 0.25rem;
-  font-size: 0.875rem;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
 }
 
 :deep(.tooltip-marker) {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   margin-right: 0.5rem;
+  flex-shrink: 0;
 }
 
 :deep(.tooltip-label) {
-  color: #6b7280;
+  color: #4b5563;
   margin-right: 0.5rem;
+  flex-shrink: 0;
 }
 
 :deep(.tooltip-value) {
@@ -1253,18 +1391,26 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 }
 
 /* Dark mode tooltips */
-:global([data-theme="dark"]) .custom-tooltip {
+:global([data-theme="dark"]) .traffic-sim-tooltip {
   background: #1e293b !important;
   border-color: #475569 !important;
 }
 
-:global([data-theme="dark"]) .tooltip-title {
-  color: #9ca3af;
+:global([data-theme="dark"]) .traffic-sim-tooltip .tooltip-title {
+  color: #f9fafb;
   border-bottom-color: #475569;
 }
 
-:global([data-theme="dark"]) .tooltip-label {
+:global([data-theme="dark"]) .traffic-sim-tooltip .tooltip-section-title {
   color: #9ca3af;
+}
+
+:global([data-theme="dark"]) .traffic-sim-tooltip .tooltip-label {
+  color: #d1d5db;
+}
+
+:global([data-theme="dark"]) .traffic-sim-tooltip .tooltip-value {
+  color: #f9fafb;
 }
 
 :global([data-theme="dark"]) .tooltip-value {

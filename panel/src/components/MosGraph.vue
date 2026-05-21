@@ -26,13 +26,6 @@
           <div class="stat-value">{{ statistics.min.toFixed(2) }} – {{ statistics.max.toFixed(2) }}</div>
         </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon">📡</div>
-        <div class="stat-content">
-          <div class="stat-label">Data Sources</div>
-          <div class="stat-value">{{ statistics.dataSources }}</div>
-        </div>
-      </div>
     </div>
 
     <!-- Chart Container -->
