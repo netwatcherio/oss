@@ -675,6 +675,23 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       dropShadow: {
         enabled: false
       },
+      events: {
+        zoomed: (chartContext: any, { xaxis }: any) => {
+          if (xaxis && xaxis.min && xaxis.max) {
+            const newFrom = new Date(xaxis.min);
+            const newTo = new Date(xaxis.max);
+            console.log('[TrafficSimGraph] Zoomed to:', newFrom.toISOString(), '->', newTo.toISOString());
+            emit('time-range-change', [newFrom, newTo]);
+          }
+        },
+        beforeResetZoom: () => {
+          if (props.currentTimeRange && props.currentTimeRange.length === 2) {
+            console.log('[TrafficSimGraph] Reset zoom, restoring original range');
+            emit('time-range-change', props.currentTimeRange);
+          }
+          return undefined;
+        }
+      },
       redrawOnParentResize: true,
       redrawOnWindowResize: true
     },
