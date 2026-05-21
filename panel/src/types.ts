@@ -343,12 +343,19 @@ export interface PingResult {
 
 export interface TrafficSimResult {
     averageRTT: number;
+    medianRTT?: number;
+    p95RTT?: number;
+    p99RTT?: number;
     minRTT: number;
     maxRTT: number;
     lostPackets: number;
     totalPackets: number;
     outOfSequence: number;
     duplicates: number;  // Duplicate packets received
+    jitterAvg?: number;  // stddev of RTTs
+    jitterMedian?: number;
+    jitterP95?: number;
+    mosScore?: number;   // MOS score computed from TrafficSim metrics
     reportTime: string;  // ISO 8601 timestamp
 }
 

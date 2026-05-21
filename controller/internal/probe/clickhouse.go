@@ -745,12 +745,20 @@ type AggregatedPingPayload struct {
 type TrafficSimPayload struct {
 	ReportTime    string  `json:"reportTime"`
 	AverageRTT    float64 `json:"averageRTT"`
+	MedianRTT     float64 `json:"medianRTT,omitempty"`
+	P95RTT        float64 `json:"p95RTT,omitempty"`
+	P99RTT        float64 `json:"p99RTT,omitempty"`
 	MinRTT        float64 `json:"minRTT"`
 	MaxRTT        float64 `json:"maxRTT"`
+	StdDevRTT     float64 `json:"stdDevRTT"`
+	JitterAvg     float64 `json:"jitterAvg,omitempty"`
+	JitterMedian  float64 `json:"jitterMedian,omitempty"`
+	JitterP95     float64 `json:"jitterP95,omitempty"`
 	TotalPackets  uint64  `json:"totalPackets"`
 	LostPackets   uint64  `json:"lostPackets"`
 	OutOfSequence uint64  `json:"outOfSequence"`
 	Duplicates    uint64  `json:"duplicates"`
+	MosScore      float64 `json:"mosScore,omitempty"`
 }
 
 // MTR aggregation types
@@ -1173,6 +1181,9 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		lostPackets   uint64
 		outOfSequence uint64
 		duplicates    uint64
+		jitterAvgs    []float64
+		jitterMedians []float64
+		jitterP95s    []float64
 		lastData      ProbeData
 		initialized   bool
 	}
@@ -1206,11 +1217,42 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		b.lostPackets += p.LostPackets
 		b.outOfSequence += p.OutOfSequence
 		b.duplicates += p.Duplicates
+
+		// Track jitter values for aggregation
+		jitterVal := p.JitterAvg
+		if jitterVal == 0 {
+			jitterVal = p.StdDevRTT
+		}
+		if jitterVal > 0 {
+			b.jitterAvgs = append(b.jitterAvgs, jitterVal)
+		}
+		if p.JitterMedian > 0 {
+			b.jitterMedians = append(b.jitterMedians, p.JitterMedian)
+		}
+		if p.JitterP95 > 0 {
+			b.jitterP95s = append(b.jitterP95s, p.JitterP95)
+		}
+
 		b.initialized = true
 
 		if d.CreatedAt.After(b.lastData.CreatedAt) {
 			b.lastData = d
 		}
+	}
+
+	// percentile helper for aggregation
+	percentileFn := func(vals []float64, pct int) float64 {
+		if len(vals) == 0 {
+			return 0
+		}
+		sorted := make([]float64, len(vals))
+		copy(sorted, vals)
+		sort.Float64s(sorted)
+		idx := (len(sorted) * pct) / 100
+		if idx >= len(sorted) {
+			idx = len(sorted) - 1
+		}
+		return sorted[idx]
 	}
 
 	result := make([]ProbeData, 0, len(buckets))
@@ -1219,15 +1261,45 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 			continue
 		}
 
+		// Compute packet loss percentage
+		lossPct := float64(0)
+		if b.totalPackets > 0 {
+			lossPct = float64(b.lostPackets) / float64(b.totalPackets) * 100
+		}
+
+		// Aggregate jitter values
+		avgJitter := percentileFn(b.jitterAvgs, 50) // Use median of jitterAvgs
+		if len(b.jitterAvgs) == 0 {
+			avgJitter = 0
+		} else {
+			var sum float64
+			for _, j := range b.jitterAvgs {
+				sum += j
+			}
+			avgJitter = sum / float64(len(b.jitterAvgs))
+		}
+		medianJitter := percentileFn(b.jitterMedians, 50)
+		p95Jitter := percentileFn(b.jitterP95s, 95)
+
+		// Compute MOS score
+		mosScore := computeMos(avg(b.rtts), lossPct, avgJitter)
+
 		agg := TrafficSimPayload{
 			ReportTime:    bucketTime.UTC().Format(time.RFC3339),
 			AverageRTT:    avg(b.rtts),
+			MedianRTT:     percentileFn(b.rtts, 50),
+			P95RTT:        percentileFn(b.rtts, 95),
+			P99RTT:        percentileFn(b.rtts, 99),
 			MinRTT:        b.minRTT,
 			MaxRTT:        b.maxRTT,
 			TotalPackets:  b.totalPackets,
 			LostPackets:   b.lostPackets,
 			OutOfSequence: b.outOfSequence,
 			Duplicates:    b.duplicates,
+			JitterAvg:     avgJitter,
+			JitterMedian:  medianJitter,
+			JitterP95:     p95Jitter,
+			MosScore:      mosScore,
 		}
 
 		payload, _ := json.Marshal(agg)

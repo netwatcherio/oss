@@ -13,8 +13,32 @@
         <div class="stat-value">{{ statistics.avgRtt.toFixed(1) }} ms</div>
       </div>
       <div class="stat-card">
+        <div class="stat-label">Median RTT</div>
+        <div class="stat-value">{{ statistics.medianRtt.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">P95 RTT</div>
+        <div class="stat-value">{{ statistics.p95Rtt.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">P99 RTT</div>
+        <div class="stat-value">{{ statistics.p99Rtt.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">Min / Max RTT</div>
         <div class="stat-value">{{ statistics.minRtt.toFixed(1) }} / {{ statistics.maxRtt.toFixed(1) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jitter (Avg)</div>
+        <div class="stat-value">{{ statistics.jitter.toFixed(2) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jitter (Med)</div>
+        <div class="stat-value">{{ statistics.jitterMedian.toFixed(2) }} ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jitter (P95)</div>
+        <div class="stat-value">{{ statistics.jitterP95.toFixed(2) }} ms</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Packet Loss</div>
@@ -132,8 +156,18 @@ export default {
       const avgRtt = avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length;
       const avgPacketLoss = packetLosses.reduce((a, b) => a + b, 0) / packetLosses.length;
       
-      // Calculate jitter as standard deviation of RTT (approximation from min/max spread)
-      const jitter = (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
+      // Use actual jitterAvg if available, otherwise fall back to approximation
+      const jitterVals = props.trafficResults.map(d => d.jitterAvg).filter(v => v != null && v > 0);
+      const jitter = jitterVals.length > 0 
+        ? jitterVals.reduce((a, b) => a + b, 0) / jitterVals.length
+        : (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
+      
+      // Collect percentile values from results
+      const medianRTTs = props.trafficResults.map(d => d.medianRTT).filter(v => v != null && v > 0);
+      const p95RTTs = props.trafficResults.map(d => d.p95RTT).filter(v => v != null && v > 0);
+      const p99RTTs = props.trafficResults.map(d => d.p99RTT).filter(v => v != null && v > 0);
+      const jitterMedians = props.trafficResults.map(d => d.jitterMedian).filter(v => v != null && v > 0);
+      const jitterP95s = props.trafficResults.map(d => d.jitterP95).filter(v => v != null && v > 0);
       
       // Calculate MOS using ITU-T G.107 E-Model
       const mosResult = calculateMOS(avgRtt, jitter, avgPacketLoss);
@@ -141,12 +175,17 @@ export default {
       return {
         currentRtt,
         avgRtt,
+        medianRtt: medianRTTs.length > 0 ? medianRTTs.reduce((a, b) => a + b, 0) / medianRTTs.length : 0,
+        p95Rtt: p95RTTs.length > 0 ? p95RTTs.reduce((a, b) => a + b, 0) / p95RTTs.length : 0,
+        p99Rtt: p99RTTs.length > 0 ? p99RTTs.reduce((a, b) => a + b, 0) / p99RTTs.length : 0,
         minRtt: Math.min(...minRtts),
         maxRtt: Math.max(...maxRtts),
         avgPacketLoss,
         totalOutOfSequence: outOfSequence.reduce((a, b) => a + b, 0),
         totalDuplicates: duplicates.reduce((a, b) => a + b, 0),
         jitter,
+        jitterMedian: jitterMedians.length > 0 ? jitterMedians.reduce((a, b) => a + b, 0) / jitterMedians.length : 0,
+        jitterP95: jitterP95s.length > 0 ? jitterP95s.reduce((a, b) => a + b, 0) / jitterP95s.length : 0,
         mos: mosResult.mos,
         mosQuality: mosResult.quality,
         mosQualityLabel: getMosQualityLabel(mosResult.quality)
@@ -168,7 +207,12 @@ export default {
       const avgLoss = lastHourData.reduce((sum, d) => sum + (d.lostPackets / d.totalPackets) * 100, 0) / lastHourData.length;
       const minRtts = lastHourData.map(d => d.minRTT);
       const maxRtts = lastHourData.map(d => d.maxRTT);
-      const avgJitter = (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
+      
+      // Use actual jitterAvg if available, otherwise fall back to approximation
+      const jitterVals = lastHourData.map(d => d.jitterAvg).filter(v => v != null && v > 0);
+      const avgJitter = jitterVals.length > 0
+        ? jitterVals.reduce((a, b) => a + b, 0) / jitterVals.length
+        : (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
       
       const mosResult = calculateMOS(avgLatency, avgJitter, avgLoss);
       

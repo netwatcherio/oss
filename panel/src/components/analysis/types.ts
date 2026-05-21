@@ -11,10 +11,14 @@ export interface HealthVector {
 }
 
 export interface ProbeMetrics {
-    avg_latency: number   // ms
-    p95_latency: number   // ms
-    packet_loss: number   // percentage
-    jitter: number        // ms
+    avg_latency: number
+    median_latency?: number
+    p95_latency: number
+    p99_latency?: number
+    packet_loss: number
+    jitter_avg: number
+    jitter_median?: number
+    jitter_p95?: number
     sample_count: number
 }
 

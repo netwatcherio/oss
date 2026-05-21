@@ -50,30 +50,21 @@
 import { onMounted, onUnmounted, ref, watch, computed, defineComponent } from 'vue';
 import ApexCharts from 'apexcharts';
 import type { PropType } from 'vue';
-import type { PingResult, TrafficSimResult } from '@/types';
+import type { TrafficSimResult } from '@/types';
 import { themeService } from '@/services/themeService';
-import { calculateMOS, getMosQuality, getMosQualityLabel, getMosColor, type MosQuality } from '@/utils/mos';
+import { calculateMOS, getMosQuality, getMosQualityLabel, type MosQuality } from '@/utils/mos';
 
-interface MosDataPoint {
+interface MosPoint {
   timestamp: number;
   mos: number;
-  quality: MosQuality;
-  source: 'ping' | 'trafficsim' | 'combined';
-}
-
-const NS_TO_MS = 1e-6;
-
-function toMs(ns: number): number {
-  return ns * NS_TO_MS;
+  latency: number;
+  jitter: number;
+  loss: number;
 }
 
 export default defineComponent({
   name: 'MosGraph',
   props: {
-    pingResults: {
-      type: Array as PropType<PingResult[]>,
-      default: () => []
-    },
     trafficSimResults: {
       type: Array as PropType<TrafficSimResult[]>,
       default: () => []
@@ -90,48 +81,34 @@ export default defineComponent({
     let themeUnsubscribe: (() => void) | null = null;
 
     const hasData = computed(() => {
-      return (props.pingResults?.length || 0) > 0 || (props.trafficSimResults?.length || 0) > 0;
+      return (props.trafficSimResults?.length || 0) > 0;
     });
 
-    // Calculate MOS data points from both sources
-    const mosDataPoints = computed((): MosDataPoint[] => {
-      const points: MosDataPoint[] = [];
-      
-      // Process ping data
-      if (props.pingResults?.length) {
-        for (const ping of props.pingResults) {
-          const latency = toMs(ping.avg_rtt);
-          const jitter = toMs(ping.std_dev_rtt);
-          const packetLoss = ping.packet_loss || 0;
-          const { mos, quality } = calculateMOS(latency, jitter, packetLoss);
-          points.push({
-            timestamp: new Date(ping.stop_timestamp).getTime(),
-            mos,
-            quality,
-            source: 'ping'
-          });
-        }
-      }
-      
-      // Process traffic sim data
-      if (props.trafficSimResults?.length) {
-        for (const ts of props.trafficSimResults) {
-          const latency = ts.averageRTT;
-          // Estimate jitter from min/max spread
-          const jitter = (ts.maxRTT - ts.minRTT) / 4;
-          const packetLoss = ts.totalPackets > 0 ? (ts.lostPackets / ts.totalPackets) * 100 : 0;
-          const { mos, quality } = calculateMOS(latency, jitter, packetLoss);
-          points.push({
+    // MOS data points from TrafficSim (MOS computed on backend during aggregation)
+    const mosDataPoints = computed(() => {
+      return props.trafficSimResults
+        .filter(ts => ts.averageRTT > 0 || ts.jitterAvg)
+        .map(ts => {
+          // Use pre-computed MosScore if available, otherwise compute from jitterAvg
+          let mos: number;
+          if (ts.mosScore && ts.mosScore > 0) {
+            mos = ts.mosScore;
+          } else {
+            // Fall back to computing MOS from jitterAvg (backend aggregates compute this, but raw data may not have it)
+            const latency = ts.averageRTT;
+            const jitter = ts.jitterAvg ?? (ts.maxRTT - ts.minRTT) / 4;
+            const loss = ts.totalPackets > 0 ? (ts.lostPackets / ts.totalPackets) * 100 : 0;
+            const result = calculateMOS(latency, jitter, loss);
+            mos = result.mos;
+          }
+          return {
             timestamp: new Date(ts.reportTime).getTime(),
             mos,
-            quality,
-            source: 'trafficsim'
-          });
-        }
-      }
-      
-      // Sort by timestamp
-      return points.sort((a, b) => a.timestamp - b.timestamp);
+            quality: getMosQuality(mos),
+            source: 'trafficsim' as const
+          };
+        })
+        .sort((a, b) => a.timestamp - b.timestamp);
     });
 
     // Calculate statistics
@@ -147,18 +124,6 @@ export default defineComponent({
       
       const currentQuality = getMosQuality(current);
       
-      // Determine data sources
-      const hasPing = points.some(p => p.source === 'ping');
-      const hasTrafficSim = points.some(p => p.source === 'trafficsim');
-      let dataSources = '';
-      if (hasPing && hasTrafficSim) {
-        dataSources = 'ICMP + TrafficSim';
-      } else if (hasPing) {
-        dataSources = 'ICMP Ping';
-      } else {
-        dataSources = 'TrafficSim';
-      }
-      
       return {
         current,
         average,
@@ -166,12 +131,12 @@ export default defineComponent({
         max,
         quality: currentQuality,
         qualityLabel: getMosQualityLabel(currentQuality),
-        dataSources,
+        dataSources: 'TrafficSim',
         sampleCount: points.length
       };
     });
 
-    function createChartOptions(data: MosDataPoint[], darkMode: boolean): ApexCharts.ApexOptions {
+    function createChartOptions(data: typeof mosDataPoints.value, darkMode: boolean): ApexCharts.ApexOptions {
       const colors = darkMode ? {
         foreColor: '#e5e7eb',
         labelColor: '#9ca3af',
@@ -382,7 +347,7 @@ export default defineComponent({
       }
     });
 
-    watch([() => props.pingResults, () => props.trafficSimResults], () => drawGraph(), { deep: true });
+    watch([() => props.trafficSimResults], () => drawGraph(), { deep: true });
 
     return {
       mosGraph,

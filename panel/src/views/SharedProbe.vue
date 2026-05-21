@@ -209,8 +209,15 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
         const p = r.payload as any;
         return {
             averageRTT: p?.averageRTT ?? 0,
+            medianRTT: p?.medianRTT,
+            p95RTT: p?.p95RTT,
+            p99RTT: p?.p99RTT,
             minRTT: p?.minRTT ?? 0,
             maxRTT: p?.maxRTT ?? 0,
+            jitterAvg: p?.jitterAvg ?? p?.stdDevRTT,
+            jitterMedian: p?.jitterMedian,
+            jitterP95: p?.jitterP95,
+            mosScore: p?.mosScore,
             lostPackets: p?.lostPackets ?? 0,
             totalPackets: p?.totalPackets ?? 0,
             outOfSequence: p?.outOfOrder ?? 0,
@@ -1116,12 +1123,12 @@ watch(
                     </div>
                     
                     <!-- MOS Graph (Voice Quality) -->
-                    <div v-if="activePingData.length > 0 || activeTrafficSimData.length > 0" class="data-section">
+                    <div v-if="activeTrafficSimData.length > 0" class="data-section">
                         <h2><i class="bi bi-telephone"></i> Voice Quality (MOS)</h2>
                         <div class="graph-container">
                             <MosGraph 
-                                :pingResults="transformPingDataMulti(activePingData)"
-                                :aggregationBucketSec="state.aggregationBucketSec"
+                                :trafficSimResults="transformToTrafficSimResult(activeTrafficSimData)"
+                                :intervalSec="state.aggregationBucketSec || 60"
                             />
                         </div>
                     </div>

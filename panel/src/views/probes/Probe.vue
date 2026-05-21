@@ -390,8 +390,15 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
     const p = r.payload as any;
     return {
       averageRTT: p?.averageRTT ?? 0,
+      medianRTT: p?.medianRTT,
+      p95RTT: p?.p95RTT,
+      p99RTT: p?.p99RTT,
       minRTT: p?.minRTT ?? 0,
       maxRTT: p?.maxRTT ?? 0,
+      jitterAvg: p?.jitterAvg ?? p?.stdDevRTT,
+      jitterMedian: p?.jitterMedian,
+      jitterP95: p?.jitterP95,
+      mosScore: p?.mosScore,
       lostPackets: p?.lostPackets ?? 0,
       totalPackets: p?.totalPackets ?? 0,
       outOfSequence: p?.outOfOrder ?? 0,  // Agent uses outOfOrder, graph expects outOfSequence
@@ -1381,7 +1388,6 @@ const { connected: wsConnected } = useProbeSubscription(
                 </div>
                 <div class="card-body">
                   <MosGraph 
-                    :ping-results="transformPingDataMulti(pair.pingData)" 
                     :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
                     :intervalSec="state.probe?.interval_sec || 60" 
                   />
@@ -1548,7 +1554,6 @@ const { connected: wsConnected } = useProbeSubscription(
             </div>
             <div v-else>
               <MosGraph 
-                :ping-results="transformPingDataMulti(state.pingData)" 
                 :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
                 :intervalSec="state.probe?.interval_sec || 60" 
               />

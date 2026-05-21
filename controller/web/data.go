@@ -88,6 +88,77 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	})
 
 	// ------------------------------------------
+	// GET /workspaces/:id/probe-data/mos-timeseries
+	// MOS score timeseries from TrafficSim probe data
+	// Query: probeId (required), from, to, limit (default 300), aggregate (seconds, default 60)
+	// Returns aggregated MOS scores computed from TrafficSim metrics
+	// ------------------------------------------
+	base.Get("/mos-timeseries", func(c *fiber.Ctx) error {
+		wID := uintParam(c, "id")
+		probeID := intOrDefault(c.Query("probeId"), 0)
+		if probeID == 0 {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "probeId is required"})
+		}
+
+		from, _ := readTime(c.Query("from"))
+		if from.IsZero() {
+			from = time.Now().UTC().Add(-1 * time.Hour)
+		}
+		to, _ := readTime(c.Query("to"))
+		if to.IsZero() {
+			to = time.Now().UTC()
+		}
+		limit := intOrDefault(c.Query("limit"), 300)
+		aggregateSec := intOrDefault(c.Query("aggregate"), 60)
+
+		// Fetch aggregated TrafficSim data
+		rows, err := probe.GetProbeDataAggregated(
+			c.UserContext(), ch, uint64(probeID), nil, "TRAFFICSIM",
+			from, to, aggregateSec, limit,
+		)
+		if err != nil {
+			log.Printf("[mos-timeseries] probeID=%d error: %v", probeID, err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Extract MOS scores from aggregated payloads
+		type MosPoint struct {
+			Timestamp int64   `json:"timestamp"`
+			Mos       float64 `json:"mos"`
+			Latency   float64 `json:"latency"`
+			Jitter    float64 `json:"jitter"`
+			Loss      float64 `json:"loss"`
+		}
+		mosData := make([]MosPoint, 0, len(rows))
+
+		for _, row := range rows {
+			if row.Payload == nil || len(row.Payload) == 0 {
+				continue
+			}
+			var p probe.TrafficSimPayload
+			if err := json.Unmarshal(row.Payload, &p); err != nil {
+				continue
+			}
+
+			mosData = append(mosData, MosPoint{
+				Timestamp: row.CreatedAt.UnixMilli(),
+				Mos:       p.MosScore,
+				Latency:   p.AverageRTT,
+				Jitter:    p.JitterAvg,
+				Loss:      float64(p.LostPackets) / float64(p.TotalPackets) * 100,
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"probe_id":  probeID,
+			"workspace": wID,
+			"from":      from,
+			"to":        to,
+			"points":    mosData,
+		})
+	})
+
+	// ------------------------------------------
 	// GET /workspaces/:id/probe-data/find
 	// Flexible finder across ClickHouse with query params mirroring pd.FindParams
 	// ------------------------------------------

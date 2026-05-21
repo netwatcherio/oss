@@ -172,10 +172,20 @@ watch(() => props.probeId, fetchAnalysis)
             ></i>
           </div>
 
+          <!-- Median Latency -->
+          <div class="metric-label">Median Latency</div>
+          <div class="metric-value">{{ formatMs(analysis.metrics.median_latency) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.median_latency) }}</div>
+
           <!-- P95 Latency -->
           <div class="metric-label">P95 Latency</div>
           <div class="metric-value">{{ formatMs(analysis.metrics.p95_latency) }}</div>
           <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.p95_latency) }}</div>
+
+          <!-- P99 Latency -->
+          <div class="metric-label">P99 Latency</div>
+          <div class="metric-value">{{ formatMs(analysis.metrics.p99_latency) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.p99_latency) }}</div>
 
           <!-- Packet Loss -->
           <div class="metric-label">Packet Loss</div>
@@ -186,10 +196,20 @@ watch(() => props.probeId, fetchAnalysis)
             {{ formatPct(analysis.reverse!.metrics.packet_loss) }}
           </div>
 
-          <!-- Jitter -->
-          <div class="metric-label">Jitter</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.jitter) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter) }}</div>
+          <!-- Jitter Avg -->
+          <div class="metric-label">Jitter (Avg)</div>
+          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_avg) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_avg) }}</div>
+
+          <!-- Jitter Median -->
+          <div class="metric-label">Jitter (Med)</div>
+          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_median) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_median) }}</div>
+
+          <!-- Jitter P95 -->
+          <div class="metric-label">Jitter (P95)</div>
+          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_p95) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_p95) }}</div>
 
           <!-- MOS -->
           <div class="metric-label">MOS Score</div>

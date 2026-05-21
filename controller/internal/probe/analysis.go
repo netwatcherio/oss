@@ -85,11 +85,15 @@ type HealthVector struct {
 
 // ProbeMetrics holds raw metrics for a single probe direction
 type ProbeMetrics struct {
-	AvgLatency  float64 `json:"avg_latency"` // ms
-	P95Latency  float64 `json:"p95_latency"` // ms
-	PacketLoss  float64 `json:"packet_loss"` // percentage
-	Jitter      float64 `json:"jitter"`      // ms (stddev)
-	SampleCount int     `json:"sample_count"`
+	AvgLatency    float64 `json:"avg_latency"`    // ms
+	MedianLatency float64 `json:"median_latency"` // ms
+	P95Latency    float64 `json:"p95_latency"`    // ms
+	P99Latency    float64 `json:"p99_latency"`    // ms
+	PacketLoss    float64 `json:"packet_loss"`    // percentage
+	JitterAvg     float64 `json:"jitter_avg"`     // ms (stddev)
+	JitterMedian  float64 `json:"jitter_median"`  // ms
+	JitterP95     float64 `json:"jitter_p95"`     // ms
+	SampleCount   int     `json:"sample_count"`
 }
 
 // AnalysisSignal represents a detected signal (anomaly, artifact, etc.)
@@ -115,16 +119,16 @@ type AnalysisFinding struct {
 
 // MtrPathAnalysis contains route-level diagnostic data from MTR traces
 type MtrPathAnalysis struct {
-	HopCount          int         `json:"hop_count"`
-	UniqueRoutes      int         `json:"unique_routes"`
-	RouteStabilityPct float64    `json:"route_stability_pct"`
-	AvgEndHopLatency  float64     `json:"avg_end_hop_latency"`
-	AvgEndHopLoss     float64     `json:"avg_end_hop_loss"`
-	AvgEndHopJitter   float64     `json:"avg_end_hop_jitter"` // stddev from end hop
-	TraceCount        int         `json:"trace_count"`        // number of MTR traces analysed
-	RateLimitedHops   []int       `json:"rate_limited_hops"`
-	TimeoutSegments   []string    `json:"timeout_segments"`
-	LatestHopsDetail  []HopDetail `json:"latest_hops_detail,omitempty"` // Enriched hop info with agent names
+	HopCount           int         `json:"hop_count"`
+	UniqueRoutes       int         `json:"unique_routes"`
+	RouteStabilityPct  float64     `json:"route_stability_pct"`
+	AvgEndHopLatency   float64     `json:"avg_end_hop_latency"`
+	AvgEndHopLoss      float64     `json:"avg_end_hop_loss"`
+	AvgEndHopJitterAvg float64     `json:"avg_end_hop_jitter"` // stddev from end hop
+	TraceCount         int         `json:"trace_count"`        // number of MTR traces analysed
+	RateLimitedHops    []int       `json:"rate_limited_hops"`
+	TimeoutSegments    []string    `json:"timeout_segments"`
+	LatestHopsDetail   []HopDetail `json:"latest_hops_detail,omitempty"` // Enriched hop info with agent names
 }
 
 // ── Probe-level Analysis ──
@@ -168,18 +172,18 @@ type AgentHealthSummary struct {
 
 // DetectedIncident is a correlated event detected across agents/probes
 type DetectedIncident struct {
-	ID               string   `json:"id"`
-	Title            string   `json:"title"`
-	Severity         string   `json:"severity"`          // info, warning, critical
-	Scope            string   `json:"scope"`             // infrastructure, agent-specific, target-specific
-	SuggestedCause   string   `json:"suggested_cause"`
-	AffectedAgents   []string `json:"affected_agents"`
-	AffectedTargets  []string `json:"affected_targets"`
-	Evidence         []string `json:"evidence"`
-	Recommendations  []string `json:"recommendations"`
-	Confidence       float64  `json:"confidence"`         // 0-1.0, based on proportion of agents affected
-	LookbackMinutes  int      `json:"lookback_minutes"`   // time window being analyzed
-	MatchedCriteria  string   `json:"matched_criteria"`   // what triggered the incident (e.g., "packet_loss > 1%")
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Severity        string   `json:"severity"` // info, warning, critical
+	Scope           string   `json:"scope"`    // infrastructure, agent-specific, target-specific
+	SuggestedCause  string   `json:"suggested_cause"`
+	AffectedAgents  []string `json:"affected_agents"`
+	AffectedTargets []string `json:"affected_targets"`
+	Evidence        []string `json:"evidence"`
+	Recommendations []string `json:"recommendations"`
+	Confidence      float64  `json:"confidence"`       // 0-1.0, based on proportion of agents affected
+	LookbackMinutes int      `json:"lookback_minutes"` // time window being analyzed
+	MatchedCriteria string   `json:"matched_criteria"` // what triggered the incident (e.g., "packet_loss > 1%")
 }
 
 // StatusSummary is a high-level "what's happening right now" overview
@@ -328,9 +332,9 @@ func clampScore(s float64) float64 {
 
 // computeHealthVector builds a HealthVector from raw metrics
 func computeHealthVector(metrics ProbeMetrics, routeStability float64) HealthVector {
-	latScore := scoreLatency(metrics.AvgLatency, metrics.P95Latency, metrics.Jitter)
+	latScore := scoreLatency(metrics.AvgLatency, metrics.P95Latency, metrics.JitterAvg)
 	lossScore := scorePacketLoss(metrics.PacketLoss)
-	mos := computeMos(metrics.AvgLatency, metrics.PacketLoss, metrics.Jitter)
+	mos := computeMos(metrics.AvgLatency, metrics.PacketLoss, metrics.JitterAvg)
 
 	// Weighted composite: 30% latency, 35% loss, 15% route stability, 20% MOS-derived
 	mosScore := (mos - 1.0) / 3.5 * 100 // Normalize MOS 1-4.5 to 0-100
@@ -382,7 +386,7 @@ LIMIT 2000
 
 	var latencies []float64
 	var totalLoss float64
-	var totalJitter float64
+	var totalJitterAvg float64
 	var count int
 
 	for rows.Next() {
@@ -409,7 +413,7 @@ LIMIT 2000
 
 		latencies = append(latencies, latMs)
 		totalLoss += payload.PacketLoss
-		totalJitter += jitterMs
+		totalJitterAvg += jitterMs
 		count++
 	}
 
@@ -421,13 +425,13 @@ LIMIT 2000
 	avgLat := avg(latencies)
 	p95Lat := percentile(latencies, 95)
 	avgLoss := totalLoss / float64(count)
-	avgJitter := totalJitter / float64(count)
+	avgJitterAvg := totalJitterAvg / float64(count)
 
 	return ProbeMetrics{
 		AvgLatency:  sanitizeFloat(avgLat),
 		P95Latency:  sanitizeFloat(p95Lat),
 		PacketLoss:  sanitizeFloat(avgLoss),
-		Jitter:      sanitizeFloat(avgJitter),
+		JitterAvg:   sanitizeFloat(avgJitterAvg),
 		SampleCount: count,
 	}, nil
 }
@@ -464,7 +468,12 @@ LIMIT 2000
 	defer rows.Close()
 
 	var latencies []float64
+	var medianRTTs []float64
+	var p95RTTs []float64
+	var p99RTTs []float64
 	var jitters []float64
+	var jitterMedians []float64
+	var jitterP95s []float64
 	var totalLoss float64
 	var count int
 
@@ -476,7 +485,13 @@ LIMIT 2000
 
 		var payload struct {
 			AverageRTT     float64 `json:"averageRTT"`
+			MedianRTT      float64 `json:"medianRTT,omitempty"`
+			P95RTT         float64 `json:"p95RTT,omitempty"`
+			P99RTT         float64 `json:"p99RTT,omitempty"`
 			StdDevRTT      float64 `json:"stdDevRTT"`
+			JitterAvg      float64 `json:"jitterAvg,omitempty"`
+			JitterMedian   float64 `json:"jitterMedian,omitempty"`
+			JitterP95      float64 `json:"jitterP95,omitempty"`
 			LossPercentage float64 `json:"lossPercentage"`
 		}
 		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
@@ -484,7 +499,30 @@ LIMIT 2000
 		}
 
 		latencies = append(latencies, payload.AverageRTT)
-		jitters = append(jitters, payload.StdDevRTT)
+		if payload.MedianRTT > 0 {
+			medianRTTs = append(medianRTTs, payload.MedianRTT)
+		}
+		if payload.P95RTT > 0 {
+			p95RTTs = append(p95RTTs, payload.P95RTT)
+		}
+		if payload.P99RTT > 0 {
+			p99RTTs = append(p99RTTs, payload.P99RTT)
+		}
+
+		jitterVal := payload.JitterAvg
+		if jitterVal == 0 {
+			jitterVal = payload.StdDevRTT
+		}
+		if jitterVal > 0 {
+			jitters = append(jitters, jitterVal)
+		}
+		if payload.JitterMedian > 0 {
+			jitterMedians = append(jitterMedians, payload.JitterMedian)
+		}
+		if payload.JitterP95 > 0 {
+			jitterP95s = append(jitterP95s, payload.JitterP95)
+		}
+
 		totalLoss += payload.LossPercentage
 		count++
 	}
@@ -493,13 +531,56 @@ LIMIT 2000
 		return ProbeMetrics{}
 	}
 
-	return ProbeMetrics{
-		AvgLatency:  sanitizeFloat(avg(latencies)),
-		P95Latency:  sanitizeFloat(percentile(latencies, 95)),
-		PacketLoss:  sanitizeFloat(totalLoss / float64(count)),
-		Jitter:      sanitizeFloat(avg(jitters)),
-		SampleCount: count,
+	// Determine final percentile values - use per-record values if available, otherwise compute from raw latencies
+	var medianLat, p95Lat, p99Lat float64
+	if len(medianRTTs) > 0 {
+		medianLat = percentile(medianRTTs, 50)
+	} else {
+		_, medianLat, _ = FallbackPercentiles(latencies)
 	}
+	if len(p95RTTs) > 0 {
+		p95Lat = percentile(p95RTTs, 50) // p95RTTs contains P95 values from each cycle
+	} else {
+		_, p95Lat, _ = FallbackPercentiles(latencies)
+	}
+	if len(p99RTTs) > 0 {
+		p99Lat = percentile(p99RTTs, 50) // p99RTTs contains P99 values from each cycle
+	} else {
+		_, _, p99Lat = FallbackPercentiles(latencies)
+	}
+
+	// Jitter median and P95
+	var jitterMedian, jitterP95 float64
+	if len(jitterMedians) > 0 {
+		jitterMedian = percentile(jitterMedians, 50)
+	}
+	if len(jitterP95s) > 0 {
+		jitterP95 = percentile(jitterP95s, 95) // P95 of the P95 jitter values
+	}
+
+	return ProbeMetrics{
+		AvgLatency:    sanitizeFloat(avg(latencies)),
+		MedianLatency: sanitizeFloat(medianLat),
+		P95Latency:    sanitizeFloat(p95Lat),
+		P99Latency:    sanitizeFloat(p99Lat),
+		PacketLoss:    sanitizeFloat(totalLoss / float64(count)),
+		JitterAvg:     sanitizeFloat(avg(jitters)),
+		JitterMedian:  sanitizeFloat(jitterMedian),
+		JitterP95:     sanitizeFloat(jitterP95),
+		SampleCount:   count,
+	}
+}
+
+// FallbackPercentiles computes median, P95, P99 from a list of latency values
+// when individual percentile fields aren't available (backwards compatibility)
+func FallbackPercentiles(latencies []float64) (median, p95, p99 float64) {
+	if len(latencies) == 0 {
+		return 0, 0, 0
+	}
+	median = percentile(latencies, 50)
+	p95 = percentile(latencies, 95)
+	p99 = percentile(latencies, 99)
+	return
 }
 
 // analyzeMtrForProbe fetches MTR traces and produces path analysis + signals
@@ -540,7 +621,7 @@ LIMIT 100
 	var totalTraces int
 	var totalEndHopLatency float64
 	var totalEndHopLoss float64
-	var totalEndHopJitter float64
+	var totalEndHopJitterAvg float64
 	var rateLimitedHops []int
 	var timeoutSegments []string
 	var maxHops int
@@ -602,7 +683,7 @@ LIMIT 100
 		lastHop := payload.Report.Hops[len(payload.Report.Hops)-1]
 		totalEndHopLatency += parseFloat(lastHop.Avg)
 		totalEndHopLoss += parseFloat(lastHop.LossPct)
-		totalEndHopJitter += parseFloat(lastHop.StdDev)
+		totalEndHopJitterAvg += parseFloat(lastHop.StdDev)
 
 		// Detect ICMP rate limiting and timeout segments (only on first trace)
 		if totalTraces == 1 {
@@ -656,15 +737,15 @@ LIMIT 100
 	stabilityPct := float64(maxCount) / float64(totalTraces) * 100
 
 	analysis := &MtrPathAnalysis{
-		HopCount:          maxHops,
-		UniqueRoutes:      len(routeSignatures),
-		RouteStabilityPct: sanitizeFloat(stabilityPct),
-		AvgEndHopLatency:  sanitizeFloat(totalEndHopLatency / float64(totalTraces)),
-		AvgEndHopLoss:     sanitizeFloat(totalEndHopLoss / float64(totalTraces)),
-		AvgEndHopJitter:   sanitizeFloat(totalEndHopJitter / float64(totalTraces)),
-		TraceCount:        totalTraces,
-		RateLimitedHops:   rateLimitedHops,
-		TimeoutSegments:   timeoutSegments,
+		HopCount:           maxHops,
+		UniqueRoutes:       len(routeSignatures),
+		RouteStabilityPct:  sanitizeFloat(stabilityPct),
+		AvgEndHopLatency:   sanitizeFloat(totalEndHopLatency / float64(totalTraces)),
+		AvgEndHopLoss:      sanitizeFloat(totalEndHopLoss / float64(totalTraces)),
+		AvgEndHopJitterAvg: sanitizeFloat(totalEndHopJitterAvg / float64(totalTraces)),
+		TraceCount:         totalTraces,
+		RateLimitedHops:    rateLimitedHops,
+		TimeoutSegments:    timeoutSegments,
 	}
 
 	// Build enriched hop details with agent names and per-hop metrics
@@ -894,11 +975,11 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 	var fallbackSignals []AnalysisSignal
 	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
 		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
-			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitter)
+			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitterAvg)
 		metrics.AvgLatency = pathAnalysis.AvgEndHopLatency
 		metrics.P95Latency = pathAnalysis.AvgEndHopLatency * 1.3 // Approximate P95 from avg
 		metrics.PacketLoss = pathAnalysis.AvgEndHopLoss
-		metrics.Jitter = pathAnalysis.AvgEndHopJitter
+		metrics.JitterAvg = pathAnalysis.AvgEndHopJitterAvg
 		metrics.SampleCount = pathAnalysis.TraceCount
 		fallbackSignals = append(fallbackSignals, AnalysisSignal{
 			Type:       "icmp_latency_incomplete",
@@ -938,12 +1019,12 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		})
 	}
 
-	if metrics.Jitter > 30 {
+	if metrics.JitterAvg > 30 {
 		signals = append(signals, AnalysisSignal{
 			Type:       "jitter_anomaly",
 			Severity:   "warning",
-			Title:      "High Jitter",
-			Evidence:   fmt.Sprintf("Average jitter: %.1fms", metrics.Jitter),
+			Title:      "High JitterAvg",
+			Evidence:   fmt.Sprintf("Average jitter: %.1fms", metrics.JitterAvg),
 			Confidence: 0.80,
 		})
 	}
@@ -1074,7 +1155,7 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 		// Collect metrics for probes FROM this agent
 		var agentLatencies []float64
 		var agentLoss []float64
-		var agentJitter []float64
+		var agentJitterAvg []float64
 		var probeEntries []ProbeHealthEntry
 
 		prefix := fmt.Sprintf("%d:", agent.ID)
@@ -1110,7 +1191,7 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 			m := ProbeMetrics{
 				AvgLatency:  stats.AvgLatency,
 				PacketLoss:  stats.PacketLoss,
-				Jitter:      stats.Jitter,
+				JitterAvg:   stats.Jitter,
 				SampleCount: stats.Count,
 			}
 			h := computeHealthVector(m, 100)
@@ -1122,7 +1203,7 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 			})
 			agentLatencies = append(agentLatencies, stats.AvgLatency)
 			agentLoss = append(agentLoss, stats.PacketLoss)
-			agentJitter = append(agentJitter, stats.Jitter)
+			agentJitterAvg = append(agentJitterAvg, stats.Jitter)
 		}
 
 		// TrafficSim metrics
@@ -1171,12 +1252,12 @@ func ComputeWorkspaceAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, work
 		if len(probeEntries) > 0 {
 			avgLat := avg(agentLatencies)
 			avgLossVal := avg(agentLoss)
-			avgJitterVal := avg(agentJitter)
+			avgJitterAvgVal := avg(agentJitterAvg)
 
 			agentMetrics := ProbeMetrics{
 				AvgLatency: avgLat,
 				PacketLoss: avgLossVal,
-				Jitter:     avgJitterVal,
+				JitterAvg:  avgJitterAvgVal,
 			}
 			agentHealth = computeHealthVector(agentMetrics, 100)
 		} else {
@@ -1419,7 +1500,7 @@ func extractField(summaries []AgentHealthSummary, field string) []float64 {
 			if len(s.WorstProbes) > 0 {
 				var total float64
 				for _, p := range s.WorstProbes {
-					total += p.Metrics.Jitter
+					total += p.Metrics.JitterAvg
 				}
 				out = append(out, total/float64(len(s.WorstProbes)))
 			}
@@ -1858,11 +1939,11 @@ func sanitizeKey(s string) string {
 // ── Speedtest / SysInfo / NetInfo Metric Fetchers ──
 
 type speedtestStats struct {
-	AvgDownload float64 // Mbps
-	AvgUpload   float64 // Mbps
-	AvgLatency  float64 // ms
-	AvgJitter   float64 // ms
-	Count       int
+	AvgDownload  float64 // Mbps
+	AvgUpload    float64 // Mbps
+	AvgLatency   float64 // ms
+	AvgJitterAvg float64 // ms
+	Count        int
 }
 
 func getWorkspaceSpeedtestMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) (map[string]speedtestStats, error) {
@@ -1924,11 +2005,11 @@ LIMIT 500
 			continue
 		}
 		out[k] = speedtestStats{
-			AvgDownload: (a.dlTotal / float64(a.count)) * 8 / 1_000_000, // bytes/s → Mbps
-			AvgUpload:   (a.ulTotal / float64(a.count)) * 8 / 1_000_000,
-			AvgLatency:  a.latTotal / float64(a.count),
-			AvgJitter:   a.jitterTotal / float64(a.count),
-			Count:       a.count,
+			AvgDownload:  (a.dlTotal / float64(a.count)) * 8 / 1_000_000, // bytes/s → Mbps
+			AvgUpload:    (a.ulTotal / float64(a.count)) * 8 / 1_000_000,
+			AvgLatency:   a.latTotal / float64(a.count),
+			AvgJitterAvg: a.jitterTotal / float64(a.count),
+			Count:        a.count,
 		}
 	}
 	return out, nil
@@ -2396,7 +2477,7 @@ func detectSpeedtestIncidents(ctx context.Context, ch *sql.DB, agentIDs []uint, 
 				Evidence: []string{
 					fmt.Sprintf("Baseline download: %.1f Mbps (from %d tests)", base.AvgDownload, base.Count),
 					fmt.Sprintf("Current download: %.1f Mbps (from %d tests)", curr.AvgDownload, curr.Count),
-					fmt.Sprintf("Latency: %.1fms, Jitter: %.1fms", curr.AvgLatency, curr.AvgJitter),
+					fmt.Sprintf("Latency: %.1fms, JitterAvg: %.1fms", curr.AvgLatency, curr.AvgJitterAvg),
 				},
 				Recommendations: []string{
 					"Run a manual speed test to confirm results",
@@ -2466,11 +2547,11 @@ LIMIT 1000
 	defer rows.Close()
 
 	type dnsAccum struct {
-		queryTimes  []float64
-		nxdomain    int
-		total       int
-		servfail     int
-		respondIPs  map[string]int
+		queryTimes []float64
+		nxdomain   int
+		total      int
+		servfail   int
+		respondIPs map[string]int
 	}
 	acc := make(map[string]*dnsAccum)
 
@@ -2718,20 +2799,20 @@ func buildHopDetailsForMtrPayload(mtrPayload *mtrPayload, agentIPToID map[string
 
 // ProbeRouteInfo holds route data for a single MTR probe.
 type ProbeRouteInfo struct {
-	ProbeID            uint        `json:"probe_id"`
-	Target             string      `json:"target"`
-	BaselineFingerprint string     `json:"baseline_fingerprint,omitempty"`
-	BaselineHopCount   int         `json:"baseline_hop_count,omitempty"`
-	BaselineRoutePath  string      `json:"baseline_route_path,omitempty"`
-	LatestSignature    string      `json:"latest_signature,omitempty"`
-	LatestHops         []string     `json:"latest_hops,omitempty"`            // IPs only (for signature computation)
-	LatestHopsDetail   []HopDetail `json:"latest_hops_detail,omitempty"`    // Enriched with agent names
-	HasRouteChange     bool        `json:"has_route_change"`
-	TraceCount         int         `json:"trace_count,omitempty"`
-	RouteStabilityPct  float64     `json:"route_stability_pct,omitempty"`
-	AvgEndHopLatency   float64     `json:"avg_end_hop_latency,omitempty"`
-	AvgEndHopLoss      float64     `json:"avg_end_hop_loss,omitempty"`
-	IntermediateHops   []HopMetric `json:"intermediate_hops,omitempty"` // Hop metrics excluding the final hop
+	ProbeID             uint        `json:"probe_id"`
+	Target              string      `json:"target"`
+	BaselineFingerprint string      `json:"baseline_fingerprint,omitempty"`
+	BaselineHopCount    int         `json:"baseline_hop_count,omitempty"`
+	BaselineRoutePath   string      `json:"baseline_route_path,omitempty"`
+	LatestSignature     string      `json:"latest_signature,omitempty"`
+	LatestHops          []string    `json:"latest_hops,omitempty"`        // IPs only (for signature computation)
+	LatestHopsDetail    []HopDetail `json:"latest_hops_detail,omitempty"` // Enriched with agent names
+	HasRouteChange      bool        `json:"has_route_change"`
+	TraceCount          int         `json:"trace_count,omitempty"`
+	RouteStabilityPct   float64     `json:"route_stability_pct,omitempty"`
+	AvgEndHopLatency    float64     `json:"avg_end_hop_latency,omitempty"`
+	AvgEndHopLoss       float64     `json:"avg_end_hop_loss,omitempty"`
+	IntermediateHops    []HopMetric `json:"intermediate_hops,omitempty"` // Hop metrics excluding the final hop
 }
 
 // HopMetric holds metrics for a single intermediate hop (not the final destination)
@@ -2752,13 +2833,13 @@ type HopMetrics struct {
 
 // AgentRouteInfo holds route/path data for a single agent.
 type AgentRouteInfo struct {
-	AgentID       uint             `json:"agent_id"`
-	AgentName     string           `json:"agent_name"`
-	PublicIP      string           `json:"public_ip,omitempty"`
-	ISP           string           `json:"isp,omitempty"`
-	HasIPChange   bool             `json:"has_ip_change"`
-	HasISPChange  bool             `json:"has_isp_change"`
-	Routes        []ProbeRouteInfo `json:"routes"`
+	AgentID      uint             `json:"agent_id"`
+	AgentName    string           `json:"agent_name"`
+	PublicIP     string           `json:"public_ip,omitempty"`
+	ISP          string           `json:"isp,omitempty"`
+	HasIPChange  bool             `json:"has_ip_change"`
+	HasISPChange bool             `json:"has_isp_change"`
+	Routes       []ProbeRouteInfo `json:"routes"`
 }
 
 // SharedHopInfo represents a hop that appears in multiple agent routes.
@@ -2775,27 +2856,27 @@ type SharedHopInfo struct {
 
 // RouteIncident is a lightweight incident specifically for route/path issues.
 type RouteIncident struct {
-	ID             string   `json:"id"`
-	Type           string   `json:"type"` // ip_change, isp_change, route_change
-	Severity       string   `json:"severity"`
-	AgentID        uint     `json:"agent_id"`
-	AgentName      string   `json:"agent_name"`
-	ProbeID        uint     `json:"probe_id,omitempty"`
-	Target         string   `json:"target,omitempty"`
-	Message        string   `json:"message"`
-	Evidence       []string `json:"evidence,omitempty"`
-	DetectedAt     string   `json:"detected_at,omitempty"`
+	ID         string   `json:"id"`
+	Type       string   `json:"type"` // ip_change, isp_change, route_change
+	Severity   string   `json:"severity"`
+	AgentID    uint     `json:"agent_id"`
+	AgentName  string   `json:"agent_name"`
+	ProbeID    uint     `json:"probe_id,omitempty"`
+	Target     string   `json:"target,omitempty"`
+	Message    string   `json:"message"`
+	Evidence   []string `json:"evidence,omitempty"`
+	DetectedAt string   `json:"detected_at,omitempty"`
 }
 
 // WorkspaceRouteAnalysis is the top-level response for route/path visualization.
 type WorkspaceRouteAnalysis struct {
-	WorkspaceID    uint             `json:"workspace_id"`
-	Agents         []AgentRouteInfo `json:"agents"`
-	SharedHops     []SharedHopInfo  `json:"shared_hops"`
-	Incidents      []RouteIncident  `json:"incidents"`
-	TotalAgents    int              `json:"total_agents"`
-	TotalRoutes    int              `json:"total_routes"`
-	GeneratedAt    time.Time        `json:"generated_at"`
+	WorkspaceID uint             `json:"workspace_id"`
+	Agents      []AgentRouteInfo `json:"agents"`
+	SharedHops  []SharedHopInfo  `json:"shared_hops"`
+	Incidents   []RouteIncident  `json:"incidents"`
+	TotalAgents int              `json:"total_agents"`
+	TotalRoutes int              `json:"total_routes"`
+	GeneratedAt time.Time        `json:"generated_at"`
 }
 
 // ComputeWorkspaceRouteAnalysis aggregates route/path data across all agents in a workspace
@@ -2970,7 +3051,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 								maxCount = c
 							}
 						}
-						pri.RouteStabilityPct = math.Round(float64(maxCount)/float64(len(mtrRows))*100*10)/10
+						pri.RouteStabilityPct = math.Round(float64(maxCount)/float64(len(mtrRows))*100*10) / 10
 						pri.HasRouteChange = true
 					} else {
 						pri.RouteStabilityPct = 100

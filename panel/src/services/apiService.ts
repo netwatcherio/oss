@@ -361,6 +361,39 @@ export const ProbeDataService = {
         return data;
     },
 
+    /**
+     * MOS score timeseries from TrafficSim probe data.
+     * GET /workspaces/{id}/probe-data/mos-timeseries
+     */
+    async mosTimeseries(
+        workspaceId: number | string,
+        probeId: number | string,
+        params?: { from?: Date; to?: Date; limit?: number; aggregate?: number }
+    ) {
+        const qs = new URLSearchParams();
+        qs.set("probeId", String(probeId));
+        if (params?.from) qs.set("from", params.from.toISOString());
+        if (params?.to) qs.set("to", params.to.toISOString());
+        if (params?.limit) qs.set("limit", String(params.limit));
+        if (params?.aggregate) qs.set("aggregate", String(params.aggregate));
+
+        const { data } = await request.get<{
+            probe_id: number;
+            workspace: number;
+            from: string;
+            to: string;
+            points: Array<{
+                timestamp: number;
+                mos: number;
+                latency: number;
+                jitter: number;
+                loss: number;
+            }>;
+        }>(`/workspaces/${workspaceId}/probe-data/mos-timeseries?${qs.toString()}`);
+
+        return data;
+    },
+
     /** Convenience wrappers */
     async latestNetInfo(workspaceId: number | string, agentId: number | string, probeId?: number | string) {
         return this.latest(workspaceId, { type: "NETINFO", agentId, probeId });
