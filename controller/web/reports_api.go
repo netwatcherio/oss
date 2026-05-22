@@ -214,6 +214,28 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 	})
 }
 
+func agentReports(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
+	generator := reports.NewGenerator(pg, ch)
+
+	api.Get("/agents/:id/reports/agent_detail/run", func(c *fiber.Ctx) error {
+		agentID := uintParam(c, "id")
+
+		timeRangeDays := int64(7)
+		if tr := c.Query("time_range_days"); tr != "" {
+			fmt.Sscanf(tr, "%d", &timeRangeDays)
+		}
+
+		pdfData, err := generator.GenerateAgentPDF(c.UserContext(), agentID, timeRangeDays)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		c.Set("Content-Type", "application/pdf")
+		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=agent-%d-voice-quality.pdf", agentID))
+		return c.Send(pdfData)
+	})
+}
+
 type CreateReportRequest struct {
 	Name            string   `json:"name"`
 	Description     string   `json:"description"`

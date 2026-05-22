@@ -50,6 +50,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelShareLinks(api, db)
 	panelAnalysis(api, db, ch)
 	panelReports(api, db, ch, emailStore, reportScheduler)
+	agentReports(api, db, ch)
 	RegisterAdminRoutes(api, db)
 
 	// Workspace-scoped metrics (API key auth)

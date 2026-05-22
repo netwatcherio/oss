@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/llm"
 
 	log "github.com/sirupsen/logrus"
@@ -3178,5 +3179,1019 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		TotalAgents: len(agents),
 		TotalRoutes: totalRoutes,
 		GeneratedAt: time.Now().UTC(),
+	}, nil
+}
+
+// ── Voice Quality Types ──────────────────────────────────────────────────────
+
+// VoicePathDirection distinguishes forward vs return path
+type VoicePathDirection string
+
+const (
+	VoicePathForward VoicePathDirection = "forward"
+	VoicePathReturn  VoicePathDirection = "return"
+)
+
+// CongestionLevel represents how congested a path is for voice traffic
+type CongestionLevel string
+
+const (
+	CongestionNone     CongestionLevel = "none"
+	CongestionMild     CongestionLevel = "mild"
+	CongestionModerate CongestionLevel = "moderate"
+	CongestionSevere   CongestionLevel = "severe"
+)
+
+// VoicePathMetrics holds voice-relevant metrics for one direction (forward or return)
+type VoicePathMetrics struct {
+	Direction       VoicePathDirection `json:"direction"`
+	TargetAgentID   uint               `json:"target_agent_id"`
+	TargetAgentName string             `json:"target_agent_name"`
+	SourceAgentID   uint               `json:"source_agent_id"`
+	SourceAgentName string             `json:"source_agent_name"`
+	ProbeID         uint               `json:"probe_id"`
+	ProbeType       string             `json:"probe_type"`
+	MosScore        float64            `json:"mos_score"`      // 1.0-5.0
+	AvgLatency      float64            `json:"avg_latency_ms"` // ms (one-way estimated as RTT/2)
+	P95Latency      float64            `json:"p95_latency_ms"` // ms
+	MedianLatency   float64            `json:"median_latency_ms"`
+	JitterAvg       float64            `json:"jitter_avg_ms"` // ms
+	JitterMedian    float64            `json:"jitter_median_ms"`
+	JitterP95       float64            `json:"jitter_p95_ms"`
+	PacketLoss      float64            `json:"packet_loss_pct"`
+	OutOfSequence   float64            `json:"out_of_sequence_pct"`
+	Duplicates      float64            `json:"duplicate_pct"`
+	SampleCount     int                `json:"sample_count"`
+	MosContributors []string           `json:"mos_contributing_factors"` // e.g., "latency>150ms", "jitter>20ms"
+	CongestionLevel CongestionLevel    `json:"congestion_level"`
+}
+
+// VoiceQualityIssue is a detected voice quality abnormality
+type VoiceQualityIssue struct {
+	ID              string             `json:"id"`
+	Severity        string             `json:"severity"` // warning, critical
+	Title           string             `json:"title"`
+	Category        string             `json:"category"` // jitter_spike, packet_loss, latency_degradation, asymmetry, out_of_order
+	AffectedPath    VoicePathDirection `json:"affected_path"`
+	TargetAgentName string             `json:"target_agent_name"`
+	SuspectedCause  string             `json:"suspected_cause"`
+	Evidence        []string           `json:"evidence"`
+	TimePattern     string             `json:"time_pattern"` // "constant", "business_hours", "off_hours", "periodic_30min", "unknown"
+	FirstDetected   time.Time          `json:"first_detected"`
+	LastDetected    time.Time          `json:"last_detected"`
+	MosDegradation  float64            `json:"mos_degradation"` // delta from baseline (negative = worse)
+	MosBefore       float64            `json:"mos_before"`
+	MosAfter        float64            `json:"mos_after"`
+	Recommendations []string           `json:"recommendations"`
+}
+
+// VoiceQualitySummary is the complete voice quality assessment for an agent
+type VoiceQualitySummary struct {
+	AgentID         uint                `json:"agent_id"`
+	AgentName       string              `json:"agent_name"`
+	OverallMos      float64             `json:"overall_mos"`       // weighted average of forward + return
+	OverallGrade    string              `json:"overall_grade"`     // excellent/good/fair/poor/critical
+	LatencyScore    float64             `json:"latency_score"`     // 0-100
+	JitterScore     float64             `json:"jitter_score"`      // 0-100
+	PacketLossScore float64             `json:"packet_loss_score"` // 0-100
+	ForwardPath     *VoicePathMetrics   `json:"forward_path,omitempty"`
+	ReturnPath      *VoicePathMetrics   `json:"return_path,omitempty"`
+	Issues          []VoiceQualityIssue `json:"issues"`
+	TimePattern     string              `json:"time_pattern"` // "constant", "mixed", "periodic", "unknown"
+	Recommendation  string              `json:"recommendation"`
+	GeneratedAt     time.Time           `json:"generated_at"`
+}
+
+// AgentAnalysis is per-agent analysis including voice quality
+type AgentAnalysis struct {
+	AgentID          uint                 `json:"agent_id"`
+	AgentName        string               `json:"agent_name"`
+	IsOnline         bool                 `json:"is_online"`
+	Health           HealthVector         `json:"health"`
+	VoiceQuality     *VoiceQualitySummary `json:"voice_quality,omitempty"`
+	Probes           []ProbeAnalysis      `json:"probes"`
+	ReturnPathProbes []ProbeAnalysis      `json:"return_path_probes"`
+	Incidents        []DetectedIncident   `json:"incidents"`
+	GeneratedAt      time.Time            `json:"generated_at"`
+}
+
+// ── Voice Quality Scoring ───────────────────────────────────────────────────
+
+// voiceScoreFromMos converts MOS 1-5 to 0-100 score
+func voiceScoreFromMos(mos float64) float64 {
+	return clampScore((mos - 1.0) / 3.5 * 100)
+}
+
+// voiceGradeFromMos converts MOS to grade string
+func voiceGradeFromMos(mos float64) string {
+	switch {
+	case mos >= 4.3:
+		return "excellent"
+	case mos >= 4.0:
+		return "good"
+	case mos >= 3.6:
+		return "fair"
+	case mos >= 3.1:
+		return "poor"
+	default:
+		return "critical"
+	}
+}
+
+// mosContributingFactors identifies what is degrading MOS for a given path
+func mosContributingFactors(avgLat, p95Lat, jitter, loss float64) []string {
+	var factors []string
+	if avgLat > 150 {
+		factors = append(factors, fmt.Sprintf("high_latency_avg=%.0fms", avgLat))
+	} else if avgLat > 80 {
+		factors = append(factors, fmt.Sprintf("elevated_latency_avg=%.0fms", avgLat))
+	}
+	if p95Lat > 200 {
+		factors = append(factors, fmt.Sprintf("high_latency_p95=%.0fms", p95Lat))
+	}
+	if jitter > 20 {
+		factors = append(factors, fmt.Sprintf("high_jitter=%.1fms", jitter))
+	} else if jitter > 10 {
+		factors = append(factors, fmt.Sprintf("elevated_jitter=%.1fms", jitter))
+	}
+	if loss > 2 {
+		factors = append(factors, fmt.Sprintf("high_packet_loss=%.1f%%", loss))
+	} else if loss > 0.5 {
+		factors = append(factors, fmt.Sprintf("mild_packet_loss=%.1f%%", loss))
+	}
+	return factors
+}
+
+// congestionLevelFromMetrics determines congestion level from voice metrics
+func congestionLevelFromMetrics(jitter, loss, avgLat float64) CongestionLevel {
+	// Severe: high jitter + loss + latency
+	if jitter > 30 && loss > 3 && avgLat > 100 {
+		return CongestionSevere
+	}
+	// Moderate: elevated on two or more metrics
+	elevatedCount := 0
+	if jitter > 15 {
+		elevatedCount++
+	}
+	if loss > 1 {
+		elevatedCount++
+	}
+	if avgLat > 80 {
+		elevatedCount++
+	}
+	if elevatedCount >= 2 {
+		return CongestionModerate
+	}
+	// Mild: one metric elevated
+	if jitter > 10 || loss > 0.5 || avgLat > 60 {
+		return CongestionMild
+	}
+	return CongestionNone
+}
+
+// ── Voice Quality Issue Detection ──────────────────────────────────────────
+
+// detectVoiceQualityIssues detects voice quality problems across forward and return paths
+func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineForward, baselineReturn *VoicePathMetrics, targetAgentName string) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+
+	// 1. Jitter spike detection (forward)
+	if forward != nil {
+		issues = append(issues, detectJitterAnomalies(forward, baselineForward, VoicePathForward, targetAgentName)...)
+	}
+
+	// 2. Jitter spike detection (return)
+	if returnPath != nil {
+		issues = append(issues, detectJitterAnomalies(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+	}
+
+	// 3. Packet loss burst detection
+	if forward != nil {
+		issues = append(issues, detectPacketLossAnomalies(forward, baselineForward, VoicePathForward, targetAgentName)...)
+	}
+	if returnPath != nil {
+		issues = append(issues, detectPacketLossAnomalies(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+	}
+
+	// 4. Latency-only degradation (high latency but no packet loss — route issue)
+	if forward != nil {
+		issues = append(issues, detectLatencyOnlyDegradation(forward, baselineForward, VoicePathForward, targetAgentName)...)
+	}
+	if returnPath != nil {
+		issues = append(issues, detectLatencyOnlyDegradation(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+	}
+
+	// 5. Out of sequence / packet reordering
+	if forward != nil && forward.OutOfSequence > 1.0 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("out_of_sequence_%d_forward", forward.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Packet reordering detected on forward path to %s", targetAgentName),
+			Category:        "out_of_order",
+			AffectedPath:    VoicePathForward,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Packet reordering can indicate ECMP load balancing, suboptimal routing, or a problematic middlebox",
+			Evidence: []string{
+				fmt.Sprintf("Out of sequence: %.2f%%", forward.OutOfSequence),
+				fmt.Sprintf("Duplicates: %.2f%%", forward.Duplicates),
+				fmt.Sprintf("Jitter: %.1fms", forward.JitterAvg),
+			},
+			Recommendations: []string{
+				"Run MTR with TCP mode (mtr -T) to check for ECMP hashing issues",
+				"Compare route at different times to identify unstable hops",
+			},
+		})
+	}
+	if returnPath != nil && returnPath.OutOfSequence > 1.0 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("out_of_sequence_%d_return", returnPath.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Packet reordering detected on return path from %s", targetAgentName),
+			Category:        "out_of_order",
+			AffectedPath:    VoicePathReturn,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Asymmetric return routing may cause packet reordering",
+			Evidence: []string{
+				fmt.Sprintf("Out of sequence: %.2f%%", returnPath.OutOfSequence),
+				fmt.Sprintf("Duplicates: %.2f%%", returnPath.Duplicates),
+			},
+			Recommendations: []string{
+				"Check if return path uses different ISP or routing path",
+			},
+		})
+	}
+
+	// 6. Asymmetric path degradation (forward good, return bad — or vice versa)
+	if forward != nil && returnPath != nil {
+		issues = append(issues, detectAsymmetricVoiceDegradation(forward, returnPath, targetAgentName)...)
+	}
+
+	return issues
+}
+
+// detectJitterAnomalies identifies jitter spikes above voice quality thresholds
+func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+	if path == nil || path.JitterAvg <= 0 {
+		return issues
+	}
+
+	// Threshold: jitter > 15ms is problematic for voice
+	// Threshold: jitter > 25ms is critical
+	threshold := 15.0
+	criticalThreshold := 25.0
+
+	if path.JitterAvg > criticalThreshold {
+		mosDegradation := path.MosScore
+		if baseline != nil {
+			mosDegradation = path.MosScore - baseline.MosScore
+		}
+		var timePattern string
+		if baseline != nil && baseline.JitterAvg > 0 {
+			if path.JitterAvg > baseline.JitterAvg*1.5 {
+				timePattern = "periodic_spikes"
+			} else {
+				timePattern = "constant"
+			}
+		} else {
+			timePattern = "unknown"
+		}
+
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("jitter_critical_%d_%s", path.ProbeID, direction),
+			Severity:        "critical",
+			Title:           fmt.Sprintf("Critical jitter on %s path to %s", direction, targetAgentName),
+			Category:        "jitter_spike",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Very high jitter (>25ms) causes voice buffer underruns leading to choppy or garbled audio",
+			Evidence: []string{
+				fmt.Sprintf("Jitter average: %.1fms (threshold: %.0fms)", path.JitterAvg, criticalThreshold),
+				fmt.Sprintf("Jitter P95: %.1fms", path.JitterP95),
+				fmt.Sprintf("MOS: %.2f", path.MosScore),
+				fmt.Sprintf("Sample count: %d", path.SampleCount),
+			},
+			TimePattern:    timePattern,
+			MosDegradation: mosDegradation,
+			MosBefore: func() float64 {
+				if baseline != nil {
+					return baseline.MosScore
+				}
+				return 0
+			}(),
+			MosAfter: path.MosScore,
+			Recommendations: []string{
+				"Check for competing traffic on the network segment",
+				"Verify ISP does not have bufferbloat issues",
+				"Consider implementing jitter buffering on endpoint",
+			},
+		})
+	} else if path.JitterAvg > threshold {
+		mosDegradation := path.MosScore
+		if baseline != nil {
+			mosDegradation = path.MosScore - baseline.MosScore
+		}
+		timePattern := "unknown"
+		if baseline != nil && baseline.JitterAvg > 0 {
+			if path.JitterAvg > baseline.JitterAvg*1.5 {
+				timePattern = "periodic_spikes"
+			} else if path.JitterAvg > baseline.JitterAvg*1.2 {
+				timePattern = "gradual_increase"
+			} else {
+				timePattern = "constant"
+			}
+		}
+
+		cause := "Elevated jitter (>15ms) can cause voice quality degradation during calls"
+		if path.JitterP95 > path.JitterAvg*3 {
+			cause = "High jitter variance (P95 is 3x average) indicates intermittent network congestion"
+		}
+
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("jitter_warning_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Elevated jitter on %s path to %s", direction, targetAgentName),
+			Category:        "jitter_spike",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  cause,
+			Evidence: []string{
+				fmt.Sprintf("Jitter average: %.1fms (threshold: %.0fms)", path.JitterAvg, threshold),
+				fmt.Sprintf("Jitter P95: %.1fms", path.JitterP95),
+				fmt.Sprintf("Jitter median: %.1fms", path.JitterMedian),
+				fmt.Sprintf("MOS: %.2f", path.MosScore),
+			},
+			TimePattern:    timePattern,
+			MosDegradation: mosDegradation,
+			MosBefore: func() float64 {
+				if baseline != nil {
+					return baseline.MosScore
+				}
+				return 0
+			}(),
+			MosAfter: path.MosScore,
+			Recommendations: []string{
+				"Monitor jitter trend to determine if it's worsening",
+				"Check for bandwidth-intensive applications during peak hours",
+			},
+		})
+	}
+
+	// Also detect sudden jitter increases from baseline
+	if baseline != nil && baseline.JitterAvg > 5 && path.JitterAvg > baseline.JitterAvg*2 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("jitter_spike_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Sudden jitter increase on %s path to %s", direction, targetAgentName),
+			Category:        "jitter_spike",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Jitter more than doubled from baseline — possible network event, congestion, or route change",
+			Evidence: []string{
+				fmt.Sprintf("Current jitter: %.1fms vs baseline: %.1fms (2x increase)", path.JitterAvg, baseline.JitterAvg),
+				fmt.Sprintf("MOS dropped from %.2f to %.2f", baseline.MosScore, path.MosScore),
+			},
+			TimePattern:    "sudden_spike",
+			MosDegradation: path.MosScore - baseline.MosScore,
+			MosBefore:      baseline.MosScore,
+			MosAfter:       path.MosScore,
+			Recommendations: []string{
+				"Check MTR for route changes",
+				"Verify no network maintenance or ISP issues",
+			},
+		})
+	}
+
+	return issues
+}
+
+// detectPacketLossAnomalies identifies packet loss patterns affecting voice quality
+func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+	if path == nil || path.PacketLoss <= 0 {
+		return issues
+	}
+
+	// Voice-relevant thresholds: >2% is problematic, >5% is critical
+	if path.PacketLoss > 5 {
+		timePattern := "constant"
+		if baseline != nil && baseline.PacketLoss > 0 {
+			if path.PacketLoss > baseline.PacketLoss*2 {
+				timePattern = "increasing"
+			} else {
+				timePattern = "constant"
+			}
+		}
+
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("loss_critical_%d_%s", path.ProbeID, direction),
+			Severity:        "critical",
+			Title:           fmt.Sprintf("Severe packet loss on %s path to %s", direction, targetAgentName),
+			Category:        "packet_loss",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Packet loss >5%% will cause noticeable call quality issues — dropped words, robotic voice, call drops",
+			Evidence: []string{
+				fmt.Sprintf("Packet loss: %.2f%% (critical threshold: 5%%)", path.PacketLoss),
+				fmt.Sprintf("MOS: %.2f", path.MosScore),
+				fmt.Sprintf("Total packets: %.0f, Lost: %.0f", float64(path.SampleCount)*60.0, float64(path.SampleCount)*60.0*path.PacketLoss/100),
+			},
+			TimePattern: timePattern,
+			MosDegradation: func() float64 {
+				if baseline != nil {
+					return path.MosScore - baseline.MosScore
+				}
+				return 0
+			}(),
+			MosBefore: func() float64 {
+				if baseline != nil {
+					return baseline.MosScore
+				}
+				return 0
+			}(),
+			MosAfter: path.MosScore,
+			Recommendations: []string{
+				"Check for link failures or ISP outages",
+				"Review MTR for high-loss hops",
+				"Escalate to ISP if loss persists",
+			},
+		})
+	} else if path.PacketLoss > 2 {
+		timePattern := "unknown"
+		if baseline != nil && baseline.PacketLoss > 0 {
+			if path.PacketLoss > baseline.PacketLoss*1.5 {
+				timePattern = "increasing"
+			} else if path.PacketLoss < baseline.PacketLoss*0.8 {
+				timePattern = "improving"
+			} else {
+				timePattern = "stable"
+			}
+		}
+
+		cause := "Moderate packet loss (2-5%%) causes occasional dropouts and reduced call quality"
+		if path.OutOfSequence > 1 {
+			cause = "Moderate packet loss with reordering suggests network instability or ISP issues"
+		}
+
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("loss_warning_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Packet loss on %s path to %s", direction, targetAgentName),
+			Category:        "packet_loss",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  cause,
+			Evidence: []string{
+				fmt.Sprintf("Packet loss: %.2f%% (warning threshold: 2%%)", path.PacketLoss),
+				fmt.Sprintf("Out of sequence: %.2f%%", path.OutOfSequence),
+				fmt.Sprintf("MOS: %.2f", path.MosScore),
+			},
+			TimePattern: timePattern,
+			MosDegradation: func() float64 {
+				if baseline != nil {
+					return path.MosScore - baseline.MosScore
+				}
+				return 0
+			}(),
+			MosBefore: func() float64 {
+				if baseline != nil {
+					return baseline.MosScore
+				}
+				return 0
+			}(),
+			MosAfter: path.MosScore,
+			Recommendations: []string{
+				"Monitor loss trend to determine if it's getting worse",
+				"Check for congestion during business hours",
+			},
+		})
+	}
+
+	// Detect sudden loss appearance (from baseline of near-zero)
+	if baseline != nil && baseline.PacketLoss < 0.5 && path.PacketLoss > 2 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("loss_new_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("New packet loss on %s path to %s", direction, targetAgentName),
+			Category:        "packet_loss",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Packet loss recently appeared — possible link degradation, ISP issue, or congestion",
+			Evidence: []string{
+				fmt.Sprintf("Current loss: %.2f%% vs baseline: %.2f%%", path.PacketLoss, baseline.PacketLoss),
+				fmt.Sprintf("MOS: %.2f (was %.2f)", path.MosScore, baseline.MosScore),
+			},
+			TimePattern:    "sudden_appearance",
+			MosDegradation: path.MosScore - baseline.MosScore,
+			MosBefore:      baseline.MosScore,
+			MosAfter:       path.MosScore,
+			Recommendations: []string{
+				"Review MTR for the degraded path",
+				"Check if issue correlates with specific time periods",
+			},
+		})
+	}
+
+	return issues
+}
+
+// detectLatencyOnlyDegradation detects high latency degrading voice without packet loss
+func detectLatencyOnlyDegradation(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+	if path == nil || path.PacketLoss > 1 {
+		return issues // Not latency-only if there's packet loss
+	}
+
+	// Latency-only issue: high latency but MOS degraded without packet loss
+	if path.MosScore < 4.0 && path.AvgLatency > 100 && path.PacketLoss < 0.5 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("latency_only_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Latency impacting voice quality on %s path to %s", direction, targetAgentName),
+			Category:        "latency_degradation",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "High latency (>100ms) with no packet loss suggests route inefficiency or distant peering point",
+			Evidence: []string{
+				fmt.Sprintf("Avg latency: %.0fms", path.AvgLatency),
+				fmt.Sprintf("P95 latency: %.0fms", path.P95Latency),
+				fmt.Sprintf("Packet loss: %.2f%% (negligible)", path.PacketLoss),
+				fmt.Sprintf("MOS: %.2f", path.MosScore),
+			},
+			TimePattern: "unknown",
+			Recommendations: []string{
+				"Run MTR to identify the high-latency hop",
+				"Check for suboptimal routing or distant ISP peering",
+			},
+		})
+	}
+
+	return issues
+}
+
+// detectAsymmetricVoiceDegradation compares forward vs return path for asymmetric issues
+func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, targetAgentName string) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+
+	// Calculate MOS ratio
+	var mosRatio float64
+	if forward.MosScore > 0 {
+		mosRatio = returnPath.MosScore / forward.MosScore
+	}
+
+	// Significant asymmetry: return path is much worse than forward
+	if mosRatio < 0.75 && forward.MosScore > 3.5 {
+		latRatio := 1.0
+		if forward.AvgLatency > 0 {
+			latRatio = returnPath.AvgLatency / forward.AvgLatency
+		}
+
+		var suspectedCause string
+		if latRatio > 2.0 {
+			suspectedCause = fmt.Sprintf("Return path latency is %.0f%% higher than forward path — asymmetric routing or different ISP path", (latRatio-1)*100)
+		} else {
+			suspectedCause = "Return path has significantly lower MOS than forward path despite similar latency — possible ISP issue on return"
+		}
+
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("asymmetry_%d", forward.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Asymmetric voice quality to %s", targetAgentName),
+			Category:        "asymmetry",
+			AffectedPath:    VoicePathReturn,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  suspectedCause,
+			Evidence: []string{
+				fmt.Sprintf("Forward MOS: %.2f, Return MOS: %.2f (ratio: %.2f)", forward.MosScore, returnPath.MosScore, mosRatio),
+				fmt.Sprintf("Forward latency: %.0fms, Return latency: %.0fms", forward.AvgLatency, returnPath.AvgLatency),
+				fmt.Sprintf("Forward jitter: %.1fms, Return jitter: %.1fms", forward.JitterAvg, returnPath.JitterAvg),
+			},
+			TimePattern: "constant",
+			Recommendations: []string{
+				"Check if return path uses a different ISP",
+				"Contact upstream provider if asymmetry persists",
+			},
+		})
+	}
+
+	// Reverse asymmetry: forward path is worse
+	if mosRatio > 1.25 && returnPath.MosScore > 3.5 {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("asymmetry_reverse_%d", forward.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Forward path degraded relative to return to %s", targetAgentName),
+			Category:        "asymmetry",
+			AffectedPath:    VoicePathForward,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  "Forward path has lower MOS than return — possible local congestion or ISP issue",
+			Evidence: []string{
+				fmt.Sprintf("Forward MOS: %.2f, Return MOS: %.2f", forward.MosScore, returnPath.MosScore),
+			},
+			TimePattern: "unknown",
+			Recommendations: []string{
+				"Check local network at source for congestion",
+			},
+		})
+	}
+
+	return issues
+}
+
+// timePatternFromIncidents determines the dominant time pattern from issue history
+func timePatternFromIncidents(issues []VoiceQualityIssue) string {
+	if len(issues) == 0 {
+		return "none"
+	}
+	patternCounts := make(map[string]int)
+	for _, issue := range issues {
+		if issue.TimePattern != "" && issue.TimePattern != "unknown" {
+			patternCounts[issue.TimePattern]++
+		}
+	}
+	if len(patternCounts) == 0 {
+		return "constant"
+	}
+	// Find most common pattern
+	var maxCount int
+	var dominant string
+	for p, c := range patternCounts {
+		if c > maxCount {
+			maxCount = c
+			dominant = p
+		}
+	}
+	return dominant
+}
+
+// buildVoiceQualityRecommendation generates a recommendation based on issues
+func buildVoiceQualityRecommendation(issues []VoiceQualityIssue, forward, returnPath *VoicePathMetrics) string {
+	if len(issues) == 0 {
+		if forward != nil && forward.CongestionLevel == CongestionNone && (returnPath == nil || returnPath.CongestionLevel == CongestionNone) {
+			return "Voice quality is within acceptable parameters. No action required."
+		}
+	}
+	var severeIssues, warningIssues int
+	for _, issue := range issues {
+		if issue.Severity == "critical" {
+			severeIssues++
+		} else if issue.Severity == "warning" {
+			warningIssues++
+		}
+	}
+	if severeIssues > 0 {
+		return fmt.Sprintf("%d critical and %d warning voice quality issues detected. Immediate attention recommended.", severeIssues, warningIssues)
+	}
+	if warningIssues > 0 {
+		return fmt.Sprintf("%d warning-level voice quality issues detected. Monitor closely for worsening.", warningIssues)
+	}
+	return "Voice quality issues are minor or improving."
+}
+
+// ── Compute Agent Voice Quality ─────────────────────────────────────────────
+
+// ComputeAgentVoiceQuality computes comprehensive voice quality metrics for an agent
+// including forward path probes and return path probes
+func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint, from, to time.Time) (*VoiceQualitySummary, error) {
+	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent %d: %w", agentID, err)
+	}
+
+	// Get baseline (7 days before the analysis window)
+	baselineFrom := from.Add(-7 * 24 * time.Hour)
+
+	// Get owned probes (forward path)
+	probes, err := ListForAgent(ctx, db, ch, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list probes for agent %d: %w", agentID, err)
+	}
+
+	// Separate TRAFFICSIM probes (voice-relevant) from others
+	var trafficSimProbes []Probe
+	var mtrProbes []Probe
+	for _, p := range probes {
+		if p.ID == 0 {
+			continue // Skip virtual probes
+		}
+		switch p.Type {
+		case TypeTrafficSim:
+			trafficSimProbes = append(trafficSimProbes, p)
+		case TypeMTR:
+			mtrProbes = append(mtrProbes, p)
+		}
+	}
+
+	// Fetch TrafficSim metrics for forward path
+	forwardMetrics := make(map[uint]*VoicePathMetrics)
+	for _, p := range trafficSimProbes {
+		metrics, err := fetchVoicePathMetrics(ctx, ch, []uint{agentID}, p.ID, from)
+		if err != nil || metrics == nil {
+			continue
+		}
+		// Get target agent name
+		targetName := ""
+		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+			if ta, err := agent.GetAgentByID(ctx, db, *p.Targets[0].AgentID); err == nil {
+				targetName = ta.Name
+			}
+		}
+		targetIP := ""
+		if len(p.Targets) > 0 {
+			targetIP = p.Targets[0].Target
+		}
+		metrics.TargetAgentID = uint(0)
+		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+			metrics.TargetAgentID = *p.Targets[0].AgentID
+		}
+		metrics.TargetAgentName = targetName
+		metrics.SourceAgentID = agentID
+		metrics.SourceAgentName = agentObj.Name
+		metrics.ProbeID = p.ID
+		metrics.ProbeType = string(p.Type)
+		if targetIP != "" {
+			metrics.TargetAgentName = targetIP
+		}
+		forwardMetrics[p.ID] = metrics
+	}
+
+	// Find return path probes (reverse AGENT probes from other agents targeting this agent)
+	reverseAgentProbes, err := findReverseAgentProbes(ctx, db, agentID)
+	if err != nil {
+		log.Warnf("[voice] failed to find reverse agent probes for agent %d: %v", agentID, err)
+	}
+
+	// Build reverse probe metrics map keyed by source agent ID
+	reverseMetrics := make(map[uint]*VoicePathMetrics)
+	for _, rap := range reverseAgentProbes {
+		if rap.ID == 0 {
+			continue
+		}
+		// rap.AgentID is the source agent that owns this reverse probe
+		sourceAgentID := rap.AgentID
+		sourceAgent, err := agent.GetAgentByID(ctx, db, sourceAgentID)
+		if err != nil {
+			continue
+		}
+		// Expand the AGENT probe to get the target (which is this agent)
+		for _, t := range rap.Targets {
+			if t.AgentID != nil && *t.AgentID == agentID {
+				// This reverse probe targets this agent
+				// Look for TRAFFICSIM metrics from this source agent to our target
+				metrics, err := fetchVoicePathMetrics(ctx, ch, []uint{sourceAgentID}, rap.ID, from)
+				if err != nil || metrics == nil {
+					continue
+				}
+				metrics.TargetAgentID = agentID
+				metrics.TargetAgentName = agentObj.Name
+				metrics.SourceAgentID = sourceAgentID
+				metrics.SourceAgentName = sourceAgent.Name
+				metrics.ProbeID = rap.ID
+				metrics.ProbeType = string(rap.Type)
+				metrics.Direction = VoicePathReturn
+				reverseMetrics[sourceAgentID] = metrics
+			}
+		}
+	}
+
+	// Determine best forward and return path metrics (by MOS score)
+	var bestForward, bestReturn *VoicePathMetrics
+	for _, m := range forwardMetrics {
+		m.Direction = VoicePathForward
+		if bestForward == nil || m.MosScore < bestForward.MosScore {
+			bestForward = m
+		}
+	}
+	for _, m := range reverseMetrics {
+		if bestReturn == nil || m.MosScore < bestReturn.MosScore {
+			bestReturn = m
+		}
+	}
+
+	// Fetch baseline metrics for comparison
+	var baselineForward, baselineReturn *VoicePathMetrics
+	if len(forwardMetrics) > 0 {
+		// Use first forward probe for baseline
+		for _, p := range trafficSimProbes {
+			bm, err := fetchVoicePathMetrics(ctx, ch, []uint{agentID}, p.ID, baselineFrom)
+			if err == nil && bm != nil {
+				baselineForward = bm
+				break
+			}
+		}
+	}
+
+	// Determine target agent name for issue detection
+	targetName := ""
+	if bestForward != nil {
+		targetName = bestForward.TargetAgentName
+	} else if bestReturn != nil {
+		targetName = bestReturn.TargetAgentName
+	}
+
+	// Detect voice quality issues
+	issues := detectVoiceQualityIssues(bestForward, bestReturn, baselineForward, baselineReturn, targetName)
+
+	// Compute overall MOS as weighted average
+	var overallMos float64
+	var totalWeight float64
+	if bestForward != nil {
+		overallMos += bestForward.MosScore * 1.0
+		totalWeight += 1.0
+	}
+	if bestReturn != nil {
+		overallMos += bestReturn.MosScore * 0.8 // Return path slightly less weight
+		totalWeight += 0.8
+	}
+	if totalWeight > 0 {
+		overallMos /= totalWeight
+	} else {
+		overallMos = 4.5 // Default to excellent if no data
+	}
+
+	// Compute scores
+	var latencyScore, jitterScore, packetLossScore float64
+	count := 0
+	if bestForward != nil {
+		latencyScore += scoreLatency(bestForward.AvgLatency, bestForward.P95Latency, bestForward.JitterAvg)
+		jitterScore += jitterToScore(bestForward.JitterAvg)
+		packetLossScore += scorePacketLoss(bestForward.PacketLoss)
+		count++
+	}
+	if bestReturn != nil {
+		latencyScore += scoreLatency(bestReturn.AvgLatency, bestReturn.P95Latency, bestReturn.JitterAvg)
+		jitterScore += jitterToScore(bestReturn.JitterAvg)
+		packetLossScore += scorePacketLoss(bestReturn.PacketLoss)
+		count++
+	}
+	if count > 0 {
+		latencyScore /= float64(count)
+		jitterScore /= float64(count)
+		packetLossScore /= float64(count)
+	} else {
+		latencyScore, jitterScore, packetLossScore = 100, 100, 100
+	}
+
+	timePattern := timePatternFromIncidents(issues)
+	recommendation := buildVoiceQualityRecommendation(issues, bestForward, bestReturn)
+
+	return &VoiceQualitySummary{
+		AgentID:         agentID,
+		AgentName:       agentObj.Name,
+		OverallMos:      overallMos,
+		OverallGrade:    voiceGradeFromMos(overallMos),
+		LatencyScore:    latencyScore,
+		JitterScore:     jitterScore,
+		PacketLossScore: packetLossScore,
+		ForwardPath:     bestForward,
+		ReturnPath:      bestReturn,
+		Issues:          issues,
+		TimePattern:     timePattern,
+		Recommendation:  recommendation,
+		GeneratedAt:     time.Now().UTC(),
+	}, nil
+}
+
+// fetchVoicePathMetrics fetches voice path metrics from ClickHouse for a given probe
+func fetchVoicePathMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*VoicePathMetrics, error) {
+	if len(agentIDs) == 0 {
+		return nil, nil
+	}
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
+	q := fmt.Sprintf(`
+SELECT 
+    avg_rtt, median_rtt, p95_rtt, p99_rtt,
+    jitter_avg, jitter_median, jitter_p95,
+    loss_pct, out_of_seq_pct, duplicate_pct,
+    mos_score, sample_count
+FROM (
+    SELECT 
+        avg(average_rtt) as avg_rtt,
+        avg(median_rtt) as median_rtt,
+        avg(p95_rtt) as p95_rtt,
+        avg(p99_rtt) as p99_rtt,
+        avg(jitter_avg) as jitter_avg,
+        avg(jitter_median) as jitter_median,
+        avg(jitter_p95) as jitter_p95,
+        avg(loss_pct) as loss_pct,
+        avg(out_of_seq_pct) as out_of_seq_pct,
+        avg(duplicate_pct) as duplicate_pct,
+        avg(mos_score) as mos_score,
+        count(*) as sample_count
+    FROM traffic_metrics
+    WHERE agent_id IN (%s)
+      AND probe_id = %d
+      AND created_at >= %s
+    GROUP BY agent_id
+) subq
+`, agentIDList, probeID, chQuoteTime(from))
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, nil
+	}
+
+	var m VoicePathMetrics
+	var avgRtt, medianRtt, p95Rtt, p99Rtt, jitterAvg, jitterMedian, jitterP95, lossPct, outOfSeqPct, duplicatePct, mosScore float64
+	var sampleCount int
+
+	if err := rows.Scan(&avgRtt, &medianRtt, &p95Rtt, &p99Rtt, &jitterAvg, &jitterMedian, &jitterP95, &lossPct, &outOfSeqPct, &duplicatePct, &mosScore, &sampleCount); err != nil {
+		return nil, err
+	}
+
+	// Convert RTT to one-way latency estimate (divide by 2)
+	m.AvgLatency = avgRtt / 2
+	m.MedianLatency = medianRtt / 2
+	m.P95Latency = p95Rtt / 2
+	m.JitterAvg = jitterAvg
+	m.JitterMedian = jitterMedian
+	m.JitterP95 = jitterP95
+	m.PacketLoss = lossPct
+	m.OutOfSequence = outOfSeqPct
+	m.Duplicates = duplicatePct
+	m.MosScore = mosScore
+	m.SampleCount = sampleCount
+	m.MosContributors = mosContributingFactors(m.AvgLatency, m.P95Latency, m.JitterAvg, m.PacketLoss)
+	m.CongestionLevel = congestionLevelFromMetrics(m.JitterAvg, m.PacketLoss, m.AvgLatency)
+
+	return &m, nil
+}
+
+// ComputePerAgentAnalysis computes full analysis for a single agent including voice quality
+func ComputePerAgentAnalysis(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint, lookbackMinutes int) (*AgentAnalysis, error) {
+	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent %d: %w", agentID, err)
+	}
+
+	from := time.Now().UTC().Add(-time.Duration(lookbackMinutes) * time.Minute)
+
+	// Compute voice quality
+	vq, err := ComputeAgentVoiceQuality(ctx, db, ch, agentID, from, time.Now().UTC())
+	if err != nil {
+		log.Warnf("[analysis] failed to compute voice quality for agent %d: %v", agentID, err)
+	}
+
+	// Get agent's probes
+	probes, err := ListForAgent(ctx, db, ch, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list probes for agent %d: %w", agentID, err)
+	}
+
+	// Build probe analyses
+	var probeAnalyses []ProbeAnalysis
+	for _, p := range probes {
+		if p.ID == 0 {
+			continue
+		}
+		pa := ProbeAnalysis{
+			ProbeID:     p.ID,
+			ProbeType:   string(p.Type),
+			AgentID:     agentID,
+			AgentName:   agentObj.Name,
+			GeneratedAt: time.Now().UTC(),
+		}
+		if len(p.Targets) > 0 {
+			pa.Target = p.Targets[0].Target
+		}
+		probeAnalyses = append(probeAnalyses, pa)
+	}
+
+	// Check if online
+	isOnline := agentObj.LastSeenAt.After(time.Now().UTC().Add(-5 * time.Minute))
+
+	// Compute health vector from voice metrics if available
+	var health HealthVector
+	if vq != nil {
+		health = HealthVector{
+			OverallHealth:   (vq.LatencyScore + vq.JitterScore + vq.PacketLossScore) / 3,
+			LatencyScore:    vq.LatencyScore,
+			PacketLossScore: vq.PacketLossScore,
+			MosScore:        vq.OverallMos,
+			Grade:           vq.OverallGrade,
+		}
+	} else {
+		health = HealthVector{Grade: "unknown", RouteStability: 100, MosScore: 1.0}
+	}
+
+	return &AgentAnalysis{
+		AgentID:          agentID,
+		AgentName:        agentObj.Name,
+		IsOnline:         isOnline,
+		Health:           health,
+		VoiceQuality:     vq,
+		Probes:           probeAnalyses,
+		ReturnPathProbes: nil,
+		Incidents:        nil,
+		GeneratedAt:      time.Now().UTC(),
 	}, nil
 }

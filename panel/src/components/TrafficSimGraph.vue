@@ -231,6 +231,9 @@ export default {
       
       if (chart.value) {
         chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
+        // Explicitly bind zoom events after updateOptions to ensure they fire
+        chart.value.removeEvents();
+        chart.value.addEventsListeners();
       } else {
         chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
         chart.value.render();
@@ -653,8 +656,8 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       zoom: {
         type: 'x',
         enabled: true,
-        autoScaleYaxis: false,
-        allowMouseWheelZoom: false
+        autoScaleYaxis: true,
+        allowMouseWheelZoom: true
       },
       toolbar: {
         show: true,

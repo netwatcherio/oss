@@ -20,6 +20,7 @@ const emit = defineEmits<{
   share: [];
   editProbes: [];
   addProbe: [];
+  voiceReport: [];
 }>();
 
 const agentStatus = useAgentStatus();
@@ -62,6 +63,17 @@ const agentStatus = useAgentStatus();
         <i class="bi bi-wifi-off"></i>
         Disconnected
       </div>
+
+      <!-- Voice Quality Report Button -->
+      <button
+        v-if="agent.id && workspace.id"
+        class="btn btn-outline-info"
+        @click="emit('voiceReport')"
+        title="Download Voice Quality Report (PDF)"
+      >
+        <i class="bi bi-file-earmark-pdf"></i>
+        <span class="d-none d-sm-inline">&nbsp;Voice Report</span>
+      </button>
 
       <!-- Share Button -->
       <button

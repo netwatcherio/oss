@@ -30,7 +30,7 @@ import {since} from "@/time";
 import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
-import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService} from "@/services/apiService";
+import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService, ReportService} from "@/services/apiService";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
 import DnsDashboard from "@/views/agent/DNS.vue";
@@ -595,6 +595,24 @@ const liveUpdating = ref(false);
 const showShareModal = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
 
+// Download voice quality report
+async function downloadAgentReport(timeRangeDays: number = 7) {
+  try {
+    const blob = await AgentService.downloadAgentReport(state.agent.id, timeRangeDays);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `agent-${state.agent.id}-voice-quality.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Failed to download agent report:", err);
+    alert("Failed to download voice quality report. Please try again.");
+  }
+}
+
 // Get workspace/agent IDs as refs for the WebSocket composable
 const workspaceIdRef = computed(() => state.workspace.id);
 
@@ -880,6 +898,7 @@ onMounted(async () => {
       @share="showShareModal = true"
       @edit-probes="null"
       @add-probe="null"
+      @voice-report="downloadAgentReport"
     />
 
     <QuickStatsBar
