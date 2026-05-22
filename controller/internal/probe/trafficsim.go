@@ -14,6 +14,9 @@ func initTrafficSim(db *sql.DB, pg *gorm.DB) {
 		TypeTrafficSim,
 		nil,
 		func(ctx context.Context, data ProbeData, p TrafficSimResult) error {
+			log.Infof("[trafficsim] RAW payload bytes: %s", string(data.Payload))
+			log.Infof("[trafficsim] Parsed TrafficSimResult: %+v", p)
+
 			if err := SaveRecordWithAlertEval(ctx, db, pg, data, string(TypeTrafficSim), p); err != nil {
 				log.WithError(err).Error("save trafficsim record (CH)")
 				return err
@@ -57,6 +60,5 @@ type TrafficSimResult struct {
 	Flows map[string]interface{} `json:"flows,omitempty"`
 
 	// Timestamps
-	ReportTime time.Time `json:"reportTime"`
-	Timestamp  time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"timestamp"`
 }

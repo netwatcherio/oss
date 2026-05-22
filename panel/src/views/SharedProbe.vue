@@ -719,14 +719,34 @@ function handleWebSocketData(data: ProbeDataPayload) {
     // Add to appropriate data array based on type
     if (data.type === 'PING') {
         state.pingData.unshift(probeData);
-        // Keep reasonable limit
         if (state.pingData.length > 500) state.pingData.pop();
     } else if (data.type === 'MTR') {
         state.mtrData.unshift(probeData);
         if (state.mtrData.length > 500) state.mtrData.pop();
     } else if (data.type === 'TRAFFICSIM') {
-        state.trafficSimData.unshift(probeData);
-        if (state.trafficSimData.length > 500) state.trafficSimData.pop();
+        // For AGENT probes, route to the correct direction in agentPairData
+        if (state.isAgentProbe && state.agentPairData.length > 0) {
+            const mainProbeId = probeId.value;
+            const recipProbeId = state.reciprocalProbe?.id;
+            
+            if (data.probe_id === mainProbeId) {
+                // Forward direction - add to agentPairData[0]
+                const forwardPair = state.agentPairData[0];
+                if (forwardPair) {
+                    addProbeDataUnique(forwardPair.trafficSimData, probeData);
+                }
+            } else if (recipProbeId && data.probe_id === recipProbeId) {
+                // Reverse direction - add to agentPairData[1]
+                const reversePair = state.agentPairData[1];
+                if (reversePair) {
+                    addProbeDataUnique(reversePair.trafficSimData, probeData);
+                }
+            }
+        } else {
+            // Non-AGENT probes: add to common trafficSimData
+            state.trafficSimData.unshift(probeData);
+            if (state.trafficSimData.length > 500) state.trafficSimData.pop();
+        }
     }
 }
 
