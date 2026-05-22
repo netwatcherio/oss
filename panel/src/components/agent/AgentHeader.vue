@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import type { Agent, Workspace } from "@/types";
 import type { PermissionFlags } from "@/composables/usePermissions";
 import { useAgentStatus, type AgentStatusTier } from "@/composables/useAgentStatus";
@@ -13,6 +12,7 @@ interface Props {
   currentStatus: AgentStatusTier;
   wsConnected: boolean;
   liveUpdating: boolean;
+  isGeneratingReport?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -21,23 +21,10 @@ const emit = defineEmits<{
   share: [];
   editProbes: [];
   addProbe: [];
-  voiceReport: [timeRange: number | { from: Date; to: Date }];
+  voiceReport: [];
 }>();
 
 const agentStatus = useAgentStatus();
-
-const voiceReportRange = ref<number | { from: Date; to: Date }>(7);
-
-const timeRangeOptions = [
-  { label: '24 hours', value: 1 },
-  { label: '48 hours', value: 2 },
-  { label: '72 hours', value: 3 },
-  { label: '7 days', value: 7 },
-];
-
-function handleVoiceReport() {
-  emit('voiceReport', voiceReportRange.value);
-}
 </script>
 
 <template>
@@ -78,29 +65,18 @@ function handleVoiceReport() {
         Disconnected
       </div>
 
-      <!-- Voice Report Time Range Selector -->
-      <select
-        v-if="agent.id && workspace.id"
-        v-model="voiceReportRange"
-        class="form-select form-select-sm"
-        style="width: auto; min-width: 120px;"
-        title="Voice report time range"
-      >
-        <option v-for="opt in timeRangeOptions" :key="opt.value" :value="opt.value">
-          {{ opt.label }}
-        </option>
-        <option :value="{ from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), to: new Date() }">Custom...</option>
-      </select>
-
       <!-- Voice Quality Report Button -->
       <button
         v-if="agent.id && workspace.id"
         class="btn btn-outline-info"
-        @click="handleVoiceReport"
+        :class="{ 'generating': isGeneratingReport }"
+        :disabled="isGeneratingReport"
+        @click="emit('voiceReport')"
         title="Download Voice Quality Report (PDF)"
       >
-        <i class="bi bi-file-earmark-pdf"></i>
-        <span class="d-none d-sm-inline">&nbsp;Voice Report</span>
+        <i v-if="isGeneratingReport" class="bi bi-arrow-repeat spin-animation"></i>
+        <i v-else class="bi bi-file-earmark-pdf"></i>
+        <span class="d-none d-sm-inline">&nbsp;{{ isGeneratingReport ? 'Generating...' : 'Voice Report' }}</span>
       </button>
 
       <!-- Share Button -->
@@ -199,6 +175,15 @@ function handleVoiceReport() {
 }
 
 /* Spin Animation */
+.btn-outline-info.generating {
+  opacity: 0.8;
+  cursor: wait;
+}
+
+.btn-outline-info .bi-arrow-repeat {
+  display: inline-block;
+}
+
 .spin-animation {
   animation: spin 1s linear infinite;
 }

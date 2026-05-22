@@ -3256,6 +3256,7 @@ type VoiceQualitySummary struct {
 	PacketLossScore float64             `json:"packet_loss_score"` // 0-100
 	ForwardPath     *VoicePathMetrics   `json:"forward_path,omitempty"`
 	ReturnPath      *VoicePathMetrics   `json:"return_path,omitempty"`
+	Probes          []VoicePathMetrics  `json:"probes"` // all probe-level metrics
 	Issues          []VoiceQualityIssue `json:"issues"`
 	TimePattern     string              `json:"time_pattern"` // "constant", "mixed", "periodic", "unknown"
 	Recommendation  string              `json:"recommendation"`
@@ -4034,6 +4035,11 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	timePattern := timePatternFromIncidents(issues)
 	recommendation := buildVoiceQualityRecommendation(issues, bestForward, bestReturn)
 
+	probeList := make([]VoicePathMetrics, 0, len(forwardMetrics))
+	for _, m := range forwardMetrics {
+		probeList = append(probeList, *m)
+	}
+
 	return &VoiceQualitySummary{
 		AgentID:         agentID,
 		AgentName:       agentObj.Name,
@@ -4044,6 +4050,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		PacketLossScore: packetLossScore,
 		ForwardPath:     bestForward,
 		ReturnPath:      bestReturn,
+		Probes:          probeList,
 		Issues:          issues,
 		TimePattern:     timePattern,
 		Recommendation:  recommendation,

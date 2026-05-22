@@ -118,6 +118,7 @@ type AgentVoiceReportSummary struct {
 	PacketLossScore float64
 	ForwardPath     *VoicePathSummary
 	ReturnPath      *VoicePathSummary
+	Probes          []VoicePathSummary
 	Issues          []VoiceIssueSummary
 	Recommendation  string
 }
@@ -407,6 +408,26 @@ func (g *Generator) fetchAgentVoiceReportSummary(ctx context.Context, agentID ui
 				Recommendations: issue.Recommendations,
 			})
 		}
+
+		for _, probe := range vq.Probes {
+			summary.Probes = append(summary.Probes, VoicePathSummary{
+				Direction:       string(probe.Direction),
+				TargetAgent:     probe.TargetAgentName,
+				MosScore:        probe.MosScore,
+				Grade:           voiceGradeFromMos(probe.MosScore),
+				AvgLatency:      probe.AvgLatency,
+				P95Latency:      probe.P95Latency,
+				MedianLatency:   probe.MedianLatency,
+				JitterAvg:       probe.JitterAvg,
+				JitterMedian:    probe.JitterMedian,
+				JitterP95:       probe.JitterP95,
+				PacketLoss:      probe.PacketLoss,
+				OutOfSequence:   probe.OutOfSequence,
+				Duplicates:      probe.Duplicates,
+				SampleCount:     probe.SampleCount,
+				CongestionLevel: string(probe.CongestionLevel),
+			})
+		}
 	}
 
 	return summary, nil
@@ -492,6 +513,26 @@ func (g *Generator) fetchAgentVoiceReportSummaryCustomRange(ctx context.Context,
 				TimePattern:     issue.TimePattern,
 				MosDegradation:  issue.MosDegradation,
 				Recommendations: issue.Recommendations,
+			})
+		}
+
+		for _, probe := range vq.Probes {
+			summary.Probes = append(summary.Probes, VoicePathSummary{
+				Direction:       string(probe.Direction),
+				TargetAgent:     probe.TargetAgentName,
+				MosScore:        probe.MosScore,
+				Grade:           voiceGradeFromMos(probe.MosScore),
+				AvgLatency:      probe.AvgLatency,
+				P95Latency:      probe.P95Latency,
+				MedianLatency:   probe.MedianLatency,
+				JitterAvg:       probe.JitterAvg,
+				JitterMedian:    probe.JitterMedian,
+				JitterP95:       probe.JitterP95,
+				PacketLoss:      probe.PacketLoss,
+				OutOfSequence:   probe.OutOfSequence,
+				Duplicates:      probe.Duplicates,
+				SampleCount:     probe.SampleCount,
+				CongestionLevel: string(probe.CongestionLevel),
 			})
 		}
 	}
@@ -644,7 +685,57 @@ func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoice
 		renderPathRow(summary.ReturnPath)
 	}
 
-	pdf.Ln(8)
+	pdf.Ln(4)
+
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(26, 54, 93)
+	pdf.Cell(0, 6, "Per-Probe Metrics")
+	pdf.Ln(5)
+
+	if len(summary.Probes) == 0 {
+		pdf.SetFont("Arial", "I", 9)
+		pdf.SetTextColor(128, 128, 128)
+		pdf.Cell(0, 5, "No probe-level metrics available")
+		pdf.Ln(5)
+	} else {
+		pdf.SetFont("Arial", "B", 8)
+		pdf.SetFillColor(240, 240, 240)
+		pdf.SetTextColor(50, 50, 50)
+
+		probeColWidths := []float64{18, 22, 16, 18, 18, 18, 18, 16, 16, 16, 16, 16, 16}
+		probeHeaders := []string{"Dir", "Target", "MOS", "AvgLat", "P95Lat", "MedLat", "JitAvg", "JitMed", "JitP95", "Loss%", "OOO%", "Dup%", "Samps"}
+
+		for i, h := range probeHeaders {
+			pdf.CellFormat(probeColWidths[i], 6, h, "1", 0, "C", true, 0, "")
+		}
+		pdf.Ln(6)
+
+		for _, probe := range summary.Probes {
+			pdf.SetFont("Arial", "", 8)
+			pdf.SetTextColor(50, 50, 50)
+			row := []string{
+				probe.Direction,
+				truncate(probe.TargetAgent, 10),
+				fmt.Sprintf("%.2f", probe.MosScore),
+				fmt.Sprintf("%.0fms", probe.AvgLatency),
+				fmt.Sprintf("%.0fms", probe.P95Latency),
+				fmt.Sprintf("%.0fms", probe.MedianLatency),
+				fmt.Sprintf("%.1fms", probe.JitterAvg),
+				fmt.Sprintf("%.1fms", probe.JitterMedian),
+				fmt.Sprintf("%.1fms", probe.JitterP95),
+				fmt.Sprintf("%.2f%%", probe.PacketLoss),
+				fmt.Sprintf("%.2f%%", probe.OutOfSequence),
+				fmt.Sprintf("%.2f%%", probe.Duplicates),
+				fmt.Sprintf("%d", probe.SampleCount),
+			}
+			for i, cell := range row {
+				pdf.CellFormat(probeColWidths[i], 5, cell, "1", 0, "C", false, 0, "")
+			}
+			pdf.Ln(5)
+		}
+	}
+
+	pdf.Ln(6)
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.SetTextColor(26, 54, 93)
@@ -652,7 +743,7 @@ func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoice
 	pdf.Ln(5)
 	pdf.SetFont("Arial", "", 8)
 	pdf.SetTextColor(80, 80, 80)
-	pdf.MultiCell(0, 4, "Dir=Direction | MOS=Mean Opinion Score (1-5) | AvgLat=Average Latency | P95Lat=95th percentile latency | MedLat=Median Latency | JitAvg/JitMed/JitP95=Jitter average/median/P95 | Loss%=Packet Loss | OOO%=Out-of-Sequence | Dup%=Duplicates | Samps=Sample Count | Congestion=Network congestion level", "", "", false)
+	pdf.MultiCell(0, 4, "Dir=Direction | MOS=Mean Opinion Score (1-5) | AvgLat=Average Latency | P95Lat=95th percentile latency | MedLat=Median Latency | JitAvg/JitMed/JitP95=Jitter average/median/P95 | Loss%=Packet Loss | OOO%=Out-of-Sequence | Dup%=Duplicates | Samps=Sample Count", "", "", false)
 
 	pdf.Ln(6)
 }

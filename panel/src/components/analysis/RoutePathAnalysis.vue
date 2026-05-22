@@ -9,6 +9,7 @@ const props = defineProps<{
 
 const analysis = ref<WorkspaceRouteAnalysis | null>(null)
 const loading = ref(true)
+const isRefreshing = ref(false)
 const error = ref('')
 const expandedAgents = ref<Set<number>>(new Set())
 const expandedIncidents = ref<Set<string>>(new Set())
@@ -29,13 +30,18 @@ const selectedHop = ref<{ ip: string; label: string; metrics: { latency: number;
 
 async function fetchAnalysis() {
   try {
-    loading.value = true
+    if (analysis.value) {
+      isRefreshing.value = true
+    } else {
+      loading.value = true
+    }
     analysis.value = await ProbeDataService.workspaceRouteAnalysis(props.workspaceId)
     error.value = ''
   } catch (e: any) {
     error.value = e?.message || 'Failed to fetch route analysis'
   } finally {
     loading.value = false
+    isRefreshing.value = false
     secondsUntilRefresh.value = 60
   }
 }
@@ -274,6 +280,16 @@ onUnmounted(() => {
 
     <!-- Content -->
     <div v-else-if="analysis">
+      <!-- Loading overlay for refresh -->
+      <div v-if="isRefreshing" class="refresh-overlay">
+        <div class="refresh-spinner">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Refreshing...</span>
+          </div>
+          <span>Updating analysis...</span>
+        </div>
+      </div>
+
       <!-- Header with controls -->
       <div class="analysis-header">
         <div class="header-top">
@@ -287,8 +303,8 @@ onUnmounted(() => {
             <button class="btn btn-sm btn-outline-secondary" @click="expandedAgents.size ? collapseAll() : expandAll()">
               {{ expandedAgents.size ? 'Collapse All' : 'Expand All' }}
             </button>
-            <button class="btn btn-sm btn-outline-primary" @click="fetchAnalysis" :disabled="loading">
-              <i class="bi bi-arrow-clockwise" :class="{ 'spinning': loading }"></i>
+            <button class="btn btn-sm btn-outline-primary" @click="fetchAnalysis" :disabled="loading || isRefreshing">
+              <i class="bi bi-arrow-clockwise" :class="{ 'spinning': loading || isRefreshing }"></i>
             </button>
           </div>
         </div>
@@ -634,6 +650,8 @@ onUnmounted(() => {
 <style scoped>
 .route-analysis {
   padding: 0;
+  position: relative;
+  min-height: 200px;
 }
 
 /* Loading skeleton */
@@ -834,6 +852,7 @@ onUnmounted(() => {
 /* Incidents */
 .incidents-section {
   margin-bottom: 1.5rem;
+  position: relative;
 }
 
 .severity-group {
@@ -1564,6 +1583,37 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* Refresh overlay */
+.refresh-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 0.5rem;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.refresh-spinner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bs-body-bg);
+  padding: 6px 14px;
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  font-size: 0.8rem;
+  color: var(--bs-primary);
+}
+
+.refresh-spinner .spinner-border {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
 }
 
 /* Footer */

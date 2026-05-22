@@ -33,6 +33,7 @@ import ElementExpand from "@/components/ElementExpand.vue";
 import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService, ReportService} from "@/services/apiService";
 import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
+import VoiceReportModal from "@/components/VoiceReportModal.vue";
 import DnsDashboard from "@/views/agent/DNS.vue";
 import WebDashboard from "@/views/agent/Web.vue";
 import AgentHeader from "@/components/agent/AgentHeader.vue";
@@ -593,10 +594,13 @@ const liveUpdating = ref(false);
 
 // Share modal state
 const showShareModal = ref(false);
+const showVoiceReportModal = ref(false);
+const isGeneratingReport = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
 
 // Download voice quality report
 async function downloadAgentReport(timeRange: number | { from: Date; to: Date }) {
+  isGeneratingReport.value = true;
   try {
     const blob = await AgentService.downloadAgentReport(state.agent.id, timeRange);
     const url = URL.createObjectURL(blob);
@@ -610,6 +614,9 @@ async function downloadAgentReport(timeRange: number | { from: Date; to: Date })
   } catch (err) {
     console.error("Failed to download agent report:", err);
     alert("Failed to download voice quality report. Please try again.");
+  } finally {
+    isGeneratingReport.value = false;
+    showVoiceReportModal.value = false;
   }
 }
 
@@ -895,10 +902,11 @@ onMounted(async () => {
       :current-status="currentAgentStatus"
       :ws-connected="wsConnected"
       :live-updating="liveUpdating"
+      :is-generating-report="isGeneratingReport"
       @share="showShareModal = true"
       @edit-probes="null"
       @add-probe="null"
-      @voice-report="downloadAgentReport"
+      @voice-report="showVoiceReportModal = true"
     />
 
     <QuickStatsBar
@@ -1009,6 +1017,15 @@ onMounted(async () => {
       :agent-id="state.agent.id"
       :agent-name="state.agent.name || 'Agent'"
       @close="showShareModal = false"
+  />
+
+  <!-- Voice Report Modal -->
+  <VoiceReportModal
+      v-if="showVoiceReportModal"
+      :agent-id="state.agent.id"
+      :agent-name="state.agent.name || 'Agent'"
+      @close="showVoiceReportModal = false"
+      @generate="downloadAgentReport"
   />
 </template>
 
