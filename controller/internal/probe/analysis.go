@@ -540,12 +540,12 @@ LIMIT 2000
 		_, medianLat, _ = FallbackPercentiles(latencies)
 	}
 	if len(p95RTTs) > 0 {
-		p95Lat = percentile(p95RTTs, 50) // p95RTTs contains P95 values from each cycle
+		p95Lat = percentile(p95RTTs, 95) // p95RTTs contains P95 values from each cycle
 	} else {
 		_, p95Lat, _ = FallbackPercentiles(latencies)
 	}
 	if len(p99RTTs) > 0 {
-		p99Lat = percentile(p99RTTs, 50) // p99RTTs contains P99 values from each cycle
+		p99Lat = percentile(p99RTTs, 99) // p99RTTs contains P99 values from each cycle
 	} else {
 		_, _, p99Lat = FallbackPercentiles(latencies)
 	}
