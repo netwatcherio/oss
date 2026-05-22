@@ -1174,7 +1174,10 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 
 func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, limit int) []ProbeData {
 	type tsBucket struct {
-		rtts          []float64
+		avgRtts       []float64
+		medianRtts    []float64
+		p95Rtts       []float64
+		p99Rtts       []float64
 		minRTT        float64
 		maxRTT        float64
 		totalPackets  uint64
@@ -1206,7 +1209,16 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 			buckets[key] = b
 		}
 
-		b.rtts = append(b.rtts, p.AverageRTT)
+		b.avgRtts = append(b.avgRtts, p.AverageRTT)
+		if p.MedianRTT > 0 {
+			b.medianRtts = append(b.medianRtts, p.MedianRTT)
+		}
+		if p.P95RTT > 0 {
+			b.p95Rtts = append(b.p95Rtts, p.P95RTT)
+		}
+		if p.P99RTT > 0 {
+			b.p99Rtts = append(b.p99Rtts, p.P99RTT)
+		}
 		if !b.initialized || p.MinRTT < b.minRTT {
 			b.minRTT = p.MinRTT
 		}
@@ -1257,7 +1269,7 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 
 	result := make([]ProbeData, 0, len(buckets))
 	for bucketTime, b := range buckets {
-		if len(b.rtts) == 0 {
+		if len(b.avgRtts) == 0 {
 			continue
 		}
 
@@ -1268,10 +1280,8 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		}
 
 		// Aggregate jitter values
-		avgJitter := percentileFn(b.jitterAvgs, 50) // Use median of jitterAvgs
-		if len(b.jitterAvgs) == 0 {
-			avgJitter = 0
-		} else {
+		avgJitter := float64(0)
+		if len(b.jitterAvgs) > 0 {
 			var sum float64
 			for _, j := range b.jitterAvgs {
 				sum += j
@@ -1281,15 +1291,29 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		medianJitter := percentileFn(b.jitterMedians, 50)
 		p95Jitter := percentileFn(b.jitterP95s, 95)
 
+		// Aggregate RTT percentiles: use per-cycle percentiles when available, fallback to computed
+		medianRTT := percentileFn(b.medianRtts, 50)
+		if medianRTT == 0 && len(b.avgRtts) > 0 {
+			medianRTT = percentileFn(b.avgRtts, 50)
+		}
+		p95RTT := percentileFn(b.p95Rtts, 95)
+		if p95RTT == 0 && len(b.avgRtts) > 0 {
+			p95RTT = percentileFn(b.avgRtts, 95)
+		}
+		p99RTT := percentileFn(b.p99Rtts, 99)
+		if p99RTT == 0 && len(b.avgRtts) > 0 {
+			p99RTT = percentileFn(b.avgRtts, 99)
+		}
+
 		// Compute MOS score
-		mosScore := computeMos(avg(b.rtts), lossPct, avgJitter)
+		mosScore := computeMos(avg(b.avgRtts), lossPct, avgJitter)
 
 		agg := TrafficSimPayload{
 			ReportTime:    bucketTime.UTC().Format(time.RFC3339),
-			AverageRTT:    avg(b.rtts),
-			MedianRTT:     percentileFn(b.rtts, 50),
-			P95RTT:        percentileFn(b.rtts, 95),
-			P99RTT:        percentileFn(b.rtts, 99),
+			AverageRTT:    avg(b.avgRtts),
+			MedianRTT:     medianRTT,
+			P95RTT:        p95RTT,
+			P99RTT:        p99RTT,
 			MinRTT:        b.minRTT,
 			MaxRTT:        b.maxRTT,
 			TotalPackets:  b.totalPackets,
