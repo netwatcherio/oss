@@ -332,13 +332,13 @@ function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): T
       reportTime: new Date(bucketTime + bucketSizeMs / 2).toISOString(), // Middle of bucket
       averageRTT: avgRtts.reduce((a, b) => a + b, 0) / avgRtts.length,
       medianRTT: medianRtts.length > 0 ? percentile(medianRtts, 50) : 0,
-      p95RTT: p95Rtts.length > 0 ? percentile(p95Rtts, 50) : 0,
-      p99RTT: p99Rtts.length > 0 ? percentile(p99Rtts, 50) : 0,
+      p95RTT: p95Rtts.length > 0 ? percentile(p95Rtts, 95) : 0,
+      p99RTT: p99Rtts.length > 0 ? percentile(p99Rtts, 99) : 0,
       minRTT: Math.min(...minRtts),
       maxRTT: Math.max(...maxRtts),
       jitterAvg: jitterAvgs.length > 0 ? jitterAvgs.reduce((a, b) => a + b, 0) / jitterAvgs.length : 0,
       jitterMedian: jitterMedians.length > 0 ? percentile(jitterMedians, 50) : 0,
-      jitterP95: jitterP95s.length > 0 ? percentile(jitterP95s, 50) : 0,
+      jitterP95: jitterP95s.length > 0 ? percentile(jitterP95s, 95) : 0,
       totalPackets: totalPackets,
       lostPackets: lostPackets,
       outOfSequence: outOfSeq
