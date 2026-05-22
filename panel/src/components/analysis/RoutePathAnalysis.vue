@@ -1,8 +1,7 @@
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ProbeDataService } from '@/services/apiService'
 import type { WorkspaceRouteAnalysis, AgentRouteInfo, SharedHopInfo, RouteIncident } from './types'
-import { severityIcons } from './types'
 
 const props = defineProps<{
   workspaceId: number | string
@@ -13,17 +12,44 @@ const loading = ref(true)
 const error = ref('')
 const expandedAgents = ref<Set<number>>(new Set())
 const expandedIncidents = ref<Set<string>>(new Set())
-let refreshInterval: ReturnType<typeof setInterval> | null = null
+const refreshInterval = ref<ReturnType<typeof setInterval> | null>(null)
+const secondsUntilRefresh = ref(60)
+const countdownInterval = ref<ReturnType<typeof setInterval> | null>(null)
+
+// Filter/sort state
+const searchQuery = ref('')
+const filterType = ref<'all' | 'issues' | 'route_change' | 'ip_change' | 'isp_change'>('all')
+const sortBy = ref<'name' | 'issues' | 'latency' | 'routes'>('name')
+const currentPage = ref(1)
+const pageSize = ref(25)
+const compactMode = ref(false)
+
+// Selected hop for detail panel
+const selectedHop = ref<{ ip: string; label: string; metrics: { latency: number; loss: number } | null; sharedWith: string[] } | null>(null)
 
 async function fetchAnalysis() {
   try {
+    loading.value = true
     analysis.value = await ProbeDataService.workspaceRouteAnalysis(props.workspaceId)
     error.value = ''
   } catch (e: any) {
     error.value = e?.message || 'Failed to fetch route analysis'
   } finally {
     loading.value = false
+    secondsUntilRefresh.value = 60
   }
+}
+
+function startRefreshTimer() {
+  if (refreshInterval.value) clearInterval(refreshInterval.value)
+  if (countdownInterval.value) clearInterval(countdownInterval.value)
+  
+  refreshInterval.value = setInterval(fetchAnalysis, 60000)
+  countdownInterval.value = setInterval(() => {
+    if (secondsUntilRefresh.value > 0) {
+      secondsUntilRefresh.value--
+    }
+  }, 1000)
 }
 
 function toggleAgent(id: number) {
@@ -60,6 +86,19 @@ function incidentIcon(type_: string) {
   }
 }
 
+// Group incidents by severity
+const groupedIncidents = computed(() => {
+  if (!analysis.value?.incidents?.length) return { critical: [], warning: [], info: [] }
+  const groups = { critical: [] as RouteIncident[], warning: [] as RouteIncident[], info: [] as RouteIncident[] }
+  for (const inc of analysis.value.incidents) {
+    if (inc.severity === 'critical') groups.critical.push(inc)
+    else if (inc.severity === 'warning') groups.warning.push(inc)
+    else groups.info.push(inc)
+  }
+  return groups
+})
+
+// Shared hop agents map
 const sharedHopAgents = computed(() => {
   if (!analysis.value?.shared_hops?.length) return {}
   const map: Record<string, string[]> = {}
@@ -69,183 +108,336 @@ const sharedHopAgents = computed(() => {
   return map
 })
 
-// Get display info for a hop - uses detail if available, otherwise falls back to IP
+// Filtered and sorted agents
+const filteredAgents = computed(() => {
+  if (!analysis.value?.agents?.length) return []
+  
+  let agents = [...analysis.value.agents]
+  
+  // Apply search filter
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    agents = agents.filter(a => 
+      a.agent_name.toLowerCase().includes(query) ||
+      a.public_ip?.toLowerCase().includes(query) ||
+      a.isp?.toLowerCase().includes(query)
+    )
+  }
+  
+  // Apply type filter
+  if (filterType.value !== 'all') {
+    agents = agents.filter(a => {
+      switch (filterType.value) {
+        case 'issues': return a.has_ip_change || a.has_isp_change || a.routes?.some(r => r.has_route_change)
+        case 'route_change': return a.routes?.some(r => r.has_route_change)
+        case 'ip_change': return a.has_ip_change
+        case 'isp_change': return a.has_isp_change
+        default: return true
+      }
+    })
+  }
+  
+  // Apply sorting
+  agents.sort((a, b) => {
+    switch (sortBy.value) {
+      case 'name': return a.agent_name.localeCompare(b.agent_name)
+      case 'issues': {
+        const aIssues = (a.has_ip_change ? 1 : 0) + (a.has_isp_change ? 1 : 0) + (a.routes?.filter(r => r.has_route_change).length || 0)
+        const bIssues = (b.has_ip_change ? 1 : 0) + (b.has_isp_change ? 1 : 0) + (b.routes?.filter(r => r.has_route_change).length || 0)
+        return bIssues - aIssues
+      }
+      case 'latency': {
+        const aLat = Math.min(...(a.routes?.map(r => r.avg_end_hop_latency || Infinity) || [Infinity]))
+        const bLat = Math.min(...(b.routes?.map(r => r.avg_end_hop_latency || Infinity) || [Infinity]))
+        return aLat - bLat
+      }
+      case 'routes': return (b.routes?.length || 0) - (a.routes?.length || 0)
+      default: return 0
+    }
+  })
+  
+  return agents
+})
+
+// Paginated agents
+const paginatedAgents = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredAgents.value.slice(start, start + pageSize.value)
+})
+
+const totalPages = computed(() => Math.ceil(filteredAgents.value.length / pageSize.value))
+
+// Stats computed
+const routeChangeCount = computed(() =>
+  analysis.value?.incidents?.filter(i => i.type === 'route_change').length || 0
+)
+const ipChangeCount = computed(() =>
+  analysis.value?.incidents?.filter(i => i.type === 'ip_change').length || 0
+)
+const ispChangeCount = computed(() =>
+  analysis.value?.incidents?.filter(i => i.type === 'isp_change').length || 0
+)
+
+// Time ago helper
+function timeAgo(date: string): string {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
+}
+
+// Hop display helpers
 function getHopDisplay(route: any, idx: number): { ip: string; label: string; isAgent: boolean } {
   if (route.latest_hops_detail && route.latest_hops_detail[idx]) {
     const detail = route.latest_hops_detail[idx]
-    return {
-      ip: detail.ip,
-      label: detail.hostname || detail.ip,
-      isAgent: detail.is_agent
-    }
+    return { ip: detail.ip, label: detail.hostname || detail.ip, isAgent: detail.is_agent }
   }
-  return {
-    ip: route.latest_hops[idx],
-    label: route.latest_hops[idx],
-    isAgent: false
-  }
+  return { ip: route.latest_hops[idx], label: route.latest_hops[idx], isAgent: false }
 }
 
-// Look up intermediate hop metrics by IP
 function getHopMetrics(route: any, ip: string): { latency: number; loss: number } | null {
   if (!route.intermediate_hops) return null
   const m = route.intermediate_hops.find((h: any) => h.ip === ip)
-  if (!m) return null
-  return { latency: m.latency, loss: m.loss }
+  return m ? { latency: m.latency, loss: m.loss } : null
 }
 
-// Determine health class based on latency and loss thresholds
 function hopHealthClass(latency: number, loss: number): string {
   if (latency > 150 || loss > 3) return 'poor'
   if (latency >= 50 || loss > 0) return 'degraded'
   return 'healthy'
 }
 
-const routeChangeCount = computed(() =>
-  analysis.value?.incidents?.filter(i => i.type === 'route_change').length || 0
-)
+function stabilityClass(pct: number | null): string {
+  if (pct === null) return ''
+  if (pct < 70) return 'poor'
+  if (pct < 90) return 'warning'
+  return 'good'
+}
 
-const ipChangeCount = computed(() =>
-  analysis.value?.incidents?.filter(i => i.type === 'ip_change').length || 0
-)
+// Hop click handler
+function showHopDetail(route: any, idx: number) {
+  const hopInfo = getHopDisplay(route, idx)
+  const metrics = getHopMetrics(route, hopInfo.ip)
+  const sharedWith = sharedHopAgents.value[hopInfo.ip] || []
+  selectedHop.value = { ...hopInfo, metrics, sharedWith }
+}
 
-const ispChangeCount = computed(() =>
-  analysis.value?.incidents?.filter(i => i.type === 'isp_change').length || 0
-)
+function closeHopDetail() {
+  selectedHop.value = null
+}
 
-const totalHops = computed(() =>
-  analysis.value?.shared_hops?.reduce((sum, sh) => sum + sh.hop_count, 0) || 0
-)
+// Expand/collapse all
+function expandAll() {
+  filteredAgents.value.forEach(a => expandedAgents.value.add(a.agent_id))
+}
+
+function collapseAll() {
+  expandedAgents.value.clear()
+}
+
+// Reset page on filter change
+watch([searchQuery, filterType, sortBy], () => {
+  currentPage.value = 1
+})
 
 onMounted(() => {
   fetchAnalysis()
-  refreshInterval = setInterval(fetchAnalysis, 60000)
+  startRefreshTimer()
 })
 
 onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval)
+  if (refreshInterval.value) clearInterval(refreshInterval.value)
+  if (countdownInterval.value) clearInterval(countdownInterval.value)
 })
 </script>
 
 <template>
   <div class="route-analysis">
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-5">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
+    <!-- Loading skeleton -->
+    <div v-if="loading && !analysis" class="loading-state">
+      <div class="skeleton-stats"></div>
+      <div class="skeleton-cards">
+        <div class="skeleton-card" v-for="i in 6" :key="i"></div>
       </div>
-      <p class="text-muted mt-2">Analyzing route paths...</p>
     </div>
 
     <!-- Error -->
-    <div v-else-if="error" class="text-center py-5">
+    <div v-else-if="error && !analysis" class="error-state">
       <i class="bi bi-exclamation-triangle fs-1 text-warning mb-3"></i>
       <h5 class="text-muted">Route Analysis Unavailable</h5>
       <p class="text-muted small">{{ error }}</p>
-      <button class="btn btn-sm btn-outline-primary" @click="fetchAnalysis">Retry</button>
+      <button class="btn btn-sm btn-outline-primary" @click="fetchAnalysis">
+        <i class="bi bi-arrow-clockwise me-1"></i>Retry
+      </button>
     </div>
 
     <!-- Content -->
     <div v-else-if="analysis">
-      <!-- Stats Bar -->
-      <div class="stats-bar mb-4">
-        <div class="stat-pill">
-          <i class="bi bi-hdd-network"></i>
-          <span class="stat-value">{{ analysis.total_agents }}</span>
-          <span class="stat-label">agents</span>
+      <!-- Header with controls -->
+      <div class="analysis-header">
+        <div class="header-top">
+          <h5 class="section-title mb-0">
+            <i class="bi bi-diagram-3 me-1"></i>Route Analysis
+          </h5>
+          <div class="header-actions">
+            <button class="btn btn-sm btn-outline-secondary" @click="compactMode = !compactMode" :title="compactMode ? 'Expand all' : 'Collapse all'">
+              <i :class="compactMode ? 'bi bi-arrows-expand' : 'bi bi-arrows-collapse'"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" @click="expandedAgents.size ? collapseAll() : expandAll()">
+              {{ expandedAgents.size ? 'Collapse All' : 'Expand All' }}
+            </button>
+            <button class="btn btn-sm btn-outline-primary" @click="fetchAnalysis" :disabled="loading">
+              <i class="bi bi-arrow-clockwise" :class="{ 'spinning': loading }"></i>
+            </button>
+          </div>
         </div>
-        <div class="stat-pill">
-          <i class="bi bi-diagram-2"></i>
-          <span class="stat-value">{{ analysis.total_routes }}</span>
-          <span class="stat-label">routes</span>
+        
+        <!-- Filter controls -->
+        <div class="filter-bar">
+          <div class="search-input-wrapper">
+            <i class="bi bi-search"></i>
+            <input v-model="searchQuery" type="text" placeholder="Search agents..." class="search-input" />
+          </div>
+          <select v-model="filterType" class="filter-select">
+            <option value="all">All routes</option>
+            <option value="issues">Has issues</option>
+            <option value="route_change">Route changes</option>
+            <option value="ip_change">IP changes</option>
+            <option value="isp_change">ISP changes</option>
+          </select>
+          <select v-model="sortBy" class="sort-select">
+            <option value="name">Name A-Z</option>
+            <option value="issues">Most issues</option>
+            <option value="latency">Worst latency</option>
+            <option value="routes">Most routes</option>
+          </select>
         </div>
-        <div class="stat-pill">
-          <i class="bi bi-share"></i>
-          <span class="stat-value">{{ analysis.shared_hops?.length || 0 }}</span>
-          <span class="stat-label">shared hops</span>
-        </div>
-        <div v-if="routeChangeCount > 0" class="stat-pill warning">
-          <i class="bi bi-shuffle"></i>
-          <span class="stat-value">{{ routeChangeCount }}</span>
-          <span class="stat-label">route changes</span>
-        </div>
-        <div v-if="ipChangeCount > 0" class="stat-pill info">
-          <i class="bi bi-globe2"></i>
-          <span class="stat-value">{{ ipChangeCount }}</span>
-          <span class="stat-label">IP changes</span>
-        </div>
-        <div v-if="ispChangeCount > 0" class="stat-pill danger">
-          <i class="bi bi-building"></i>
-          <span class="stat-value">{{ ispChangeCount }}</span>
-          <span class="stat-label">ISP changes</span>
+
+        <!-- Stats bar -->
+        <div class="stats-bar">
+          <div class="stat-pill primary">
+            <div class="stat-inner">
+              <i class="bi bi-hdd-network"></i>
+              <span class="stat-value">{{ analysis.total_agents }}</span>
+              <span class="stat-label">agents</span>
+            </div>
+          </div>
+          <div class="stat-pill primary">
+            <div class="stat-inner">
+              <i class="bi bi-diagram-2"></i>
+              <span class="stat-value">{{ analysis.total_routes }}</span>
+              <span class="stat-label">routes</span>
+            </div>
+          </div>
+          <div class="stat-pill primary">
+            <div class="stat-inner">
+              <i class="bi bi-share"></i>
+              <span class="stat-value">{{ analysis.shared_hops?.length || 0 }}</span>
+              <span class="stat-label">shared hops</span>
+            </div>
+          </div>
+          <div v-if="routeChangeCount > 0" class="stat-pill warning">
+            <div class="stat-inner">
+              <i class="bi bi-shuffle"></i>
+              <span class="stat-value">{{ routeChangeCount }}</span>
+              <span class="stat-label">route changes</span>
+            </div>
+          </div>
+          <div v-if="ipChangeCount > 0" class="stat-pill info">
+            <div class="stat-inner">
+              <i class="bi bi-globe2"></i>
+              <span class="stat-value">{{ ipChangeCount }}</span>
+              <span class="stat-label">IP changes</span>
+            </div>
+          </div>
+          <div v-if="ispChangeCount > 0" class="stat-pill danger">
+            <div class="stat-inner">
+              <i class="bi bi-building"></i>
+              <span class="stat-value">{{ ispChangeCount }}</span>
+              <span class="stat-label">ISP changes</span>
+            </div>
+          </div>
+          <div class="stat-pill ml-auto">
+            <div class="stat-inner timestamp">
+              <i class="bi bi-clock"></i>
+              <span>{{ timeAgo(analysis.generated_at) }}</span>
+              <span class="refresh-countdown" v-if="!loading">· {{ secondsUntilRefresh }}s</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Incidents -->
-      <div v-if="analysis.incidents?.length" class="incidents-section mb-4">
-        <h6 class="section-title">
-          <i class="bi bi-lightning-charge me-1"></i>
-          Path Issues
-          <span class="badge-count">{{ analysis.incidents.length }}</span>
-        </h6>
-        <div v-for="incident in analysis.incidents" :key="incident.id"
-          class="incident-card" :class="severityClass(incident.severity)"
-          @click="toggleIncident(incident.id)"
-        >
-          <div class="incident-header">
-            <i :class="['bi', incidentIcon(incident.type), 'incident-type-icon']"></i>
-            <div class="incident-info">
-              <div class="incident-title">{{ incident.message }}</div>
-              <div class="incident-meta">
-                <span class="meta-badge">{{ incident.agent_name }}</span>
-                <span v-if="incident.target" class="meta-badge target">→ {{ incident.target }}</span>
+      <!-- Incidents grouped by severity -->
+      <div v-if="analysis.incidents?.length" class="incidents-section">
+        <div v-for="(incidents, severity) in groupedIncidents" :key="severity">
+          <div v-if="incidents.length > 0" class="severity-group">
+            <h6 class="severity-header" :class="severity">
+              <i :class="severity === 'critical' ? 'bi bi-x-octagon-fill' : severity === 'warning' ? 'bi bi-exclamation-triangle-fill' : 'bi bi-info-circle-fill'"></i>
+              {{ severity === 'critical' ? 'Critical' : severity === 'warning' ? 'Warning' : 'Info' }}
+              <span class="badge-count">{{ incidents.length }}</span>
+            </h6>
+            <div v-for="incident in incidents" :key="incident.id" class="incident-card" :class="[severity, { expanded: expandedIncidents.has(incident.id) }]" @click="toggleIncident(incident.id)">
+              <div class="incident-header">
+                <div class="incident-icon">
+                  <i :class="['bi', incidentIcon(incident.type)]"></i>
+                </div>
+                <div class="incident-content">
+                  <div class="incident-title">{{ incident.message }}</div>
+                  <div class="incident-meta">
+                    <span class="meta-badge">{{ incident.agent_name }}</span>
+                    <span v-if="incident.target" class="meta-badge target">
+                      <i class="bi bi-arrow-right"></i> {{ incident.target }}
+                    </span>
+                    <span v-if="incident.detected_at" class="meta-badge time">
+                      {{ timeAgo(incident.detected_at) }}
+                    </span>
+                  </div>
+                </div>
+                <i :class="['bi', expandedIncidents.has(incident.id) ? 'bi-chevron-up' : 'bi-chevron-down', 'expand-icon']"></i>
               </div>
-            </div>
-            <i :class="['bi', expandedIncidents.has(incident.id) ? 'bi-chevron-up' : 'bi-chevron-down', 'expand-icon']"></i>
-          </div>
-          <div v-if="expandedIncidents.has(incident.id)" class="incident-details" @click.stop>
-            <div v-if="incident.evidence?.length" class="detail-section">
-              <div class="detail-label">Evidence</div>
-              <div v-for="(e, i) in incident.evidence" :key="i" class="evidence-item">
-                <i class="bi bi-dot"></i>{{ e }}
+              <div v-if="expandedIncidents.has(incident.id)" class="incident-details">
+                <div v-if="incident.evidence?.length" class="evidence-list">
+                  <div v-for="(e, i) in incident.evidence" :key="i" class="evidence-item">
+                    <i class="bi bi-check-circle"></i>{{ e }}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div v-if="incident.detected_at" class="detail-section">
-              <div class="detail-label">Detected</div>
-              <span class="text-muted small">{{ new Date(incident.detected_at).toLocaleString() }}</span>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Shared Hops -->
-      <div v-if="analysis.shared_hops?.length" class="shared-hops-section mb-4">
+      <div v-if="analysis.shared_hops?.length" class="shared-hops-section">
         <h6 class="section-title">
-          <i class="bi bi-share me-1"></i>
-          Shared Network Hops
+          <i class="bi bi-share me-1"></i>Shared Network Hops
           <span class="badge-count">{{ analysis.shared_hops.length }}</span>
         </h6>
         <div class="shared-hops-grid">
-          <div v-for="hop in analysis.shared_hops" :key="hop.hop_ip" class="hop-card">
-            <div class="hop-ip">
-              <i class="bi bi-router me-1"></i>
-              <code>{{ hop.hop_ip }}</code>
+          <div v-for="hop in analysis.shared_hops" :key="hop.hop_ip" class="hop-card" :class="hopHealthClass(hop.avg_latency || 0, hop.avg_loss || 0)">
+            <div class="hop-header">
+              <div class="hop-icon">
+                <i class="bi bi-router"></i>
+              </div>
+              <div class="hop-info">
+                <code class="hop-ip">{{ hop.hop_ip }}</code>
+                <div v-if="hop.avg_latency != null || hop.avg_loss != null" class="hop-metrics">
+                  <span v-if="hop.avg_latency != null" class="metric-badge" :class="hopHealthClass(hop.avg_latency, hop.avg_loss || 0)">
+                    {{ hop.avg_latency.toFixed(0) }}ms
+                  </span>
+                  <span v-if="hop.avg_loss != null && hop.avg_loss > 0" class="metric-badge loss" :class="hopHealthClass(hop.avg_latency || 0, hop.avg_loss)">
+                    {{ hop.avg_loss.toFixed(1) }}%
+                  </span>
+                </div>
+              </div>
+              <div class="hop-agents-count">
+                <span class="count-badge">{{ hop.hop_count }}</span>
+              </div>
             </div>
             <div class="hop-agents">
-              <span v-for="name in hop.agent_names" :key="name" class="agent-tag">
-                {{ name }}
-              </span>
-            </div>
-            <div v-if="hop.avg_latency != null || hop.avg_loss != null" class="hop-metrics-row">
-              <span v-if="hop.avg_latency != null" class="hop-metric" :class="hopHealthClass(hop.avg_latency, hop.avg_loss || 0)">
-                {{ hop.avg_latency.toFixed(0) }}ms
-              </span>
-              <span v-if="hop.avg_loss != null && hop.avg_loss > 0" class="hop-metric" :class="hopHealthClass(hop.avg_latency || 0, hop.avg_loss)">
-                {{ hop.avg_loss.toFixed(1) }}%
-              </span>
-            </div>
-            <div class="hop-count">
-              <span class="count-badge">{{ hop.hop_count }} agent{{ hop.hop_count !== 1 ? 's' : '' }}</span>
+              <span v-for="name in hop.agent_names.slice(0, 3)" :key="name" class="agent-tag">{{ name }}</span>
+              <span v-if="hop.agent_names.length > 3" class="agent-tag more">+{{ hop.agent_names.length - 3 }}</span>
             </div>
           </div>
         </div>
@@ -253,19 +445,29 @@ onUnmounted(() => {
 
       <!-- Agent Routes -->
       <div class="agent-routes-section">
-        <h6 class="section-title">
-          <i class="bi bi-diagram-3 me-1"></i>
-          Agent Routes
-        </h6>
-        <div v-if="!analysis.agents?.length" class="empty-state">
-          <i class="bi bi-diagram-3 fs-1 text-muted"></i>
-          <p class="text-muted">No route data available</p>
+        <div class="section-header">
+          <h6 class="section-title">
+            <i class="bi bi-diagram-3 me-1"></i>Agent Routes
+            <span class="badge-count">{{ filteredAgents.length }}</span>
+          </h6>
+          <span v-if="filteredAgents.length !== analysis.total_agents" class="filter-info">
+            of {{ analysis.total_agents }} total
+          </span>
         </div>
-        <div v-for="agent in analysis.agents" :key="agent.agent_id" class="agent-card">
-          <div class="agent-header" @click="toggleAgent(agent.agent_id)">
-            <div class="agent-main">
-              <i class="bi bi-hdd-network agent-icon"></i>
-              <div>
+
+        <div v-if="!filteredAgents.length" class="empty-state">
+          <i class="bi bi-search fs-1 text-muted"></i>
+          <p class="text-muted">No agents match your filters</p>
+          <button class="btn btn-sm btn-outline-secondary" @click="searchQuery = ''; filterType = 'all'">Clear filters</button>
+        </div>
+
+        <div v-else class="agent-list">
+          <div v-for="agent in paginatedAgents" :key="agent.agent_id" class="agent-card" :class="{ 'has-issues': agent.has_ip_change || agent.has_isp_change || agent.routes?.some(r => r.has_route_change) }">
+            <div class="agent-header" @click="toggleAgent(agent.agent_id)" :class="{ expanded: expandedAgents.has(agent.agent_id) }">
+              <div class="agent-score" :class="agent.has_ip_change || agent.has_isp_change ? 'warning' : 'healthy'">
+                <i class="bi" :class="agent.has_ip_change || agent.has_isp_change ? 'bi-exclamation-triangle' : 'bi bi-hdd-network'"></i>
+              </div>
+              <div class="agent-info">
                 <div class="agent-name">{{ agent.agent_name }}</div>
                 <div class="agent-meta">
                   <span v-if="agent.public_ip" class="meta-item">
@@ -276,115 +478,154 @@ onUnmounted(() => {
                   </span>
                 </div>
               </div>
-            </div>
-            <div class="agent-badges">
-              <span v-if="agent.has_ip_change" class="badge ip-change" title="IP changed recently">
-                <i class="bi bi-globe2"></i> IP Change
-              </span>
-              <span v-if="agent.has_isp_change" class="badge isp-change" title="ISP changed recently">
-                <i class="bi bi-building"></i> ISP Change
-              </span>
-              <span class="route-count">{{ agent.routes?.length || 0 }} route{{ agent.routes?.length !== 1 ? 's' : '' }}</span>
+              <div class="agent-badges">
+                <span v-if="agent.has_ip_change" class="badge ip-change">
+                  <i class="bi bi-globe2"></i>
+                </span>
+                <span v-if="agent.has_isp_change" class="badge isp-change">
+                  <i class="bi bi-building"></i>
+                </span>
+                <span v-if="agent.routes?.some(r => r.has_route_change)" class="badge route-change">
+                  <i class="bi bi-shuffle"></i> {{ agent.routes.filter(r => r.has_route_change).length }}
+                </span>
+                <span class="route-count">{{ agent.routes?.length || 0 }}</span>
+              </div>
               <i :class="['bi', expandedAgents.has(agent.agent_id) ? 'bi-chevron-up' : 'bi-chevron-down', 'expand-icon']"></i>
             </div>
-          </div>
 
-          <div v-if="expandedAgents.has(agent.agent_id)" class="agent-routes">
-            <div v-if="!agent.routes?.length" class="empty-routes">
-              <span class="text-muted small">No MTR routes configured</span>
-            </div>
-            <div v-for="route in agent.routes" :key="route.probe_id" class="route-item"
-              :class="{ 'has-issue': route.has_route_change }"
-            >
-              <div class="route-header">
-                <div class="route-target">
-                  <i class="bi bi-arrow-right-circle"></i>
-                  <span>{{ route.target || 'Unknown target' }}</span>
-                </div>
-                <div class="route-badges">
-                  <span v-if="route.has_route_change" class="badge route-change">
-                    <i class="bi bi-shuffle"></i> Route Change
-                  </span>
-                  <span v-if="route.route_stability_pct != null" class="badge stability"
-                    :class="{ warning: route.route_stability_pct < 90, good: route.route_stability_pct >= 90 }"
-                  >
-                    <i class="bi bi-activity"></i> {{ Math.round(route.route_stability_pct) }}% stable
-                  </span>
-                </div>
+            <div v-if="expandedAgents.has(agent.agent_id)" class="agent-routes" :class="{ compact: compactMode }">
+              <div v-if="!agent.routes?.length" class="empty-routes">
+                <i class="bi bi-info-circle"></i> No MTR routes configured
               </div>
+              <div v-for="route in agent.routes" :key="route.probe_id" class="route-item" :class="{ 'has-issue': route.has_route_change }">
+                <div class="route-header">
+                  <div class="route-target">
+                    <i class="bi bi-bullseye"></i>
+                    <span class="target-name">{{ route.target || 'Unknown target' }}</span>
+                  </div>
+                  <div class="route-vitals">
+                    <span v-if="route.route_stability_pct != null" class="stability-badge" :class="stabilityClass(route.route_stability_pct)">
+                      <i class="bi bi-activity"></i> {{ Math.round(route.route_stability_pct) }}%
+                    </span>
+                    <span v-if="route.avg_end_hop_latency != null" class="latency-badge">
+                      {{ route.avg_end_hop_latency.toFixed(1) }}ms
+                    </span>
+                    <span v-if="route.avg_end_hop_loss != null && route.avg_end_hop_loss > 0" class="loss-badge">
+                      {{ route.avg_end_hop_loss.toFixed(2) }}%
+                    </span>
+                  </div>
+                </div>
 
-              <!-- Route Hops Visualization -->
-              <div v-if="route.latest_hops?.length" class="route-hops">
-                <div class="hops-chain">
-                  <div class="hop-node source">
-                    <i class="bi bi-pc-display"></i>
-                    <span class="hop-label">{{ agent.agent_name }}</span>
-                  </div>
-                  <div v-for="(hop, idx) in route.latest_hops" :key="idx" class="hop-wrapper">
-                    <div class="hop-arrow">
-                      <i class="bi bi-arrow-right"></i>
+                <div v-if="route.has_route_change" class="route-change-banner">
+                  <i class="bi bi-shuffle"></i>
+                  Route changed
+                  <span v-if="route.baseline_hop_count">(was {{ route.baseline_hop_count }} hops)</span>
+                </div>
+
+                <!-- Route Hops -->
+                <div v-if="route.latest_hops?.length && !compactMode" class="route-hops">
+                  <div class="hops-chain">
+                    <div class="hop-node source">
+                      <i class="bi bi-pc-display"></i>
+                      <span class="hop-label">{{ agent.agent_name }}</span>
                     </div>
-                    <div class="hop-node" :class="{ shared: sharedHopAgents[getHopDisplay(route, idx).ip], 'agent-hop': getHopDisplay(route, idx).isAgent }">
-                      <i :class="getHopDisplay(route, idx).isAgent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
-                      <span class="hop-label" :title="getHopDisplay(route, idx).ip">{{ getHopDisplay(route, idx).label }}</span>
-                      <span v-if="sharedHopAgents[getHopDisplay(route, idx).ip]" class="shared-badge"
-                        :title="`Shared with: ${sharedHopAgents[getHopDisplay(route, idx).ip].join(', ')}`"
-                      >
-                        <i class="bi bi-share"></i> {{ sharedHopAgents[getHopDisplay(route, idx).ip].length }}
-                      </span>
-                      <div v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)" class="hop-node-metrics">
-                        <span class="hop-node-metric" :class="hopHealthClass(getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency, getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss)">
-                          {{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency.toFixed(0) }}ms
+                    <template v-for="(hop, idx) in route.latest_hops" :key="idx">
+                      <div class="hop-arrow"><i class="bi bi-arrow-right"></i></div>
+                      <div class="hop-node" 
+                           :class="[hopHealthClass(getHopMetrics(route, getHopDisplay(route, idx).ip)?.latency || 0, getHopMetrics(route, getHopDisplay(route, idx).ip)?.loss || 0), { shared: sharedHopAgents[getHopDisplay(route, idx).ip], 'agent-hop': getHopDisplay(route, idx).isAgent }]"
+                           @click="showHopDetail(route, idx)">
+                        <i :class="getHopDisplay(route, idx).isAgent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
+                        <span class="hop-label" :title="getHopDisplay(route, idx).ip">{{ getHopDisplay(route, idx).label }}</span>
+                        <span v-if="sharedHopAgents[getHopDisplay(route, idx).ip]" class="shared-badge">
+                          <i class="bi bi-share"></i>{{ sharedHopAgents[getHopDisplay(route, idx).ip].length }}
                         </span>
-                        <span v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss > 0" class="hop-node-metric" :class="hopHealthClass(getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency, getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss)">
-                          {{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss.toFixed(1) }}%
-                        </span>
+                        <div v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)" class="hop-node-metrics">
+                          <span class="hop-metric-value">{{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.latency.toFixed(0) }}ms</span>
+                          <span v-if="getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss > 0" class="hop-metric-value loss">{{ getHopMetrics(route, getHopDisplay(route, idx).ip)!.loss.toFixed(1) }}%</span>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div class="hop-wrapper">
-                    <div class="hop-arrow">
-                      <i class="bi bi-arrow-right"></i>
-                    </div>
+                    </template>
+                    <div class="hop-arrow"><i class="bi bi-arrow-right"></i></div>
                     <div class="hop-node dest">
                       <i class="bi bi-bullseye"></i>
                       <span class="hop-label">{{ route.target || 'Target' }}</span>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div v-else class="route-no-hops">
-                <span class="text-muted small">No hop data available</span>
+                <div v-if="!compactMode && route.avg_end_hop_latency != null" class="route-metrics">
+                  <div class="metric">
+                    <span class="metric-value">{{ route.avg_end_hop_latency.toFixed(1) }}</span>
+                    <span class="metric-label">ms latency</span>
+                  </div>
+                  <div v-if="route.avg_end_hop_loss != null" class="metric">
+                    <span class="metric-value">{{ route.avg_end_hop_loss.toFixed(2) }}</span>
+                    <span class="metric-label">% loss</span>
+                  </div>
+                  <div v-if="route.trace_count" class="metric">
+                    <span class="metric-value">{{ route.trace_count }}</span>
+                    <span class="metric-label">traces</span>
+                  </div>
+                  <div v-if="route.baseline_hop_count" class="metric">
+                    <span class="metric-value">{{ route.baseline_hop_count }}</span>
+                    <span class="metric-label">baseline hops</span>
+                  </div>
+                </div>
               </div>
+            </div>
+          </div>
+        </div>
 
-              <!-- Route Metrics -->
-              <div v-if="route.avg_end_hop_latency != null || route.avg_end_hop_loss != null" class="route-metrics">
-                <div v-if="route.avg_end_hop_latency != null" class="metric">
-                  <span class="metric-value">{{ route.avg_end_hop_latency.toFixed(1) }}ms</span>
-                  <span class="metric-label">End-hop latency</span>
-                </div>
-                <div v-if="route.avg_end_hop_loss != null" class="metric">
-                  <span class="metric-value">{{ route.avg_end_hop_loss.toFixed(2) }}%</span>
-                  <span class="metric-label">End-hop loss</span>
-                </div>
-                <div v-if="route.trace_count" class="metric">
-                  <span class="metric-value">{{ route.trace_count }}</span>
-                  <span class="metric-label">Traces</span>
-                </div>
-                <div v-if="route.baseline_hop_count" class="metric">
-                  <span class="metric-value">{{ route.baseline_hop_count }}</span>
-                  <span class="metric-label">Baseline hops</span>
-                </div>
+        <!-- Pagination -->
+        <div v-if="totalPages > 1" class="pagination-wrapper">
+          <div class="pagination-info">
+            Showing {{ (currentPage - 1) * pageSize + 1 }}-{{ Math.min(currentPage * pageSize, filteredAgents.length) }} of {{ filteredAgents.length }}
+          </div>
+          <div class="pagination-controls">
+            <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="currentPage--">
+              <i class="bi bi-chevron-left"></i>
+            </button>
+            <span class="page-indicator">{{ currentPage }} / {{ totalPages }}</span>
+            <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="currentPage++">
+              <i class="bi bi-chevron-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hop detail panel -->
+      <div v-if="selectedHop" class="hop-detail-overlay" @click.self="closeHopDetail">
+        <div class="hop-detail-panel">
+          <div class="panel-header">
+            <h5>{{ selectedHop.ip }}</h5>
+            <button class="btn btn-sm btn-close" @click="closeHopDetail">
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+          <div class="panel-body">
+            <div v-if="selectedHop.metrics" class="metrics-grid">
+              <div class="metric-card" :class="hopHealthClass(selectedHop.metrics.latency, selectedHop.metrics.loss)">
+                <span class="metric-value">{{ selectedHop.metrics.latency.toFixed(1) }}ms</span>
+                <span class="metric-label">Latency</span>
+              </div>
+              <div v-if="selectedHop.metrics.loss > 0" class="metric-card" :class="hopHealthClass(selectedHop.metrics.latency, selectedHop.metrics.loss)">
+                <span class="metric-value">{{ selectedHop.metrics.loss.toFixed(2) }}%</span>
+                <span class="metric-label">Loss</span>
+              </div>
+            </div>
+            <div v-if="selectedHop.sharedWith.length" class="shared-section">
+              <h6>Shared with {{ selectedHop.sharedWith.length }} agents</h6>
+              <div class="agent-list-compact">
+                <span v-for="name in selectedHop.sharedWith" :key="name" class="agent-tag">{{ name }}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="text-muted small mt-3 text-end timestamp">
-        <i class="bi bi-clock me-1"></i>
-        {{ new Date(analysis.generated_at).toLocaleTimeString() }} · Auto-refreshes every 60s
+      <div class="analysis-footer">
+        <span><i class="bi bi-clock"></i> Updated {{ new Date(analysis.generated_at).toLocaleString() }}</span>
+        <span>· Auto-refreshes every 60s</span>
       </div>
     </div>
   </div>
@@ -395,7 +636,110 @@ onUnmounted(() => {
   padding: 0;
 }
 
-/* Stats Bar */
+/* Loading skeleton */
+.loading-state {
+  padding: 1rem;
+}
+
+.skeleton-stats {
+  height: 60px;
+  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+
+.skeleton-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.skeleton-card {
+  height: 100px;
+  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 10px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Header */
+.analysis-header {
+  margin-bottom: 1rem;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.header-actions .btn {
+  padding: 0.25rem 0.5rem;
+}
+
+.header-actions .btn i {
+  font-size: 14px;
+}
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.search-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.search-input-wrapper i {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--bs-secondary-color);
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.4rem 0.75rem 0.4rem 2rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-body-bg);
+  font-size: 0.85rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--bs-primary);
+}
+
+.filter-select, .sort-select {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-body-bg);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* Stats bar */
 .stats-bar {
   display: flex;
   flex-wrap: wrap;
@@ -404,47 +748,63 @@ onUnmounted(() => {
   background: var(--bs-secondary-bg);
   border-radius: 12px;
   border: 1px solid var(--bs-border-color);
+  align-items: center;
 }
 
 .stat-pill {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   background: var(--bs-body-bg);
   border-radius: 8px;
   border: 1px solid var(--bs-border-color);
-  font-size: 0.85rem;
 }
 
-.stat-pill i {
-  color: var(--bs-primary);
-}
-
+.stat-pill.primary i { color: var(--bs-primary); }
 .stat-pill.warning i { color: #f59e0b; }
 .stat-pill.info i { color: #3b82f6; }
 .stat-pill.danger i { color: #ef4444; }
 
+.stat-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .stat-value {
   font-weight: 700;
+  font-size: 1rem;
   color: var(--bs-body-color);
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--bs-secondary-color);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-/* Section Title */
+.stat-pill.ml-auto {
+  margin-left: auto;
+}
+
+.timestamp {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+}
+
+.refresh-countdown {
+  color: var(--bs-primary);
+  font-weight: 500;
+}
+
+/* Section title */
 .section-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--bs-secondary-color);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin: 1.5rem 0 10px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -455,55 +815,110 @@ onUnmounted(() => {
   font-weight: 700;
   background: var(--bs-primary);
   color: white;
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 8px;
 }
 
-/* Incident Cards */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-info {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+}
+
+/* Incidents */
+.incidents-section {
+  margin-bottom: 1.5rem;
+}
+
+.severity-group {
+  margin-bottom: 1rem;
+}
+
+.severity-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.severity-header.critical { color: #ef4444; }
+.severity-header.warning { color: #f59e0b; }
+.severity-header.info { color: #3b82f6; }
+
 .incident-card {
   background: var(--bs-body-bg);
   border: 1px solid var(--bs-border-color);
   border-radius: 10px;
-  padding: 12px 16px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: all 0.15s;
+  overflow: hidden;
 }
 
 .incident-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
-.incident-card.critical { border-left: 4px solid #ef4444; }
-.incident-card.warning { border-left: 4px solid #f59e0b; }
-.incident-card.info { border-left: 4px solid #3b82f6; }
+.incident-card.critical { border-left: 3px solid #ef4444; }
+.incident-card.warning { border-left: 3px solid #f59e0b; }
+.incident-card.info { border-left: 3px solid #3b82f6; }
+
+.incident-card.expanded {
+  margin-bottom: 8px;
+}
 
 .incident-header {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 10px 12px;
 }
 
-.incident-type-icon {
-  font-size: 18px;
-  flex-shrink: 0;
+.incident-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
 }
 
-.incident-card.critical .incident-type-icon { color: #ef4444; }
-.incident-card.warning .incident-type-icon { color: #f59e0b; }
-.incident-card.info .incident-type-icon { color: #3b82f6; }
+.incident-card.critical .incident-icon { color: #ef4444; }
+.incident-card.warning .incident-icon { color: #f59e0b; }
+.incident-card.info .incident-icon { color: #3b82f6; }
 
-.incident-info { flex: 1; min-width: 0; }
-.incident-title { font-weight: 600; font-size: 14px; color: var(--bs-body-color); }
-.incident-meta { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.incident-content { flex: 1; min-width: 0; }
+
+.incident-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--bs-body-color);
+}
+
+.incident-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
 
 .meta-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
   background: var(--bs-secondary-bg);
   color: var(--bs-secondary-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .meta-badge.target {
@@ -511,38 +926,46 @@ onUnmounted(() => {
   color: var(--bs-primary);
 }
 
+.meta-badge.time {
+  color: var(--bs-secondary-color);
+}
+
 .expand-icon {
   color: var(--bs-secondary-color);
-  font-size: 14px;
-  flex-shrink: 0;
+  font-size: 12px;
 }
 
 .incident-details {
-  margin-top: 12px;
-  padding-top: 12px;
+  padding: 0 12px 10px;
   border-top: 1px solid var(--bs-border-color);
 }
 
-.detail-section { margin-bottom: 10px; }
-.detail-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--bs-secondary-color);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+.evidence-list {
+  padding-top: 8px;
 }
 
 .evidence-item {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--bs-body-color);
-  padding: 2px 0;
+  padding: 3px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
 }
 
-/* Shared Hops Grid */
+.evidence-item i {
+  color: var(--bs-success);
+  margin-top: 2px;
+}
+
+/* Shared hops grid */
+.shared-hops-section {
+  margin-bottom: 1.5rem;
+}
+
 .shared-hops-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 0.75rem;
 }
 
@@ -551,7 +974,7 @@ onUnmounted(() => {
   border: 1px solid var(--bs-border-color);
   border-radius: 10px;
   padding: 12px;
-  transition: transform 0.15s;
+  transition: all 0.15s;
 }
 
 .hop-card:hover {
@@ -559,116 +982,197 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
-.hop-ip {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--bs-body-color);
-  margin-bottom: 6px;
+.hop-card.healthy { border-left: 3px solid #10b981; }
+.hop-card.degraded { border-left: 3px solid #f59e0b; }
+.hop-card.poor { border-left: 3px solid #ef4444; }
+
+.hop-header {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.hop-ip code {
+.hop-icon {
+  font-size: 16px;
+  color: var(--bs-secondary-color);
+}
+
+.hop-info {
+  flex: 1;
+}
+
+.hop-ip {
   font-size: 12px;
+  font-weight: 600;
   background: var(--bs-secondary-bg);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+.hop-metrics {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.metric-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.metric-badge.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.metric-badge.degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.metric-badge.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.metric-badge.loss {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.hop-agents-count {
+  text-align: right;
+}
+
+.count-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 
 .hop-agents {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 6px;
 }
 
 .agent-tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
   background: rgba(var(--bs-primary-rgb), 0.1);
   color: var(--bs-primary);
 }
 
-.count-badge {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--bs-secondary-color);
+.agent-tag.more {
   background: var(--bs-secondary-bg);
-  padding: 2px 8px;
-  border-radius: 6px;
+  color: var(--bs-secondary-color);
 }
 
-/* Agent Cards */
+/* Agent cards */
+.agent-routes-section {
+  margin-bottom: 1rem;
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .agent-card {
   background: var(--bs-body-bg);
   border: 1px solid var(--bs-border-color);
   border-radius: 12px;
-  margin-bottom: 12px;
   overflow: hidden;
+}
+
+.agent-card.has-issues {
+  border-left: 3px solid #f59e0b;
 }
 
 .agent-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 12px 14px;
   cursor: pointer;
-  gap: 1rem;
-  flex-wrap: wrap;
+  transition: background 0.15s;
 }
 
-.agent-main {
+.agent-header:hover {
+  background: var(--bs-secondary-bg);
+}
+
+.agent-header.expanded {
+  background: var(--bs-secondary-bg);
+}
+
+.agent-score {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.agent-score.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.agent-score.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.agent-info {
   flex: 1;
   min-width: 0;
 }
 
-.agent-icon {
-  font-size: 20px;
-  color: var(--bs-primary);
-  flex-shrink: 0;
-}
-
 .agent-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   color: var(--bs-body-color);
 }
 
 .agent-meta {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   margin-top: 2px;
   flex-wrap: wrap;
 }
 
 .meta-item {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--bs-secondary-color);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .agent-badges {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .agent-badges .badge {
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 6px;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .badge.ip-change {
@@ -686,43 +1190,47 @@ onUnmounted(() => {
   color: #f59e0b;
 }
 
-.badge.stability {
-  background: var(--bs-secondary-bg);
-  color: var(--bs-secondary-color);
-}
-
-.badge.stability.warning {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-}
-
-.badge.stability.good {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
 .route-count {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--bs-secondary-color);
+  background: var(--bs-secondary-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
-/* Routes inside agent card */
+.expand-icon {
+  color: var(--bs-secondary-color);
+  font-size: 14px;
+}
+
+/* Agent routes */
 .agent-routes {
   border-top: 1px solid var(--bs-border-color);
-  padding: 12px 16px;
+  padding: 12px;
+}
+
+.agent-routes.compact {
+  padding: 8px 12px;
 }
 
 .empty-routes {
-  padding: 12px 0;
   text-align: center;
+  padding: 1rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
+/* Route item */
 .route-item {
   background: var(--bs-secondary-bg);
   border: 1px solid var(--bs-border-color);
   border-radius: 10px;
   padding: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .route-item.has-issue {
@@ -734,66 +1242,119 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
 }
 
 .route-target {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.route-target i {
+  color: var(--bs-primary);
+}
+
+.target-name {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--bs-body-color);
 }
 
-.route-badges {
+.route-vitals {
   display: flex;
+  align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 }
 
-/* Hops Chain */
+.stability-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.stability-badge.good {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.stability-badge.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.stability-badge.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.latency-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bs-body-color);
+}
+
+.loss-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.route-change-banner {
+  font-size: 11px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Hop chain */
 .route-hops {
   overflow-x: auto;
-  padding-bottom: 8px;
-  margin-bottom: 10px;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .hops-chain {
   display: flex;
   align-items: center;
-  gap: 0;
   min-width: max-content;
-}
-
-.hop-wrapper {
-  display: flex;
-  align-items: center;
-}
-
-.hop-arrow {
-  padding: 0 6px;
-  color: var(--bs-secondary-color);
-  font-size: 12px;
 }
 
 .hop-node {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 6px 8px;
   background: var(--bs-body-bg);
   border: 1px solid var(--bs-border-color);
-  border-radius: 8px;
-  min-width: 80px;
-  max-width: 140px;
+  border-radius: 6px;
+  min-width: 70px;
+  max-width: 120px;
   position: relative;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.hop-node.source,
-.hop-node.dest {
+.hop-node:hover {
+  border-color: var(--bs-primary);
+  transform: translateY(-2px);
+}
+
+.hop-node.source, .hop-node.dest {
   background: rgba(var(--bs-primary-rgb), 0.1);
   border-color: rgba(var(--bs-primary-rgb), 0.3);
 }
@@ -803,22 +1364,20 @@ onUnmounted(() => {
   border-color: rgba(16, 185, 129, 0.3);
 }
 
+.hop-node.healthy { border-color: #10b981; }
+.hop-node.degraded { border-color: #f59e0b; }
+.hop-node.poor { border-color: #ef4444; }
+
 .hop-node i {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--bs-secondary-color);
 }
 
-.hop-node.source i,
-.hop-node.dest i {
-  color: var(--bs-primary);
-}
-
-.hop-node.shared i {
-  color: #10b981;
-}
+.hop-node.source i, .hop-node.dest i { color: var(--bs-primary); }
+.hop-node.shared i { color: #10b981; }
 
 .hop-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--bs-body-color);
   text-align: center;
   white-space: nowrap;
@@ -827,88 +1386,55 @@ onUnmounted(() => {
   max-width: 100%;
 }
 
+.hop-arrow {
+  padding: 0 4px;
+  color: var(--bs-secondary-color);
+  font-size: 10px;
+}
+
 .hop-node-metrics {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   margin-top: 2px;
 }
 
-.hop-node-metric {
-  font-size: 9px;
+.hop-metric-value {
+  font-size: 8px;
   font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 6px;
-  white-space: nowrap;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bs-secondary-bg);
 }
 
-.hop-node-metric.healthy {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
-.hop-node-metric.degraded {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-}
-
-.hop-node-metric.poor {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-
-.hop-metrics-row {
-  display: flex;
-  gap: 6px;
-  margin: 6px 0;
-}
-
-.hop-metric {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-.hop-metric.healthy {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
-.hop-metric.degraded {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-}
-
-.hop-metric.poor {
+.hop-metric-value.loss {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
 }
 
 .shared-badge {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  font-size: 9px;
+  top: -5px;
+  right: -5px;
+  font-size: 8px;
+  font-weight: 600;
   background: #10b981;
   color: white;
-  padding: 1px 5px;
-  border-radius: 8px;
+  padding: 1px 4px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
 }
 
-.route-no-hops {
-  padding: 8px 0;
+.shared-badge i {
+  font-size: 8px;
 }
 
-/* Route Metrics */
+/* Route metrics */
 .route-metrics {
   display: flex;
   gap: 1rem;
-  flex-wrap: wrap;
-  padding-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--bs-border-color);
 }
 
@@ -919,38 +1445,184 @@ onUnmounted(() => {
 
 .metric-value {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--bs-body-color);
 }
 
 .metric-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--bs-secondary-color);
 }
 
-/* Empty State */
+/* Pagination */
+.pagination-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.pagination-info {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.page-indicator {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  min-width: 60px;
+  text-align: center;
+}
+
+/* Hop detail panel */
+.hop-detail-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.hop-detail-panel {
+  background: var(--bs-body-bg);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.panel-header h5 {
+  margin: 0;
+  font-size: 14px;
+  font-family: monospace;
+}
+
+.panel-body {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.metric-card {
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+  background: var(--bs-secondary-bg);
+}
+
+.metric-card.healthy { border-left: 3px solid #10b981; }
+.metric-card.degraded { border-left: 3px solid #f59e0b; }
+.metric-card.poor { border-left: 3px solid #ef4444; }
+
+.metric-card .metric-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.metric-card .metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.shared-section h6 {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+  margin-bottom: 8px;
+}
+
+.agent-list-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Footer */
+.analysis-footer {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Empty state */
 .empty-state {
   text-align: center;
   padding: 2rem;
   color: var(--bs-secondary-color);
 }
 
-.timestamp {
-  font-size: 11px;
-  opacity: 0.7;
+.empty-state i {
+  margin-bottom: 0.5rem;
 }
 
-/* Dark mode compatibility */
+.empty-state p {
+  margin-bottom: 0.75rem;
+}
+
+/* Error state */
+.error-state {
+  text-align: center;
+  padding: 3rem;
+}
+
+/* Spinning animation */
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .skeleton-stats,
+[data-theme="dark"] .skeleton-card {
+  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
+}
+
 [data-theme="dark"] .hop-node {
   background: var(--bs-tertiary-bg);
 }
 
-[data-theme="dark"] .hop-node.source,
-[data-theme="dark"] .hop-node.dest {
-  background: rgba(var(--bs-primary-rgb), 0.15);
+[data-theme="dark"] .route-item {
+  background: var(--bs-tertiary-bg);
 }
 
-[data-theme="dark"] .hop-node.shared {
-  background: rgba(16, 185, 129, 0.15);
+[data-theme="dark"] .hop-metric-value {
+  background: var(--bs-secondary-bg);
 }
 </style>

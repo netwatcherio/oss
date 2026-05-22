@@ -85,18 +85,25 @@ type VoicePathSummary struct {
 	Grade           string
 	AvgLatency      float64
 	P95Latency      float64
+	MedianLatency   float64
 	JitterAvg       float64
+	JitterMedian    float64
+	JitterP95       float64
 	PacketLoss      float64
+	OutOfSequence   float64
+	Duplicates      float64
+	SampleCount     int
 	CongestionLevel string
 }
 
 type VoiceIssueSummary struct {
-	Severity       string
-	Title          string
-	Category       string
-	SuspectedCause string
-	TimePattern    string
-	MosDegradation float64
+	Severity        string
+	Title           string
+	Category        string
+	SuspectedCause  string
+	TimePattern     string
+	MosDegradation  float64
+	Recommendations []string
 }
 
 type AgentVoiceReportSummary struct {
@@ -290,6 +297,30 @@ func (g *Generator) GenerateAgentPDF(ctx context.Context, agentID uint, days int
 	return buf.Bytes(), nil
 }
 
+func (g *Generator) GenerateAgentPDFCustomRange(ctx context.Context, agentID uint, from, to time.Time) ([]byte, error) {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(15, 15, 15)
+	pdf.AddPage()
+
+	summary, err := g.fetchAgentVoiceReportSummaryCustomRange(ctx, agentID, from, to)
+	if err != nil {
+		log.Warnf("[reports] failed to fetch agent voice summary for agent %d: %v", agentID, err)
+		summary = &AgentVoiceReportSummary{Name: "Unknown Agent", GeneratedAt: time.Now()}
+	}
+
+	g.renderAgentVoiceCover(pdf, summary)
+	g.renderAgentVoiceSummary(pdf, summary)
+	g.renderVoicePathDetails(pdf, summary)
+	g.renderVoiceIssues(pdf, summary)
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, fmt.Errorf("pdf output failed: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
 func (g *Generator) fetchAgentVoiceReportSummary(ctx context.Context, agentID uint, days int64) (*AgentVoiceReportSummary, error) {
 	from := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
@@ -333,8 +364,14 @@ func (g *Generator) fetchAgentVoiceReportSummary(ctx context.Context, agentID ui
 				Grade:           voiceGradeFromMos(vq.ForwardPath.MosScore),
 				AvgLatency:      vq.ForwardPath.AvgLatency,
 				P95Latency:      vq.ForwardPath.P95Latency,
+				MedianLatency:   vq.ForwardPath.MedianLatency,
 				JitterAvg:       vq.ForwardPath.JitterAvg,
+				JitterMedian:    vq.ForwardPath.JitterMedian,
+				JitterP95:       vq.ForwardPath.JitterP95,
 				PacketLoss:      vq.ForwardPath.PacketLoss,
+				OutOfSequence:   vq.ForwardPath.OutOfSequence,
+				Duplicates:      vq.ForwardPath.Duplicates,
+				SampleCount:     vq.ForwardPath.SampleCount,
 				CongestionLevel: string(vq.ForwardPath.CongestionLevel),
 			}
 		}
@@ -347,20 +384,114 @@ func (g *Generator) fetchAgentVoiceReportSummary(ctx context.Context, agentID ui
 				Grade:           voiceGradeFromMos(vq.ReturnPath.MosScore),
 				AvgLatency:      vq.ReturnPath.AvgLatency,
 				P95Latency:      vq.ReturnPath.P95Latency,
+				MedianLatency:   vq.ReturnPath.MedianLatency,
 				JitterAvg:       vq.ReturnPath.JitterAvg,
+				JitterMedian:    vq.ReturnPath.JitterMedian,
+				JitterP95:       vq.ReturnPath.JitterP95,
 				PacketLoss:      vq.ReturnPath.PacketLoss,
+				OutOfSequence:   vq.ReturnPath.OutOfSequence,
+				Duplicates:      vq.ReturnPath.Duplicates,
+				SampleCount:     vq.ReturnPath.SampleCount,
 				CongestionLevel: string(vq.ReturnPath.CongestionLevel),
 			}
 		}
 
 		for _, issue := range vq.Issues {
 			summary.Issues = append(summary.Issues, VoiceIssueSummary{
-				Severity:       issue.Severity,
-				Title:          issue.Title,
-				Category:       issue.Category,
-				SuspectedCause: issue.SuspectedCause,
-				TimePattern:    issue.TimePattern,
-				MosDegradation: issue.MosDegradation,
+				Severity:        issue.Severity,
+				Title:           issue.Title,
+				Category:        issue.Category,
+				SuspectedCause:  issue.SuspectedCause,
+				TimePattern:     issue.TimePattern,
+				MosDegradation:  issue.MosDegradation,
+				Recommendations: issue.Recommendations,
+			})
+		}
+	}
+
+	return summary, nil
+}
+
+func (g *Generator) fetchAgentVoiceReportSummaryCustomRange(ctx context.Context, agentID uint, from, to time.Time) (*AgentVoiceReportSummary, error) {
+	agentObj, err := agent.GetAgentByID(ctx, g.db, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	vq, err := probe.ComputeAgentVoiceQuality(ctx, g.db, g.ch, agentID, from, to)
+	if err != nil {
+		log.Warnf("[reports] failed to compute voice quality for agent %d: %v", agentID, err)
+	}
+
+	summary := &AgentVoiceReportSummary{
+		Name:            agentObj.Name,
+		AgentID:         agentID,
+		ReportPeriod:    fmt.Sprintf("%s to %s", from.Format("2006-01-02"), to.Format("2006-01-02")),
+		GeneratedAt:     time.Now(),
+		OverallMos:      4.5,
+		OverallGrade:    "excellent",
+		LatencyScore:    100,
+		JitterScore:     100,
+		PacketLossScore: 100,
+	}
+
+	if vq != nil {
+		summary.OverallMos = vq.OverallMos
+		summary.OverallGrade = vq.OverallGrade
+		summary.LatencyScore = vq.LatencyScore
+		summary.JitterScore = vq.JitterScore
+		summary.PacketLossScore = vq.PacketLossScore
+		summary.Recommendation = vq.Recommendation
+
+		if vq.ForwardPath != nil {
+			summary.ForwardPath = &VoicePathSummary{
+				Direction:       "Forward",
+				TargetAgent:     vq.ForwardPath.TargetAgentName,
+				MosScore:        vq.ForwardPath.MosScore,
+				Grade:           voiceGradeFromMos(vq.ForwardPath.MosScore),
+				AvgLatency:      vq.ForwardPath.AvgLatency,
+				P95Latency:      vq.ForwardPath.P95Latency,
+				MedianLatency:   vq.ForwardPath.MedianLatency,
+				JitterAvg:       vq.ForwardPath.JitterAvg,
+				JitterMedian:    vq.ForwardPath.JitterMedian,
+				JitterP95:       vq.ForwardPath.JitterP95,
+				PacketLoss:      vq.ForwardPath.PacketLoss,
+				OutOfSequence:   vq.ForwardPath.OutOfSequence,
+				Duplicates:      vq.ForwardPath.Duplicates,
+				SampleCount:     vq.ForwardPath.SampleCount,
+				CongestionLevel: string(vq.ForwardPath.CongestionLevel),
+			}
+		}
+
+		if vq.ReturnPath != nil {
+			summary.ReturnPath = &VoicePathSummary{
+				Direction:       "Return",
+				TargetAgent:     vq.ReturnPath.SourceAgentName,
+				MosScore:        vq.ReturnPath.MosScore,
+				Grade:           voiceGradeFromMos(vq.ReturnPath.MosScore),
+				AvgLatency:      vq.ReturnPath.AvgLatency,
+				P95Latency:      vq.ReturnPath.P95Latency,
+				MedianLatency:   vq.ReturnPath.MedianLatency,
+				JitterAvg:       vq.ReturnPath.JitterAvg,
+				JitterMedian:    vq.ReturnPath.JitterMedian,
+				JitterP95:       vq.ReturnPath.JitterP95,
+				PacketLoss:      vq.ReturnPath.PacketLoss,
+				OutOfSequence:   vq.ReturnPath.OutOfSequence,
+				Duplicates:      vq.ReturnPath.Duplicates,
+				SampleCount:     vq.ReturnPath.SampleCount,
+				CongestionLevel: string(vq.ReturnPath.CongestionLevel),
+			}
+		}
+
+		for _, issue := range vq.Issues {
+			summary.Issues = append(summary.Issues, VoiceIssueSummary{
+				Severity:        issue.Severity,
+				Title:           issue.Title,
+				Category:        issue.Category,
+				SuspectedCause:  issue.SuspectedCause,
+				TimePattern:     issue.TimePattern,
+				MosDegradation:  issue.MosDegradation,
+				Recommendations: issue.Recommendations,
 			})
 		}
 	}
@@ -469,58 +600,61 @@ func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoice
 	pdf.Cell(0, 8, "Voice Path Details")
 	pdf.Ln(8)
 
-	// Table header
-	pdf.SetFont("Arial", "B", 9)
+	pdf.SetFont("Arial", "B", 8)
 	pdf.SetFillColor(240, 240, 240)
 	pdf.SetTextColor(50, 50, 50)
 
-	colWidths := []float64{25, 25, 20, 22, 22, 22, 22, 22}
-	headers := []string{"Direction", "Target", "MOS", "Avg Lat", "P95 Lat", "Jitter", "Loss %", "Congestion"}
+	colWidths := []float64{20, 22, 16, 18, 18, 18, 18, 16, 16, 16, 16, 16, 16, 16}
+	headers := []string{"Dir", "Target", "MOS", "AvgLat", "P95Lat", "MedLat", "JitAvg", "JitMed", "JitP95", "Loss%", "OOO%", "Dup%", "Samps", "Congestion"}
 
 	for i, h := range headers {
-		pdf.CellFormat(colWidths[i], 7, h, "1", 0, "C", true, 0, "")
+		pdf.CellFormat(colWidths[i], 6, h, "1", 0, "C", true, 0, "")
 	}
-	pdf.Ln(7)
+	pdf.Ln(6)
 
-	// Forward path row
-	pdf.SetFont("Arial", "", 9)
-	pdf.SetTextColor(50, 50, 50)
+	renderPathRow := func(path *VoicePathSummary) {
+		pdf.SetFont("Arial", "", 8)
+		pdf.SetTextColor(50, 50, 50)
+		row := []string{
+			path.Direction,
+			truncate(path.TargetAgent, 10),
+			fmt.Sprintf("%.2f", path.MosScore),
+			fmt.Sprintf("%.0fms", path.AvgLatency),
+			fmt.Sprintf("%.0fms", path.P95Latency),
+			fmt.Sprintf("%.0fms", path.MedianLatency),
+			fmt.Sprintf("%.1fms", path.JitterAvg),
+			fmt.Sprintf("%.1fms", path.JitterMedian),
+			fmt.Sprintf("%.1fms", path.JitterP95),
+			fmt.Sprintf("%.2f%%", path.PacketLoss),
+			fmt.Sprintf("%.2f%%", path.OutOfSequence),
+			fmt.Sprintf("%.2f%%", path.Duplicates),
+			fmt.Sprintf("%d", path.SampleCount),
+			path.CongestionLevel,
+		}
+		for i, cell := range row {
+			pdf.CellFormat(colWidths[i], 5, cell, "1", 0, "C", false, 0, "")
+		}
+		pdf.Ln(5)
+	}
 
 	if summary.ForwardPath != nil {
-		row := []string{
-			summary.ForwardPath.Direction,
-			truncate(summary.ForwardPath.TargetAgent, 15),
-			fmt.Sprintf("%.2f", summary.ForwardPath.MosScore),
-			fmt.Sprintf("%.0fms", summary.ForwardPath.AvgLatency),
-			fmt.Sprintf("%.0fms", summary.ForwardPath.P95Latency),
-			fmt.Sprintf("%.1fms", summary.ForwardPath.JitterAvg),
-			fmt.Sprintf("%.2f%%", summary.ForwardPath.PacketLoss),
-			summary.ForwardPath.CongestionLevel,
-		}
-		for i, cell := range row {
-			pdf.CellFormat(colWidths[i], 6, cell, "1", 0, "C", false, 0, "")
-		}
-		pdf.Ln(6)
+		renderPathRow(summary.ForwardPath)
 	}
-
 	if summary.ReturnPath != nil {
-		row := []string{
-			summary.ReturnPath.Direction,
-			truncate(summary.ReturnPath.TargetAgent, 15),
-			fmt.Sprintf("%.2f", summary.ReturnPath.MosScore),
-			fmt.Sprintf("%.0fms", summary.ReturnPath.AvgLatency),
-			fmt.Sprintf("%.0fms", summary.ReturnPath.P95Latency),
-			fmt.Sprintf("%.1fms", summary.ReturnPath.JitterAvg),
-			fmt.Sprintf("%.2f%%", summary.ReturnPath.PacketLoss),
-			summary.ReturnPath.CongestionLevel,
-		}
-		for i, cell := range row {
-			pdf.CellFormat(colWidths[i], 6, cell, "1", 0, "C", false, 0, "")
-		}
-		pdf.Ln(6)
+		renderPathRow(summary.ReturnPath)
 	}
 
-	pdf.Ln(10)
+	pdf.Ln(8)
+
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(26, 54, 93)
+	pdf.Cell(0, 6, "Path Metrics Legend:")
+	pdf.Ln(5)
+	pdf.SetFont("Arial", "", 8)
+	pdf.SetTextColor(80, 80, 80)
+	pdf.MultiCell(0, 4, "Dir=Direction | MOS=Mean Opinion Score (1-5) | AvgLat=Average Latency | P95Lat=95th percentile latency | MedLat=Median Latency | JitAvg/JitMed/JitP95=Jitter average/median/P95 | Loss%=Packet Loss | OOO%=Out-of-Sequence | Dup%=Duplicates | Samps=Sample Count | Congestion=Network congestion level", "", "", false)
+
+	pdf.Ln(6)
 }
 
 func (g *Generator) renderVoiceIssues(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary) {
@@ -586,6 +720,19 @@ func (g *Generator) renderVoiceIssues(pdf *gofpdf.Fpdf, summary *AgentVoiceRepor
 			pdf.Cell(5, 5, "")
 			pdf.Cell(0, 5, fmt.Sprintf("MOS Impact: %.2f (negative = worse)", issue.MosDegradation))
 			pdf.Ln(5)
+		}
+
+		if len(issue.Recommendations) > 0 {
+			pdf.SetFont("Arial", "B", 9)
+			pdf.Cell(5, 5, "")
+			pdf.Cell(0, 5, "Recommendations:")
+			pdf.Ln(5)
+			pdf.SetFont("Arial", "", 9)
+			for _, rec := range issue.Recommendations {
+				pdf.Cell(5, 4, "")
+				pdf.Cell(0, 4, "• "+rec)
+				pdf.Ln(4)
+			}
 		}
 
 		pdf.Ln(3)

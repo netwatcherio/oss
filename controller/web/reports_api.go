@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -220,12 +221,33 @@ func agentReports(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	api.Get("/agents/:id/reports/agent_detail/run", func(c *fiber.Ctx) error {
 		agentID := uintParam(c, "id")
 
-		timeRangeDays := int64(7)
-		if tr := c.Query("time_range_days"); tr != "" {
-			fmt.Sscanf(tr, "%d", &timeRangeDays)
+		var days int64 = 7
+		var from, to *time.Time
+
+		if c.Query("from") != "" && c.Query("to") != "" {
+			fromStr := c.Query("from")
+			toStr := c.Query("to")
+			fromTime, err1 := time.Parse(time.RFC3339, fromStr)
+			toTime, err2 := time.Parse(time.RFC3339, toStr)
+			if err1 == nil && err2 == nil {
+				from = &fromTime
+				to = &toTime
+				days = 0
+			}
+		} else if tr := c.Query("time_range_days"); tr != "" {
+			fmt.Sscanf(tr, "%d", &days)
 		}
 
-		pdfData, err := generator.GenerateAgentPDF(c.UserContext(), agentID, timeRangeDays)
+		var pdfData []byte
+		var err error
+		if from != nil && to != nil {
+			pdfData, err = generator.GenerateAgentPDFCustomRange(c.UserContext(), agentID, *from, *to)
+		} else {
+			if days <= 0 {
+				days = 7
+			}
+			pdfData, err = generator.GenerateAgentPDF(c.UserContext(), agentID, days)
+		}
 		if err != nil {
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}

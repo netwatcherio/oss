@@ -596,9 +596,9 @@ const showShareModal = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
 
 // Download voice quality report
-async function downloadAgentReport(timeRangeDays: number = 7) {
+async function downloadAgentReport(timeRange: number | { from: Date; to: Date }) {
   try {
-    const blob = await AgentService.downloadAgentReport(state.agent.id, timeRangeDays);
+    const blob = await AgentService.downloadAgentReport(state.agent.id, timeRange);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
