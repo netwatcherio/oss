@@ -50,6 +50,14 @@ interface SnmpConfig {
   securityLevel: string;
 }
 
+interface TrafficSimConfig {
+  voip_mode: boolean;
+  dscp: number;
+  interval_ms: number;
+  payload_size: number;
+  bidirectional: boolean;
+}
+
 interface ProbeState {
   workspace: Workspace;
   ready: boolean;
@@ -74,6 +82,8 @@ interface ProbeState {
   // Interface binding
   availableInterfaces: InterfaceInfo[];
   selectedInterface: string; // Interface name or empty for OS default
+  // TrafficSim config (for AGENT probes - passed to child TRAFFICSIM probes)
+  trafficSimConfig: TrafficSimConfig;
 }
 
 // Get probe description
@@ -159,7 +169,14 @@ const state = reactive<ProbeState>({
   },
   bidirectional: true, // Default to bidirectional for AGENT probes
   availableInterfaces: [],
-  selectedInterface: "" // Empty = OS default
+  selectedInterface: "", // Empty = OS default
+  trafficSimConfig: {
+    voip_mode: true, // Enable VoIP simulation by default for better network health assessment
+    dscp: 46, // Expedited Forwarding for voice traffic
+    interval_ms: 20, // G.711-style 50 packets/sec
+    payload_size: 160, // G.711 payload size
+    bidirectional: true // Enable bidirectional testing (server sends back to client)
+  }
 });
 
 const router = core.router();
@@ -543,6 +560,19 @@ async function submit() {
         privacy_protocol: state.snmpConfig.privacyProtocol || undefined,
         security_level: state.snmpConfig.securityLevel || undefined,
         timeout_sec: state.probe.timeout_sec
+      };
+    }
+
+    // AGENT probes — set TrafficSim/VoIP metadata for child TRAFFICSIM probes
+    if (state.selected.value === 'AGENT') {
+      newProbe.metadata = {
+        trafficsim: {
+          voip_mode: state.trafficSimConfig.voip_mode,
+          dscp: state.trafficSimConfig.dscp,
+          interval_ms: state.trafficSimConfig.voip_mode ? state.trafficSimConfig.interval_ms : 1000,
+          payload_size: state.trafficSimConfig.voip_mode ? state.trafficSimConfig.payload_size : 0,
+          bidirectional: state.trafficSimConfig.bidirectional
+        }
       };
     }
 
@@ -1259,6 +1289,95 @@ onMounted(async () => {
                 <div>
                   <strong>Agent Monitoring</strong> will continuously check the health, connectivity, and performance
                   metrics of the selected target agent. This includes uptime, response times, and system resources.
+                </div>
+              </div>
+
+              <!-- TrafficSim / VoIP Configuration (for AGENT probes - applies to child TRAFFICSIM probes) -->
+              <div v-if="state.selected.value === 'AGENT'" class="configuration-section mb-4">
+                <h6 class="section-title">
+                  <i class="bi bi-broadcast me-2"></i>Traffic Simulation Settings
+                </h6>
+                <p class="text-muted small mb-3">These settings apply to the TRAFFICSIM probes created from this AGENT probe.</p>
+
+                <div class="row">
+                  <div class="col-md-4 mb-3">
+                    <div class="form-check form-switch">
+                      <input
+                          id="voipMode"
+                          v-model="state.trafficSimConfig.voip_mode"
+                          class="form-check-input"
+                          type="checkbox"
+                          role="switch">
+                      <label class="form-check-label fw-semibold" for="voipMode">
+                        VoIP Simulation
+                      </label>
+                      <div class="form-text">G.711-style (50 pps, 160B)</div>
+                    </div>
+                  </div>
+
+                  <div class="col-md-4 mb-3">
+                    <label class="form-label fw-semibold" for="dscpValue">
+                      <i class="bi bi-shield-check me-1"></i>DSCP
+                    </label>
+                    <select
+                        id="dscpValue"
+                        v-model.number="state.trafficSimConfig.dscp"
+                        class="form-select form-select-sm">
+                      <option :value="0">Best Effort (0)</option>
+                      <option :value="46">EF Voice (46)</option>
+                      <option :value="34">AF41 (34)</option>
+                      <option :value="26">AF31 (26)</option>
+                    </select>
+                  </div>
+
+                  <div class="col-md-4 mb-3">
+                    <div class="form-check form-switch mt-3">
+                      <input
+                          id="bidirectional"
+                          v-model="state.trafficSimConfig.bidirectional"
+                          class="form-check-input"
+                          type="checkbox"
+                          role="switch">
+                      <label class="form-check-label fw-semibold" for="bidirectional">
+                        Bidirectional
+                      </label>
+                      <div class="form-text">Server echoes back</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="row" v-if="state.trafficSimConfig.voip_mode">
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label fw-semibold" for="tsInterval">
+                      <i class="bi bi-clock me-2"></i>Packet Interval
+                    </label>
+                    <select
+                        id="tsInterval"
+                        v-model.number="state.trafficSimConfig.interval_ms"
+                        class="form-select">
+                      <option :value="20">20ms (50 packets/sec) - G.711 VoIP</option>
+                      <option :value="30">30ms (~33 packets/sec)</option>
+                      <option :value="50">50ms (20 packets/sec)</option>
+                      <option :value="100">100ms (10 packets/sec)</option>
+                    </select>
+                    <div class="form-text">Time between packets (lower = more similar to real VoIP)</div>
+                  </div>
+
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label fw-semibold" for="tsPayload">
+                      <i class="bi bi-file-earmark me-2"></i>Payload Size
+                    </label>
+                    <select
+                        id="tsPayload"
+                        v-model.number="state.trafficSimConfig.payload_size"
+                        class="form-select">
+                      <option :value="160">160 bytes - G.711 PCM</option>
+                      <option :value="130">130 bytes - G.711 with VAD</option>
+                      <option :value="200">200 bytes - Larger payload</option>
+                      <option :value="0">Variable - Legacy mode</option>
+                    </select>
+                    <div class="form-text">Fixed payload size per packet</div>
+                  </div>
                 </div>
               </div>
 

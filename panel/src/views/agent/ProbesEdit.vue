@@ -81,6 +81,16 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString();
 }
 
+function getDSCPName(dscp: number): string {
+  const dscpNames: Record<number, string> = {
+    0: 'Best Effort',
+    46: 'Expedited Forwarding (EF)',
+    34: 'AF41',
+    26: 'AF31',
+  };
+  return dscpNames[dscp] || 'Unknown';
+}
+
 // Copy modal functions
 function openCopyModal() {
   // Start with no probes selected - user must explicitly choose
@@ -885,26 +895,81 @@ async function saveProbeSettings() {
               </div>
             </div>
 
-            <!-- DNS Configuration (only for DNS probes) -->
-            <div v-if="state.selectedProbe.type === 'DNS' && state.selectedProbe.metadata" class="detail-section">
-              <h6 class="detail-label">DNS Configuration</h6>
-              <div class="detail-grid">
-                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).record_type">
-                  <span class="detail-key">Record Type</span>
-                  <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).record_type }}</span>
-                </div>
-                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).dns_server">
-                  <span class="detail-key">Resolver</span>
-                  <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).dns_server }}</span>
-                </div>
-                <div class="detail-item" v-if="(state.selectedProbe.metadata as any).protocol">
-                  <span class="detail-key">Protocol</span>
-                  <span class="detail-value">{{ ((state.selectedProbe.metadata as any).protocol || '').toUpperCase() }}</span>
+              <!-- DNS Configuration (only for DNS probes) -->
+              <div v-if="state.selectedProbe.type === 'DNS' && state.selectedProbe.metadata" class="detail-section">
+                <h6 class="detail-label">DNS Configuration</h6>
+                <div class="detail-grid">
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).record_type">
+                    <span class="detail-key">Record Type</span>
+                    <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).record_type }}</span>
+                  </div>
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).dns_server">
+                    <span class="detail-key">Resolver</span>
+                    <span class="detail-value mono">{{ (state.selectedProbe.metadata as any).dns_server }}</span>
+                  </div>
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).protocol">
+                    <span class="detail-key">Protocol</span>
+                    <span class="detail-value">{{ ((state.selectedProbe.metadata as any).protocol || '').toUpperCase() }}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Targets -->
+              <!-- TrafficSim/VoIP Configuration (for AGENT probes - applies to child TRAFFICSIM probes) -->
+              <div v-if="state.selectedProbe.type === 'AGENT' && state.selectedProbe.metadata" class="detail-section">
+                <h6 class="detail-label">
+                  <i class="bi bi-broadcast me-2"></i>Traffic Simulation Settings
+                </h6>
+                <div class="detail-grid" v-if="(state.selectedProbe.metadata as any).trafficsim">
+                  <div class="detail-item">
+                    <span class="detail-key">Mode</span>
+                    <span class="detail-value">
+                      <span v-if="(state.selectedProbe.metadata as any).trafficsim.voip_mode" class="badge bg-success">
+                        <i class="bi bi-telephone me-1"></i>VoIP (G.711)
+                      </span>
+                      <span v-else class="badge bg-secondary">
+                        <i class="bi bi-arrow-left-right me-1"></i>Standard UDP
+                      </span>
+                    </span>
+                  </div>
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).trafficsim.dscp">
+                    <span class="detail-key">DSCP</span>
+                    <span class="detail-value mono">
+                      {{ getDSCPName((state.selectedProbe.metadata as any).trafficsim.dscp) }}
+                      ({{ (state.selectedProbe.metadata as any).trafficsim.dscp }})
+                    </span>
+                  </div>
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).trafficsim.voip_mode">
+                    <span class="detail-key">Interval</span>
+                    <span class="detail-value mono">
+                      {{ (state.selectedProbe.metadata as any).trafficsim.interval_ms }}ms
+                      ({{ Math.round(1000 / ((state.selectedProbe.metadata as any).trafficsim.interval_ms || 1000)) }} pps)
+                    </span>
+                  </div>
+                  <div class="detail-item" v-if="(state.selectedProbe.metadata as any).trafficsim.voip_mode">
+                    <span class="detail-key">Payload</span>
+                    <span class="detail-value mono">
+                      {{ (state.selectedProbe.metadata as any).trafficsim.payload_size || 'Variable' }} bytes
+                    </span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-key">Bidirectional</span>
+                    <span class="detail-value">
+                      <span v-if="(state.selectedProbe.metadata as any).trafficsim.bidirectional" class="badge bg-info">
+                        <i class="bi bi-arrow-left-right me-1"></i>Enabled
+                      </span>
+                      <span v-else class="badge bg-secondary">
+                        Disabled
+                      </span>
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="text-muted small">
+                  <i class="bi bi-info-circle me-1"></i>
+                  Default TrafficSim settings will be used (1 second interval, no VoIP simulation).
+                </div>
+              </div>
+
+              <!-- Targets -->
             <div v-if="hasTargets(state.selectedProbe)" class="detail-section">
               <h6 class="detail-label">Targets ({{ state.selectedProbe.targets.length }})</h6>
               <div class="targets-list">
