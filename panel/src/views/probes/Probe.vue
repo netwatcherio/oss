@@ -592,11 +592,20 @@ async function reloadData() {
       // Filter data by probe_id to ensure each direction only shows its own probe's data
       // This prevents data from other probes with the same target from mixing in
       const mainProbeId = state.probe.id;
+
+      // For bidirectional TrafficSim (same probe_id for both directions):
+      // - Forward data has agent_id === sourceAgentId
+      // - Reverse data has agent_id === targetAgentId
+      // Check if we have bidirectional TrafficSim data (same probe_id, different agent_id)
+      const allTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
+      const forwardTrafficSimData = allTrafficSimData.filter(d => d.agent_id === sourceAgentId);
+      const reverseTrafficSimData = allTrafficSimData.filter(d => d.agent_id === targetAgentId);
+      const hasBidirectionalTrafficSim = reverseTrafficSimData.length > 0;
+
       const forwardPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
       const forwardMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
-      const forwardTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
       const forwardRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId);
-      
+
       // Build the agent pair data with filtered data
       state.agentPairData = [{
         direction: 'forward' as const,
@@ -610,6 +619,28 @@ async function reloadData() {
         trafficSimData: forwardTrafficSimData,
         rperfData: forwardRperfData
       }];
+
+      // If we have bidirectional TrafficSim data, add reverse direction
+      if (hasBidirectionalTrafficSim) {
+        // Fetch reverse data for other types if needed (for legacy dual-probe)
+        // For new bidirectional system, reverse data is already in state
+        const reversePingData = state.pingData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
+        const reverseMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
+        const reverseRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
+
+        state.agentPairData.push({
+          direction: 'reverse' as const,
+          probeId: state.probe.id,
+          sourceAgentId: targetAgentId,
+          targetAgentId: sourceAgentId,
+          sourceAgentName: targetAgentName,
+          targetAgentName: sourceAgentName,
+          pingData: reversePingData,
+          mtrData: reverseMtrData,
+          trafficSimData: reverseTrafficSimData,
+          rperfData: reverseRperfData
+        });
+      }
       
       // If reciprocal probe exists, load its data too for in-page direction switching
       if (state.reciprocalProbe) {

@@ -847,52 +847,78 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 
 	var expanded []Probe
 
-	// Create MTR probe targeting the target agent
-	expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
+	// Bidirectional mode: check if this AGENT probe has bidirectional enabled
+	// When enabled, creates a single probe for each type that gets sent to BOTH agents:
+	// - Client probe (AgentID = owner) for sending
+	// - Server probe (AgentID = target) for receiving
+	// Both share the same Probe ID for attribution
+	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
 
-	// Create PING probe targeting the target agent
-	expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
+	// Create MTR probe(s) - bidirectional if enabled
+	if bidirectionalEnabled {
+		// Bidirectional: create probes for both agents
+		expanded = append(expanded, createBidirectionalProbePair(agentProbe, TypeMTR, targetIP, targetAgentID)...)
+	} else {
+		// Legacy: single probe
+		expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
+	}
+
+	// Create PING probe(s) - bidirectional if enabled
+	if bidirectionalEnabled {
+		expanded = append(expanded, createBidirectionalProbePair(agentProbe, TypePing, targetIP, targetAgentID)...)
+	} else {
+		expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
+	}
 
 	// Create TRAFFICSIM probe(s) when target agent has a server.
 	//
-	// Two modes supported:
-	// 1. NEW: Single probe with bidirectional=true - server enables bidirectional mode
-	//    based on this flag, no reverse marker probe needed
-	// 2. LEGACY: Dual probes - forward probe + reverse marker (":bidir" suffix)
-	//    Used for backward compatibility when bidirectional flag is not set
+	// Bidirectional mode creates a SINGLE probe that gets sent to BOTH agents:
+	// - The probe sent to client (owner) is for sending forward traffic
+	// - The SAME probe sent to server (target) tells it to enable reverse when that client connects
+	// - Both probes have the SAME ID (from the AGENT probe template)
+	// - But different AgentID (one owned by client, one by server)
+	// - The server uses the client's ProbeID for reverse stats attribution
 	//
-	// Both approaches share the same VoIP/trafficsim metadata from the AGENT probe.
+	// Legacy mode uses dual probes for backward compatibility.
+	//
 	targetHasServer := hasTrafficSimServer(ctx, db, targetAgentID)
 	ownerHasServer := hasTrafficSimServer(ctx, db, agentProbe.AgentID)
 	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
 
 	if targetHasServer {
+		port := getTrafficSimServerPort(ctx, db, targetAgentID)
+		targetAddr := targetIP
+		if port != "" {
+			targetAddr = targetIP + ":" + port
+		}
+
 		if bidirectionalEnabled && ownerHasServer {
-			// NEW: Single probe with bidirectional flag
-			// Server will detect this flag and enable bidirectional mode
-			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
-			port := getTrafficSimServerPort(ctx, db, targetAgentID)
-			if port != "" {
-				tsProbe.Targets[0].Target = targetIP + ":" + port
-			}
-			// Ensure bidirectional flag is set in metadata
-			tsProbe = setBidirectionalFlag(tsProbe, true)
-			expanded = append(expanded, tsProbe)
-			log.Debugf("[agent %d] Created SINGLE bidirectional TRAFFICSIM for target agent %d (bidirectional=true)", agentProbe.AgentID, targetAgentID)
+			// NEW: Single bidirectional probe sent to BOTH agents
+			// 1. Client probe for owner (Agent A)
+			clientProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
+			clientProbe = setBidirectionalFlag(clientProbe, true)
+			expanded = append(expanded, clientProbe)
+
+			// 2. Server probe for target (Agent B) - SAME ProbeID, different AgentID
+			// This tells the server to enable reverse when client connects
+			serverProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
+			serverProbe.AgentID = targetAgentID // Server owns this probe
+			serverProbe = setBidirectionalFlag(serverProbe, true)
+			// Add marker that this is a bidirectional server probe (not a client)
+			serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, agentProbe.AgentID)
+			expanded = append(expanded, serverProbe)
+
+			log.Debugf("[agent %d→%d] Created bidirectional TRAFFICSIM: client probe %d, server probe %d",
+				agentProbe.AgentID, targetAgentID, clientProbe.ID, serverProbe.ID)
 		} else {
-			// LEGACY: Dual probe approach for backward compatibility
+			// LEGACY: Unidirectional or dual-probe approach
 			// Forward probe: client connects to target's server
-			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
-			port := getTrafficSimServerPort(ctx, db, targetAgentID)
-			if port != "" {
-				tsProbe.Targets[0].Target = targetIP + ":" + port
-			}
+			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
 			expanded = append(expanded, tsProbe)
 
 			// Reverse probe marker: only created if owner also has a server (bidirectional mode)
-			// This tells the server which probe ID to use when reporting reverse traffic
 			if ownerHasServer {
-				reverseProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetIP, targetAgentID)
+				reverseProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
 				reverseProbe.Server = false                          // Marker only, not a real client
 				reverseProbe.Targets[0].Target = targetIP + ":bidir" // Special marker for bidirectional
 				// Metadata already inherited from AGENT probe
@@ -1034,6 +1060,78 @@ func setBidirectionalFlag(probe Probe, bidirectional bool) Probe {
 
 	// Also set top-level for easy detection
 	metadata["bidirectional"] = bidirectional
+	metadata["trafficsim"] = tsConfig
+
+	if newMetadata, err := json.Marshal(metadata); err == nil {
+		probe.Metadata = datatypes.JSON(newMetadata)
+	}
+
+	return probe
+}
+
+// setBidirectionalReceiver modifies a probe to be a "bidirectional receiver" for the server.
+// It sets metadata indicating:
+// - This probe is for receiving bidirectional connections
+// - The clientProbeID to correlate with
+// - The clientAgentID that will connect
+// The server uses this to know when to enable reverse path testing.
+func setBidirectionalReceiver(probe Probe, clientProbeID uint, clientAgentID uint) Probe {
+	var metadata map[string]interface{}
+	if len(probe.Metadata) > 0 {
+		if err := json.Unmarshal(probe.Metadata, &metadata); err != nil {
+			metadata = make(map[string]interface{})
+		}
+	} else {
+		metadata = make(map[string]interface{})
+	}
+
+	// Set bidirectional receiver info in trafficsim section
+	var tsConfig map[string]interface{}
+	if ts, ok := metadata["trafficsim"].(map[string]interface{}); ok {
+		tsConfig = ts
+	} else {
+		tsConfig = make(map[string]interface{})
+	}
+
+	// Mark as bidirectional receiver
+	tsConfig["bidirectional_receiver"] = true
+	tsConfig["client_probe_id"] = clientProbeID
+	tsConfig["client_agent_id"] = clientAgentID
+
+	metadata["trafficsim"] = tsConfig
+
+	if newMetadata, err := json.Marshal(metadata); err == nil {
+		probe.Metadata = datatypes.JSON(newMetadata)
+	}
+
+	return probe
+}
+
+// setBidirectionalServerMode marks a probe as a bidirectional SERVER probe.
+// The server uses this to know which client probe ID to use when reporting reverse stats.
+// clientProbeID is the probe ID the client will use (for attribution)
+func setBidirectionalServerMode(probe Probe, clientProbeID uint, clientAgentID uint) Probe {
+	var metadata map[string]interface{}
+	if len(probe.Metadata) > 0 {
+		if err := json.Unmarshal(probe.Metadata, &metadata); err != nil {
+			metadata = make(map[string]interface{})
+		}
+	} else {
+		metadata = make(map[string]interface{})
+	}
+
+	// Set bidirectional server mode in trafficsim section
+	var tsConfig map[string]interface{}
+	if ts, ok := metadata["trafficsim"].(map[string]interface{}); ok {
+		tsConfig = ts
+	} else {
+		tsConfig = make(map[string]interface{})
+	}
+
+	tsConfig["bidirectional_server"] = true
+	tsConfig["client_probe_id"] = clientProbeID
+	tsConfig["client_agent_id"] = clientAgentID
+
 	metadata["trafficsim"] = tsConfig
 
 	if newMetadata, err := json.Marshal(metadata); err == nil {
