@@ -616,24 +616,52 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 				agentProbesExpanded++
 			}
 		} else {
-			log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent (no expansion — %s)",
-				agentID, len(reverseAgentProbes),
-				func() string {
-					if isGlobalAgent {
-						return "global agent with bidirectional disabled"
-					}
-					return "bidi requires mutual AGENT probes"
-				}())
+			// For NORMAL agents: expand reverse AGENT probes ONLY if they have bidirectional=true
+			// This allows the target agent to know about incoming bidirectional connections
+			var bidirReverseProbes []Probe
 			for i := range reverseAgentProbes {
 				rp := &reverseAgentProbes[i]
 				sourceAgentID := rp.AgentID
 				if ownedAgentTargets[sourceAgentID] {
 					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: covered by owned forward AGENT probe",
 						agentID, rp.ID, sourceAgentID)
+					continue
+				}
+				// Check if this reverse AGENT probe has bidirectional enabled
+				if agentProbeHasBidirectional(rp) {
+					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: has bidirectional=true, will expand",
+						agentID, rp.ID, sourceAgentID)
+					bidirReverseProbes = append(bidirReverseProbes, *rp)
 				} else {
-					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: skipped (no mutual AGENT probe, one-way only)",
+					log.Debugf("[agent %d] Reverse AGENT probe %d from agent %d: skipped (no bidirectional flag, one-way only)",
 						agentID, rp.ID, sourceAgentID)
 				}
+			}
+
+			// Expand bidirectional reverse probes
+			for _, rp := range bidirReverseProbes {
+				sourceAgentID := rp.AgentID
+				log.Infof("[agent %d] Expanding bidirectional reverse probe %d from agent %d into return-path probes",
+					agentID, rp.ID, sourceAgentID)
+				expanded, err := expandAgentProbeForOwner(ctx, db, ch, &rp, sourceAgentID, pubIPCache)
+				if err != nil {
+					log.Warnf("[agent %d] Bidirectional reverse expansion FAILED for agent %d: %v",
+						agentID, sourceAgentID, err)
+					continue
+				}
+				// Override the agent ID on expanded probes to be this agent (it's the one running these probes)
+				for j := range expanded {
+					expanded[j].AgentID = agentID
+				}
+				out = append(out, expanded...)
+				agentProbesExpanded++
+			}
+
+			if len(bidirReverseProbes) == 0 {
+				log.Infof("[agent %d] Found %d reverse AGENT probes targeting this agent (no expansion — bidi requires mutual AGENT probes or bidirectional flag)",
+					agentID, len(reverseAgentProbes))
+			} else {
+				log.Infof("[agent %d] Expanded %d bidirectional reverse probes", agentID, len(bidirReverseProbes))
 			}
 		}
 	}
