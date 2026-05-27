@@ -985,16 +985,21 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 }
 
 // createBidirectionalProbePair creates two probes for bidirectional mode:
-// 1. Client probe (AgentID = ownerAgentID) - sent to the client agent
-// 2. Server probe (AgentID = targetAgentID) - sent to the target agent
+// 1. Client probe (AgentID = source.AgentID) - sent to the client agent, targets the server (targetAgentID)
+// 2. Server probe (AgentID = targetAgentID) - sent to the target agent, targets the client (source.AgentID)
 // Both have the same Probe ID for attribution
 // The server probe has bidirectional metadata to enable reverse path testing
 func createBidirectionalProbePair(source *Probe, probeType Type, targetIP string, targetAgentID uint) []Probe {
+	// Client probe: owned by source (A), targets target (B)
 	clientProbe := createExpandedProbe(source, probeType, targetIP, targetAgentID)
 	clientProbe = setBidirectionalFlag(clientProbe, true)
+	// clientProbe.AgentID = source.AgentID (A) - correct for client ownership
+	// clientProbe.target.AgentID = targetAgentID (B) - correct for targeting B
 
-	serverProbe := createExpandedProbe(source, probeType, targetIP, targetAgentID)
-	serverProbe.AgentID = targetAgentID // Server owns this probe
+	// Server probe: owned by target (B), targets the source (A) so B can send reverse traffic to A
+	// Use source.AgentID (A) as the target AgentID so server probe targets A's IP
+	serverProbe := createExpandedProbe(source, probeType, targetIP, source.AgentID)
+	serverProbe.AgentID = targetAgentID // Server (B) owns this probe
 	serverProbe = setBidirectionalFlag(serverProbe, true)
 	serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, source.AgentID)
 
