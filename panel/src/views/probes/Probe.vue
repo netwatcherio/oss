@@ -593,17 +593,25 @@ async function reloadData() {
       // This prevents data from other probes with the same target from mixing in
       const mainProbeId = state.probe.id;
 
-      // For bidirectional TrafficSim (same probe_id for both directions):
+      // For bidirectional probes (same probe_id for both directions):
       // - Forward data has agent_id === sourceAgentId
       // - Reverse data has agent_id === targetAgentId
-      // Check if we have bidirectional TrafficSim data (same probe_id, different agent_id)
+      // Check if we have bidirectional data (any type with same probe_id, different agent_id)
       const allTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
       const forwardTrafficSimData = allTrafficSimData.filter(d => d.agent_id === sourceAgentId);
       const reverseTrafficSimData = allTrafficSimData.filter(d => d.agent_id === targetAgentId);
-      const hasBidirectionalTrafficSim = reverseTrafficSimData.length > 0;
 
-      const forwardPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
-      const forwardMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
+      const allPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
+      const forwardPingData = allPingData.filter(d => d.agent_id === sourceAgentId);
+      const reversePingData = allPingData.filter(d => d.agent_id === targetAgentId);
+
+      const allMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
+      const forwardMtrData = allMtrData.filter(d => d.agent_id === sourceAgentId);
+      const reverseMtrData = allMtrData.filter(d => d.agent_id === targetAgentId);
+
+      // Check if we have ANY bidirectional data
+      const hasBidirectionalData = reverseTrafficSimData.length > 0 || reversePingData.length > 0 || reverseMtrData.length > 0;
+
       const forwardRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId);
 
       // Build the agent pair data with filtered data
@@ -620,12 +628,9 @@ async function reloadData() {
         rperfData: forwardRperfData
       }];
 
-      // If we have bidirectional TrafficSim data, add reverse direction
-      if (hasBidirectionalTrafficSim) {
-        // Fetch reverse data for other types if needed (for legacy dual-probe)
-        // For new bidirectional system, reverse data is already in state
-        const reversePingData = state.pingData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
-        const reverseMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
+      // If we have bidirectional data, add reverse direction
+      if (hasBidirectionalData) {
+        // For new bidirectional system, reverse data is filtered by agent_id
         const reverseRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
 
         state.agentPairData.push({

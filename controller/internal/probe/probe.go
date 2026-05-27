@@ -883,7 +883,6 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	//
 	targetHasServer := hasTrafficSimServer(ctx, db, targetAgentID)
 	ownerHasServer := hasTrafficSimServer(ctx, db, agentProbe.AgentID)
-	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
 
 	if targetHasServer {
 		port := getTrafficSimServerPort(ctx, db, targetAgentID)
@@ -893,23 +892,11 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		}
 
 		if bidirectionalEnabled && ownerHasServer {
-			// NEW: Single bidirectional probe sent to BOTH agents
-			// 1. Client probe for owner (Agent A)
-			clientProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
-			clientProbe = setBidirectionalFlag(clientProbe, true)
-			expanded = append(expanded, clientProbe)
-
-			// 2. Server probe for target (Agent B) - SAME ProbeID, different AgentID
-			// This tells the server to enable reverse when client connects
-			serverProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
-			serverProbe.AgentID = targetAgentID // Server owns this probe
-			serverProbe = setBidirectionalFlag(serverProbe, true)
-			// Add marker that this is a bidirectional server probe (not a client)
-			serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, agentProbe.AgentID)
-			expanded = append(expanded, serverProbe)
-
+			// NEW: Bidirectional using helper for both agents
+			probes := createBidirectionalProbePair(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
+			expanded = append(expanded, probes...)
 			log.Debugf("[agent %d→%d] Created bidirectional TRAFFICSIM: client probe %d, server probe %d",
-				agentProbe.AgentID, targetAgentID, clientProbe.ID, serverProbe.ID)
+				agentProbe.AgentID, targetAgentID, probes[0].ID, probes[1].ID)
 		} else {
 			// LEGACY: Unidirectional or dual-probe approach
 			// Forward probe: client connects to target's server
@@ -967,6 +954,23 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 			},
 		},
 	}
+}
+
+// createBidirectionalProbePair creates two probes for bidirectional mode:
+// 1. Client probe (AgentID = ownerAgentID) - sent to the client agent
+// 2. Server probe (AgentID = targetAgentID) - sent to the target agent
+// Both have the same Probe ID for attribution
+// The server probe has bidirectional metadata to enable reverse path testing
+func createBidirectionalProbePair(source *Probe, probeType Type, targetIP string, targetAgentID uint) []Probe {
+	clientProbe := createExpandedProbe(source, probeType, targetIP, targetAgentID)
+	clientProbe = setBidirectionalFlag(clientProbe, true)
+
+	serverProbe := createExpandedProbe(source, probeType, targetIP, targetAgentID)
+	serverProbe.AgentID = targetAgentID // Server owns this probe
+	serverProbe = setBidirectionalFlag(serverProbe, true)
+	serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, source.AgentID)
+
+	return []Probe{clientProbe, serverProbe}
 }
 
 // expandedProbeDefaults returns the system defaults for each probe type
