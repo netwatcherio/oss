@@ -59,10 +59,10 @@ export default defineComponent({
       return props.trafficSimResults
         .filter(ts => ts.averageRTT > 0 || ts.jitterAvg)
         .map(ts => {
-          // Use pre-computed MosScore if available, otherwise compute from jitterAvg
+          // Use pre-computed mos/mosScore if available, otherwise compute from jitterAvg
           let mos: number;
-          if (ts.mosScore && ts.mosScore > 0) {
-            mos = ts.mosScore;
+          if ((ts.mos || ts.mosScore) && (ts.mos || ts.mosScore) > 0) {
+            mos = ts.mos || ts.mosScore;
           } else {
             // Fall back to computing MOS from jitterAvg (backend aggregates compute this, but raw data may not have it)
             const latency = ts.averageRTT;

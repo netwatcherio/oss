@@ -106,8 +106,24 @@ export default {
       const jitterMedians = props.trafficResults.map(d => d.jitterMedian).filter(v => v != null && v > 0);
       const jitterP95s = props.trafficResults.map(d => d.jitterP95).filter(v => v != null && v > 0);
       
-      // Calculate MOS using ITU-T G.107 E-Model
-      const mosResult = calculateMOS(avgRtt, jitter, avgPacketLoss);
+      // Use pre-computed MOS from agent data if available, otherwise calculate
+      const mosScores = props.trafficResults.map(d => d.mos || d.mosScore).filter(v => v != null && v > 0);
+      const avgMos = mosScores.length > 0 
+        ? mosScores.reduce((a, b) => a + b, 0) / mosScores.length
+        : calculateMOS(avgRtt, jitter, avgPacketLoss).mos;
+      
+      // Use pre-computed Network Health Score if available
+      const healthScores = props.trafficResults.map(d => d.networkHealthScore).filter(v => v != null && v > 0);
+      const avgHealthScore = healthScores.length > 0
+        ? healthScores.reduce((a, b) => a + b, 0) / healthScores.length
+        : 0;
+      
+      // Get MOS quality label
+      const mosQuality = getMosQualityLabel(avgMos);
+      
+      // Get latency quality from data if available
+      const latencyQualities = props.trafficResults.map(d => d.latencyQuality).filter(v => v != null);
+      const latencyQuality = latencyQualities.length > 0 ? latencyQualities[latencyQualities.length - 1] : '';
       
       return {
         currentRtt,
@@ -123,9 +139,11 @@ export default {
         jitter,
         jitterMedian: jitterMedians.length > 0 ? jitterMedians.reduce((a, b) => a + b, 0) / jitterMedians.length : 0,
         jitterP95: jitterP95s.length > 0 ? jitterP95s.reduce((a, b) => a + b, 0) / jitterP95s.length : 0,
-        mos: mosResult.mos,
-        mosQuality: mosResult.quality,
-        mosQualityLabel: getMosQualityLabel(mosResult.quality)
+        mos: avgMos,
+        mosQuality,
+        mosQualityLabel: getMosQualityLabel(mosQuality),
+        networkHealthScore: avgHealthScore,
+        latencyQuality
       };
     });
 
@@ -492,6 +510,16 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       name: 'Out of Sequence',
       type: 'scatter',
       data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.outOfSequence }))
+    },
+    {
+      name: 'MOS Score',
+      type: 'line',
+      data: buildSeriesData(d => d.mos || d.mosScore || 0)
+    },
+    {
+      name: 'Network Health',
+      type: 'line',
+      data: buildSeriesData(d => d.networkHealthScore || 0)
     }
   ];
 
@@ -506,7 +534,9 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     '#eab308',  // Jitter Avg - yellow
     '#f59e0b',  // Jitter P95 - amber
     '#fbbf24',  // Packet Loss - yellow gradient
-    '#a855f7'   // Out of Sequence - purple scatter
+    '#a855f7',  // Out of Sequence - purple scatter
+    '#22c55e',  // MOS Score - green (higher is better)
+    '#6366f1'   // Network Health - indigo (higher is better)
   ];
 
   // Initialize empty annotations (gaps are handled by null values in series data)
@@ -700,12 +730,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     },
     colors: seriesColors,
     stroke: {
-      width: [3, 2, 2, 2, 2, 2, 2, 2, 0, 0],
+      width: [3, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 2],
       curve: 'smooth',
-      dashArray: [0, 0, 4, 4, 0, 0, 0, 4, 0, 0]  // Dashed for percentile lines
+      dashArray: [0, 0, 4, 4, 0, 0, 0, 4, 0, 0, 0, 0]  // Dashed for percentile lines
     },
     fill: {
-      type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid'],
+      type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid', 'solid', 'solid'],
       gradient: {
         shadeIntensity: 0.8,
         opacityFrom: 0.35,
@@ -714,7 +744,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     markers: {
-      size: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      size: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3],
       strokeWidth: 0,
       hover: {
         size: 6,
@@ -792,6 +822,28 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
             fontSize: '12px'
           }
         }
+      },
+      {
+        seriesName: ['MOS Score', 'Network Health'],
+        opposite: true,
+        title: {
+          text: 'MOS / Health (0-100)',
+          style: {
+            color: colors.foreColor,
+            fontSize: '14px',
+            fontWeight: 600
+          }
+        },
+        min: 0,
+        max: 100,
+        tickAmount: 5,
+        labels: {
+          style: {
+            colors: colors.labelColor,
+            fontSize: '12px'
+          },
+          formatter: (val) => val.toFixed(1)
+        }
       }
     ],
     tooltip: {
@@ -813,11 +865,15 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       y: {
         formatter: function (y, { seriesIndex }) {
           if (y != null) {
-            // idx 0-7: RTT/Jitter in ms, idx 8: Packet Loss %, idx 9: Out of Sequence count
+            // idx 0-7: RTT/Jitter in ms, idx 8: Packet Loss %, idx 9: Out of Sequence count, idx 10: MOS, idx 11: Network Health
             if (seriesIndex === 8) {
               return y.toFixed(1) + "%";
             } else if (seriesIndex === 9) {
               return y.toFixed(0) + " pkts";
+            } else if (seriesIndex === 10) {
+              return y.toFixed(2) + " MOS";
+            } else if (seriesIndex === 11) {
+              return y.toFixed(1) + " score";
             }
             return y.toFixed(1) + " ms";
           }
@@ -910,6 +966,42 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
               <span class="tooltip-value">${oosValue.toFixed(0)}</span>
             </div>
           `;
+        }
+        
+        html += '</div></div>';
+        
+        // Quality section (indices 10-11: MOS Score, Network Health)
+        const mosValue = series[10]?.[dataPointIndex];
+        const healthValue = series[11]?.[dataPointIndex];
+        if ((mosValue != null && mosValue > 0) || (healthValue != null && healthValue > 0)) {
+          html += '<div class="tooltip-section">';
+          html += '<div class="tooltip-section-title">Quality</div>';
+          html += '<div class="tooltip-body">';
+          
+          if (mosValue != null && mosValue > 0) {
+            const mosColor = mosValue >= 4.0 ? '#22c55e' : mosValue >= 3.5 ? '#3b82f6' : mosValue >= 3.0 ? '#eab308' : '#ef4444';
+            const mosLabel = mosValue >= 4.3 ? 'Excellent' : mosValue >= 4.0 ? 'Good' : mosValue >= 3.6 ? 'Acceptable' : mosValue >= 3.0 ? 'Poor' : 'Bad';
+            html += `
+              <div class="tooltip-series">
+                <span class="tooltip-marker" style="background-color: ${mosColor}"></span>
+                <span class="tooltip-label">MOS Score:</span>
+                <span class="tooltip-value">${mosValue.toFixed(2)} (${mosLabel})</span>
+              </div>
+            `;
+          }
+          
+          if (healthValue != null && healthValue > 0) {
+            const healthColor = healthValue >= 80 ? '#22c55e' : healthValue >= 60 ? '#3b82f6' : healthValue >= 40 ? '#eab308' : '#ef4444';
+            html += `
+              <div class="tooltip-series">
+                <span class="tooltip-marker" style="background-color: ${healthColor}"></span>
+                <span class="tooltip-label">Network Health:</span>
+                <span class="tooltip-value">${healthValue.toFixed(1)}</span>
+              </div>
+            `;
+          }
+          
+          html += '</div></div>';
         }
         
         html += '</div></div></div>';

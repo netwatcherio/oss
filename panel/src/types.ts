@@ -351,11 +351,45 @@ export interface TrafficSimResult {
     lostPackets: number;
     totalPackets: number;
     outOfSequence: number;
-    duplicates: number;  // Duplicate packets received
-    jitterAvg?: number;  // stddev of RTTs
+    outOfOrderPercent?: number;
+    duplicates: number;
+    duplicatePercent?: number;
+    jitterAvg?: number;
     jitterMedian?: number;
     jitterP95?: number;
-    mosScore?: number;   // MOS score computed from TrafficSim metrics
+    rfc3550Jitter?: number;
+
+    // Network quality metrics
+    networkEfficiency?: number;
+    latencyQuality?: string;
+    latencyQualityScore?: number;
+    jitterQualityScore?: number;
+    lossQualityScore?: number;
+    networkHealthScore?: number;
+
+    // Timing metrics
+    cycleDurationMs?: number;
+    packetsPerSecond?: number;
+
+    // VoIP-specific metrics (when voip_mode enabled)
+    mos?: number;
+    rFactor?: number;
+    mosQuality?: string;
+    oneWayLatency?: number;
+    delayImp?: number;
+    lossImp?: number;
+    playoutBufferMin?: number;
+    playoutBufferMax?: number;
+    maxConsecutiveLoss?: number;
+    totalBursts?: number;
+    dscpValue?: number;
+    payloadSize?: number;
+    intervalMs?: number;
+    estimatedBandwidthKbps?: number;
+
+    // Legacy alias for backward compatibility
+    mosScore?: number;
+
     reportTime: string;  // ISO 8601 timestamp
 }
 
