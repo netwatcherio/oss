@@ -948,7 +948,9 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	if bidirectionalEnabled {
 		// Bidirectional: create probes for both agents
 		// ownerIP = A's IP (source), targetIP = B's IP (target)
-		expanded = append(expanded, createBidirectionalProbePair(agentProbe, TypeMTR, ownerIP, targetIP, targetAgentID)...)
+		probes, updatedSource := createBidirectionalProbePair(agentProbe, TypeMTR, ownerIP, targetIP, targetAgentID)
+		agentProbe = &updatedSource // Update so subsequent calls see the flag
+		expanded = append(expanded, probes...)
 	} else {
 		// Legacy: single probe
 		expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
@@ -956,7 +958,9 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 
 	// Create PING probe(s) - bidirectional if enabled
 	if bidirectionalEnabled {
-		expanded = append(expanded, createBidirectionalProbePair(agentProbe, TypePing, ownerIP, targetIP, targetAgentID)...)
+		probes, updatedSource := createBidirectionalProbePair(agentProbe, TypePing, ownerIP, targetIP, targetAgentID)
+		agentProbe = &updatedSource
+		expanded = append(expanded, probes...)
 	} else {
 		expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
 	}
@@ -989,7 +993,8 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		if bidirectionalEnabled {
 			// NEW: Bidirectional using helper for both agents
 			// TrafficSim uses targetAddr (B's IP:port) for the socket connection
-			probes := createBidirectionalProbePair(agentProbe, TypeTrafficSim, ownerIP, targetAddr, targetAgentID)
+			probes, updatedSource := createBidirectionalProbePair(agentProbe, TypeTrafficSim, ownerIP, targetAddr, targetAgentID)
+			agentProbe = &updatedSource
 			expanded = append(expanded, probes...)
 			log.Debugf("[agent %d→%d] Created bidirectional TRAFFICSIM: client probe %d, server probe %d",
 				agentProbe.AgentID, targetAgentID, probes[0].ID, probes[1].ID)
@@ -1057,19 +1062,26 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 // 2. Server probe (AgentID = targetAgentID) - sent to target agent (B), targets source.AgentID (A)
 // Both have the same Probe ID for attribution
 // The server probe has bidirectional metadata to enable reverse path testing
+// This function also updates the SOURCE probe's metadata to have bidirectional=true
+// so subsequent expansions (e.g., for reverse) also create new-format probes
 // sourceIP is A's IP (from NetInfo cache), targetIP is B's IP
-func createBidirectionalProbePair(source *Probe, probeType Type, sourceIP string, targetIP string, targetAgentID uint) []Probe {
+func createBidirectionalProbePair(source *Probe, probeType Type, sourceIP string, targetIP string, targetAgentID uint) ([]Probe, Probe) {
+	// Update source probe's metadata to have bidirectional=true
+	// This ensures subsequent expansions see the flag
+	updatedSource := setBidirectionalFlag(*source, true)
+
 	// Client probe: owned by source (A), targets target (B) at targetIP
-	clientProbe := createExpandedProbe(source, probeType, targetIP, targetAgentID)
+	// Use updatedSource to get the bidirectional metadata
+	clientProbe := createExpandedProbe(&updatedSource, probeType, targetIP, targetAgentID)
 	clientProbe = setBidirectionalFlag(clientProbe, true)
 
 	// Server probe: owned by target (B), targets source (A) at sourceIP so B can send reverse traffic to A
-	serverProbe := createExpandedProbe(source, probeType, sourceIP, source.AgentID)
+	serverProbe := createExpandedProbe(&updatedSource, probeType, sourceIP, source.AgentID)
 	serverProbe.AgentID = targetAgentID // Server (B) owns this probe
 	serverProbe = setBidirectionalFlag(serverProbe, true)
 	serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, source.AgentID)
 
-	return []Probe{clientProbe, serverProbe}
+	return []Probe{clientProbe, serverProbe}, updatedSource
 }
 
 // expandedProbeDefaults returns the system defaults for each probe type
@@ -1236,6 +1248,8 @@ func setBidirectionalServerMode(probe Probe, clientProbeID uint, clientAgentID u
 	tsConfig["client_agent_id"] = clientAgentID
 
 	metadata["trafficsim"] = tsConfig
+	// Also set top-level bidirectional flag for new format
+	metadata["bidirectional"] = true
 
 	if newMetadata, err := json.Marshal(metadata); err == nil {
 		probe.Metadata = datatypes.JSON(newMetadata)
