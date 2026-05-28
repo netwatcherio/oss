@@ -680,6 +680,68 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			port = 5000
 		}
 		now := time.Now()
+		serverAddr := fmt.Sprintf("%s:%d", host, port)
+
+		// Check if we have any reverse AGENT probes with bidirectional=true
+		// If so, create individual bidirectional server probes with metadata
+		bidirReverseCount := 0
+		for _, rp := range reverseAgentProbes {
+			if agentProbeHasBidirectional(&rp) {
+				bidirReverseCount++
+			}
+		}
+
+		if bidirReverseCount > 0 {
+			// Create individual bidirectional server probes for each reverse AGENT probe with bidirectional=true
+			for _, rp := range reverseAgentProbes {
+				if !agentProbeHasBidirectional(&rp) {
+					continue // Skip non-bidirectional probes
+				}
+				sourceAgentID := rp.AgentID
+
+				// Get source agent's IP for the server probe's target
+				sourceIP, ok := pubIPCache[sourceAgentID]
+				if !ok {
+					sourceIP, err = getPublicIP(ctx, db, ch, sourceAgentID)
+					if err != nil {
+						log.Warnf("[agent %d] Failed to get IP for reverse agent %d: %v", agentID, sourceAgentID, err)
+						continue
+					}
+					pubIPCache[sourceAgentID] = sourceIP
+				}
+
+				// Create bidirectional server probe for this reverse agent
+				bidirServerProbe := Probe{
+					ID:          0, // Virtual probe - no DB record
+					CreatedAt:   now,
+					UpdatedAt:   now,
+					WorkspaceID: agentObj.WorkspaceID,
+					AgentID:     agentID,
+					Type:        TypeTrafficSim,
+					Enabled:     true,
+					IntervalSec: 60,
+					TimeoutSec:  10,
+					Server:      true,
+					Labels:      datatypes.JSON([]byte(`{}`)),
+					Targets: []Target{
+						{
+							ProbeID:   0,
+							Target:    serverAddr,
+							AgentID:   &sourceAgentID,
+							CreatedAt: now,
+							UpdatedAt: now,
+						},
+					},
+				}
+				// Set bidirectional metadata
+				bidirServerProbe = setBidirectionalServerMode(bidirServerProbe, rp.ID, sourceAgentID)
+				out = append(out, bidirServerProbe)
+				log.Debugf("[agent %d] Created bidirectional TRAFFICSIM server probe for reverse agent %d (client_probe_id=%d, client_agent_id=%d)",
+					agentID, sourceAgentID, rp.ID, sourceAgentID)
+			}
+		}
+
+		// Create the generic server probe for allowed agents (non-bidirectional)
 		serverProbe := Probe{
 			ID:          0, // Virtual probe - no DB record
 			CreatedAt:   now,
@@ -696,7 +758,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 			Targets: []Target{
 				{
 					ProbeID:   0,
-					Target:    fmt.Sprintf("%s:%d", host, port),
+					Target:    serverAddr,
 					CreatedAt: now,
 					UpdatedAt: now,
 				},
@@ -908,6 +970,10 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	// - But different AgentID (one owned by client, one by server)
 	// - The server uses the client's ProbeID for reverse stats attribution
 	//
+	// For TrafficSim bidirectional, the reverse uses the SAME socket from A to B's server.
+	// A does NOT need its own server for reverse - it just echoes back on the same connection.
+	// So we only check ownerHasServer for MTR/PING (which initiate new connections).
+	//
 	// Legacy mode uses dual probes for backward compatibility.
 	//
 	targetHasServer := hasTrafficSimServer(ctx, db, targetAgentID)
@@ -920,7 +986,7 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 			targetAddr = targetIP + ":" + port
 		}
 
-		if bidirectionalEnabled && ownerHasServer {
+		if bidirectionalEnabled {
 			// NEW: Bidirectional using helper for both agents
 			// TrafficSim uses targetAddr (B's IP:port) for the socket connection
 			probes := createBidirectionalProbePair(agentProbe, TypeTrafficSim, ownerIP, targetAddr, targetAgentID)
