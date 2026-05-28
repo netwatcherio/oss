@@ -649,9 +649,17 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 						agentID, sourceAgentID, err)
 					continue
 				}
-				// Override the agent ID on expanded probes to be this agent (it's the one running these probes)
+				// For bidirectional probes, we create a pair:
+				// - Client probe: should be owned by THIS agent (agentID) - sends forward traffic
+				// - Server probe: should be owned by sourceAgentID - receives reverse traffic
+				// We must NOT override the server probe's AgentID, only the client probe's.
+				// After createBidirectionalProbePair, both probes have ownerAgentID (sourceAgentID).
 				for j := range expanded {
-					expanded[j].AgentID = agentID
+					if expanded[j].AgentID == sourceAgentID && !expanded[j].Server {
+						// This is the client probe (non-server) - override to this agent
+						expanded[j].AgentID = agentID
+					}
+					// Server probes keep their AgentID = sourceAgentID (the reverse traffic receiver)
 				}
 				out = append(out, expanded...)
 				agentProbesExpanded++
