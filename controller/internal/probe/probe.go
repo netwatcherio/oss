@@ -999,13 +999,18 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		}
 
 		if bidirectionalEnabled {
-			// NEW: Bidirectional using helper for both agents
-			// TrafficSim uses targetAddr (B's IP:port) for the socket connection
-			probes, updatedSource := createBidirectionalProbePair(agentProbe, TypeTrafficSim, ownerIP, targetAddr, targetAgentID)
-			agentProbe = &updatedSource
-			expanded = append(expanded, probes...)
-			log.Debugf("[agent %d→%d] Created bidirectional TRAFFICSIM: client probe %d, server probe %d",
-				agentProbe.AgentID, targetAgentID, probes[0].ID, probes[1].ID)
+			// Bidirectional: create a SINGLE probe.
+			// This probe is owned by THIS agent (ownerAgentID) but targets sourceAgentID (the client).
+			// When the server (targetAgentID) receives this probe, GetClientProbeForAgent(sourceAgentID)
+			// finds it and enables bidirectional mode.
+			// Unlike MTR/PING, TrafficSim uses the existing connection from client to server,
+			// so we don't need a separate "server probe".
+			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, ownerAgentID)
+			tsProbe.AgentID = ownerAgentID // This agent owns the client probe
+			tsProbe = setBidirectionalFlag(tsProbe, true)
+			expanded = append(expanded, tsProbe)
+			log.Debugf("[agent %d→%d] Created bidirectional TRAFFICSIM probe (client) for agent %d",
+				ownerAgentID, targetAgentID, ownerAgentID)
 		} else {
 			// LEGACY: Unidirectional or dual-probe approach
 			// Forward probe: client connects to target's server
