@@ -1249,6 +1249,7 @@ func setBidirectionalServerMode(probe Probe, clientProbeID uint, clientAgentID u
 
 	metadata["trafficsim"] = tsConfig
 	// Also set top-level bidirectional flag for new format
+	// This is critical for agent's extractVoIPOptions to detect bidirectional mode
 	metadata["bidirectional"] = true
 
 	if newMetadata, err := json.Marshal(metadata); err == nil {

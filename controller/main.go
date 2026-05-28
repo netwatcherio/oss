@@ -31,6 +31,10 @@ import (
 func main() {
 	_ = godotenv.Load()
 
+	if os.Getenv("DEBUG") == "true" {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	// ---- DB ----
 	db, err := database.OpenFromEnv()
 	if err != nil {
