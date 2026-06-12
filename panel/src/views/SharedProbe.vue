@@ -15,6 +15,7 @@ import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService, type Theme } from '@/services/themeService';
 import type { PingResult, MtrResult, TrafficSimResult, ProbeData, Probe } from '@/types';
 import { findProbesByInitialTarget } from '@/utils/probeGrouping';
+import { addProbeDataUnique } from '@/utils/probeData';
 import { SharedWebSocketService } from '@/services/sharedWebSocketService';
 import type { ProbeDataPayload } from '@/composables/useSharedWebSocket';
 

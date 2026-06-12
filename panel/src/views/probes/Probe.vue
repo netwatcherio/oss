@@ -19,6 +19,7 @@ import { themeService } from '@/services/themeService';
 // NEW: API services wired to your new endpoints
 import {AgentService, ProbeDataService, ProbeService, WorkspaceService} from "@/services/apiService";
 import {findMatchingProbesByProbeId, findProbesByInitialTarget} from "@/utils/probeGrouping";
+import {addProbeDataUnique} from "@/utils/probeData";
 
 // WebSocket for real-time updates
 import { useProbeSubscription, type ProbeDataEvent } from "@/composables/useWebSocket";
@@ -213,40 +214,6 @@ function generateTable(probeData: ProbeData) {
   return table.toString();
 }
 
-// Helper function to add probe data without duplicates
-// Helper: safely add probe data without duplicates or Vue reactivity issues
-function addProbeDataUnique(targetArray: ProbeData[], newData: ProbeData) {
-  if (!newData) return;
-
-  // --- deduplication logic (check BEFORE assigning ID) ---
-  // Use a stable composite key: probe_id + created_at + type
-  const newKey = `${newData.probe_id}-${newData.created_at}-${newData.type}`;
-  
-  const exists = targetArray.some(
-      (item) => `${item.probe_id}-${item.created_at}-${item.type}` === newKey
-  );
-
-  if (exists) {
-    // Duplicate found, skip
-    return;
-  }
-
-  // --- assign stable unique id for Vue reactivity if missing ---
-  if (!newData.id || newData.id === 0) {
-    if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
-      (newData as any).id = (crypto as any).randomUUID();
-    } else {
-      (newData as any).id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === "x" ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      });
-    }
-  }
-
-  // Use .push() to preserve reactivity in Vue arrays
-  targetArray.push(newData);
-}
 // --------- Adapters for graphs (expecting your components’ input shapes) ---------
 
 // PING: flatten rows -> PingResult[]
