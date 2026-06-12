@@ -545,7 +545,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     '#f97316',  // Max RTT - orange
     '#eab308',  // Jitter Avg - yellow
     '#f59e0b',  // Jitter P95 - amber
-    '#fbbf24',  // Packet Loss - yellow gradient
+    '#ef4444',  // Packet Loss - red (distinct from the jitter yellows)
     '#a855f7',  // Out of Sequence - purple scatter
     '#22c55e',  // MOS Score - green (higher is better)
     '#6366f1'   // Network Health - indigo (higher is better)
@@ -663,13 +663,6 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     }
   }
 
-  // Calculate Y-axis for consistent scaling
-  const avgRttValues = processedData.map(d => d.averageRTT);
-  const sortedAvgRtts = [...avgRttValues].sort((a, b) => a - b);
-  const p90Index = Math.floor(sortedAvgRtts.length * 0.90);
-  const p90Value = sortedAvgRtts[p90Index] || sortedAvgRtts[sortedAvgRtts.length - 1];
-  const yMax = Math.min(Math.ceil(p90Value * 1.5 / 50) * 50, 500);
-
   // Performance optimization: determine if we have a large dataset
   const isLargeDataset = processedData.length > 300;
 
@@ -742,9 +735,11 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     },
     colors: seriesColors,
     stroke: {
-      width: [3, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 2],
+      // Min/Max RTT are thin dashed envelope lines so spikes stay visible
+      // without visually dominating the averages.
+      width: [3, 2, 2, 2, 1, 1, 2, 2, 0, 0, 2, 2],
       curve: 'smooth',
-      dashArray: [0, 0, 4, 4, 0, 0, 0, 4, 0, 0, 0, 0]  // Dashed for percentile lines
+      dashArray: [0, 0, 4, 4, 2, 2, 0, 4, 0, 0, 0, 0]  // Dashed for percentile/envelope lines
     },
     fill: {
       type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid', 'solid', 'solid'],
@@ -790,8 +785,11 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
             fontWeight: 600
           }
         },
+        // No fixed max: let Apex auto-scale to the visible series so outliers
+        // (Max RTT spikes) are never clipped. Hiding a series via the legend or
+        // zooming re-scales the axis automatically.
         min: 0,
-        max: yMax,
+        forceNiceScale: true,
         tickAmount: 8,
         labels: {
           style: {
@@ -836,10 +834,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         }
       },
       {
-        seriesName: ['MOS Score', 'Network Health'],
+        // MOS is a 1-5 score — it must NOT share the 0-100 health axis, or the
+        // curve renders as a flat line at the bottom.
+        seriesName: ['MOS Score'],
         opposite: true,
         title: {
-          text: 'MOS / Health (0-100)',
+          text: 'MOS (1-5)',
           style: {
             color: colors.foreColor,
             fontSize: '14px',
@@ -847,7 +847,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
           }
         },
         min: 0,
-        max: 100,
+        max: 5,
         tickAmount: 5,
         labels: {
           style: {
@@ -855,6 +855,20 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
             fontSize: '12px'
           },
           formatter: (val) => val.toFixed(1)
+        }
+      },
+      {
+        seriesName: ['Network Health'],
+        opposite: true,
+        show: false,
+        min: 0,
+        max: 100,
+        labels: {
+          style: {
+            colors: colors.labelColor,
+            fontSize: '12px'
+          },
+          formatter: (val) => val.toFixed(0)
         }
       }
     ],
@@ -910,7 +924,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         const rttIndices = [0, 1, 2, 3, 4, 5];
         
         w.config.series.forEach((s: any, idx: number) => {
-          if (idx === 8 || idx === 9) return; // Skip non-RTT for this section
+          if (idx > 5) return; // RTT series only (0-5); jitter/loss/quality have their own sections
           const value = series[idx][dataPointIndex];
           if (value == null) return;
           const color = w.config.colors[idx];
@@ -933,7 +947,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         
         // Jitter metrics (indices 6-7)
         w.config.series.forEach((s: any, idx: number) => {
-          if (idx < 6 || idx === 9) return; // Only jitter (6-7)
+          if (idx !== 6 && idx !== 7) return; // Only jitter — loss/MOS/health have their own sections
           const value = series[idx][dataPointIndex];
           if (value == null || value === 0) return;
           const color = w.config.colors[idx];
