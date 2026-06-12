@@ -399,14 +399,18 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
       jitterMedian: p?.jitterMedian,
       jitterP95: p?.jitterP95,
       rfc3550Jitter: p?.rfc3550Jitter,
-      mosScore: p?.mosScore ?? p?.mos,
-      mos: p?.mos,
-      rFactor: p?.rFactor,
+      // Raw agent cycles emit "MOS"/"RFactor"; controller-aggregated buckets emit
+      // "mos"/"rFactor". Legacy (non-VoIP) rows have neither — leave undefined so
+      // the graph falls back to its client-side MOS estimate.
+      mosScore: p?.mosScore ?? p?.mos ?? p?.MOS,
+      mos: p?.mos ?? p?.MOS,
+      rFactor: p?.rFactor ?? p?.RFactor,
       mosQuality: p?.mosQuality,
       lostPackets: p?.lostPackets ?? 0,
       totalPackets: p?.totalPackets ?? 0,
       receivedPackets: p?.receivedPackets,
-      outOfSequence: p?.outOfOrder ?? 0,
+      // Raw rows use "outOfOrder", aggregated buckets use "outOfSequence"
+      outOfSequence: p?.outOfOrder ?? p?.outOfSequence ?? 0,
       outOfOrderPercent: p?.outOfOrderPercent,
       duplicates: p?.duplicates ?? 0,
       duplicatePercent: p?.duplicatePercent,
@@ -429,7 +433,9 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
       payloadSize: p?.payloadSize,
       intervalMs: p?.intervalMs,
       estimatedBandwidthKbps: p?.estimatedBandwidthKbps,
-      reportTime: p?.timestamp ?? r.created_at,
+      // Raw rows carry "timestamp", aggregated buckets carry "reportTime";
+      // fall back to the row's created_at (bucket time) either way.
+      reportTime: p?.timestamp ?? p?.reportTime ?? r.created_at,
     };
   }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
 }
@@ -774,9 +780,15 @@ async function reloadData() {
         }
       }
       
-      console.log("Built agentPairData:", state.agentPairData.length, "pairs with", 
-        state.pingData.length, "ping,", state.mtrData.length, "mtr,", 
+      console.log("Built agentPairData:", state.agentPairData.length, "pairs with",
+        state.pingData.length, "ping,", state.mtrData.length, "mtr,",
         state.trafficSimData.length, "trafficsim");
+
+      // Keep the selected direction tab in range after a rebuild (e.g. time-range
+      // change that no longer has reverse data)
+      if (state.selectedDirection >= state.agentPairData.length) {
+        state.selectedDirection = 0;
+      }
     }
 
     state.ready = true;
@@ -1112,12 +1124,6 @@ async function reloadTrafficSimData() {
   }
 }
 
-// Toggle to reciprocal direction (in-page, no navigation)
-function switchToReciprocal() {
-  if (!state.reciprocalProbe) return;
-  state.selectedDirection = state.selectedDirection === 0 ? 1 : 0;
-}
-
 // Theme subscription for date picker
 let themeUnsubscribe: (() => void) | null = null;
 
@@ -1251,24 +1257,40 @@ const handleLiveProbeData = (data: ProbeDataEvent) => {
   if (state.isAgentProbe && state.agentPairData.length > 0) {
     const mainProbeId = state.probe?.id;
     const recipProbeId = state.reciprocalProbe?.id;
-    
-    // Determine which direction this data belongs to based on probe_id
+
+    const addToPair = (pair: (typeof state.agentPairData)[0]) => {
+      if (data.type === 'PING') addProbeDataUnique(pair.pingData, probeData);
+      if (data.type === 'MTR') addProbeDataUnique(pair.mtrData, probeData);
+      if (data.type === 'TRAFFICSIM') addProbeDataUnique(pair.trafficSimData, probeData);
+    };
+
     if (data.probe_id === mainProbeId) {
-      // Forward direction - add to agentPairData[0]
-      const forwardPair = state.agentPairData[0];
-      if (forwardPair) {
-        if (data.type === 'PING') addProbeDataUnique(forwardPair.pingData, probeData);
-        if (data.type === 'MTR') addProbeDataUnique(forwardPair.mtrData, probeData);
-        if (data.type === 'TRAFFICSIM') addProbeDataUnique(forwardPair.trafficSimData, probeData);
+      // New single-probe bidirectional format: forward and reverse rows share the
+      // probe ID and are distinguished by the reporting agent (agent_id).
+      let pair = state.agentPairData.find(p => p.probeId === mainProbeId && p.sourceAgentId === data.agent_id);
+      if (!pair) {
+        const forwardPair = state.agentPairData[0];
+        if (data.agent_id === forwardPair.targetAgentId) {
+          // First reverse-direction row since page load — create the reverse view live
+          pair = {
+            direction: 'reverse' as const,
+            probeId: mainProbeId,
+            sourceAgentId: forwardPair.targetAgentId,
+            targetAgentId: forwardPair.sourceAgentId,
+            sourceAgentName: forwardPair.targetAgentName,
+            targetAgentName: forwardPair.sourceAgentName,
+            pingData: [], mtrData: [], trafficSimData: [], rperfData: []
+          };
+          state.agentPairData.push(pair);
+        } else {
+          pair = forwardPair;
+        }
       }
+      if (pair) addToPair(pair);
     } else if (recipProbeId && data.probe_id === recipProbeId) {
-      // Reverse direction - add to agentPairData[1]
-      const reversePair = state.agentPairData[1];
-      if (reversePair) {
-        if (data.type === 'PING') addProbeDataUnique(reversePair.pingData, probeData);
-        if (data.type === 'MTR') addProbeDataUnique(reversePair.mtrData, probeData);
-        if (data.type === 'TRAFFICSIM') addProbeDataUnique(reversePair.trafficSimData, probeData);
-      }
+      // Legacy dual-probe format: reverse data lives under the reciprocal probe's ID
+      const reversePair = state.agentPairData.find(p => p.probeId === recipProbeId);
+      if (reversePair) addToPair(reversePair);
     }
   }
 };
@@ -1327,33 +1349,27 @@ const { connected: wsConnected } = useProbeSubscription(
       </div>
     </Title>
     
-    <!-- Direction Selector for AGENT probes with reciprocal -->
-    <div v-if="state.ready && state.isAgentProbe && state.reciprocalProbe" class="direction-selector-wrapper mb-3">
+    <!-- Direction Selector for AGENT probes with bidirectional data (new single-probe
+         format) and/or a reciprocal probe (legacy dual-probe format) -->
+    <div v-if="state.ready && state.isAgentProbe && state.agentPairData.length > 1" class="direction-selector-wrapper mb-3">
       <div class="direction-selector">
         <div class="direction-label">
           <i class="bi bi-arrow-left-right"></i>
           <span>Direction</span>
         </div>
         <div class="direction-buttons" role="group" aria-label="probe direction">
-          <button 
-            type="button" 
+          <button
+            v-for="(pair, idx) in state.agentPairData"
+            :key="`dir-${idx}`"
+            type="button"
             class="direction-btn"
-            :class="{ active: state.selectedDirection === 0 }"
-            @click="state.selectedDirection = 0">
-            <i class="bi bi-arrow-right"></i>
-            <span class="agent-name">{{ state.agent.name }}</span>
+            :class="{ active: state.selectedDirection === idx }"
+            @click="state.selectedDirection = idx">
+            <i :class="pair.direction === 'forward' ? 'bi bi-arrow-right' : 'bi bi-arrow-left'"></i>
+            <span class="agent-name">{{ pair.sourceAgentName }}</span>
             <span class="direction-arrow">→</span>
-            <span class="agent-name">{{ state.probeAgent.name || 'Target' }}</span>
-          </button>
-          <button 
-            type="button" 
-            class="direction-btn"
-            :class="{ active: state.selectedDirection === 1 }"
-            @click="switchToReciprocal">
-            <i class="bi bi-arrow-left"></i>
-            <span class="agent-name">{{ state.probeAgent.name || 'Target' }}</span>
-            <span class="direction-arrow">→</span>
-            <span class="agent-name">{{ state.agent.name }}</span>
+            <span class="agent-name">{{ pair.targetAgentName }}</span>
+            <span v-if="pair.direction === 'reverse' && pair.probeId !== state.probe.id" class="ms-1 badge bg-secondary">reciprocal</span>
           </button>
         </div>
       </div>

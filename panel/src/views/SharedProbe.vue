@@ -203,7 +203,11 @@ function transformMtrData(data: ProbeData): MtrResult {
     return data.payload as MtrResult;
 }
 
-// Transform TrafficSim data
+// Transform TrafficSim data (kept in sync with Probe.vue's normalization).
+// Raw agent cycles emit "MOS"/"RFactor"/"timestamp"/"outOfOrder"; controller
+// aggregated buckets emit "mos"/"rFactor"/"reportTime"/"outOfSequence".
+// Legacy (non-VoIP) rows omit the VoIP fields — left undefined so the graph
+// falls back to its client-side MOS estimate.
 function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
     return rows.map((r) => {
         const p = r.payload as any;
@@ -217,12 +221,37 @@ function transformToTrafficSimResult(rows: ProbeData[]): TrafficSimResult[] {
             jitterAvg: p?.jitterAvg ?? p?.stdDevRTT,
             jitterMedian: p?.jitterMedian,
             jitterP95: p?.jitterP95,
-            mosScore: p?.mosScore,
+            rfc3550Jitter: p?.rfc3550Jitter,
+            mosScore: p?.mosScore ?? p?.mos ?? p?.MOS,
+            mos: p?.mos ?? p?.MOS,
+            rFactor: p?.rFactor ?? p?.RFactor,
+            mosQuality: p?.mosQuality,
             lostPackets: p?.lostPackets ?? 0,
             totalPackets: p?.totalPackets ?? 0,
-            outOfSequence: p?.outOfOrder ?? 0,
+            outOfSequence: p?.outOfOrder ?? p?.outOfSequence ?? 0,
+            outOfOrderPercent: p?.outOfOrderPercent,
             duplicates: p?.duplicates ?? 0,
-            reportTime: p?.timestamp ?? r.created_at,
+            duplicatePercent: p?.duplicatePercent,
+            networkEfficiency: p?.networkEfficiency,
+            latencyQuality: p?.latencyQuality,
+            latencyQualityScore: p?.latencyQualityScore,
+            jitterQualityScore: p?.jitterQualityScore,
+            lossQualityScore: p?.lossQualityScore,
+            networkHealthScore: p?.networkHealthScore,
+            cycleDurationMs: p?.cycleDurationMs,
+            packetsPerSecond: p?.packetsPerSecond,
+            oneWayLatency: p?.oneWayLatency,
+            delayImp: p?.delayImp,
+            lossImp: p?.lossImp,
+            playoutBufferMin: p?.playoutBufferMin,
+            playoutBufferMax: p?.playoutBufferMax,
+            maxConsecutiveLoss: p?.maxConsecutiveLoss,
+            totalBursts: p?.totalBursts,
+            dscpValue: p?.dscpValue,
+            payloadSize: p?.payloadSize,
+            intervalMs: p?.intervalMs,
+            estimatedBandwidthKbps: p?.estimatedBandwidthKbps,
+            reportTime: p?.timestamp ?? p?.reportTime ?? r.created_at,
         };
     }).sort((a, b) => new Date(a.reportTime).getTime() - new Date(b.reportTime).getTime());
 }

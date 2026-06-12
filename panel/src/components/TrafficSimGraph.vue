@@ -38,7 +38,13 @@ import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
 import ApexCharts from 'apexcharts'
 import type { TrafficSimResult } from '@/types';
 import { themeService } from '@/services/themeService';
-import { calculateMOS, getMosQualityLabel } from '@/utils/mos';
+import { calculateMOS, getMosQuality, getMosQualityLabel } from '@/utils/mos';
+
+// Loss %, guarded against rows/buckets with totalPackets=0 (plain division yields
+// NaN, which poisons every average it touches).
+function lossPercent(d: { lostPackets: number; totalPackets: number }): number {
+  return d.totalPackets > 0 ? (d.lostPackets / d.totalPackets) * 100 : 0;
+}
 
 export default {
   name: 'TrafficGraph',
@@ -85,7 +91,7 @@ export default {
       const avgRtts = props.trafficResults.map(d => d.averageRTT);
       const minRtts = props.trafficResults.map(d => d.minRTT);
       const maxRtts = props.trafficResults.map(d => d.maxRTT);
-      const packetLosses = props.trafficResults.map(d => (d.lostPackets / d.totalPackets) * 100);
+      const packetLosses = props.trafficResults.map(lossPercent);
       const outOfSequence = props.trafficResults.map(d => d.outOfSequence);
       const duplicates = props.trafficResults.map(d => d.duplicates ?? 0);
       
@@ -118,8 +124,8 @@ export default {
         ? healthScores.reduce((a, b) => a + b, 0) / healthScores.length
         : 0;
       
-      // Get MOS quality label
-      const mosQuality = getMosQualityLabel(avgMos);
+      // Map the numeric MOS to a quality tier; the label is derived from the tier
+      const mosQuality = getMosQuality(avgMos);
       
       // Get latency quality from data if available
       const latencyQualities = props.trafficResults.map(d => d.latencyQuality).filter(v => v != null);
@@ -159,7 +165,7 @@ export default {
       if (lastHourData.length === 0) return null;
       
       const avgLatency = lastHourData.reduce((sum, d) => sum + d.averageRTT, 0) / lastHourData.length;
-      const avgLoss = lastHourData.reduce((sum, d) => sum + (d.lostPackets / d.totalPackets) * 100, 0) / lastHourData.length;
+      const avgLoss = lastHourData.reduce((sum, d) => sum + lossPercent(d), 0) / lastHourData.length;
       const minRtts = lastHourData.map(d => d.minRTT);
       const maxRtts = lastHourData.map(d => d.maxRTT);
       
@@ -169,15 +175,21 @@ export default {
         ? jitterVals.reduce((a, b) => a + b, 0) / jitterVals.length
         : (Math.max(...maxRtts) - Math.min(...minRtts)) / 4;
       
-      const mosResult = calculateMOS(avgLatency, avgJitter, avgLoss);
-      
+      // Prefer the agent's E-model MOS when present; fall back to the
+      // client-side estimate for legacy/non-VoIP rows.
+      const agentMos = lastHourData.map(d => d.mos || d.mosScore).filter(v => v != null && v > 0);
+      const avgMos = agentMos.length > 0
+        ? agentMos.reduce((a, b) => a + b, 0) / agentMos.length
+        : calculateMOS(avgLatency, avgJitter, avgLoss).mos;
+      const quality = getMosQuality(avgMos);
+
       return {
         avgLatency,
         avgJitter,
         avgLoss,
-        avgMos: mosResult.mos,
-        mosQuality: mosResult.quality,
-        mosQualityLabel: getMosQualityLabel(mosResult.quality),
+        avgMos,
+        mosQuality: quality,
+        mosQualityLabel: getMosQualityLabel(quality),
         sampleCount: lastHourData.length
       };
     });
@@ -504,7 +516,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     {
       name: 'Packet Loss',
       type: 'area',
-      data: buildSeriesData(d => (d.lostPackets / d.totalPackets) * 100)
+      data: buildSeriesData(lossPercent)
     },
     {
       name: 'Out of Sequence',
@@ -595,7 +607,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     let lossRegion: { start: number; end: number; severity: 'low' | 'moderate' | 'high' } | null = null;
     
     processedData.forEach((d, i) => {
-      const packetLoss = (d.lostPackets / d.totalPackets) * 100;
+      const packetLoss = lossPercent(d);
       const timestamp = new Date(d.reportTime).getTime();
       
       // Determine severity

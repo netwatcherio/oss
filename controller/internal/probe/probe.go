@@ -404,8 +404,18 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 			return err
 		}
 
-		// Create reverse probes if bidirectional and there are agent targets
-		if in.Bidirectional && len(in.AgentTargets) > 0 {
+		// LEGACY dual-probe mode: create a persistent reverse probe on each target agent.
+		//
+		// NEW single-probe mode is signaled by bidirectional=true in the probe METADATA
+		// (top-level or trafficsim.bidirectional). In that mode no reverse DB probe is
+		// created — the controller dynamically generates the target agent's return-path
+		// probes (and the per-client TrafficSim server probe) at probe_get time, all
+		// referencing this single probe's ID.
+		newFormatBidir := agentProbeHasBidirectional(p)
+		if newFormatBidir && len(in.AgentTargets) > 0 {
+			log.Infof("[BIDIR] Probe %d uses single-probe bidirectional mode (metadata flag) — no reverse probe created", p.ID)
+		}
+		if in.Bidirectional && len(in.AgentTargets) > 0 && !newFormatBidir {
 			for _, targetAgentID := range in.AgentTargets {
 				// Create reverse probe owned by target agent, pointing to source
 				reverseProbe := &Probe{
@@ -649,17 +659,14 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 						agentID, sourceAgentID, err)
 					continue
 				}
-				// For bidirectional probes, we create a pair:
-				// - Client probe: should be owned by THIS agent (agentID) - sends forward traffic
-				// - Server probe: should be owned by sourceAgentID - receives reverse traffic
-				// We must NOT override the server probe's AgentID, only the client probe's.
-				// After createBidirectionalProbePair, both probes have ownerAgentID (sourceAgentID).
+				// The expansion produced return-path client probes still owned by the
+				// source agent (the expansion ran against ITS probe). Reassign them to
+				// THIS agent, which actually runs the return tests. They keep the source
+				// probe's ID so the data correlates with the forward direction.
 				for j := range expanded {
 					if expanded[j].AgentID == sourceAgentID && !expanded[j].Server {
-						// This is the client probe (non-server) - override to this agent
 						expanded[j].AgentID = agentID
 					}
-					// Server probes keep their AgentID = sourceAgentID (the reverse traffic receiver)
 				}
 				out = append(out, expanded...)
 				agentProbesExpanded++
@@ -731,6 +738,10 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 					TimeoutSec:  10,
 					Server:      true,
 					Labels:      datatypes.JSON([]byte(`{}`)),
+					// Inherit the client's trafficsim metadata (voip_mode, interval_ms,
+					// payload_size, dscp) so the server's reverse traffic mirrors the
+					// client's settings instead of falling back to defaults.
+					Metadata: coalesceJSON(rp.Metadata),
 					Targets: []Target{
 						{
 							ProbeID:   0,
@@ -952,24 +963,22 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	// Both share the same Probe ID for attribution
 	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
 
-	// Create MTR probe(s) - bidirectional if enabled
+	// Create MTR/PING probes. Each expansion produces a SINGLE probe owned by the
+	// requesting agent. In bidirectional mode the return path is NOT a second probe
+	// here — the target agent generates its own return probes (same probe ID) when
+	// it fetches its list, via the reverse AGENT probe expansion. Emitting a
+	// target-owned "pair" probe into this agent's list would make it probe its own
+	// IP (forward path) or run duplicate return probes (reverse path).
 	if bidirectionalEnabled {
-		// Bidirectional: create probes for both agents
-		// ownerIP = A's IP (source), targetIP = B's IP (target)
-		probes, updatedSource := createBidirectionalProbePair(agentProbe, TypeMTR, ownerIP, targetIP, targetAgentID)
-		agentProbe = &updatedSource // Update so subsequent calls see the flag
-		expanded = append(expanded, probes...)
-	} else {
-		// Legacy: single probe
-		expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
-	}
+		mtrProbe := createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID)
+		mtrProbe = setBidirectionalFlag(mtrProbe, true)
+		expanded = append(expanded, mtrProbe)
 
-	// Create PING probe(s) - bidirectional if enabled
-	if bidirectionalEnabled {
-		probes, updatedSource := createBidirectionalProbePair(agentProbe, TypePing, ownerIP, targetIP, targetAgentID)
-		agentProbe = &updatedSource
-		expanded = append(expanded, probes...)
+		pingProbe := createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID)
+		pingProbe = setBidirectionalFlag(pingProbe, true)
+		expanded = append(expanded, pingProbe)
 	} else {
+		expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
 		expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
 	}
 
@@ -999,13 +1008,15 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 		}
 
 		if bidirectionalEnabled {
-			// Bidirectional: create a SINGLE probe.
-			// This probe is owned by THIS agent (ownerAgentID) but targets sourceAgentID (the client).
-			// When the server (targetAgentID) receives this probe, GetClientProbeForAgent(sourceAgentID)
-			// finds it and enables bidirectional mode.
-			// Unlike MTR/PING, TrafficSim uses the existing connection from client to server,
-			// so we don't need a separate "server probe".
-			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, ownerAgentID)
+			// Bidirectional: create a SINGLE client probe owned by ownerAgentID targeting
+			// targetAgentID's server. The server side does NOT receive this probe — it gets
+			// its own dynamically generated bidirectional server probe (with client_probe_id /
+			// client_agent_id metadata) from GetProbesForAgent's reverse-probe handling.
+			// Unlike MTR/PING, TrafficSim reverse traffic uses the existing client→server
+			// connection, so no separate return-path client probe is needed.
+			// Target.AgentID must be the TARGET agent: the client uses it as OtherAgent for
+			// stats attribution, and a co-located server uses it to match connecting clients.
+			tsProbe := createExpandedProbe(agentProbe, TypeTrafficSim, targetAddr, targetAgentID)
 			tsProbe.AgentID = ownerAgentID // This agent owns the client probe
 			tsProbe = setBidirectionalFlag(tsProbe, true)
 			expanded = append(expanded, tsProbe)
@@ -1068,33 +1079,6 @@ func createExpandedProbe(source *Probe, probeType Type, targetIP string, targetA
 			},
 		},
 	}
-}
-
-// createBidirectionalProbePair creates two probes for bidirectional mode:
-// 1. Client probe (AgentID = source.AgentID) - sent to source agent (A), targets targetAgentID (B)
-// 2. Server probe (AgentID = targetAgentID) - sent to target agent (B), targets source.AgentID (A)
-// Both have the same Probe ID for attribution
-// The server probe has bidirectional metadata to enable reverse path testing
-// This function also updates the SOURCE probe's metadata to have bidirectional=true
-// so subsequent expansions (e.g., for reverse) also create new-format probes
-// sourceIP is A's IP (from NetInfo cache), targetIP is B's IP
-func createBidirectionalProbePair(source *Probe, probeType Type, sourceIP string, targetIP string, targetAgentID uint) ([]Probe, Probe) {
-	// Update source probe's metadata to have bidirectional=true
-	// This ensures subsequent expansions see the flag
-	updatedSource := setBidirectionalFlag(*source, true)
-
-	// Client probe: owned by source (A), targets target (B) at targetIP
-	// Use updatedSource to get the bidirectional metadata
-	clientProbe := createExpandedProbe(&updatedSource, probeType, targetIP, targetAgentID)
-	clientProbe = setBidirectionalFlag(clientProbe, true)
-
-	// Server probe: owned by target (B), targets source (A) at sourceIP so B can send reverse traffic to A
-	serverProbe := createExpandedProbe(&updatedSource, probeType, sourceIP, source.AgentID)
-	serverProbe.AgentID = targetAgentID // Server (B) owns this probe
-	serverProbe = setBidirectionalFlag(serverProbe, true)
-	serverProbe = setBidirectionalServerMode(serverProbe, clientProbe.ID, source.AgentID)
-
-	return []Probe{clientProbe, serverProbe}, updatedSource
 }
 
 // expandedProbeDefaults returns the system defaults for each probe type

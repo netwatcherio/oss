@@ -1126,7 +1126,13 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 		lastData     ProbeData
 	}
 
-	buckets := make(map[time.Time]*pingBucket)
+	// Bucket by (time, reporting agent): bidirectional probes share a probe ID and the
+	// forward/reverse rows differ only by agent_id — they must not blend into one bucket.
+	type pingBucketKey struct {
+		t       time.Time
+		agentID uint
+	}
+	buckets := make(map[pingBucketKey]*pingBucket)
 
 	for _, d := range rawData {
 		if d.Payload == nil || len(d.Payload) == 0 {
@@ -1138,7 +1144,7 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 			continue // Skip malformed payloads
 		}
 
-		key := getBucketKey(d.CreatedAt, bucketDuration)
+		key := pingBucketKey{t: getBucketKey(d.CreatedAt, bucketDuration), agentID: d.AgentID}
 		b, ok := buckets[key]
 		if !ok {
 			b = &pingBucket{}
@@ -1165,7 +1171,8 @@ func aggregatePingData(rawData []ProbeData, bucketDuration time.Duration, limit 
 
 	// Convert buckets to ProbeData
 	result := make([]ProbeData, 0, len(buckets))
-	for bucketTime, b := range buckets {
+	for bucketKey, b := range buckets {
+		bucketTime := bucketKey.t
 		if len(b.latencies) == 0 {
 			continue
 		}
@@ -1212,11 +1219,25 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		jitterAvgs    []float64
 		jitterMedians []float64
 		jitterP95s    []float64
-		lastData      ProbeData
-		initialized   bool
+		// VoIP metrics from agent cycles, carried into the bucket so zoomed-out
+		// views keep the agent's E-model values instead of losing them.
+		mosVals      []float64
+		rFactors     []float64
+		oneWays      []float64
+		healthScores []float64
+		maxConsLoss  uint64
+		totalBursts  uint64
+		lastData     ProbeData
+		initialized  bool
 	}
 
-	buckets := make(map[time.Time]*tsBucket)
+	// Bucket by (time, reporting agent): bidirectional probes share a probe ID and the
+	// forward/reverse rows differ only by agent_id — they must not blend into one bucket.
+	type tsBucketKey struct {
+		t       time.Time
+		agentID uint
+	}
+	buckets := make(map[tsBucketKey]*tsBucket)
 
 	for _, d := range rawData {
 		if d.Payload == nil || len(d.Payload) == 0 {
@@ -1226,8 +1247,21 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 		if err := json.Unmarshal(d.Payload, &p); err != nil {
 			continue
 		}
+		// Raw agent cycles emit "MOS"/"RFactor" (capitalized), which don't map to
+		// TrafficSimPayload's "mos"/"rFactor" tags — parse the aliases separately.
+		var rawKeys struct {
+			MOS     float64 `json:"MOS"`
+			RFactor float64 `json:"RFactor"`
+		}
+		_ = json.Unmarshal(d.Payload, &rawKeys)
+		if p.MosScore == 0 {
+			p.MosScore = rawKeys.MOS
+		}
+		if p.RFactor == 0 {
+			p.RFactor = rawKeys.RFactor
+		}
 
-		key := getBucketKey(d.CreatedAt, bucketDuration)
+		key := tsBucketKey{t: getBucketKey(d.CreatedAt, bucketDuration), agentID: d.AgentID}
 		b, ok := buckets[key]
 		if !ok {
 			b = &tsBucket{minRTT: p.MinRTT, maxRTT: p.MaxRTT}
@@ -1270,6 +1304,24 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 			b.jitterP95s = append(b.jitterP95s, p.JitterP95)
 		}
 
+		// Collect VoIP metrics when present (legacy/non-VoIP rows simply omit them)
+		if p.MosScore > 0 {
+			b.mosVals = append(b.mosVals, p.MosScore)
+		}
+		if p.RFactor > 0 {
+			b.rFactors = append(b.rFactors, p.RFactor)
+		}
+		if p.OneWayLatency > 0 {
+			b.oneWays = append(b.oneWays, p.OneWayLatency)
+		}
+		if p.NetworkHealthScore > 0 {
+			b.healthScores = append(b.healthScores, p.NetworkHealthScore)
+		}
+		if p.MaxConsecutiveLoss > b.maxConsLoss {
+			b.maxConsLoss = p.MaxConsecutiveLoss
+		}
+		b.totalBursts += p.TotalBursts
+
 		b.initialized = true
 
 		if d.CreatedAt.After(b.lastData.CreatedAt) {
@@ -1293,7 +1345,8 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 	}
 
 	result := make([]ProbeData, 0, len(buckets))
-	for bucketTime, b := range buckets {
+	for bucketKey, b := range buckets {
+		bucketTime := bucketKey.t
 		if len(b.avgRtts) == 0 {
 			continue
 		}
@@ -1330,25 +1383,34 @@ func aggregateTrafficSimData(rawData []ProbeData, bucketDuration time.Duration, 
 			p99RTT = percentileFn(b.avgRtts, 99)
 		}
 
-		// Compute MOS score
-		mosScore := computeMos(avg(b.avgRtts), lossPct, avgJitter)
+		// MOS: prefer the average of the agent's E-model scores; fall back to a
+		// server-side estimate only when the rows carried none (legacy/non-VoIP).
+		mosScore := avg(b.mosVals)
+		if mosScore == 0 {
+			mosScore = computeMos(avg(b.avgRtts), lossPct, avgJitter)
+		}
 
 		agg := TrafficSimPayload{
-			ReportTime:    bucketTime.UTC().Format(time.RFC3339),
-			AverageRTT:    avg(b.avgRtts),
-			MedianRTT:     medianRTT,
-			P95RTT:        p95RTT,
-			P99RTT:        p99RTT,
-			MinRTT:        b.minRTT,
-			MaxRTT:        b.maxRTT,
-			TotalPackets:  b.totalPackets,
-			LostPackets:   b.lostPackets,
-			OutOfSequence: b.outOfSequence,
-			Duplicates:    b.duplicates,
-			JitterAvg:     avgJitter,
-			JitterMedian:  medianJitter,
-			JitterP95:     p95Jitter,
-			MosScore:      mosScore,
+			ReportTime:         bucketTime.UTC().Format(time.RFC3339),
+			AverageRTT:         avg(b.avgRtts),
+			MedianRTT:          medianRTT,
+			P95RTT:             p95RTT,
+			P99RTT:             p99RTT,
+			MinRTT:             b.minRTT,
+			MaxRTT:             b.maxRTT,
+			TotalPackets:       b.totalPackets,
+			LostPackets:        b.lostPackets,
+			OutOfSequence:      b.outOfSequence,
+			Duplicates:         b.duplicates,
+			JitterAvg:          avgJitter,
+			JitterMedian:       medianJitter,
+			JitterP95:          p95Jitter,
+			MosScore:           mosScore,
+			RFactor:            avg(b.rFactors),
+			OneWayLatency:      avg(b.oneWays),
+			NetworkHealthScore: avg(b.healthScores),
+			MaxConsecutiveLoss: b.maxConsLoss,
+			TotalBursts:        b.totalBursts,
 		}
 
 		payload, _ := json.Marshal(agg)
