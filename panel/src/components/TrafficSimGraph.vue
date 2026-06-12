@@ -776,7 +776,10 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     },
     yaxis: [
       {
-        seriesName: ['Avg RTT', 'Median RTT', 'P95 RTT', 'P99 RTT', 'Min RTT', 'Max RTT', 'Jitter Avg', 'Jitter P95'],
+        // Main latency axis: scaled to the KEY metrics only. Max RTT lives on
+        // its own independent axis below so a single outlier spike (e.g.
+        // 15000ms) can't blow up the scale everything else is read against.
+        seriesName: ['Avg RTT', 'Median RTT', 'P95 RTT', 'P99 RTT', 'Min RTT', 'Jitter Avg', 'Jitter P95'],
         title: {
           text: 'Latency / Jitter (ms)',
           style: {
@@ -785,12 +788,25 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
             fontWeight: 600
           }
         },
-        // No fixed max: let Apex auto-scale to the visible series so outliers
-        // (Max RTT spikes) are never clipped. Hiding a series via the legend or
-        // zooming re-scales the axis automatically.
         min: 0,
         forceNiceScale: true,
         tickAmount: 8,
+        labels: {
+          style: {
+            colors: colors.labelColor,
+            fontSize: '12px'
+          },
+          formatter: (val) => val.toFixed(0)
+        }
+      },
+      {
+        // Max RTT outlier axis: independent hidden scale. Spikes render as a
+        // visible envelope line without distorting the main axis; exact values
+        // are in the tooltip and >300ms regions get the anomaly shading.
+        seriesName: ['Max RTT'],
+        opposite: true,
+        show: false,
+        min: 0,
         labels: {
           style: {
             colors: colors.labelColor,
