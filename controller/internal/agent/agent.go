@@ -105,6 +105,11 @@ type CreateInput struct {
 	Labels           datatypes.JSON
 	Metadata         datatypes.JSON
 	PINTTL           *time.Duration // optional expiry for bootstrap PIN
+
+	// TrafficSim server configuration (optional at creation time)
+	TrafficSimEnabled bool
+	TrafficSimHost    string
+	TrafficSimPort    int
 }
 
 type CreateOutput struct {
@@ -139,17 +144,20 @@ func CreateAgent(ctx context.Context, db *gorm.DB, in CreateInput) (*CreateOutpu
 
 	now := time.Now()
 	a := &Agent{
-		WorkspaceID:      in.WorkspaceID,
-		Name:             in.Name,
-		Description:      in.Description,
-		Location:         in.Location,
-		PublicIPOverride: in.PublicIPOverride,
-		Version:          in.Version,
-		LastSeenAt:       time.Time{}, // zero until first heartbeat
-		Labels:           coalesceJSON(in.Labels),
-		Metadata:         coalesceJSON(in.Metadata),
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		WorkspaceID:       in.WorkspaceID,
+		Name:              in.Name,
+		Description:       in.Description,
+		Location:          in.Location,
+		PublicIPOverride:  in.PublicIPOverride,
+		Version:           in.Version,
+		LastSeenAt:        time.Time{}, // zero until first heartbeat
+		Labels:            coalesceJSON(in.Labels),
+		Metadata:          coalesceJSON(in.Metadata),
+		TrafficSimEnabled: in.TrafficSimEnabled,
+		TrafficSimHost:    in.TrafficSimHost,
+		TrafficSimPort:    in.TrafficSimPort,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	var pinPlain string

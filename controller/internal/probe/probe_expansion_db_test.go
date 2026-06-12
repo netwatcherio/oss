@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -102,8 +103,37 @@ func TestCreateNewFormatSkipsReverseProbe(t *testing.T) {
 	}
 }
 
-// LEGACY mode: top-level bidirectional flag without metadata → dual probes.
-func TestCreateLegacyCreatesReverseProbe(t *testing.T) {
+// AGENT probes never create a persistent reverse probe anymore: a caller using
+// only the legacy top-level flag gets it normalized into metadata so the return
+// path is generated dynamically instead.
+func TestCreateAgentLegacyFlagNormalizedToMetadata(t *testing.T) {
+	db := newTestDB(t)
+	seedAgent(t, db, 1, "10.0.0.1", false, 0)
+	seedAgent(t, db, 2, "10.0.0.2", true, 5005)
+
+	p, err := Create(context.Background(), db, CreateInput{
+		WorkspaceID:   1,
+		AgentID:       1,
+		Type:          TypeAgent,
+		Enabled:       true,
+		AgentTargets:  []uint{2},
+		Bidirectional: true, // legacy DTO flag only, no metadata
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if got := countAgentProbes(t, db); got != 1 {
+		t.Fatalf("AGENT probes in DB = %d, want 1 (AGENT type must never create a reverse probe)", got)
+	}
+	if !agentProbeHasBidirectional(p) {
+		t.Error("legacy bidirectional flag was not normalized into metadata")
+	}
+}
+
+// Non-AGENT types keep the legacy dual-probe behavior (no dynamic reverse
+// generation exists for them).
+func TestCreateNonAgentLegacyStillCreatesReverseProbe(t *testing.T) {
 	db := newTestDB(t)
 	seedAgent(t, db, 1, "10.0.0.1", false, 0)
 	seedAgent(t, db, 2, "10.0.0.2", true, 5005)
@@ -111,19 +141,23 @@ func TestCreateLegacyCreatesReverseProbe(t *testing.T) {
 	if _, err := Create(context.Background(), db, CreateInput{
 		WorkspaceID:   1,
 		AgentID:       1,
-		Type:          TypeAgent,
+		Type:          TypePing,
 		Enabled:       true,
 		AgentTargets:  []uint{2},
-		Bidirectional: true, // no metadata flag = legacy dual-probe behavior
+		Bidirectional: true,
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if got := countAgentProbes(t, db); got != 2 {
-		t.Fatalf("AGENT probes in DB = %d, want 2 (legacy dual-probe)", got)
+	var n int64
+	if err := db.Model(&Probe{}).Where("type = ?", TypePing).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("PING probes in DB = %d, want 2 (legacy dual-probe for non-AGENT types)", n)
 	}
 	var reverse Probe
-	if err := db.Preload("Targets").Where("type = ? AND agent_id = ?", TypeAgent, 2).First(&reverse).Error; err != nil {
+	if err := db.Preload("Targets").Where("type = ? AND agent_id = ?", TypePing, 2).First(&reverse).Error; err != nil {
 		t.Fatalf("reverse probe not found: %v", err)
 	}
 	if len(reverse.Targets) != 1 || reverse.Targets[0].AgentID == nil || *reverse.Targets[0].AgentID != 1 {
@@ -292,24 +326,38 @@ func TestListForAgentNewFormatBidirectional(t *testing.T) {
 	}
 }
 
-// Legacy dual-probe expansion still works: no metadata flag anywhere.
+// Expansion of PRE-EXISTING legacy dual AGENT probes (created by older
+// controller versions, no metadata flag anywhere) must keep working. The rows
+// are seeded directly since Create() no longer produces dual AGENT probes.
 func TestListForAgentLegacyDualProbes(t *testing.T) {
 	db := newTestDB(t)
 	const aID, bID = uint(1), uint(2)
 	seedAgent(t, db, aID, "10.0.0.1", false, 0)
 	seedAgent(t, db, bID, "10.0.0.2", true, 5005)
 
-	created, err := Create(context.Background(), db, CreateInput{
-		WorkspaceID:   1,
-		AgentID:       aID,
-		Type:          TypeAgent,
-		Enabled:       true,
-		AgentTargets:  []uint{bID},
-		Bidirectional: true, // legacy: creates the reverse AGENT probe in the DB
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
+	mkLegacyAgentProbe := func(owner, target uint) *Probe {
+		p := &Probe{
+			WorkspaceID: 1,
+			AgentID:     owner,
+			Type:        TypeAgent,
+			Enabled:     true,
+			IntervalSec: 60,
+			TimeoutSec:  10,
+			Labels:      datatypes.JSON([]byte(`{}`)),
+			Metadata:    datatypes.JSON([]byte(`{}`)),
+		}
+		if err := db.Create(p).Error; err != nil {
+			t.Fatalf("seed legacy probe: %v", err)
+		}
+		tgt := Target{ProbeID: p.ID, AgentID: &target}
+		if err := db.Create(&tgt).Error; err != nil {
+			t.Fatalf("seed legacy target: %v", err)
+		}
+		return p
 	}
+
+	created := mkLegacyAgentProbe(aID, bID) // forward A→B
+	mkLegacyAgentProbe(bID, aID)            // legacy reverse B→A
 
 	ctx := context.Background()
 

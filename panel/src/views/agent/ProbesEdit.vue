@@ -1171,7 +1171,7 @@ async function saveProbeSettings() {
                 <div v-if="hasSelectedAgentProbes" class="copy-options">
                   <label class="option-item bidirectional-option">
                     <input type="checkbox" v-model="state.copyBidirectional">
-                    <span>Create bidirectional probes (reverse probes from destination agents back to source)</span>
+                    <span>Enable bidirectional monitoring (return-path probes are generated automatically — no reverse probe is created)</span>
                     <small class="option-hint">Only applies to Agent-to-Agent probes</small>
                   </label>
                 </div>

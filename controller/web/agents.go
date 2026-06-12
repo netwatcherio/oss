@@ -75,16 +75,19 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits
 		}
 
 		out, err := agent.CreateAgent(c.UserContext(), db, agent.CreateInput{
-			WorkspaceID:      wsID,
-			Name:             body.Name,
-			Description:      body.Description,
-			PinLength:        body.PinLength,
-			Location:         body.Location,
-			PublicIPOverride: body.PublicIPOverride,
-			Version:          body.Version,
-			Labels:           jsonFromMap(body.Labels),
-			Metadata:         jsonFromMap(body.Metadata),
-			PINTTL:           ttl,
+			WorkspaceID:       wsID,
+			Name:              body.Name,
+			Description:       body.Description,
+			PinLength:         body.PinLength,
+			Location:          body.Location,
+			PublicIPOverride:  body.PublicIPOverride,
+			Version:           body.Version,
+			Labels:            jsonFromMap(body.Labels),
+			Metadata:          jsonFromMap(body.Metadata),
+			PINTTL:            ttl,
+			TrafficSimEnabled: body.TrafficSimEnabled != nil && *body.TrafficSimEnabled,
+			TrafficSimHost:    body.TrafficSimHost,
+			TrafficSimPort:    body.TrafficSimPort,
 		})
 		if err != nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})

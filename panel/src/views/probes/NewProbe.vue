@@ -55,7 +55,6 @@ interface TrafficSimConfig {
   dscp: number;
   interval_ms: number;
   payload_size: number;
-  bidirectional: boolean;
 }
 
 interface ProbeState {
@@ -174,8 +173,8 @@ const state = reactive<ProbeState>({
     voip_mode: true, // Enable VoIP simulation by default for better network health assessment
     dscp: 46, // Expedited Forwarding for voice traffic
     interval_ms: 20, // G.711-style 50 packets/sec
-    payload_size: 160, // G.711 payload size
-    bidirectional: true // Enable bidirectional testing (server sends back to client)
+    payload_size: 160 // G.711 payload size
+    // bidirectional lives on state.bidirectional (single toggle, written to metadata)
   }
 });
 
@@ -563,7 +562,10 @@ async function submit() {
       };
     }
 
-    // AGENT probes — set TrafficSim/VoIP metadata for child TRAFFICSIM probes
+    // AGENT probes — set TrafficSim/VoIP metadata for child TRAFFICSIM probes.
+    // The single "Bidirectional Monitoring" toggle drives the metadata flag; the
+    // backend generates the target agent's return-path probes dynamically from
+    // it (no second probe is created).
     if (state.selected.value === 'AGENT') {
       newProbe.metadata = {
         trafficsim: {
@@ -571,7 +573,7 @@ async function submit() {
           dscp: state.trafficSimConfig.dscp,
           interval_ms: state.trafficSimConfig.voip_mode ? state.trafficSimConfig.interval_ms : 1000,
           payload_size: state.trafficSimConfig.voip_mode ? state.trafficSimConfig.payload_size : 0,
-          bidirectional: state.trafficSimConfig.bidirectional
+          bidirectional: state.bidirectional
         }
       };
     }
@@ -938,7 +940,8 @@ onMounted(async () => {
                     <strong>Bidirectional Monitoring</strong>
                   </label>
                   <div class="form-text">
-                    Create matching probe on target agent pointing back to this agent
+                    Test both directions — the target agent's return-path probes are
+                    generated automatically (no second probe is created)
                   </div>
                 </div>
               </div>
@@ -1330,20 +1333,6 @@ onMounted(async () => {
                     </select>
                   </div>
 
-                  <div class="col-md-4 mb-3">
-                    <div class="form-check form-switch mt-3">
-                      <input
-                          id="bidirectional"
-                          v-model="state.trafficSimConfig.bidirectional"
-                          class="form-check-input"
-                          type="checkbox"
-                          role="switch">
-                      <label class="form-check-label fw-semibold" for="bidirectional">
-                        Bidirectional
-                      </label>
-                      <div class="form-text">Server echoes back</div>
-                    </div>
-                  </div>
                 </div>
 
                 <div class="row" v-if="state.trafficSimConfig.voip_mode">

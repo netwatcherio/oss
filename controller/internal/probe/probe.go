@@ -366,6 +366,15 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		UpdatedAt:     now,
 	}
 
+	// AGENT probes carry bidirectional intent in METADATA going forward — the
+	// target agent's return-path probes are generated dynamically at probe_get
+	// time, so no persistent reverse probe is ever created. Callers still using
+	// only the legacy top-level flag get it normalized into metadata here.
+	if in.Type == TypeAgent && in.Bidirectional && !agentProbeHasBidirectional(p) {
+		*p = setBidirectionalFlag(*p, true)
+		log.Infof("[BIDIR] AGENT probe: legacy bidirectional flag normalized into metadata (single-probe mode)")
+	}
+
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Create parent
 		if err := tx.Create(p).Error; err != nil {
@@ -404,18 +413,16 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 			return err
 		}
 
-		// LEGACY dual-probe mode: create a persistent reverse probe on each target agent.
-		//
-		// NEW single-probe mode is signaled by bidirectional=true in the probe METADATA
-		// (top-level or trafficsim.bidirectional). In that mode no reverse DB probe is
-		// created — the controller dynamically generates the target agent's return-path
-		// probes (and the per-client TrafficSim server probe) at probe_get time, all
-		// referencing this single probe's ID.
+		// LEGACY dual-probe mode: create a persistent reverse probe on each target
+		// agent. This now applies ONLY to non-AGENT probe types — AGENT probes
+		// always use single-probe mode (bidirectional in metadata, return path
+		// generated dynamically at probe_get time). Existing dual AGENT probes in
+		// the DB remain fully supported by the expansion logic.
 		newFormatBidir := agentProbeHasBidirectional(p)
 		if newFormatBidir && len(in.AgentTargets) > 0 {
 			log.Infof("[BIDIR] Probe %d uses single-probe bidirectional mode (metadata flag) — no reverse probe created", p.ID)
 		}
-		if in.Bidirectional && len(in.AgentTargets) > 0 && !newFormatBidir {
+		if in.Type != TypeAgent && in.Bidirectional && len(in.AgentTargets) > 0 && !newFormatBidir {
 			for _, targetAgentID := range in.AgentTargets {
 				// Create reverse probe owned by target agent, pointing to source
 				reverseProbe := &Probe{
