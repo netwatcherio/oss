@@ -89,6 +89,12 @@ interface PingStats {
   avgResponseTime: number
   lastRun: string
   status: 'healthy' | 'warning' | 'critical' | 'unknown'
+  // 'trafficsim' stats are preferred (real UDP path quality incl. return path);
+  // 'ping' is the fallback when no TrafficSim data exists for the probe.
+  source?: 'trafficsim' | 'ping'
+  // Per-direction TrafficSim samples keyed by reporting agent ID, so live
+  // updates can refresh one direction and recombine.
+  directions?: Record<number, { successRate: number; rtt: number; lastRun: string }>
 }
 
 // Loading state management
@@ -401,7 +407,70 @@ function calculateProbeStatus(successRate: number, avgResponseTime: number): 'he
   return 'unknown';
 }
 
-// Fetch real probe statistics for ping probes using latest endpoint
+// Parse a raw TrafficSim payload into a direction sample
+function trafficSimDirectionSample(payload: any, lastRun: string): { successRate: number; rtt: number; lastRun: string } | null {
+  const total = Number(payload?.totalPackets) || 0;
+  if (total <= 0) return null;
+  const lost = Number(payload?.lostPackets) || 0;
+  return {
+    successRate: ((total - lost) / total) * 100,
+    rtt: Number(payload?.averageRTT) || 0,
+    lastRun
+  };
+}
+
+// Combine per-direction TrafficSim samples into a single probe stat.
+// Success rate = worst direction (a path is only as usable as its worse
+// direction); RTT = average across directions; lastRun = most recent.
+function combineTrafficSimDirections(probeId: number, directions: Record<number, { successRate: number; rtt: number; lastRun: string }>): PingStats {
+  const dirs = Object.values(directions);
+  const successRate = Math.min(...dirs.map(d => d.successRate));
+  const avgResponseTime = dirs.reduce((s, d) => s + d.rtt, 0) / dirs.length;
+  const lastRun = dirs.map(d => d.lastRun).sort().pop() || '';
+  return {
+    probeId,
+    successRate,
+    avgResponseTime,
+    lastRun,
+    status: calculateProbeStatus(successRate, avgResponseTime),
+    source: 'trafficsim',
+    directions
+  };
+}
+
+// Fetch TrafficSim-based stats for an AGENT probe: forward (this agent) and
+// return path (target agent reports under the SAME probe ID).
+async function fetchTrafficSimStat(workspaceId: string, agentId: string, probe: Probe): Promise<PingStats | null> {
+  const readDirection = async (reporterId: string | number) => {
+    try {
+      const latest = await ProbeDataService.latest(workspaceId, {
+        type: 'TRAFFICSIM',
+        agentId: String(reporterId),
+        probeId: probe.id
+      });
+      if (!latest?.payload) return null;
+      return trafficSimDirectionSample(latest.payload, latest.created_at);
+    } catch {
+      return null; // no data for this direction yet
+    }
+  };
+
+  const targetAgentId = (probe.targets || []).find(t => t.agent_id != null)?.agent_id;
+  const [fwd, rev] = await Promise.all([
+    readDirection(agentId),
+    targetAgentId != null ? readDirection(targetAgentId) : Promise.resolve(null)
+  ]);
+  if (!fwd && !rev) return null;
+
+  const directions: Record<number, { successRate: number; rtt: number; lastRun: string }> = {};
+  if (fwd) directions[Number(agentId)] = fwd;
+  if (rev && targetAgentId != null) directions[Number(targetAgentId)] = rev;
+  return combineTrafficSimDirections(probe.id, directions);
+}
+
+// Fetch real probe statistics using the latest endpoint. AGENT probes prefer
+// TrafficSim stats (forward + return path); PING is the fallback when no
+// TrafficSim data exists (target has no server, probe type is PING, etc.).
 async function fetchPingStats(workspaceId: string, agentId: string, probes: Probe[]): Promise<PingStats[]> {
   // Include PING probes and AGENT probes (which expand to include PING)
   const pingProbes = probes.filter(p => (p.type === 'PING' || p.type === 'AGENT') && p.enabled);
@@ -410,6 +479,12 @@ async function fetchPingStats(workspaceId: string, agentId: string, probes: Prob
   try {
     // Fetch latest data for all ping probes in parallel
     const statsPromises = pingProbes.map(async (probe) => {
+      // Prefer TrafficSim for AGENT probes — real UDP path quality, both directions
+      if (probe.type === 'AGENT') {
+        const tsStat = await fetchTrafficSimStat(workspaceId, agentId, probe);
+        if (tsStat) return tsStat;
+      }
+
       try {
         // Get the latest ping data for this probe
         const latestData = await ProbeDataService.latest(
@@ -442,7 +517,8 @@ async function fetchPingStats(workspaceId: string, agentId: string, probes: Prob
           successRate,
           avgResponseTime,
           lastRun,
-          status
+          status,
+          source: 'ping'
         } as PingStats;
       } catch (err) {
         // 404 means no data yet for this probe
@@ -672,6 +748,12 @@ function handleLiveProbeData(data: ProbeDataEvent) {
       const pingPayload = data.payload as unknown as PingResult;
       if (pingPayload && data.probe_id) {
         const existingIdx = state.pingStats.findIndex(s => s.probeId === data.probe_id);
+
+        // TrafficSim-sourced stats are preferred — don't clobber them with PING
+        if (existingIdx >= 0 && state.pingStats[existingIdx].source === 'trafficsim') {
+          break;
+        }
+
         const successRate = pingPayload.packets_sent > 0
           ? (pingPayload.packets_recv / pingPayload.packets_sent) * 100
           : 0;
@@ -681,7 +763,8 @@ function handleLiveProbeData(data: ProbeDataEvent) {
           successRate,
           avgResponseTime,
           lastRun: data.created_at,
-          status: calculateProbeStatus(successRate, avgResponseTime)
+          status: calculateProbeStatus(successRate, avgResponseTime),
+          source: 'ping'
         };
 
         if (existingIdx >= 0) {
@@ -697,6 +780,35 @@ function handleLiveProbeData(data: ProbeDataEvent) {
         });
       }
       break;
+
+    case 'TRAFFICSIM': {
+      // Update the matching direction of a TrafficSim-sourced stat and recombine.
+      // Forward rows are reported by this agent, return-path rows by the target
+      // agent — both under the same probe ID.
+      if (!data.probe_id || data.agent_id == null) break;
+      const sample = trafficSimDirectionSample(data.payload as any, data.created_at);
+      if (!sample) break;
+
+      const idx = state.pingStats.findIndex(s => s.probeId === data.probe_id);
+      const directions = (idx >= 0 && state.pingStats[idx].source === 'trafficsim' && state.pingStats[idx].directions)
+        ? { ...state.pingStats[idx].directions }
+        : {};
+      directions[data.agent_id] = sample;
+      const newStat = combineTrafficSimDirections(data.probe_id, directions);
+
+      if (idx >= 0) {
+        state.pingStats[idx] = newStat;
+      } else {
+        state.pingStats.push(newStat);
+      }
+
+      // Re-aggregate group stats
+      state.targetGroups.forEach(group => {
+        const stats = aggregateGroupStats(group, state.pingStats);
+        state.groupStats[group.key] = { ...stats, isLoading: false };
+      });
+      break;
+    }
   }
 
   // Clear the live updating indicator after a short delay
