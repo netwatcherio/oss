@@ -316,6 +316,10 @@ export default {
 
 const DEFAULT_MAX_GAP = 90000; // 90 seconds fallback
 
+function avgOf(vals: number[]): number {
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+}
+
 function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): TrafficSimResult[] {
   if (bucketSizeMs === 0) return data; // No aggregation needed
   
@@ -371,7 +375,10 @@ function aggregateTrafficData(data: TrafficSimResult[], bucketSizeMs: number): T
       jitterP95: jitterP95s.length > 0 ? percentile(jitterP95s, 95) : 0,
       totalPackets: totalPackets,
       lostPackets: lostPackets,
-      outOfSequence: outOfSeq
+      outOfSequence: outOfSeq,
+      // Tooltip-only quality values: average across the bucket when present
+      mos: avgOf(bucketData.map(d => d.mos || d.mosScore || 0).filter(v => v > 0)),
+      networkHealthScore: avgOf(bucketData.map(d => d.networkHealthScore || 0).filter(v => v > 0))
     });
   });
   
@@ -522,18 +529,15 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       name: 'Out of Sequence',
       type: 'scatter',
       data: processedData.map(d => ({ x: new Date(d.reportTime).getTime(), y: d.outOfSequence }))
-    },
-    {
-      name: 'MOS Score',
-      type: 'line',
-      data: buildSeriesData(d => d.mos || d.mosScore || 0)
-    },
-    {
-      name: 'Network Health',
-      type: 'line',
-      data: buildSeriesData(d => d.networkHealthScore || 0)
     }
+    // MOS / Network Health intentionally have NO lines here — they clutter the
+    // troubleshooting view and MOS has its own dedicated graph. Their values
+    // still appear in the hover tooltip (looked up by timestamp below).
   ];
+
+  // Timestamp → data point map for tooltip values that have no chart series
+  const pointByTime = new Map<number, TrafficSimResult>();
+  processedData.forEach(d => pointByTime.set(new Date(d.reportTime).getTime(), d));
 
   // Color palette - ordered to match series indices above
   const seriesColors = [
@@ -546,9 +550,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     '#eab308',  // Jitter Avg - yellow
     '#f59e0b',  // Jitter P95 - amber
     '#ef4444',  // Packet Loss - red (distinct from the jitter yellows)
-    '#a855f7',  // Out of Sequence - purple scatter
-    '#22c55e',  // MOS Score - green (higher is better)
-    '#6366f1'   // Network Health - indigo (higher is better)
+    '#a855f7'   // Out of Sequence - purple scatter
   ];
 
   // Initialize empty annotations (gaps are handled by null values in series data)
@@ -737,12 +739,12 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     stroke: {
       // Min/Max RTT are thin dashed envelope lines so spikes stay visible
       // without visually dominating the averages.
-      width: [3, 2, 2, 2, 1, 1, 2, 2, 0, 0, 2, 2],
+      width: [3, 2, 2, 2, 1, 1, 2, 2, 0, 0],
       curve: 'smooth',
-      dashArray: [0, 0, 4, 4, 2, 2, 0, 4, 0, 0, 0, 0]  // Dashed for percentile/envelope lines
+      dashArray: [0, 0, 4, 4, 2, 2, 0, 4, 0, 0]  // Dashed for percentile/envelope lines
     },
     fill: {
-      type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid', 'solid', 'solid'],
+      type: ['solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'solid', 'gradient', 'solid'],
       gradient: {
         shadeIntensity: 0.8,
         opacityFrom: 0.35,
@@ -751,7 +753,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       }
     },
     markers: {
-      size: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3],
+      size: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       strokeWidth: 0,
       hover: {
         size: 6,
@@ -849,44 +851,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
           }
         }
       },
-      {
-        // MOS is a 1-5 score — it must NOT share the 0-100 health axis, or the
-        // curve renders as a flat line at the bottom.
-        seriesName: ['MOS Score'],
-        opposite: true,
-        title: {
-          text: 'MOS (1-5)',
-          style: {
-            color: colors.foreColor,
-            fontSize: '14px',
-            fontWeight: 600
-          }
-        },
-        min: 0,
-        max: 5,
-        tickAmount: 5,
-        labels: {
-          style: {
-            colors: colors.labelColor,
-            fontSize: '12px'
-          },
-          formatter: (val) => val.toFixed(1)
-        }
-      },
-      {
-        seriesName: ['Network Health'],
-        opposite: true,
-        show: false,
-        min: 0,
-        max: 100,
-        labels: {
-          style: {
-            colors: colors.labelColor,
-            fontSize: '12px'
-          },
-          formatter: (val) => val.toFixed(0)
-        }
-      }
+      // MOS / Network Health have no chart series (tooltip-only) — no axes needed.
     ],
     tooltip: {
       enabled: true,
@@ -907,15 +872,11 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
       y: {
         formatter: function (y, { seriesIndex }) {
           if (y != null) {
-            // idx 0-7: RTT/Jitter in ms, idx 8: Packet Loss %, idx 9: Out of Sequence count, idx 10: MOS, idx 11: Network Health
+            // idx 0-7: RTT/Jitter in ms, idx 8: Packet Loss %, idx 9: Out of Sequence count
             if (seriesIndex === 8) {
               return y.toFixed(1) + "%";
             } else if (seriesIndex === 9) {
               return y.toFixed(0) + " pkts";
-            } else if (seriesIndex === 10) {
-              return y.toFixed(2) + " MOS";
-            } else if (seriesIndex === 11) {
-              return y.toFixed(1) + " score";
             }
             return y.toFixed(1) + " ms";
           }
@@ -1012,9 +973,11 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         
         html += '</div></div>';
         
-        // Quality section (indices 10-11: MOS Score, Network Health)
-        const mosValue = series[10]?.[dataPointIndex];
-        const healthValue = series[11]?.[dataPointIndex];
+        // Quality section: MOS / Network Health have no chart lines (kept off
+        // the graph for clarity) — values come from the data point itself.
+        const qualityPoint = pointByTime.get(timestamp);
+        const mosValue = qualityPoint ? (qualityPoint.mos || qualityPoint.mosScore || 0) : 0;
+        const healthValue = qualityPoint?.networkHealthScore || 0;
         if ((mosValue != null && mosValue > 0) || (healthValue != null && healthValue > 0)) {
           html += '<div class="tooltip-section">';
           html += '<div class="tooltip-section-title">Quality</div>';
