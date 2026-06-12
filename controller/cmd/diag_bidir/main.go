@@ -172,6 +172,33 @@ func main() {
 		}
 	}
 
+	fmt.Println("\n==== ComputeProbeAnalysis(ws=2, probe=672, 60m) ====")
+	if pa, err := probe.ComputeProbeAnalysis(ctx, ch, db, 2, 672, 60); err != nil {
+		fmt.Println("ERROR:", err)
+	} else {
+		fmt.Printf("FORWARD  %s → %s: health=%.0f (%s) MOS=%.2f lat=%.1fms loss=%.2f%% jitter=%.1fms samples=%d\n",
+			pa.AgentName, pa.Target, pa.Health.OverallHealth, pa.Health.Grade, pa.Health.MosScore,
+			pa.Metrics.AvgLatency, pa.Metrics.PacketLoss, pa.Metrics.JitterAvg, pa.Metrics.SampleCount)
+		if pa.Reverse != nil {
+			fmt.Printf("REVERSE  %s → %s: health=%.0f (%s) MOS=%.2f lat=%.1fms loss=%.2f%% jitter=%.1fms samples=%d\n",
+				pa.Reverse.AgentName, pa.Reverse.Target, pa.Reverse.Health.OverallHealth, pa.Reverse.Health.Grade,
+				pa.Reverse.Health.MosScore, pa.Reverse.Metrics.AvgLatency, pa.Reverse.Metrics.PacketLoss,
+				pa.Reverse.Metrics.JitterAvg, pa.Reverse.Metrics.SampleCount)
+		} else {
+			fmt.Println("REVERSE  (none)")
+		}
+		if pa.CombinedHealth != nil {
+			fmt.Printf("COMBINED health=%.0f (%s) MOS=%.2f\n",
+				pa.CombinedHealth.OverallHealth, pa.CombinedHealth.Grade, pa.CombinedHealth.MosScore)
+		}
+		for _, s := range pa.Signals {
+			fmt.Printf("SIGNAL   [%s] %s — %s\n", s.Severity, s.Title, s.Evidence)
+		}
+		for _, f := range pa.Findings {
+			fmt.Printf("FINDING  [%s/%s] %s\n", f.Severity, f.Category, f.Title)
+		}
+	}
+
 	fmt.Println("\n==== NETINFO public_address history (last 6h) ====")
 	for _, aid := range []uint64{41, 71} {
 		nrows, err := ch.QueryContext(ctx, `

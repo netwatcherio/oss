@@ -64,6 +64,8 @@ export interface ProbeAnalysis {
     metrics: ProbeMetrics
     path_analysis?: MtrPathAnalysis
     reverse?: ProbeAnalysis
+    // Worse-direction-weighted merge of forward + reverse health (bidirectional only)
+    combined_health?: HealthVector
     signals: AnalysisSignal[]
     findings: AnalysisFinding[]
     generated_at: string

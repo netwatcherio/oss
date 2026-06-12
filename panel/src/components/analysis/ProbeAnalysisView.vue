@@ -123,6 +123,20 @@ watch(() => props.probeId, fetchAnalysis)
               <span class="mos-badge">MOS {{ formatMos(analysis.reverse.health.mos_score) }}</span>
             </div>
           </div>
+
+          <!-- Combined bidirectional health (worse-direction weighted) -->
+          <div v-if="analysis.combined_health" class="direction-card" :style="{ borderColor: gradeColor(analysis.combined_health.grade).border }">
+            <div class="direction-label">
+              <i class="bi bi-arrow-left-right me-1"></i>
+              Combined (both directions)
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-1">
+              <span class="grade-badge" :style="{ background: gradeColor(analysis.combined_health.grade).bg, color: gradeColor(analysis.combined_health.grade).text }">
+                {{ Math.round(analysis.combined_health.overall_health) }}/100 · {{ analysis.combined_health.grade }}
+              </span>
+              <span class="mos-badge">MOS {{ formatMos(analysis.combined_health.mos_score) }}</span>
+            </div>
+          </div>
         </div>
       </div>
 

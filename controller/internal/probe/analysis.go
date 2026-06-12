@@ -145,9 +145,13 @@ type ProbeAnalysis struct {
 	Metrics      ProbeMetrics      `json:"metrics"`
 	PathAnalysis *MtrPathAnalysis  `json:"path_analysis,omitempty"`
 	Reverse      *ProbeAnalysis    `json:"reverse,omitempty"`
-	Signals      []AnalysisSignal  `json:"signals"`
-	Findings     []AnalysisFinding `json:"findings"`
-	GeneratedAt  time.Time         `json:"generated_at"`
+	// CombinedHealth merges forward and reverse health for bidirectional probes,
+	// weighted toward the worse direction (a path is only as usable as its worse
+	// direction). Nil when no reverse data exists.
+	CombinedHealth *HealthVector     `json:"combined_health,omitempty"`
+	Signals        []AnalysisSignal  `json:"signals"`
+	Findings       []AnalysisFinding `json:"findings"`
+	GeneratedAt    time.Time         `json:"generated_at"`
 }
 
 // ── Workspace-level Analysis ──
@@ -931,38 +935,151 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		}
 	}
 
-	// Fetch PING metrics for this probe — source agent only
-	metrics, err := probeAnalysisMetrics(ctx, ch, []uint{p.AgentID}, pingProbeID, from)
+	// Forward direction: rows reported by the probe's owner agent
+	fwd := analyzeProbeDirection(ctx, ch, directionInput{
+		PingProbeID:       pingProbeID,
+		MtrProbeID:        mtrProbeID,
+		TrafficSimProbeID: probeID,
+		ReporterID:        p.AgentID,
+		IncludeTrafficSim: p.Type == TypeAgent,
+	}, from, agentIPToID, agentByID)
+
+	log.Debugf("[Analysis] Probe %d (type=%s): forward samples=%d, avgLat=%.1f, loss=%.2f%%",
+		probeID, p.Type, fwd.Metrics.SampleCount, fwd.Metrics.AvgLatency, fwd.Metrics.PacketLoss)
+
+	result := &ProbeAnalysis{
+		ProbeID:      probeID,
+		ProbeType:    string(p.Type),
+		Target:       targetName,
+		AgentID:      p.AgentID,
+		AgentName:    agentName,
+		Health:       fwd.Health,
+		Metrics:      fwd.Metrics,
+		PathAnalysis: fwd.Path,
+		Signals:      fwd.Signals,
+		Findings:     fwd.Findings,
+		GeneratedAt:  time.Now().UTC(),
+	}
+
+	// Reverse direction. Two formats:
+	// - NEW single-probe bidirectional: return-path rows live under the SAME
+	//   probe ID, reported by the target agent.
+	// - LEGACY dual-probe: a reciprocal AGENT probe owned by the target exists
+	//   in the DB; its rows live under that probe's ID.
+	if targetAgentID > 0 {
+		revProbeID := probeID
+		revProbeType := string(p.Type)
+
+		// Prefer the legacy reciprocal probe when one exists (hybrid/legacy DBs);
+		// otherwise use the new-format same-ID reverse rows.
+		if reverseProbes, rerr := findReverseAgentProbes(ctx, pg, p.AgentID); rerr == nil {
+			for _, rp := range reverseProbes {
+				if rp.AgentID == targetAgentID {
+					revProbeID = rp.ID
+					revProbeType = string(rp.Type)
+					break
+				}
+			}
+		}
+
+		rev := analyzeProbeDirection(ctx, ch, directionInput{
+			PingProbeID:       revProbeID,
+			MtrProbeID:        revProbeID,
+			TrafficSimProbeID: probeID, // reverse TrafficSim always reports under the client's probe ID
+			ReporterID:        targetAgentID,
+			IncludeTrafficSim: p.Type == TypeAgent,
+		}, from, agentIPToID, agentByID)
+
+		hasReverseData := rev.Metrics.SampleCount > 0 || (rev.Path != nil && rev.Path.TraceCount > 0)
+		if hasReverseData {
+			revAgentName := ""
+			if a, ok := agentByID[targetAgentID]; ok {
+				revAgentName = a.Name
+			}
+
+			result.Reverse = &ProbeAnalysis{
+				ProbeID:      revProbeID,
+				ProbeType:    revProbeType,
+				Target:       agentName, // reverse target is the original agent
+				AgentID:      targetAgentID,
+				AgentName:    revAgentName,
+				Health:       rev.Health,
+				Metrics:      rev.Metrics,
+				PathAnalysis: rev.Path,
+				Signals:      rev.Signals,
+				Findings:     rev.Findings,
+				GeneratedAt:  time.Now().UTC(),
+			}
+
+			// Bidirectional heuristics: a clean direction next to a degraded one
+			// localizes the problem to one path — the key troubleshooting signal
+			// that single-direction analysis can't produce.
+			if fwd.Metrics.SampleCount > 0 {
+				fwdLabel := fmt.Sprintf("%s → %s", agentName, revAgentName)
+				revLabel := fmt.Sprintf("%s → %s", revAgentName, agentName)
+				asymSignals, asymFindings := buildDirectionalitySignals(fwd.Metrics, rev.Metrics, fwdLabel, revLabel)
+				result.Signals = append(result.Signals, asymSignals...)
+				result.Findings = append(result.Findings, asymFindings...)
+			}
+
+			combined := combineDirectionHealth(fwd.Health, rev.Health)
+			result.CombinedHealth = &combined
+		}
+	}
+
+	return result, nil
+}
+
+// directionInput identifies which probe IDs and reporter make up one direction
+// of a probe's data.
+type directionInput struct {
+	PingProbeID       uint
+	MtrProbeID        uint
+	TrafficSimProbeID uint
+	ReporterID        uint
+	IncludeTrafficSim bool
+}
+
+// directionAnalysis is the per-direction result bundle.
+type directionAnalysis struct {
+	Metrics  ProbeMetrics
+	Path     *MtrPathAnalysis
+	Signals  []AnalysisSignal
+	Health   HealthVector
+	Findings []AnalysisFinding
+}
+
+// analyzeProbeDirection computes metrics, MTR path analysis, signals, health
+// and findings for ONE direction of a probe: the rows reported by ReporterID.
+// Forward passes the owner agent; reverse passes the target agent (same probe
+// ID for new-format bidirectional probes, reciprocal probe ID for legacy).
+func analyzeProbeDirection(ctx context.Context, ch *sql.DB, in directionInput, from time.Time, agentIPToID map[string]uint, agentByID map[uint]agentInfo) directionAnalysis {
+	metrics, err := probeAnalysisMetrics(ctx, ch, []uint{in.ReporterID}, in.PingProbeID, from)
 	if err != nil {
-		log.Warnf("[Analysis] Failed to fetch PING metrics for probe %d: %v", pingProbeID, err)
+		log.Warnf("[Analysis] Failed to fetch PING metrics for probe %d (reporter %d): %v", in.PingProbeID, in.ReporterID, err)
 		metrics = ProbeMetrics{}
 	}
 
-	log.Debugf("[Analysis] Probe %d (type=%s): PING samples=%d (queried pid=%d), avgLat=%.1f, loss=%.2f%%, agentIDs=%v",
-		probeID, p.Type, metrics.SampleCount, pingProbeID, metrics.AvgLatency, metrics.PacketLoss, agentIDs)
-
-	// Fetch MTR path analysis — source agent only
-	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, []uint{p.AgentID}, mtrProbeID, from, agentIPToID, agentByID)
+	pathAnalysis, mtrSignals, err := analyzeMtrForProbe(ctx, ch, []uint{in.ReporterID}, in.MtrProbeID, from, agentIPToID, agentByID)
 	if err != nil {
-		log.Warnf("[Analysis] Failed to analyze MTR for probe %d: %v", mtrProbeID, err)
+		log.Warnf("[Analysis] Failed to analyze MTR for probe %d (reporter %d): %v", in.MtrProbeID, in.ReporterID, err)
 	}
 
-	// For AGENT probes, also fetch TrafficSim data (same probe_id, different type) — source agent only
-	// For non-AGENT probes, also fetch TrafficSim to use as fallback when MTR end-hop is needed
-	tsMetrics := ProbeMetrics{}
-	if p.Type == TypeAgent {
-		tsMetrics = probeTrafficSimMetrics(ctx, ch, []uint{p.AgentID}, probeID, from)
-		log.Debugf("[Analysis] Probe %d AGENT: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
-			probeID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
+	// TrafficSim data (same probe_id, different type)
+	if in.IncludeTrafficSim {
+		tsMetrics := probeTrafficSimMetrics(ctx, ch, []uint{in.ReporterID}, in.TrafficSimProbeID, from)
+		log.Debugf("[Analysis] Probe %d reporter %d: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
+			in.TrafficSimProbeID, in.ReporterID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
 		if tsMetrics.SampleCount > 0 {
 			// If PING data was empty, use TrafficSim as primary (not blended)
 			if metrics.SampleCount == 0 {
 				metrics.AvgLatency = tsMetrics.AvgLatency
 				metrics.P95Latency = tsMetrics.P95Latency
 				metrics.PacketLoss = tsMetrics.PacketLoss
+				metrics.JitterAvg = tsMetrics.JitterAvg
 				metrics.SampleCount = tsMetrics.SampleCount
 			} else {
-				// Blend: use worse of PING/TrafficSim loss, average the latencies
+				// Blend: use worse of PING/TrafficSim loss
 				if tsMetrics.PacketLoss > metrics.PacketLoss {
 					metrics.PacketLoss = tsMetrics.PacketLoss
 				}
@@ -970,13 +1087,10 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		}
 	}
 
-	// For non-AGENT probes (standalone MTR, etc.), if PING metrics are empty
-	// but MTR path analysis found data, derive metrics from MTR end-hop stats.
-	// This ensures standalone MTR probes get proper health scores.
+	// If PING metrics are empty but MTR path analysis found data, derive
+	// metrics from MTR end-hop stats so the direction still gets a health score.
 	var fallbackSignals []AnalysisSignal
 	if metrics.SampleCount == 0 && pathAnalysis != nil && pathAnalysis.TraceCount > 0 {
-		log.Debugf("[Analysis] Probe %d (type=%s): No PING data, falling back to MTR end-hop metrics (traces=%d, lat=%.1f, loss=%.2f%%, jitter=%.1f)",
-			probeID, p.Type, pathAnalysis.TraceCount, pathAnalysis.AvgEndHopLatency, pathAnalysis.AvgEndHopLoss, pathAnalysis.AvgEndHopJitterAvg)
 		metrics.AvgLatency = pathAnalysis.AvgEndHopLatency
 		metrics.P95Latency = pathAnalysis.AvgEndHopLatency * 1.3 // Approximate P95 from avg
 		metrics.PacketLoss = pathAnalysis.AvgEndHopLoss
@@ -997,15 +1111,12 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		routeStability = pathAnalysis.RouteStabilityPct
 	}
 
-	// Compute health vector
 	health := computeHealthVector(metrics, routeStability)
 
-	// Build combined signals
 	var signals []AnalysisSignal
 	signals = append(signals, mtrSignals...)
 	signals = append(signals, fallbackSignals...)
 
-	// Add metric-based signals
 	if metrics.AvgLatency > 150 {
 		sev := "warning"
 		if metrics.AvgLatency > 300 {
@@ -1044,64 +1155,158 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		})
 	}
 
-	// Build findings from signals
-	findings := buildFindings(health, metrics, pathAnalysis, signals)
+	return directionAnalysis{
+		Metrics:  metrics,
+		Path:     pathAnalysis,
+		Signals:  signals,
+		Health:   health,
+		Findings: buildFindings(health, metrics, pathAnalysis, signals),
+	}
+}
 
-	result := &ProbeAnalysis{
-		ProbeID:      probeID,
-		ProbeType:    string(p.Type),
-		Target:       targetName,
-		AgentID:      p.AgentID,
-		AgentName:    agentName,
-		Health:       health,
-		Metrics:      metrics,
-		PathAnalysis: pathAnalysis,
-		Signals:      signals,
-		Findings:     findings,
-		GeneratedAt:  time.Now().UTC(),
+// buildDirectionalitySignals compares forward and reverse metrics and emits
+// asymmetry signals/findings. Direction labels are "Source → Target" strings.
+func buildDirectionalitySignals(fwd, rev ProbeMetrics, fwdLabel, revLabel string) ([]AnalysisSignal, []AnalysisFinding) {
+	var signals []AnalysisSignal
+	var findings []AnalysisFinding
+
+	worseLabel := func(fwdWorse bool) string {
+		if fwdWorse {
+			return fwdLabel
+		}
+		return revLabel
 	}
 
-	// Check for reverse/reciprocal probe
-	if targetAgentID > 0 {
-		reverseProbes, err := findReverseAgentProbes(ctx, pg, p.AgentID)
-		if err == nil {
-			for _, rp := range reverseProbes {
-				if rp.AgentID == targetAgentID {
-					// Found the reverse probe — compute its analysis using target agent data only
-					revMetrics, _ := probeAnalysisMetrics(ctx, ch, []uint{targetAgentID}, rp.ID, from)
-					revPath, revSignals, _ := analyzeMtrForProbe(ctx, ch, []uint{targetAgentID}, rp.ID, from, agentIPToID, agentByID)
-					revRouteStab := 100.0
-					if revPath != nil {
-						revRouteStab = revPath.RouteStabilityPct
-					}
-					revHealth := computeHealthVector(revMetrics, revRouteStab)
-					revFindings := buildFindings(revHealth, revMetrics, revPath, revSignals)
+	// Loss asymmetry: one direction dropping packets while the other is clean
+	// points at the worse direction's path (upload saturation at its source,
+	// one-way policing/QoS, or asymmetric routing).
+	lossDiff := fwd.PacketLoss - rev.PacketLoss
+	maxLoss := math.Max(fwd.PacketLoss, rev.PacketLoss)
+	if math.Abs(lossDiff) >= 2 && maxLoss >= 1 {
+		sev := "warning"
+		if maxLoss > 5 && math.Abs(lossDiff) >= 5 {
+			sev = "critical"
+		}
+		dir := worseLabel(lossDiff > 0)
+		signals = append(signals, AnalysisSignal{
+			Type:     "loss_asymmetry",
+			Severity: sev,
+			Title:    "Directional Packet Loss",
+			Evidence: fmt.Sprintf("%s: %.1f%% loss vs %s: %.1f%% loss",
+				fwdLabel, fwd.PacketLoss, revLabel, rev.PacketLoss),
+			Confidence: 0.9,
+		})
+		findings = append(findings, AnalysisFinding{
+			ID:       "loss-asymmetry",
+			Title:    fmt.Sprintf("Packet loss is concentrated in one direction (%s)", dir),
+			Severity: sev,
+			Category: "directionality",
+			Summary: fmt.Sprintf("The %s direction is losing %.1f%% of packets while the opposite direction loses %.1f%% — the underlying path is healthy in one direction, so this is not general congestion at the target.",
+				dir, maxLoss, math.Min(fwd.PacketLoss, rev.PacketLoss)),
+			Evidence: []string{
+				fmt.Sprintf("%s: %.1f%% loss", fwdLabel, fwd.PacketLoss),
+				fmt.Sprintf("%s: %.1f%% loss", revLabel, rev.PacketLoss),
+			},
+			Steps: []string{
+				"Check upload utilization/saturation at the source of the degraded direction",
+				"Look for one-way QoS policing or rate limiting (especially on DSCP-marked traffic)",
+				"Compare forward and reverse MTR paths for asymmetric routing",
+				"Check duplex mismatches or Wi-Fi retransmits at the degraded direction's source",
+			},
+		})
+	}
 
-					revAgentName := ""
-					if a, ok := agentByID[targetAgentID]; ok {
-						revAgentName = a.Name
-					}
-
-					result.Reverse = &ProbeAnalysis{
-						ProbeID:      rp.ID,
-						ProbeType:    string(rp.Type),
-						Target:       agentName, // reverse target is the original agent
-						AgentID:      targetAgentID,
-						AgentName:    revAgentName,
-						Health:       revHealth,
-						Metrics:      revMetrics,
-						PathAnalysis: revPath,
-						Signals:      revSignals,
-						Findings:     revFindings,
-						GeneratedAt:  time.Now().UTC(),
-					}
-					break
-				}
-			}
+	// Latency asymmetry: large one-way skew usually means queueing (bufferbloat)
+	// or a longer return route, not target distance.
+	if fwd.AvgLatency > 0 && rev.AvgLatency > 0 {
+		hi := math.Max(fwd.AvgLatency, rev.AvgLatency)
+		lo := math.Min(fwd.AvgLatency, rev.AvgLatency)
+		if hi/lo >= 1.5 && hi-lo >= 30 {
+			dir := worseLabel(fwd.AvgLatency > rev.AvgLatency)
+			signals = append(signals, AnalysisSignal{
+				Type:     "latency_asymmetry",
+				Severity: "warning",
+				Title:    "Asymmetric Latency",
+				Evidence: fmt.Sprintf("%s: %.1fms vs %s: %.1fms",
+					fwdLabel, fwd.AvgLatency, revLabel, rev.AvgLatency),
+				Confidence: 0.85,
+			})
+			findings = append(findings, AnalysisFinding{
+				ID:       "latency-asymmetry",
+				Title:    fmt.Sprintf("Latency is significantly higher in one direction (%s)", dir),
+				Severity: "warning",
+				Category: "directionality",
+				Summary: fmt.Sprintf("The %s direction averages %.1fms while the opposite direction averages %.1fms. Since both measurements traverse the same endpoints, the skew points at queueing delay (bufferbloat) or a longer route in the slower direction.",
+					dir, hi, lo),
+				Evidence: []string{
+					fmt.Sprintf("%s: avg %.1fms", fwdLabel, fwd.AvgLatency),
+					fmt.Sprintf("%s: avg %.1fms", revLabel, rev.AvgLatency),
+				},
+				Steps: []string{
+					"Check for sustained upload traffic at the slower direction's source (bufferbloat)",
+					"Compare MTR hop counts and paths between directions for route asymmetry",
+					"Enable/verify SQM or smart queue management on the slower direction's uplink",
+				},
+			})
 		}
 	}
 
-	return result, nil
+	// Jitter asymmetry: one-way jitter with clean jitter the other way usually
+	// means access-layer instability (Wi-Fi, congested uplink) at one end.
+	if fwd.JitterAvg > 0 || rev.JitterAvg > 0 {
+		hi := math.Max(fwd.JitterAvg, rev.JitterAvg)
+		lo := math.Min(fwd.JitterAvg, rev.JitterAvg)
+		if hi >= 15 && (lo == 0 || hi/math.Max(lo, 0.1) >= 2) {
+			dir := worseLabel(fwd.JitterAvg > rev.JitterAvg)
+			signals = append(signals, AnalysisSignal{
+				Type:     "jitter_asymmetry",
+				Severity: "warning",
+				Title:    "Asymmetric Jitter",
+				Evidence: fmt.Sprintf("%s: %.1fms jitter vs %s: %.1fms jitter",
+					fwdLabel, fwd.JitterAvg, revLabel, rev.JitterAvg),
+				Confidence: 0.8,
+			})
+			findings = append(findings, AnalysisFinding{
+				ID:       "jitter-asymmetry",
+				Title:    fmt.Sprintf("Jitter is concentrated in one direction (%s)", dir),
+				Severity: "warning",
+				Category: "directionality",
+				Summary: fmt.Sprintf("The %s direction shows %.1fms average jitter against %.1fms the other way — typically access-layer instability (Wi-Fi interference, congested uplink) at that direction's source rather than a path-wide issue.",
+					dir, hi, lo),
+				Evidence: []string{
+					fmt.Sprintf("%s: %.1fms jitter", fwdLabel, fwd.JitterAvg),
+					fmt.Sprintf("%s: %.1fms jitter", revLabel, rev.JitterAvg),
+				},
+				Steps: []string{
+					"Check the degraded direction's source for Wi-Fi vs wired connectivity",
+					"Inspect uplink utilization at the degraded direction's source during jitter spikes",
+					"Correlate jitter windows with scheduled transfers or backups",
+				},
+			})
+		}
+	}
+
+	return signals, findings
+}
+
+// combineDirectionHealth merges forward and reverse health into a single
+// bidirectional score, weighting the worse direction at 65% — a link is only
+// as usable as its worse direction, but the better direction still matters.
+func combineDirectionHealth(fwd, rev HealthVector) HealthVector {
+	worse, better := fwd, rev
+	if rev.OverallHealth < fwd.OverallHealth {
+		worse, better = rev, fwd
+	}
+	mix := func(w, b float64) float64 { return clampScore(w*0.65 + b*0.35) }
+	overall := mix(worse.OverallHealth, better.OverallHealth)
+	return HealthVector{
+		LatencyScore:    mix(worse.LatencyScore, better.LatencyScore),
+		PacketLossScore: mix(worse.PacketLossScore, better.PacketLossScore),
+		RouteStability:  mix(worse.RouteStability, better.RouteStability),
+		MosScore:        math.Min(fwd.MosScore, rev.MosScore),
+		OverallHealth:   overall,
+		Grade:           gradeFromScore(overall),
+	}
 }
 
 // ComputeWorkspaceAnalysis aggregates health vectors across all agents in a workspace
