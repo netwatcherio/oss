@@ -2,3 +2,6 @@
 /panel/.env
 /controller/netwatcher-controller
 .env
+# Local runtime artifacts
+.codegraph/
+data/
