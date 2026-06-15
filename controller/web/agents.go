@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
@@ -18,7 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits.Config) {
+func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, deletionStore *deletion.QueueStore, limitsConfig *limits.Config) {
 	ws := api.Group("/workspaces/:id")
 	wsStore := workspace.NewStore(db)
 
@@ -213,7 +214,7 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, limitsConfig *limits
 			log.Infof("Sent deactivation to connected agent %d before deletion", aID)
 		}
 
-		if err := agent.DeleteAgent(c.UserContext(), db, aID); err != nil {
+		if err := agent.DeleteAgent(c.UserContext(), db, deletionStore, aID); err != nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(fiber.Map{"ok": true})

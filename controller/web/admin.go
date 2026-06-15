@@ -8,6 +8,7 @@ import (
 
 	"netwatcher-controller/internal/admin"
 	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
@@ -17,7 +18,7 @@ import (
 
 // RegisterAdminRoutes mounts admin API endpoints under /admin
 // All routes require SITE_ADMIN role via AdminMiddleware
-func RegisterAdminRoutes(api fiber.Router, db *gorm.DB) {
+func RegisterAdminRoutes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueStore) {
 	adminAPI := api.Group("/admin")
 	adminAPI.Use(AdminMiddleware(db))
 
@@ -36,7 +37,7 @@ func RegisterAdminRoutes(api fiber.Router, db *gorm.DB) {
 	adminAPI.Get("/workspaces", adminListWorkspacesHandler(db))
 	adminAPI.Get("/workspaces/:id", adminGetWorkspaceHandler(db))
 	adminAPI.Put("/workspaces/:id", adminUpdateWorkspaceHandler(db))
-	adminAPI.Delete("/workspaces/:id", adminDeleteWorkspaceHandler(db))
+	adminAPI.Delete("/workspaces/:id", adminDeleteWorkspaceHandler(db, deletionStore))
 
 	// Workspace members
 	adminAPI.Get("/workspaces/:id/members", adminListMembersHandler(db))
@@ -293,12 +294,12 @@ func adminUpdateWorkspaceHandler(db *gorm.DB) fiber.Handler {
 	}
 }
 
-func adminDeleteWorkspaceHandler(db *gorm.DB) fiber.Handler {
+func adminDeleteWorkspaceHandler(db *gorm.DB, deletionStore *deletion.QueueStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		store := workspace.NewStore(db)
 		id := uintParam(c, "id")
 
-		if err := store.DeleteWorkspace(context.Background(), id); err != nil {
+		if err := store.DeleteWorkspace(context.Background(), deletionStore, id); err != nil {
 			if err == workspace.ErrNotFound {
 				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "workspace not found"})
 			}

@@ -16,6 +16,7 @@ import (
 
 	"netwatcher-controller/internal/admin"
 	"netwatcher-controller/internal/database"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/llm"
@@ -76,6 +77,12 @@ func main() {
 	emailWorker := email.NewWorker(db, smtpConfig)
 	if err := emailWorker.Start(); err != nil {
 		log.WithError(err).Fatal("email worker start failed")
+	}
+
+	// ---- Deletion Worker (async ClickHouse cleanup for probe/agent deletes) ----
+	deletionWorker := deletion.NewWorker(db, ch)
+	if err := deletionWorker.Start(); err != nil {
+		log.WithError(err).Fatal("deletion worker start failed")
 	}
 
 	// ---- GeoIP ----
@@ -162,7 +169,7 @@ func main() {
 
 	probe.InitWorkers(ch, db)
 
-	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), geoStore, ouiStore, reportScheduler)
+	web.RegisterRoutes(app, db, ch, emailWorker.GetStore(), deletionWorker.Store(), geoStore, ouiStore, reportScheduler)
 
 	// ---- Build unified HTTP mux ----
 	// WebSocket routes are served by net/http (supports http.Hijacker).
@@ -188,6 +195,7 @@ func main() {
 		cleanupCancel()
 		probe.StopBatchWriter()
 		emailWorker.Stop()
+		deletionWorker.Stop()
 		reportScheduler.Stop()
 		if geoStore != nil {
 			geoStore.Close()

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/limits"
@@ -20,7 +21,7 @@ import (
 )
 
 // RegisterRoutes mounts all REST / Fiber routes (no WebSocket routes here).
-func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store, reportScheduler *reports.Scheduler) {
+func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.QueueStore, deletionStore *deletion.QueueStore, geoStore *geoip.Store, ouiStore *oui.Store, reportScheduler *reports.Scheduler) {
 	limitsConfig := limits.LoadFromEnv()
 
 	// ----- Public (no auth) -----
@@ -37,9 +38,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	api := app.Group("/")
 	api.Use(JWTMiddleware(db))
 
-	panelWorkspaces(api, db, emailStore, limitsConfig)
-	panelProbes(api, db, limitsConfig)
-	panelAgents(api, db, ch, limitsConfig)
+	panelWorkspaces(api, db, emailStore, deletionStore, limitsConfig)
+	panelProbes(api, db, deletionStore, limitsConfig)
+	panelAgents(api, db, ch, deletionStore, limitsConfig)
 	panelProbeData(api, db, ch)
 	panelSpeedtest(api, db, ch)
 	panelGeoIP(api, geoStore, ch)
@@ -51,7 +52,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelAnalysis(api, db, ch)
 	panelReports(api, db, ch, emailStore, reportScheduler)
 	agentReports(api, db, ch)
-	RegisterAdminRoutes(api, db)
+	RegisterAdminRoutes(api, db, deletionStore)
 
 	// Workspace-scoped metrics (API key auth)
 	// Metrics include workspace_id labels; customers use Prometheus relabeling to filter

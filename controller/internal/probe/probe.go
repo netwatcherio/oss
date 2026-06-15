@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"netwatcher-controller/internal/agent"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/speedtest"
 	"strconv"
 	"strings"
@@ -1444,9 +1445,13 @@ func Update(ctx context.Context, db *gorm.DB, in UpdateInput) (*Probe, error) {
 	return GetByID(ctx, db, in.ID)
 }
 
-// Delete hard-deletes the probe and all associated data.
-func Delete(ctx context.Context, db *gorm.DB, id uint) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// Delete soft-deletes the probe and all associated data, then enqueues an
+// asynchronous ClickHouse cleanup of probe_data rows for this probe. CH
+// mutations are heavy on partitioned MergeTree tables, so they are dispatched
+// by the deletion worker off the request thread. The deletion store may be nil
+// in tests, in which case the CH enqueue is skipped.
+func Delete(ctx context.Context, db *gorm.DB, deletionStore *deletion.QueueStore, id uint) error {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete targets
 		if err := tx.Where("probe_id = ?", id).Delete(&Target{}).Error; err != nil {
 			return err
@@ -1472,12 +1477,22 @@ func Delete(ctx context.Context, db *gorm.DB, id uint) error {
 			return ErrNotFound
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	if deletionStore != nil {
+		if err := deletionStore.Enqueue(ctx, deletion.EntityProbe, id); err != nil {
+			log.WithError(err).WithField("probe_id", id).Error("probe.Delete: failed to enqueue CH cleanup")
+		}
+	}
+	return nil
 }
 
 // DeleteByAgent deletes all probes owned by an agent (and their targets).
-func DeleteByAgent(ctx context.Context, db *gorm.DB, agentID uint) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// ClickHouse cleanup is enqueued as a single agent-scoped job.
+func DeleteByAgent(ctx context.Context, db *gorm.DB, deletionStore *deletion.QueueStore, agentID uint) error {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ids []uint
 		if err := tx.Model(&Probe{}).Where("agent_id = ?", agentID).Pluck("id", &ids).Error; err != nil {
 			return err
@@ -1489,7 +1504,16 @@ func DeleteByAgent(ctx context.Context, db *gorm.DB, agentID uint) error {
 			return err
 		}
 		return tx.Where("agent_id = ?", agentID).Delete(&Probe{}).Error
-	})
+	}); err != nil {
+		return err
+	}
+
+	if deletionStore != nil {
+		if err := deletionStore.Enqueue(ctx, deletion.EntityAgent, agentID); err != nil {
+			log.WithError(err).WithField("agent_id", agentID).Error("probe.DeleteByAgent: failed to enqueue CH cleanup")
+		}
+	}
+	return nil
 }
 
 // ListOfType returns all probes for an agent of a given type.

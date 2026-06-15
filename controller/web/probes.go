@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
@@ -15,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelProbes(api fiber.Router, db *gorm.DB, limitsConfig *limits.Config) {
+func panelProbes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueStore, limitsConfig *limits.Config) {
 	base := api.Group("/workspaces/:id/agents/:agentID/probes")
 	wsStore := workspace.NewStore(db)
 
@@ -110,7 +111,7 @@ func panelProbes(api fiber.Router, db *gorm.DB, limitsConfig *limits.Config) {
 	// DELETE /workspaces/:id/agents/:agentID/probes/:probeID - requires CanEdit (USER+)
 	pid.Delete("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
 		id := uintParam(c, "probeID")
-		if err := probe.Delete(c.UserContext(), db, id); err != nil {
+		if err := probe.Delete(c.UserContext(), db, deletionStore, id); err != nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(fiber.Map{"ok": true})

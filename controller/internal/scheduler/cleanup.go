@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"netwatcher-controller/internal/deletion"
+
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -17,6 +19,7 @@ type RetentionConfig struct {
 	DataRetentionDays   int           // Days to keep probe data in ClickHouse
 	SoftDeleteGraceDays int           // Days before hard-deleting soft-deleted entities
 	CleanupInterval     time.Duration // How often cleanup runs
+	BackfillGracePeriod time.Duration // How long after soft-delete before backfilling a CH deletion job
 }
 
 // LoadRetentionConfig loads retention settings from environment variables
@@ -25,6 +28,7 @@ func LoadRetentionConfig() *RetentionConfig {
 		DataRetentionDays:   getEnvInt("DATA_RETENTION_DAYS", 90),
 		SoftDeleteGraceDays: getEnvInt("SOFT_DELETE_GRACE_DAYS", 30),
 		CleanupInterval:     time.Duration(getEnvInt("CLEANUP_INTERVAL_HOURS", 24)) * time.Hour,
+		BackfillGracePeriod: time.Duration(getEnvInt("DELETION_BACKFILL_GRACE_HOURS", 1)) * time.Hour,
 	}
 }
 
@@ -55,8 +59,8 @@ func NewCleanupScheduler(db *gorm.DB, ch *sql.DB, config *RetentionConfig) *Clea
 
 // Start begins the cleanup scheduler in a blocking loop
 func (s *CleanupScheduler) Start(ctx context.Context) {
-	log.Infof("Starting cleanup scheduler (interval: %v, soft-delete grace: %d days, data retention: %d days)",
-		s.config.CleanupInterval, s.config.SoftDeleteGraceDays, s.config.DataRetentionDays)
+	log.Infof("Starting cleanup scheduler (interval: %v, soft-delete grace: %d days, data retention: %d days, backfill grace: %v)",
+		s.config.CleanupInterval, s.config.SoftDeleteGraceDays, s.config.DataRetentionDays, s.config.BackfillGracePeriod)
 
 	// Run once on startup
 	s.runCleanup(ctx)
@@ -81,6 +85,7 @@ func (s *CleanupScheduler) runCleanup(ctx context.Context) {
 	startTime := time.Now()
 
 	cutoff := time.Now().AddDate(0, 0, -s.config.SoftDeleteGraceDays)
+	backfillCutoff := time.Now().Add(-s.config.BackfillGracePeriod)
 
 	var totalDeleted int64
 
@@ -128,11 +133,98 @@ func (s *CleanupScheduler) runCleanup(ctx context.Context) {
 		totalDeleted += result.RowsAffected
 	}
 
+	// Backfill any soft-deleted probe/agent that does not have a completed
+	// ClickHouse deletion job. Safety net in case the in-request enqueue
+	// failed (e.g. CH was down or the controller crashed mid-transaction).
+	store := deletion.NewQueueStore(s.db)
+	s.backfillDeletions(ctx, store, backfillCutoff)
+
 	elapsed := time.Since(startTime)
 	if totalDeleted > 0 {
 		log.Infof("Cleanup complete: hard-deleted %d total records in %v", totalDeleted, elapsed)
 	} else {
 		log.Debugf("Cleanup complete: no records to delete (took %v)", elapsed)
+	}
+}
+
+// backfillDeletions enqueues CH cleanup jobs for any soft-deleted entity that
+// has been deleted long enough ago to be considered "missed" by the inline
+// enqueue path, and that has not yet been completed by the worker.
+func (s *CleanupScheduler) backfillDeletions(ctx context.Context, store *deletion.QueueStore, cutoff time.Time) {
+	type idRow struct {
+		ID uint
+	}
+
+	var probeRows []idRow
+	if err := s.db.WithContext(ctx).Unscoped().
+		Model(&probeModel{}).
+		Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).
+		Pluck("id", &probeRows).Error; err != nil {
+		log.Errorf("backfill: list soft-deleted probes failed: %v", err)
+	} else {
+		enqueued := 0
+		for _, r := range probeRows {
+			n, err := store.CountCompletedForEntity(ctx, deletion.EntityProbe, r.ID)
+			if err != nil {
+				log.WithError(err).Warn("backfill: count completed probe jobs failed")
+				continue
+			}
+			if n > 0 {
+				continue
+			}
+			open, err := store.CountOpenJobsForEntity(ctx, deletion.EntityProbe, r.ID)
+			if err != nil {
+				log.WithError(err).Warn("backfill: count open probe jobs failed")
+				continue
+			}
+			if open > 0 {
+				continue
+			}
+			if err := store.EnqueueBackfill(ctx, deletion.EntityProbe, r.ID); err != nil {
+				log.WithError(err).WithField("probe_id", r.ID).Warn("backfill: enqueue probe deletion failed")
+				continue
+			}
+			enqueued++
+		}
+		if enqueued > 0 {
+			log.Infof("Backfilled %d probe deletion jobs", enqueued)
+		}
+	}
+
+	var agentRows []idRow
+	if err := s.db.WithContext(ctx).Unscoped().
+		Model(&agentModel{}).
+		Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).
+		Pluck("id", &agentRows).Error; err != nil {
+		log.Errorf("backfill: list soft-deleted agents failed: %v", err)
+	} else {
+		enqueued := 0
+		for _, r := range agentRows {
+			n, err := store.CountCompletedForEntity(ctx, deletion.EntityAgent, r.ID)
+			if err != nil {
+				log.WithError(err).Warn("backfill: count completed agent jobs failed")
+				continue
+			}
+			if n > 0 {
+				continue
+			}
+			open, err := store.CountOpenJobsForEntity(ctx, deletion.EntityAgent, r.ID)
+			if err != nil {
+				log.WithError(err).Warn("backfill: count open agent jobs failed")
+				continue
+			}
+			if open > 0 {
+				continue
+			}
+			if err := store.EnqueueBackfill(ctx, deletion.EntityAgent, r.ID); err != nil {
+				log.WithError(err).WithField("agent_id", r.ID).Warn("backfill: enqueue agent deletion failed")
+				continue
+			}
+			enqueued++
+		}
+		if enqueued > 0 {
+			log.Infof("Backfilled %d agent deletion jobs", enqueued)
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/alert"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/users"
@@ -18,7 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore, limitsConfig *limits.Config) {
+func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore, deletionStore *deletion.QueueStore, limitsConfig *limits.Config) {
 	wsParty := api.Group("/workspaces")
 	store := workspace.NewStore(db)
 
@@ -171,7 +172,7 @@ func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore
 	// DELETE /workspaces/:id - requires CanOwn (OWNER only)
 	wsID.Delete("/", RequireRole(store, CanOwn), func(c *fiber.Ctx) error {
 		id := uintParam(c, "id")
-		err := store.DeleteWorkspace(c.UserContext(), id)
+		err := store.DeleteWorkspace(c.UserContext(), deletionStore, id)
 		if err != nil {
 			status := http.StatusBadRequest
 			if err == workspace.ErrNotFound {

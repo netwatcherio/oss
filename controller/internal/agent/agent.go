@@ -10,9 +10,13 @@ import (
 	"math/big"
 	"time"
 
+	"netwatcher-controller/internal/deletion"
+
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // -------------------- Errors --------------------
@@ -289,9 +293,13 @@ func UpdateAgentVersion(ctx context.Context, db *gorm.DB, id uint, version strin
 	return nil
 }
 
-// DeleteAgent permanently deletes the agent and all associated data.
-func DeleteAgent(ctx context.Context, db *gorm.DB, id uint) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// DeleteAgent permanently deletes the agent and all associated data, then
+// enqueues an asynchronous ClickHouse cleanup of probe_data rows for this
+// agent. CH mutations are heavy on partitioned MergeTree tables, so they are
+// dispatched by the deletion worker off the request thread. The deletion
+// store may be nil in tests, in which case the CH enqueue is skipped.
+func DeleteAgent(ctx context.Context, db *gorm.DB, deletionStore *deletion.QueueStore, id uint) error {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1) Collect probe IDs owned by this agent
 		var probeIDs []uint
 		if err := tx.Model(&dbProbe{}).Where("agent_id = ?", id).Pluck("id", &probeIDs).Error; err != nil {
@@ -358,7 +366,16 @@ func DeleteAgent(ctx context.Context, db *gorm.DB, id uint) error {
 			return ErrNotFound
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	if deletionStore != nil {
+		if err := deletionStore.Enqueue(ctx, deletion.EntityAgent, id); err != nil {
+			log.WithError(err).WithField("agent_id", id).Error("agent.DeleteAgent: failed to enqueue CH cleanup")
+		}
+	}
+	return nil
 }
 
 // -------------------- PIN operations --------------------

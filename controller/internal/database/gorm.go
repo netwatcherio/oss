@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/alert"
+	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/share"
 	"netwatcher-controller/internal/speedtest"
@@ -187,6 +188,8 @@ func CreateIndexes(db *gorm.DB) error {
 		&alert.RouteBaseline{}, // TableName(): "route_baselines"
 
 		&share.ShareLink{}, // TableName(): "share_links"
+
+		&deletion.DeletionJob{}, // TableName(): "deletion_jobs"
 	); err != nil {
 		return fmt.Errorf("automigrate: %w", err)
 	}

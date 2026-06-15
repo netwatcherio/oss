@@ -10,9 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"netwatcher-controller/internal/deletion"
+
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // --- Roles ---
@@ -274,90 +278,76 @@ func (s *Store) UpdateWorkspace(ctx context.Context, id uint, in UpdateWorkspace
 	return &ws, nil
 }
 
-func (s *Store) DeleteWorkspace(ctx context.Context, id uint) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1) Collect all agent IDs in this workspace
-		var agentIDs []uint
+// DeleteWorkspace soft-deletes the workspace and every dependent row
+// (agents, probes, targets, alert rules, alerts, route baselines, share
+// links, speedtest queue items, agent auth PINs, members). It then enqueues
+// one ClickHouse cleanup job per agent in the workspace so that the
+// background deletion worker can purge the matching probe_data rows off the
+// request thread. The deletion store may be nil in tests.
+func (s *Store) DeleteWorkspace(ctx context.Context, deletionStore *deletion.QueueStore, id uint) error {
+	var agentIDs []uint
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&wsAgent{}).Where("workspace_id = ?", id).Pluck("id", &agentIDs).Error; err != nil {
 			return err
 		}
 
 		if len(agentIDs) > 0 {
-			// Collect all probe IDs owned by these agents
 			var probeIDs []uint
 			if err := tx.Model(&wsProbe{}).Where("agent_id IN ?", agentIDs).Pluck("id", &probeIDs).Error; err != nil {
 				return err
 			}
 
 			if len(probeIDs) > 0 {
-				// Delete probe targets
 				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsTarget{}).Error; err != nil {
 					return err
 				}
-				// Delete alert rules referencing these probes
 				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsAlertRule{}).Error; err != nil {
 					return err
 				}
-				// Delete alerts referencing these probes
 				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsAlert{}).Error; err != nil {
 					return err
 				}
-				// Delete route baselines for these probes
 				if err := tx.Where("probe_id IN ?", probeIDs).Delete(&wsRouteBaseline{}).Error; err != nil {
 					return err
 				}
-				// Delete the probes
 				if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsProbe{}).Error; err != nil {
 					return err
 				}
 			}
 
-			// Delete share links for these agents
 			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsShareLink{}).Error; err != nil {
 				return err
 			}
-			// Delete speedtest servers for these agents
 			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsSpeedtestServer{}).Error; err != nil {
 				return err
 			}
-			// Delete speedtest queue items for these agents
 			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsSpeedtestQueue{}).Error; err != nil {
 				return err
 			}
-			// Delete agent auth PINs
 			if err := tx.Where("agent_id IN ?", agentIDs).Delete(&wsAgentPin{}).Error; err != nil {
 				return err
 			}
-			// Delete the agents
 			if err := tx.Where("workspace_id = ?", id).Delete(&wsAgent{}).Error; err != nil {
 				return err
 			}
 		}
 
-		// 2) Delete workspace-level alert rules & alerts
 		if err := tx.Where("workspace_id = ?", id).Delete(&wsAlertRule{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("workspace_id = ?", id).Delete(&wsAlert{}).Error; err != nil {
 			return err
 		}
-
-		// 3) Delete workspace share links (catch any not tied to specific agents)
 		if err := tx.Where("workspace_id = ?", id).Delete(&wsShareLink{}).Error; err != nil {
 			return err
 		}
-
-		// 4) Delete workspace speedtest queue items
 		if err := tx.Where("workspace_id = ?", id).Delete(&wsSpeedtestQueue{}).Error; err != nil {
 			return err
 		}
-
-		// 5) Delete workspace members
 		if err := tx.Where("workspace_id = ?", id).Delete(&Member{}).Error; err != nil {
 			return err
 		}
 
-		// 6) Delete the workspace itself
 		res := tx.Delete(&Workspace{}, "id = ?", id)
 		if res.Error != nil {
 			return res.Error
@@ -366,7 +356,18 @@ func (s *Store) DeleteWorkspace(ctx context.Context, id uint) error {
 			return ErrNotFound
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	if deletionStore != nil {
+		for _, aid := range agentIDs {
+			if err := deletionStore.Enqueue(ctx, deletion.EntityAgent, aid); err != nil {
+				log.WithError(err).WithField("agent_id", aid).Error("workspace.DeleteWorkspace: failed to enqueue CH cleanup")
+			}
+		}
+	}
+	return nil
 }
 
 // --- Member API ---
