@@ -10,6 +10,7 @@ import (
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/email"
+	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
@@ -58,6 +59,81 @@ func RegisterAdminRoutes(api fiber.Router, db *gorm.DB, deletionStore *deletion.
 
 	// Debug endpoints for session/connection diagnostics
 	adminAPI.Get("/debug/connections", adminDebugConnectionsHandler(db))
+
+	// Voice thresholds — admin-global override applied on top of
+	// built-in defaults. Per-workspace overrides live in
+	// `Workspace.Settings.voice_thresholds`.
+	adminAPI.Get("/voice-thresholds", adminGetVoiceThresholdsHandler(db))
+	adminAPI.Put("/voice-thresholds", adminSetVoiceThresholdsHandler(db))
+	adminAPI.Delete("/voice-thresholds", adminClearVoiceThresholdsHandler(db))
+	adminAPI.Get("/voice-thresholds/defaults", adminDefaultVoiceThresholdsHandler())
+}
+
+// adminGetVoiceThresholdsHandler returns the current admin-global
+// voice threshold override (or `null` if none is set). The response
+// shape mirrors the effective-thresholds JSON so the UI can render
+// the merged result by reading both endpoints.
+func adminGetVoiceThresholdsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		t, err := probe.GetAdminVoiceThresholds(db)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if t == nil {
+			return c.JSON(voiceThresholdResponse{Source: "defaults", Effective: probe.VoiceDefaultThresholds})
+		}
+		return c.JSON(voiceThresholdResponse{Source: "admin", Override: t, Effective: probe.VoiceDefaultThresholds.MergeOverlay(t)})
+	}
+}
+
+func adminSetVoiceThresholdsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var t probe.VoiceThresholds
+		if err := c.BodyParser(&t); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON body: " + err.Error()})
+		}
+		// Sanity-check: warning threshold must be ≤ critical.
+		if t.WarningJitterMs > 0 && t.CriticalJitterMs > 0 && t.WarningJitterMs > t.CriticalJitterMs {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "warning_jitter_ms must be ≤ critical_jitter_ms"})
+		}
+		if t.WarningLossPct > 0 && t.CriticalLossPct > 0 && t.WarningLossPct > t.CriticalLossPct {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "warning_loss_pct must be ≤ critical_loss_pct"})
+		}
+		if err := probe.SetAdminVoiceThresholds(db, &t); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		log.Info("[admin] voice thresholds override updated")
+		return c.JSON(voiceThresholdResponse{Source: "admin", Override: &t, Effective: probe.VoiceDefaultThresholds.MergeOverlay(&t)})
+	}
+}
+
+func adminClearVoiceThresholdsHandler(db *gorm.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if err := probe.SetAdminVoiceThresholds(db, nil); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		log.Info("[admin] voice thresholds override cleared")
+		return c.JSON(voiceThresholdResponse{Source: "defaults", Effective: probe.VoiceDefaultThresholds})
+	}
+}
+
+// adminDefaultVoiceThresholdsHandler is a static endpoint that
+// returns the built-in defaults — useful for the admin UI to
+// render the "Reset to defaults" view.
+func adminDefaultVoiceThresholdsHandler() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return c.JSON(probe.VoiceDefaultThresholds)
+	}
+}
+
+// voiceThresholdResponse is the shape returned by the
+// voice-thresholds admin endpoints. The frontend uses `source` to
+// decide whether to show a "this is overriding the default" badge
+// and `effective` to render the merged view.
+type voiceThresholdResponse struct {
+	Source    string              `json:"source"` // "defaults" | "admin"
+	Override  *probe.VoiceThresholds `json:"override,omitempty"`
+	Effective probe.VoiceThresholds `json:"effective"`
 }
 
 // ==================== Stats ====================

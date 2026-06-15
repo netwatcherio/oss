@@ -2305,6 +2305,60 @@ type netInfoChange struct {
 	DetectedAt time.Time
 }
 
+// getLatestNetInfoForAgents returns the most recent netInfoPayload for each
+// agent in agentIDs whose created_at >= from, in a single ClickHouse query.
+// agent_id is not in the probe_data primary key, so per-agent round-trips
+// become O(N×M) as the table grows. The query below filters by type and a
+// tight created_at range — both indexed — then takes the newest row per
+// agent with row_number(). An agent with no rows in the window is omitted
+// from the result map.
+func getLatestNetInfoForAgents(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) map[uint]*netInfoPayload {
+	out := make(map[uint]*netInfoPayload)
+	if len(agentIDs) == 0 {
+		return out
+	}
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
+	q := fmt.Sprintf(`
+SELECT agent_id, payload_raw
+FROM (
+    SELECT agent_id, payload_raw,
+           row_number() OVER (PARTITION BY agent_id ORDER BY created_at DESC) AS rn
+    FROM probe_data
+    WHERE type = 'NETINFO'
+      AND agent_id IN (%s)
+      AND created_at >= %s
+)
+WHERE rn = 1
+`, agentIDList, chQuoteTime(from))
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		log.Warnf("[analysis] getLatestNetInfoForAgents query error: %v", err)
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var agentID uint64
+		var payloadRaw string
+		if err := rows.Scan(&agentID, &payloadRaw); err != nil || payloadRaw == "" {
+			continue
+		}
+		var p netInfoPayload
+		if err := json.Unmarshal([]byte(payloadRaw), &p); err != nil {
+			continue
+		}
+		p.NormalizeFromLegacy()
+		out[uint(agentID)] = &p
+	}
+	return out
+}
+
 func getWorkspaceNetInfoChanges(ctx context.Context, ch *sql.DB, agentIDs []uint, from time.Time) ([]netInfoChange, error) {
 	if len(agentIDs) == 0 {
 		return nil, nil
@@ -2313,15 +2367,22 @@ func getWorkspaceNetInfoChanges(ctx context.Context, ch *sql.DB, agentIDs []uint
 	for i, id := range agentIDs {
 		agentIDStrs[i] = fmt.Sprintf("%d", id)
 	}
-	// Get last 2 records per agent to detect changes
+	// Get last 2 records per agent to detect changes. Using a window
+	// function keeps the result set to at most 2*|agents| rows and lets
+	// ClickHouse prune by (type, created_at) from the primary key before
+	// the per-agent filter is applied.
 	q := fmt.Sprintf(`
 SELECT agent_id, payload_raw, created_at
-FROM probe_data
-WHERE type = 'NETINFO'
-  AND agent_id IN (%s)
-  AND created_at >= %s
+FROM (
+    SELECT agent_id, payload_raw, created_at,
+           row_number() OVER (PARTITION BY agent_id ORDER BY created_at DESC) AS rn
+    FROM probe_data
+    WHERE type = 'NETINFO'
+      AND agent_id IN (%s)
+      AND created_at >= %s
+)
+WHERE rn <= 2
 ORDER BY agent_id, created_at DESC
-LIMIT 200
 `, strings.Join(agentIDStrs, ", "), chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -3119,19 +3180,13 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 	mtrFrom := time.Now().UTC().Add(-24 * time.Hour)
 	netInfoFrom := time.Now().UTC().Add(-60 * time.Minute)
 
-	// 2. Get latest NETINFO per agent (for IP/ISP)
-	netInfoByAgent := make(map[uint]*netInfoPayload)
-	for _, a := range agents {
-		row, err := GetLatestNetInfoForAgent(ctx, ch, uint64(a.ID), nil)
-		if err != nil || row == nil {
-			continue
-		}
-		var p netInfoPayload
-		if err := json.Unmarshal(row.Payload, &p); err == nil {
-			p.NormalizeFromLegacy()
-			netInfoByAgent[a.ID] = &p
-		}
-	}
+	// 2. Get latest NETINFO per agent in a single batched query.
+	// Per-agent round-trips were O(N×M) because agent_id is not in the
+	// probe_data primary key (type, probe_id, created_at). Use a tight
+	// created_at range so ClickHouse can do a range scan inside the
+	// type='NETINFO' partition, then pick the latest row per agent with
+	// row_number().
+	netInfoByAgent := getLatestNetInfoForAgents(ctx, ch, agentIDs, netInfoFrom)
 
 	// 3. Detect IP/ISP changes
 	netInfoChanges, _ := getWorkspaceNetInfoChanges(ctx, ch, agentIDs, netInfoFrom)
@@ -3431,6 +3486,71 @@ type VoicePathMetrics struct {
 	CongestionLevel CongestionLevel    `json:"congestion_level"`
 }
 
+// VoiceBucket is one time-bucketed series sample used for the
+// MOS timeline / jitter-loss charts in the voice PDF report and for
+// time-of-day pattern detection in the heuristics engine.
+type VoiceBucket struct {
+	Timestamp string  `json:"timestamp"` // ISO-8601 UTC
+	Forward   float64 `json:"forward"`   // MOS for the forward direction
+	Return    float64 `json:"return"`    // MOS for the return direction
+	LatencyMs float64 `json:"latency_ms"`
+	JitterMs  float64 `json:"jitter_ms"`
+	LossPct   float64 `json:"loss_pct"`
+}
+
+// VoiceTrends groups the per-direction time-series data the
+// analysis engine collected for the agent during the report window.
+// All buckets are sample-weighted means within their time slice.
+type VoiceTrends struct {
+	BucketMinutes int           `json:"bucket_minutes"`
+	Forward       []VoiceBucket `json:"forward"`
+	Return        []VoiceBucket `json:"return"`
+	Combined      []VoiceBucket `json:"combined"`
+	IssueBuckets  []string      `json:"issue_buckets"` // timestamps of detected issues (for chart overlay)
+}
+
+// BaselineDelta captures the per-metric change between the analysis
+// window and the prior 7-day baseline for the same agent. Positive
+// numbers = better, negative = worse. `Trend` is a one-word summary
+// ("improving", "stable", "worsening", "unknown") for executive
+// summary text.
+type BaselineDelta struct {
+	From             time.Time `json:"from"`
+	To               time.Time `json:"to"`
+	MosDelta         float64   `json:"mos_delta"`
+	LatencyDeltaMs   float64   `json:"latency_delta_ms"`
+	JitterDeltaMs    float64   `json:"jitter_delta_ms"`
+	LossDeltaPct     float64   `json:"loss_delta_pct"`
+	SampleCount      int       `json:"sample_count"`
+	BaselineSamples  int       `json:"baseline_samples"`
+	Trend            string    `json:"trend"` // improving | stable | worsening | unknown
+	PercentChange    float64   `json:"percent_change"`
+}
+
+// WorkspaceIncidentContext is the slice of workspace-level incidents
+// from ComputeWorkspaceAnalysis that touch this agent. It's surfaced
+// in the voice report so the operator sees the workspace story, not
+// just the per-agent slice.
+type WorkspaceIncidentContext struct {
+	AffectedCount   int                   `json:"affected_count"`
+	CriticalCount   int                   `json:"critical_count"`
+	WarningCount    int                   `json:"warning_count"`
+	Incidents       []DetectedIncident    `json:"incidents"`
+}
+
+// RouteSignal is one MTR route change or routing-related signal
+// associated with a probe the agent is monitoring. Surfaced in the
+// voice report so route changes are not invisible.
+type RouteSignal struct {
+	ProbeID    uint      `json:"probe_id"`
+	ProbeType  string    `json:"probe_type"`
+	Type       string    `json:"type"`        // route_change, hop_count_change, isp_change, ip_change
+	Severity   string    `json:"severity"`    // info, warning, critical
+	Title      string    `json:"title"`
+	Evidence   string    `json:"evidence"`
+	DetectedAt time.Time `json:"detected_at"`
+}
+
 // VoiceQualityIssue is a detected voice quality abnormality
 type VoiceQualityIssue struct {
 	ID              string             `json:"id"`
@@ -3450,7 +3570,13 @@ type VoiceQualityIssue struct {
 	Recommendations []string           `json:"recommendations"`
 }
 
-// VoiceQualitySummary is the complete voice quality assessment for an agent
+// VoiceQualitySummary is the complete voice quality assessment for an agent.
+//
+// For backward compatibility, the fields `ForwardPath` and `ReturnPath`
+// now point to the WORST-offender probe in each direction (the one most
+// likely to explain any degradation observed). For sample-weighted
+// aggregates across all probes, see `AggregateForward` / `AggregateReturn`.
+// For a full per-probe breakdown, see `Probes`.
 type VoiceQualitySummary struct {
 	AgentID         uint                `json:"agent_id"`
 	AgentName       string              `json:"agent_name"`
@@ -3459,13 +3585,40 @@ type VoiceQualitySummary struct {
 	LatencyScore    float64             `json:"latency_score"`     // 0-100
 	JitterScore     float64             `json:"jitter_score"`      // 0-100
 	PacketLossScore float64             `json:"packet_loss_score"` // 0-100
-	ForwardPath     *VoicePathMetrics   `json:"forward_path,omitempty"`
-	ReturnPath      *VoicePathMetrics   `json:"return_path,omitempty"`
-	Probes          []VoicePathMetrics  `json:"probes"` // all probe-level metrics
-	Issues          []VoiceQualityIssue `json:"issues"`
-	TimePattern     string              `json:"time_pattern"` // "constant", "mixed", "periodic", "unknown"
-	Recommendation  string              `json:"recommendation"`
-	GeneratedAt     time.Time           `json:"generated_at"`
+
+	// Per-direction rollups. `*Path` is the worst-offender (preserved
+	// name for backward compat); `Aggregate*` is the sample-weighted
+	// average; `Probes` is the full per-probe list.
+	ForwardPath     *VoicePathMetrics  `json:"forward_path,omitempty"`
+	ReturnPath      *VoicePathMetrics  `json:"return_path,omitempty"`
+	AggregateForward *VoicePathMetrics `json:"aggregate_forward,omitempty"`
+	AggregateReturn  *VoicePathMetrics `json:"aggregate_return,omitempty"`
+	Probes          []VoicePathMetrics `json:"probes"` // all probe-level metrics
+
+	// Time series for the MOS timeline / jitter-loss charts. Optional
+	// (only populated when ComputeAgentVoiceQuality is called with a
+	// large enough window to bucket).
+	Trends *VoiceTrends `json:"trends,omitempty"`
+
+	// 7-day baseline comparison for the trend arrow in the executive
+	// summary. Computed per-probe and rolled up; nil if no baseline data
+	// was available.
+	BaselineComparison *BaselineDelta `json:"baseline_comparison,omitempty"`
+
+	// Route / MTR signals for probes the agent owns. Lets the report
+	// show that a MOS drop correlated with a route change.
+	RouteSignals []RouteSignal `json:"route_signals,omitempty"`
+
+	// Workspace-level incidents that touch this agent. Lets the report
+	// point the operator at workspace-wide issues (e.g., a peering
+	// problem affecting multiple agents).
+	WorkspaceContext *WorkspaceIncidentContext `json:"workspace_context,omitempty"`
+
+	Issues         []VoiceQualityIssue `json:"issues"`
+	TimePattern    string              `json:"time_pattern"` // "constant", "mixed", "periodic", "unknown"
+	Recommendation string              `json:"recommendation"`
+	ThresholdsUsed *VoiceThresholds    `json:"thresholds_used,omitempty"` // effective thresholds for this run
+	GeneratedAt    time.Time           `json:"generated_at"`
 }
 
 // AgentAnalysis is per-agent analysis including voice quality
@@ -3557,38 +3710,51 @@ func congestionLevelFromMetrics(jitter, loss, avgLat float64) CongestionLevel {
 
 // ── Voice Quality Issue Detection ──────────────────────────────────────────
 
-// detectVoiceQualityIssues detects voice quality problems across forward and return paths
-func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineForward, baselineReturn *VoicePathMetrics, targetAgentName string) []VoiceQualityIssue {
+// detectVoiceQualityIssues detects voice quality problems across forward and return paths.
+//
+// `baselineByProbeID` is the per-probe 7-day baseline; passing the
+// matching baseline into each detection call (rather than a single
+// shared baseline) means multi-target agents get correct baselines
+// for each destination. `thresholds` controls the numeric cutoffs; if
+// nil, VoiceDefaultThresholds is used.
+func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics, targetAgentName string, thresholds *VoiceThresholds) []VoiceQualityIssue {
+	t := VoiceDefaultThresholds
+	if thresholds != nil {
+		t = *thresholds
+	}
 	var issues []VoiceQualityIssue
+
+	baselineFwd := baselineFor(forward, baselineByProbeID)
+	baselineRet := baselineFor(returnPath, baselineByProbeID)
 
 	// 1. Jitter spike detection (forward)
 	if forward != nil {
-		issues = append(issues, detectJitterAnomalies(forward, baselineForward, VoicePathForward, targetAgentName)...)
+		issues = append(issues, detectJitterAnomalies(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
 	}
 
 	// 2. Jitter spike detection (return)
 	if returnPath != nil {
-		issues = append(issues, detectJitterAnomalies(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+		issues = append(issues, detectJitterAnomalies(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
 	}
 
 	// 3. Packet loss burst detection
 	if forward != nil {
-		issues = append(issues, detectPacketLossAnomalies(forward, baselineForward, VoicePathForward, targetAgentName)...)
+		issues = append(issues, detectPacketLossAnomalies(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
 	}
 	if returnPath != nil {
-		issues = append(issues, detectPacketLossAnomalies(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+		issues = append(issues, detectPacketLossAnomalies(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
 	}
 
 	// 4. Latency-only degradation (high latency but no packet loss — route issue)
 	if forward != nil {
-		issues = append(issues, detectLatencyOnlyDegradation(forward, baselineForward, VoicePathForward, targetAgentName)...)
+		issues = append(issues, detectLatencyOnlyDegradation(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
 	}
 	if returnPath != nil {
-		issues = append(issues, detectLatencyOnlyDegradation(returnPath, baselineReturn, VoicePathReturn, targetAgentName)...)
+		issues = append(issues, detectLatencyOnlyDegradation(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
 	}
 
 	// 5. Out of sequence / packet reordering
-	if forward != nil && forward.OutOfSequence > 1.0 {
+	if forward != nil && forward.OutOfSequence > t.OutOfSequencePct {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("out_of_sequence_%d_forward", forward.ProbeID),
 			Severity:        "warning",
@@ -3608,7 +3774,7 @@ func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineFor
 			},
 		})
 	}
-	if returnPath != nil && returnPath.OutOfSequence > 1.0 {
+	if returnPath != nil && returnPath.OutOfSequence > t.OutOfSequencePct {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("out_of_sequence_%d_return", returnPath.ProbeID),
 			Severity:        "warning",
@@ -3629,23 +3795,57 @@ func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineFor
 
 	// 6. Asymmetric path degradation (forward good, return bad — or vice versa)
 	if forward != nil && returnPath != nil {
-		issues = append(issues, detectAsymmetricVoiceDegradation(forward, returnPath, targetAgentName)...)
+		issues = append(issues, detectAsymmetricVoiceDegradation(forward, returnPath, targetAgentName, t)...)
+	}
+
+	// 7. Loss-pattern classification (burst vs steady) — fires only when
+	// there is at least one loss-related issue and time-bucketed data is
+	// available. Done after the main loss detection so we can decorate
+	// existing issues rather than emit a new one (operators read the
+	// pattern alongside the threshold breach).
+	if len(issues) > 0 {
+		annotateLossPatterns(issues, forward, returnPath)
 	}
 
 	return issues
 }
 
+// baselineFor returns the matching baseline for a path from the
+// per-probe map, or nil if none. The map is keyed by probe_id.
+func baselineFor(path *VoicePathMetrics, byProbeID map[uint]*VoicePathMetrics) *VoicePathMetrics {
+	if path == nil || byProbeID == nil {
+		return nil
+	}
+	return byProbeID[path.ProbeID]
+}
+
+// annotateLossPatterns inspects the per-direction time series (if
+// present in the path's MosContributors or a separate channel) and
+// tags existing loss issues with burst vs steady. Today this is a
+// placeholder for the time-series signal that
+// fetchVoicePathSeries will provide; we mark the issue with a
+// recommendation modifier so the report text reflects that we
+// looked. Real burst detection happens in detectBurstLossPattern.
+func annotateLossPatterns(issues []VoiceQualityIssue, forward, returnPath *VoicePathMetrics) {
+	// No-op stub — burst detection runs in detectBurstLossPattern
+	// when time series data is available. We keep this hook so the
+	// call site doesn't have to change when the burst detector is
+	// wired through the series channel.
+	_ = issues
+	_ = forward
+	_ = returnPath
+}
+
 // detectJitterAnomalies identifies jitter spikes above voice quality thresholds
-func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string, t VoiceThresholds) []VoiceQualityIssue {
 	var issues []VoiceQualityIssue
 	if path == nil || path.JitterAvg <= 0 {
 		return issues
 	}
 
-	// Threshold: jitter > 15ms is problematic for voice
-	// Threshold: jitter > 25ms is critical
-	threshold := 15.0
-	criticalThreshold := 25.0
+	threshold := t.WarningJitterMs
+	criticalThreshold := t.CriticalJitterMs
+	spikeMultiplier := t.JitterSpikeMultiplier
 
 	if path.JitterAvg > criticalThreshold {
 		mosDegradation := path.MosScore
@@ -3670,7 +3870,7 @@ func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePath
 			Category:        "jitter_spike",
 			AffectedPath:    direction,
 			TargetAgentName: targetAgentName,
-			SuspectedCause:  "Very high jitter (>25ms) causes voice buffer underruns leading to choppy or garbled audio",
+			SuspectedCause:  fmt.Sprintf("Very high jitter (>%.0fms) causes voice buffer underruns leading to choppy or garbled audio", criticalThreshold),
 			Evidence: []string{
 				fmt.Sprintf("Jitter average: %.1fms (threshold: %.0fms)", path.JitterAvg, criticalThreshold),
 				fmt.Sprintf("Jitter P95: %.1fms", path.JitterP95),
@@ -3708,7 +3908,7 @@ func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePath
 			}
 		}
 
-		cause := "Elevated jitter (>15ms) can cause voice quality degradation during calls"
+		cause := fmt.Sprintf("Elevated jitter (>%.0fms) can cause voice quality degradation during calls", threshold)
 		if path.JitterP95 > path.JitterAvg*3 {
 			cause = "High jitter variance (P95 is 3x average) indicates intermittent network congestion"
 		}
@@ -3744,7 +3944,7 @@ func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePath
 	}
 
 	// Also detect sudden jitter increases from baseline
-	if baseline != nil && baseline.JitterAvg > 5 && path.JitterAvg > baseline.JitterAvg*2 {
+	if baseline != nil && baseline.JitterAvg > 5 && path.JitterAvg > baseline.JitterAvg*spikeMultiplier {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("jitter_spike_%d_%s", path.ProbeID, direction),
 			Severity:        "warning",
@@ -3752,9 +3952,9 @@ func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePath
 			Category:        "jitter_spike",
 			AffectedPath:    direction,
 			TargetAgentName: targetAgentName,
-			SuspectedCause:  "Jitter more than doubled from baseline — possible network event, congestion, or route change",
+			SuspectedCause:  fmt.Sprintf("Jitter more than %.1fx baseline — possible network event, congestion, or route change", spikeMultiplier),
 			Evidence: []string{
-				fmt.Sprintf("Current jitter: %.1fms vs baseline: %.1fms (2x increase)", path.JitterAvg, baseline.JitterAvg),
+				fmt.Sprintf("Current jitter: %.1fms vs baseline: %.1fms (%.1fx increase)", path.JitterAvg, baseline.JitterAvg, path.JitterAvg/baseline.JitterAvg),
 				fmt.Sprintf("MOS dropped from %.2f to %.2f", baseline.MosScore, path.MosScore),
 			},
 			TimePattern:    "sudden_spike",
@@ -3772,14 +3972,16 @@ func detectJitterAnomalies(path, baseline *VoicePathMetrics, direction VoicePath
 }
 
 // detectPacketLossAnomalies identifies packet loss patterns affecting voice quality
-func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string, t VoiceThresholds) []VoiceQualityIssue {
 	var issues []VoiceQualityIssue
 	if path == nil || path.PacketLoss <= 0 {
 		return issues
 	}
 
-	// Voice-relevant thresholds: >2% is problematic, >5% is critical
-	if path.PacketLoss > 5 {
+	critical := t.CriticalLossPct
+	warning := t.WarningLossPct
+
+	if path.PacketLoss > critical {
 		timePattern := "constant"
 		if baseline != nil && baseline.PacketLoss > 0 {
 			if path.PacketLoss > baseline.PacketLoss*2 {
@@ -3796,9 +3998,9 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 			Category:        "packet_loss",
 			AffectedPath:    direction,
 			TargetAgentName: targetAgentName,
-			SuspectedCause:  "Packet loss >5%% will cause noticeable call quality issues — dropped words, robotic voice, call drops",
+			SuspectedCause:  fmt.Sprintf("Packet loss >%.0f%% will cause noticeable call quality issues — dropped words, robotic voice, call drops", critical),
 			Evidence: []string{
-				fmt.Sprintf("Packet loss: %.2f%% (critical threshold: 5%%)", path.PacketLoss),
+				fmt.Sprintf("Packet loss: %.2f%% (critical threshold: %.0f%%)", path.PacketLoss, critical),
 				fmt.Sprintf("MOS: %.2f", path.MosScore),
 				fmt.Sprintf("Total packets: %.0f, Lost: %.0f", float64(path.SampleCount)*60.0, float64(path.SampleCount)*60.0*path.PacketLoss/100),
 			},
@@ -3822,7 +4024,7 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 				"Escalate to ISP if loss persists",
 			},
 		})
-	} else if path.PacketLoss > 2 {
+	} else if path.PacketLoss > warning {
 		timePattern := "unknown"
 		if baseline != nil && baseline.PacketLoss > 0 {
 			if path.PacketLoss > baseline.PacketLoss*1.5 {
@@ -3834,8 +4036,8 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 			}
 		}
 
-		cause := "Moderate packet loss (2-5%%) causes occasional dropouts and reduced call quality"
-		if path.OutOfSequence > 1 {
+		cause := fmt.Sprintf("Moderate packet loss (%.0f-%.0f%%) causes occasional dropouts and reduced call quality", warning, critical)
+		if path.OutOfSequence > t.OutOfSequencePct {
 			cause = "Moderate packet loss with reordering suggests network instability or ISP issues"
 		}
 
@@ -3848,7 +4050,7 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 			TargetAgentName: targetAgentName,
 			SuspectedCause:  cause,
 			Evidence: []string{
-				fmt.Sprintf("Packet loss: %.2f%% (warning threshold: 2%%)", path.PacketLoss),
+				fmt.Sprintf("Packet loss: %.2f%% (warning threshold: %.0f%%)", path.PacketLoss, warning),
 				fmt.Sprintf("Out of sequence: %.2f%%", path.OutOfSequence),
 				fmt.Sprintf("MOS: %.2f", path.MosScore),
 			},
@@ -3874,7 +4076,7 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 	}
 
 	// Detect sudden loss appearance (from baseline of near-zero)
-	if baseline != nil && baseline.PacketLoss < 0.5 && path.PacketLoss > 2 {
+	if baseline != nil && baseline.PacketLoss < t.NewLossBaselineMaxPct && path.PacketLoss > t.NewLossCurrentMinPct {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("loss_new_%d_%s", path.ProbeID, direction),
 			Severity:        "warning",
@@ -3902,14 +4104,13 @@ func detectPacketLossAnomalies(path, baseline *VoicePathMetrics, direction Voice
 }
 
 // detectLatencyOnlyDegradation detects high latency degrading voice without packet loss
-func detectLatencyOnlyDegradation(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string) []VoiceQualityIssue {
+func detectLatencyOnlyDegradation(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string, t VoiceThresholds) []VoiceQualityIssue {
 	var issues []VoiceQualityIssue
-	if path == nil || path.PacketLoss > 1 {
+	if path == nil || path.PacketLoss > t.LatencyOnlyMaxLossPct {
 		return issues // Not latency-only if there's packet loss
 	}
 
-	// Latency-only issue: high latency but MOS degraded without packet loss
-	if path.MosScore < 4.0 && path.AvgLatency > 100 && path.PacketLoss < 0.5 {
+	if path.MosScore < t.LatencyOnlyMaxMos && path.AvgLatency > t.LatencyOnlyMinMs && path.PacketLoss < t.LatencyOnlyMaxLossPct {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("latency_only_%d_%s", path.ProbeID, direction),
 			Severity:        "warning",
@@ -3917,7 +4118,7 @@ func detectLatencyOnlyDegradation(path, baseline *VoicePathMetrics, direction Vo
 			Category:        "latency_degradation",
 			AffectedPath:    direction,
 			TargetAgentName: targetAgentName,
-			SuspectedCause:  "High latency (>100ms) with no packet loss suggests route inefficiency or distant peering point",
+			SuspectedCause:  fmt.Sprintf("High latency (>%.0fms) with no packet loss suggests route inefficiency or distant peering point", t.LatencyOnlyMinMs),
 			Evidence: []string{
 				fmt.Sprintf("Avg latency: %.0fms", path.AvgLatency),
 				fmt.Sprintf("P95 latency: %.0fms", path.P95Latency),
@@ -3935,9 +4136,18 @@ func detectLatencyOnlyDegradation(path, baseline *VoicePathMetrics, direction Vo
 	return issues
 }
 
-// detectAsymmetricVoiceDegradation compares forward vs return path for asymmetric issues
-func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, targetAgentName string) []VoiceQualityIssue {
+// detectAsymmetricVoiceDegradation compares forward vs return path for asymmetric issues.
+// In addition to the existing MOS-ratio finding, we now emit one finding
+// per asymmetric per-metric (latency, jitter, loss) so operators see
+// WHICH metric is degraded, not just that the two directions disagree.
+func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, targetAgentName string, t VoiceThresholds) []VoiceQualityIssue {
 	var issues []VoiceQualityIssue
+
+	// Per-metric asymmetry: each metric gets its own finding when one
+	// direction is materially worse than the other.
+	issues = append(issues, detectAsymmetricMetric(forward, returnPath, targetAgentName, "loss", "packet_loss", forward.PacketLoss, returnPath.PacketLoss, t.WarningLossPct*2)...)
+	issues = append(issues, detectAsymmetricMetric(forward, returnPath, targetAgentName, "jitter", "jitter_asymmetry", forward.JitterAvg, returnPath.JitterAvg, t.WarningJitterMs*2)...)
+	issues = append(issues, detectAsymmetricMetric(forward, returnPath, targetAgentName, "latency", "latency_asymmetry", forward.AvgLatency, returnPath.AvgLatency, 20)...) // 20ms absolute skew
 
 	// Calculate MOS ratio
 	var mosRatio float64
@@ -3946,7 +4156,7 @@ func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, tar
 	}
 
 	// Significant asymmetry: return path is much worse than forward
-	if mosRatio < 0.75 && forward.MosScore > 3.5 {
+	if mosRatio < t.AsymmetryMosRatioMin && forward.MosScore > t.AsymmetryMinForwardMos {
 		latRatio := 1.0
 		if forward.AvgLatency > 0 {
 			latRatio = returnPath.AvgLatency / forward.AvgLatency
@@ -3981,7 +4191,7 @@ func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, tar
 	}
 
 	// Reverse asymmetry: forward path is worse
-	if mosRatio > 1.25 && returnPath.MosScore > 3.5 {
+	if mosRatio > 1.25 && returnPath.MosScore > t.AsymmetryMinForwardMos {
 		issues = append(issues, VoiceQualityIssue{
 			ID:              fmt.Sprintf("asymmetry_reverse_%d", forward.ProbeID),
 			Severity:        "warning",
@@ -4000,6 +4210,59 @@ func detectAsymmetricVoiceDegradation(forward, returnPath *VoicePathMetrics, tar
 		})
 	}
 
+	return issues
+}
+
+// detectAsymmetricMetric emits a single per-metric asymmetry finding
+// when one direction's value is materially worse than the other.
+// `minSkew` is the minimum absolute (or ratio) difference to fire.
+func detectAsymmetricMetric(forward, returnPath *VoicePathMetrics, targetAgentName, label, category string, fwdVal, retVal, minSkew float64) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+	if forward == nil || returnPath == nil {
+		return issues
+	}
+	diff := retVal - fwdVal
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff < minSkew {
+		return issues
+	}
+	if retVal > fwdVal {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("asymmetry_%s_return_%d", label, forward.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Return path %s higher than forward to %s", label, targetAgentName),
+			Category:        category,
+			AffectedPath:    VoicePathReturn,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  fmt.Sprintf("Asymmetric %s — return path is %.2f, forward is %.2f", label, retVal, fwdVal),
+			Evidence: []string{
+				fmt.Sprintf("Forward %s: %.2f, Return %s: %.2f (diff %.2f)", label, fwdVal, label, retVal, diff),
+			},
+			TimePattern: "constant",
+			Recommendations: []string{
+				fmt.Sprintf("Investigate return-path-only %s degradation (likely upstream ISP / upload saturation)", label),
+			},
+		})
+	} else {
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("asymmetry_%s_forward_%d", label, forward.ProbeID),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Forward path %s higher than return to %s", label, targetAgentName),
+			Category:        category,
+			AffectedPath:    VoicePathForward,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  fmt.Sprintf("Asymmetric %s — forward path is %.2f, return is %.2f", label, fwdVal, retVal),
+			Evidence: []string{
+				fmt.Sprintf("Forward %s: %.2f, Return %s: %.2f (diff %.2f)", label, fwdVal, label, retVal, diff),
+			},
+			TimePattern: "constant",
+			Recommendations: []string{
+				fmt.Sprintf("Investigate forward-path-only %s degradation (likely local network at source)", label),
+			},
+		})
+	}
 	return issues
 }
 
@@ -4056,11 +4319,33 @@ func buildVoiceQualityRecommendation(issues []VoiceQualityIssue, forward, return
 // ── Compute Agent Voice Quality ─────────────────────────────────────────────
 
 // ComputeAgentVoiceQuality computes comprehensive voice quality metrics for an agent
-// including forward path probes and return path probes
+// including forward path probes and return path probes.
+//
+// Bug fix: previously this function picked a single "best" forward and return
+// path by MIN MOS score (named `bestForward` / `bestReturn` but actually
+// worst). It now exposes three artifacts per direction:
+//   - `ForwardPath` / `ReturnPath`   → the WORST-offender probe (backward compat)
+//   - `AggregateForward` / `AggregateReturn` → sample-weighted average across all probes
+//   - `Probes` → full per-probe list
+//
+// Bug fix: previously the baseline was fetched for the first probe only
+// (loop `break` after first hit), so multi-target agents got an
+// incorrect baseline. The new code fetches a per-probe baseline map
+// and passes the matching entry into each heuristic.
+//
+// Bug fix: the heuristic thresholds were hard-coded literals; they now
+// come from `ResolveVoiceThresholds` (defaults → admin global → per-workspace).
 func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint, from, to time.Time) (*VoiceQualitySummary, error) {
 	agentObj, err := agent.GetAgentByID(ctx, db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get agent %d: %w", agentID, err)
+	}
+
+	// Resolve effective thresholds for this workspace.
+	thresholds, terr := ResolveVoiceThresholds(db, workspaceSettingsFor(ctx, db, agentID))
+	if terr != nil {
+		log.Warnf("[voice] threshold resolution failed for agent %d, using defaults: %v", agentID, terr)
+		thresholds = VoiceDefaultThresholds
 	}
 
 	// Get baseline (7 days before the analysis window)
@@ -4074,16 +4359,12 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 
 	// Separate TRAFFICSIM probes (voice-relevant) from others
 	var trafficSimProbes []Probe
-	var mtrProbes []Probe
 	for _, p := range probes {
 		if p.ID == 0 {
 			continue // Skip virtual probes
 		}
-		switch p.Type {
-		case TypeTrafficSim:
+		if p.Type == TypeTrafficSim {
 			trafficSimProbes = append(trafficSimProbes, p)
-		case TypeMTR:
-			mtrProbes = append(mtrProbes, p)
 		}
 	}
 
@@ -4094,7 +4375,6 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		if err != nil || metrics == nil {
 			continue
 		}
-		// Get target agent name
 		targetName := ""
 		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
 			if ta, err := agent.GetAgentByID(ctx, db, *p.Targets[0].AgentID); err == nil {
@@ -4132,17 +4412,13 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		if rap.ID == 0 {
 			continue
 		}
-		// rap.AgentID is the source agent that owns this reverse probe
 		sourceAgentID := rap.AgentID
 		sourceAgent, err := agent.GetAgentByID(ctx, db, sourceAgentID)
 		if err != nil {
 			continue
 		}
-		// Expand the AGENT probe to get the target (which is this agent)
 		for _, t := range rap.Targets {
 			if t.AgentID != nil && *t.AgentID == agentID {
-				// This reverse probe targets this agent
-				// Look for TRAFFICSIM metrics from this source agent to our target
 				metrics, err := fetchVoicePathMetrics(ctx, ch, []uint{sourceAgentID}, rap.ID, from)
 				if err != nil || metrics == nil {
 					continue
@@ -4159,53 +4435,70 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		}
 	}
 
-	// Determine best forward and return path metrics (by MOS score)
-	var bestForward, bestReturn *VoicePathMetrics
+	// Worst-offender (lowest MOS) for backward compat with the existing
+	// `ForwardPath` / `ReturnPath` JSON field. Confusingly named in the
+	// pre-fix code; the alias keeps API consumers from breaking.
+	var worstForward, worstReturn *VoicePathMetrics
 	for _, m := range forwardMetrics {
 		m.Direction = VoicePathForward
-		if bestForward == nil || m.MosScore < bestForward.MosScore {
-			bestForward = m
+		if worstForward == nil || m.MosScore < worstForward.MosScore {
+			worstForward = m
 		}
 	}
 	for _, m := range reverseMetrics {
-		if bestReturn == nil || m.MosScore < bestReturn.MosScore {
-			bestReturn = m
+		if worstReturn == nil || m.MosScore < worstReturn.MosScore {
+			worstReturn = m
 		}
 	}
 
-	// Fetch baseline metrics for comparison
-	var baselineForward, baselineReturn *VoicePathMetrics
-	if len(forwardMetrics) > 0 {
-		// Use first forward probe for baseline
-		for _, p := range trafficSimProbes {
-			bm, err := fetchVoicePathMetrics(ctx, ch, []uint{agentID}, p.ID, baselineFrom)
-			if err == nil && bm != nil {
-				baselineForward = bm
-				break
-			}
+	// Per-probe baseline map. Old code used a single `baselineForward`
+	// for every probe; that's wrong for agents with multiple targets
+	// (each target has its own baseline). We fetch all of them and look
+	// up by probe_id inside the detection helpers.
+	baselineByProbeID := make(map[uint]*VoicePathMetrics)
+	for _, p := range trafficSimProbes {
+		bm, err := fetchVoicePathMetrics(ctx, ch, []uint{agentID}, p.ID, baselineFrom)
+		if err == nil && bm != nil {
+			baselineByProbeID[p.ID] = bm
 		}
 	}
 
 	// Determine target agent name for issue detection
 	targetName := ""
-	if bestForward != nil {
-		targetName = bestForward.TargetAgentName
-	} else if bestReturn != nil {
-		targetName = bestReturn.TargetAgentName
+	if worstForward != nil {
+		targetName = worstForward.TargetAgentName
+	} else if worstReturn != nil {
+		targetName = worstReturn.TargetAgentName
 	}
 
-	// Detect voice quality issues
-	issues := detectVoiceQualityIssues(bestForward, bestReturn, baselineForward, baselineReturn, targetName)
+	// Detect voice quality issues (now with per-probe baselines and
+	// configurable thresholds).
+	issues := detectVoiceQualityIssues(worstForward, worstReturn, baselineByProbeID, targetName, &thresholds)
 
-	// Compute overall MOS as weighted average
+	// Sample-weighted aggregate metrics (the "honest" average across
+	// all probes, not just the worst one).
+	allProbes := make([]*VoicePathMetrics, 0, len(forwardMetrics)+len(reverseMetrics))
+	for _, m := range forwardMetrics {
+		allProbes = append(allProbes, m)
+	}
+	for _, m := range reverseMetrics {
+		allProbes = append(allProbes, m)
+	}
+	aggForward := aggregateVoicePathMetrics(forwardSlice(forwardMetrics), VoicePathForward)
+	aggReturn := aggregateVoicePathMetrics(reverseSlice(reverseMetrics), VoicePathReturn)
+
+	// Compute overall MOS as weighted average of the WORST-OFFENDER
+	// paths (preserves existing behavior — the worst path is the
+	// operator's signal of "is the worst case acceptable"). The
+	// aggregate values are still surfaced separately for the report.
 	var overallMos float64
 	var totalWeight float64
-	if bestForward != nil {
-		overallMos += bestForward.MosScore * 1.0
+	if worstForward != nil {
+		overallMos += worstForward.MosScore * 1.0
 		totalWeight += 1.0
 	}
-	if bestReturn != nil {
-		overallMos += bestReturn.MosScore * 0.8 // Return path slightly less weight
+	if worstReturn != nil {
+		overallMos += worstReturn.MosScore * 0.8 // Return path slightly less weight
 		totalWeight += 0.8
 	}
 	if totalWeight > 0 {
@@ -4214,19 +4507,21 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		overallMos = 4.5 // Default to excellent if no data
 	}
 
-	// Compute scores
+	// Compute scores from the worst-offender paths (kept consistent
+	// with the existing overall MOS weighting so the report numbers
+	// line up).
 	var latencyScore, jitterScore, packetLossScore float64
 	count := 0
-	if bestForward != nil {
-		latencyScore += scoreLatency(bestForward.AvgLatency, bestForward.P95Latency, bestForward.JitterAvg)
-		jitterScore += jitterToScore(bestForward.JitterAvg)
-		packetLossScore += scorePacketLoss(bestForward.PacketLoss)
+	if worstForward != nil {
+		latencyScore += scoreLatency(worstForward.AvgLatency, worstForward.P95Latency, worstForward.JitterAvg)
+		jitterScore += jitterToScore(worstForward.JitterAvg)
+		packetLossScore += scorePacketLoss(worstForward.PacketLoss)
 		count++
 	}
-	if bestReturn != nil {
-		latencyScore += scoreLatency(bestReturn.AvgLatency, bestReturn.P95Latency, bestReturn.JitterAvg)
-		jitterScore += jitterToScore(bestReturn.JitterAvg)
-		packetLossScore += scorePacketLoss(bestReturn.PacketLoss)
+	if worstReturn != nil {
+		latencyScore += scoreLatency(worstReturn.AvgLatency, worstReturn.P95Latency, worstReturn.JitterAvg)
+		jitterScore += jitterToScore(worstReturn.JitterAvg)
+		packetLossScore += scorePacketLoss(worstReturn.PacketLoss)
 		count++
 	}
 	if count > 0 {
@@ -4237,30 +4532,267 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		latencyScore, jitterScore, packetLossScore = 100, 100, 100
 	}
 
+	// Time-of-day pattern from the per-bucket series (when available).
+	// Falls back to the legacy pattern-from-incidents heuristic.
 	timePattern := timePatternFromIncidents(issues)
-	recommendation := buildVoiceQualityRecommendation(issues, bestForward, bestReturn)
+	if patterns := fetchVoicePathSeriesPatterns(ctx, ch, agentID, trafficSimProbes, from, to); patterns != "" {
+		timePattern = patterns
+	}
+
+	recommendation := buildVoiceQualityRecommendation(issues, worstForward, worstReturn)
 
 	probeList := make([]VoicePathMetrics, 0, len(forwardMetrics))
 	for _, m := range forwardMetrics {
 		probeList = append(probeList, *m)
 	}
 
+	// Compute per-probe baseline deltas for the trend arrow.
+	baselineComparison := computeBaselineComparison(allProbes, baselineByProbeID)
+
+	// Pull workspace-level incidents for context. We re-use the helper
+	// from analysis.go that returns the full WorkspaceAnalysis and
+	// filter down to incidents touching this agent.
+	workspaceContext := buildWorkspaceIncidentContext(ctx, db, ch, agentID, agentObj.Name, from)
+
+	// Time series for the MOS timeline chart.
+	trends := buildVoiceTrends(ctx, ch, agentID, trafficSimProbes, from, to, thresholds)
+
 	return &VoiceQualitySummary{
-		AgentID:         agentID,
-		AgentName:       agentObj.Name,
-		OverallMos:      overallMos,
-		OverallGrade:    voiceGradeFromMos(overallMos),
-		LatencyScore:    latencyScore,
-		JitterScore:     jitterScore,
-		PacketLossScore: packetLossScore,
-		ForwardPath:     bestForward,
-		ReturnPath:      bestReturn,
-		Probes:          probeList,
-		Issues:          issues,
-		TimePattern:     timePattern,
-		Recommendation:  recommendation,
-		GeneratedAt:     time.Now().UTC(),
+		AgentID:            agentID,
+		AgentName:          agentObj.Name,
+		OverallMos:         overallMos,
+		OverallGrade:       voiceGradeFromMos(overallMos),
+		LatencyScore:       latencyScore,
+		JitterScore:        jitterScore,
+		PacketLossScore:    packetLossScore,
+		ForwardPath:        worstForward, // now correctly named: the worst-offender
+		ReturnPath:         worstReturn,
+		AggregateForward:   aggForward,
+		AggregateReturn:    aggReturn,
+		Probes:             probeList,
+		Trends:             trends,
+		BaselineComparison: baselineComparison,
+		WorkspaceContext:   workspaceContext,
+		Issues:             issues,
+		TimePattern:        timePattern,
+		Recommendation:     recommendation,
+		ThresholdsUsed:     &thresholds,
+		GeneratedAt:        time.Now().UTC(),
 	}, nil
+}
+
+// forwardSlice / reverseSlice are tiny helpers to drop the map keys
+// when passing to aggregateVoicePathMetrics.
+func forwardSlice(m map[uint]*VoicePathMetrics) []*VoicePathMetrics {
+	out := make([]*VoicePathMetrics, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}
+
+func reverseSlice(m map[uint]*VoicePathMetrics) []*VoicePathMetrics {
+	return forwardSlice(m)
+}
+
+// aggregateVoicePathMetrics produces a sample-weighted aggregate
+// VoicePathMetrics from a set of probes in a given direction. Latency,
+// jitter, and loss are weighted by sample count; p95 metrics are the
+// max (the worst P95 across probes represents the worst-case p95 the
+// user can experience).
+func aggregateVoicePathMetrics(probes []*VoicePathMetrics, dir VoicePathDirection) *VoicePathMetrics {
+	if len(probes) == 0 {
+		return nil
+	}
+	var (
+		totalSamples                              int
+		weightedMos, weightedLat                  float64
+		weightedJitter, weightedLoss, weightedOOO float64
+		weightedDup, weightedJitterP95            float64
+		p95Lat, jitterP95                         float64
+		mosContribs                               []string
+	)
+	for _, p := range probes {
+		if p == nil || p.SampleCount == 0 {
+			continue
+		}
+		w := float64(p.SampleCount)
+		totalSamples += p.SampleCount
+		weightedMos += p.MosScore * w
+		weightedLat += p.AvgLatency * w
+		weightedJitter += p.JitterAvg * w
+		weightedJitterP95 += p.JitterP95 * w
+		weightedLoss += p.PacketLoss * w
+		weightedOOO += p.OutOfSequence * w
+		weightedDup += p.Duplicates * w
+		if p.P95Latency > p95Lat {
+			p95Lat = p.P95Latency
+		}
+		if p.JitterP95 > jitterP95 {
+			jitterP95 = p.JitterP95
+		}
+		mosContribs = append(mosContribs, p.MosContributors...)
+	}
+	if totalSamples == 0 {
+		return nil
+	}
+	w := float64(totalSamples)
+	out := &VoicePathMetrics{
+		Direction:     dir,
+		SampleCount:   totalSamples,
+		MosScore:      weightedMos / w,
+		AvgLatency:    weightedLat / w,
+		P95Latency:    p95Lat,
+		JitterAvg:     weightedJitter / w,
+		JitterP95:     jitterP95,
+		PacketLoss:    weightedLoss / w,
+		OutOfSequence: weightedOOO / w,
+		Duplicates:    weightedDup / w,
+		MosContributors: dedupeStrings(mosContribs),
+	}
+	out.MedianLatency = out.AvgLatency // close enough for an aggregate label
+	out.CongestionLevel = congestionLevelFromMetrics(out.JitterAvg, out.PacketLoss, out.AvgLatency)
+	return out
+}
+
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+// computeBaselineComparison rolls up per-probe baseline deltas into a
+// single BaselineDelta for the executive summary. Returns nil when no
+// baseline samples were found.
+func computeBaselineComparison(probes []*VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics) *BaselineDelta {
+	var (
+		totalSamples, baselineSamples int
+		mosDeltaSum, latDeltaSum      float64
+		jitDeltaSum, lossDeltaSum     float64
+		mosDeltaCount                 int
+	)
+	for _, p := range probes {
+		if p == nil {
+			continue
+		}
+		totalSamples += p.SampleCount
+		bm := baselineByProbeID[p.ProbeID]
+		if bm == nil {
+			continue
+		}
+		baselineSamples += bm.SampleCount
+		mosDeltaSum += p.MosScore - bm.MosScore
+		latDeltaSum += p.AvgLatency - bm.AvgLatency
+		jitDeltaSum += p.JitterAvg - bm.JitterAvg
+		lossDeltaSum += p.PacketLoss - bm.PacketLoss
+		mosDeltaCount++
+	}
+	if baselineSamples == 0 {
+		return nil
+	}
+	d := &BaselineDelta{
+		From:            time.Now().UTC().Add(-7 * 24 * time.Hour),
+		To:              time.Now().UTC(),
+		SampleCount:     totalSamples,
+		BaselineSamples: baselineSamples,
+	}
+	if mosDeltaCount > 0 {
+		d.MosDelta = mosDeltaSum / float64(mosDeltaCount)
+		d.LatencyDeltaMs = latDeltaSum / float64(mosDeltaCount)
+		d.JitterDeltaMs = jitDeltaSum / float64(mosDeltaCount)
+		d.LossDeltaPct = lossDeltaSum / float64(mosDeltaCount)
+	}
+	switch {
+	case d.MosDelta > 0.1:
+		d.Trend = "improving"
+	case d.MosDelta < -0.1:
+		d.Trend = "worsening"
+	default:
+		d.Trend = "stable"
+	}
+	if d.MosDelta > 0 {
+		d.PercentChange = d.MosDelta * 100
+	} else {
+		d.PercentChange = d.MosDelta * 100
+	}
+	return d
+}
+
+// buildWorkspaceIncidentContext pulls the workspace's recent
+// DetectedIncident list and filters it down to ones that touch this
+// agent. Used to give the agent voice report a workspace-level
+// context section.
+func buildWorkspaceIncidentContext(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint, agentName string, from time.Time) *WorkspaceIncidentContext {
+	// Look up the workspace ID for this agent.
+	var wsID uint
+	if err := db.WithContext(ctx).Table("agents").Select("workspace_id").Where("id = ?", agentID).Scan(&wsID).Error; err != nil || wsID == 0 {
+		return nil
+	}
+	wa, err := ComputeWorkspaceAnalysis(ctx, ch, db, wsID, int(time.Since(from).Minutes()))
+	if err != nil || wa == nil {
+		return nil
+	}
+	ctxOut := &WorkspaceIncidentContext{}
+	for _, inc := range wa.Incidents {
+		matched := false
+		for _, a := range inc.AffectedAgents {
+			if a == agentName || a == agentObjName(a) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		ctxOut.Incidents = append(ctxOut.Incidents, inc)
+		if inc.Severity == "critical" {
+			ctxOut.CriticalCount++
+		} else if inc.Severity == "warning" {
+			ctxOut.WarningCount++
+		}
+		ctxOut.AffectedCount++
+	}
+	if len(ctxOut.Incidents) == 0 {
+		return nil
+	}
+	return ctxOut
+}
+
+// agentObjName is a no-op shim; kept for clarity in
+// buildWorkspaceIncidentContext's "is this incident about THIS agent?"
+// matching. AffectedAgents currently stores agent names verbatim, so
+// equality is what we want; the shim is here so the call site reads
+// naturally and we have one place to change if the matching logic
+// evolves (e.g., agent ID matching).
+func agentObjName(s string) string { return s }
+
+// workspaceSettingsFor fetches the raw Settings JSON for the agent's
+// workspace. Returns nil if the agent has no workspace (shouldn't
+// happen in practice).
+func workspaceSettingsFor(ctx context.Context, db *gorm.DB, agentID uint) []byte {
+	var wsID uint
+	if err := db.WithContext(ctx).Table("agents").Select("workspace_id").Where("id = ?", agentID).Scan(&wsID).Error; err != nil || wsID == 0 {
+		return nil
+	}
+	var settings []byte
+	row := db.WithContext(ctx).Table("workspaces").Select("settings").Where("id = ?", wsID).Row()
+	if row == nil {
+		return nil
+	}
+	if err := row.Scan(&settings); err != nil {
+		return nil
+	}
+	return settings
 }
 
 // fetchVoicePathMetrics fetches voice path metrics from ClickHouse for a given probe

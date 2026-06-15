@@ -2,6 +2,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,12 +13,42 @@ import (
 	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/limits"
+	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+// jsonFromBytes unmarshals raw JSON into the destination. Used by
+// the voice-threshold workspace endpoints to preserve the rest of
+// the settings blob while editing the voice_thresholds key.
+func jsonFromBytes(raw []byte, dst *map[string]any) error {
+	return json.Unmarshal(raw, dst)
+}
+
+// jsonToBytes marshals the map to JSON for storage.
+func jsonToBytes(m map[string]any) ([]byte, error) {
+	return json.Marshal(m)
+}
+
+// hasWorkspaceOverride reports whether the settings blob already
+// contains a `voice_thresholds` key. Cheap probe before issuing a
+// full ResolveVoiceThresholds call.
+func hasWorkspaceOverride(settings []byte) bool {
+	if len(settings) == 0 {
+		return false
+	}
+	var s struct {
+		VoiceThresholds *probe.VoiceThresholds `json:"voice_thresholds"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return false
+	}
+	return s.VoiceThresholds != nil
+}
 
 func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore, deletionStore *deletion.QueueStore, limitsConfig *limits.Config) {
 	wsParty := api.Group("/workspaces")
@@ -179,6 +210,102 @@ func panelWorkspaces(api fiber.Router, db *gorm.DB, emailStore *email.QueueStore
 				status = http.StatusNotFound
 			}
 			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"ok": true})
+	})
+
+	// GET /workspaces/:id/voice-thresholds
+	// Returns the effective voice thresholds for this workspace
+	// (defaults → admin override → workspace override). The body
+	// shape matches admin's voiceThresholdResponse so the frontend
+	// can render the merged view identically on both screens.
+	wsID.Get("/voice-thresholds", func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		ws, err := store.GetWorkspace(c.UserContext(), id)
+		if err != nil || ws == nil {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+		}
+		admin, err := probe.GetAdminVoiceThresholds(db)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		eff, err := probe.ResolveVoiceThresholds(db, ws.Settings)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		resp := fiber.Map{
+			"source":    "defaults",
+			"effective": eff,
+		}
+		if admin != nil {
+			resp["source"] = "admin"
+		}
+		if hasWorkspaceOverride(ws.Settings) {
+			resp["source"] = "workspace"
+		}
+		return c.JSON(resp)
+	})
+
+	// PUT /workspaces/:id/voice-thresholds - requires CanManage.
+	// Body is a partial VoiceThresholds JSON; non-zero fields override
+	// the admin global.
+	wsID.Put("/voice-thresholds", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		var body probe.VoiceThresholds
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON body: " + err.Error()})
+		}
+		if body.WarningJitterMs > 0 && body.CriticalJitterMs > 0 && body.WarningJitterMs > body.CriticalJitterMs {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "warning_jitter_ms must be ≤ critical_jitter_ms"})
+		}
+		if body.WarningLossPct > 0 && body.CriticalLossPct > 0 && body.WarningLossPct > body.CriticalLossPct {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "warning_loss_pct must be ≤ critical_loss_pct"})
+		}
+		// Merge into the existing settings blob so we don't clobber
+		// other keys the workspace owner has set.
+		ws, err := store.GetWorkspace(c.UserContext(), id)
+		if err != nil || ws == nil {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+		}
+		var settings map[string]any
+		if len(ws.Settings) > 0 {
+			_ = jsonFromBytes(ws.Settings, &settings)
+		}
+		if settings == nil {
+			settings = map[string]any{}
+		}
+		settings["voice_thresholds"] = body
+		raw, _ := jsonToBytes(settings)
+		jsonVal := datatypes.JSON(raw)
+		if _, err := store.UpdateWorkspace(c.UserContext(), id, workspace.UpdateWorkspaceInput{
+			Settings: &jsonVal,
+		}); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"ok": true, "effective": body})
+	})
+
+	// DELETE /workspaces/:id/voice-thresholds - requires CanManage.
+	wsID.Delete("/voice-thresholds", RequireRole(store, CanManage), func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+		ws, err := store.GetWorkspace(c.UserContext(), id)
+		if err != nil || ws == nil {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+		}
+		var settings map[string]any
+		if len(ws.Settings) > 0 {
+			_ = jsonFromBytes(ws.Settings, &settings)
+		}
+		if settings == nil {
+			return c.JSON(fiber.Map{"ok": true})
+		}
+		delete(settings, "voice_thresholds")
+		raw, _ := jsonToBytes(settings)
+		jsonVal := datatypes.JSON(raw)
+		if _, err := store.UpdateWorkspace(c.UserContext(), id, workspace.UpdateWorkspaceInput{
+			Settings: &jsonVal,
+		}); err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(fiber.Map{"ok": true})
 	})

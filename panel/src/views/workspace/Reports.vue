@@ -95,6 +95,7 @@ function getReportTypeLabel(type_: string): string {
     case "workspace_summary": return "Workspace Summary";
     case "probe_detail": return "Probe Detail";
     case "sla": return "SLA Report";
+    case "workspace_voice": return "Voice Quality";
     default: return type_;
   }
 }

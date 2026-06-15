@@ -675,10 +675,13 @@ const isGeneratingReport = ref(false);
 const lastLiveUpdate = ref<Date | null>(null);
 
 // Download voice quality report
-async function downloadAgentReport(timeRange: number | { from: Date; to: Date }) {
+async function downloadAgentReport(
+  timeRange: number | { from: Date; to: Date },
+  sections: string = ""
+) {
   isGeneratingReport.value = true;
   try {
-    const blob = await AgentService.downloadAgentReport(state.agent.id, timeRange);
+    const blob = await AgentService.downloadAgentReport(state.agent.id, timeRange, sections);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

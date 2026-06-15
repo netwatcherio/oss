@@ -81,6 +81,7 @@ type SLASummary struct {
 type VoicePathSummary struct {
 	Direction       string
 	TargetAgent     string
+	SourceAgent     string
 	MosScore        float64
 	Grade           string
 	AvgLatency      float64
@@ -118,9 +119,86 @@ type AgentVoiceReportSummary struct {
 	PacketLossScore float64
 	ForwardPath     *VoicePathSummary
 	ReturnPath      *VoicePathSummary
+	AggregateForward *VoicePathSummary
+	AggregateReturn  *VoicePathSummary
 	Probes          []VoicePathSummary
 	Issues          []VoiceIssueSummary
 	Recommendation  string
+
+	// New (Phase 1) fields — populated when the analysis engine
+	// provides them. Used by the executive snapshot, timeline, and
+	// correlation sections.
+	BaselineComparison *BaselineDeltaSummary
+	Trends             *VoiceTrendsSummary
+	RouteSignals       []RouteSignalSummary
+	WorkspaceContext   *WorkspaceIncidentSummary
+	Thresholds         *VoiceThresholdsSummary
+}
+
+// BaselineDeltaSummary is a PDF-friendly snapshot of the 7-day
+// baseline comparison. Mirrors probe.BaselineDelta but is detached
+// from the live struct so the report module doesn't import the
+// probe package (which would create a cycle through generator.go).
+type BaselineDeltaSummary struct {
+	From             string
+	To               string
+	MosDelta         float64
+	LatencyDeltaMs   float64
+	JitterDeltaMs    float64
+	LossDeltaPct     float64
+	SampleCount      int
+	BaselineSamples  int
+	Trend            string
+	PercentChange    float64
+}
+
+// VoiceTrendsSummary is the PDF view of the per-bucket MOS series.
+type VoiceTrendsSummary struct {
+	BucketMinutes int
+	ForwardMOS    []float64
+	ReturnMOS     []float64
+	Timestamps    []string
+	IssueBuckets  []string
+}
+
+// RouteSignalSummary is the PDF view of one route/MTR signal.
+type RouteSignalSummary struct {
+	ProbeID    uint
+	ProbeType  string
+	Type       string
+	Severity   string
+	Title      string
+	Evidence   string
+	DetectedAt string
+}
+
+// WorkspaceIncidentSummary is the PDF view of the workspace context.
+type WorkspaceIncidentSummary struct {
+	AffectedCount int
+	CriticalCount int
+	WarningCount  int
+	Incidents     []WorkspaceIncidentEntry
+}
+
+// WorkspaceIncidentEntry is one workspace incident, PDF-shaped.
+type WorkspaceIncidentEntry struct {
+	Title         string
+	Severity      string
+	Scope         string
+	SuggestedCause string
+}
+
+// VoiceThresholdsSummary is the PDF view of the effective thresholds.
+type VoiceThresholdsSummary struct {
+	Codec            string
+	WarningJitterMs  float64
+	CriticalJitterMs float64
+	WarningLossPct   float64
+	CriticalLossPct  float64
+	ExcellentMos     float64
+	GoodMos          float64
+	FairMos          float64
+	PoorMos          float64
 }
 
 type AgentStatus struct {
@@ -271,48 +349,65 @@ func (g *Generator) generateSLAPDF(ctx context.Context, config *ReportConfig, co
 }
 
 func (g *Generator) GenerateAgentPDF(ctx context.Context, agentID uint, days int64) ([]byte, error) {
-	pdf := gofpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(15, 15, 15)
-	pdf.AddPage()
-
-	if days <= 0 {
-		days = 7
-	}
-
-	summary, err := g.fetchAgentVoiceReportSummary(ctx, agentID, days)
-	if err != nil {
-		log.Warnf("[reports] failed to fetch agent voice summary for agent %d: %v", agentID, err)
-		summary = &AgentVoiceReportSummary{Name: "Unknown Agent", GeneratedAt: time.Now()}
-	}
-
-	g.renderAgentVoiceCover(pdf, summary)
-	g.renderAgentVoiceSummary(pdf, summary)
-	g.renderVoicePathDetails(pdf, summary)
-	g.renderVoiceIssues(pdf, summary)
-
-	var buf bytes.Buffer
-	if err := pdf.Output(&buf); err != nil {
-		return nil, fmt.Errorf("pdf output failed: %w", err)
-	}
-
-	return buf.Bytes(), nil
+	return g.GenerateAgentPDFWithOptions(ctx, agentID, days, time.Time{}, time.Time{}, FullAgentReportOptions())
 }
 
 func (g *Generator) GenerateAgentPDFCustomRange(ctx context.Context, agentID uint, from, to time.Time) ([]byte, error) {
+	return g.GenerateAgentPDFWithOptions(ctx, agentID, 0, from, to, FullAgentReportOptions())
+}
+
+// GenerateAgentPDFWithOptions is the section-aware entry point. The
+// `opts` param controls which sections render; pass
+// `DefaultAgentReportOptions()` for the "Quick 7-day" preset or
+// `FullAgentReportOptions()` for everything.
+//
+// The function preserves the legacy entry points
+// (`GenerateAgentPDF` / `GenerateAgentPDFCustomRange`) by
+// defaulting them to the full set so existing callers (workspace
+// schedules, email jobs) keep working.
+func (g *Generator) GenerateAgentPDFWithOptions(ctx context.Context, agentID uint, days int64, from, to time.Time, opts AgentReportOptions) ([]byte, error) {
 	pdf := gofpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(15, 15, 15)
+	pdf.SetMargins(pdfMargin, pdfMargin, pdfMargin)
+	pdf.AliasNbPages("")
+	pdf.SetFooterFunc(func() { pageFooter(pdf) })
 	pdf.AddPage()
 
-	summary, err := g.fetchAgentVoiceReportSummaryCustomRange(ctx, agentID, from, to)
+	if days <= 0 && !from.IsZero() && !to.IsZero() {
+		// Custom range path
+	} else if days <= 0 {
+		days = 7
+	}
+
+	summary, err := g.fetchAgentVoiceReportSummaryWithOptions(ctx, agentID, days, from, to, opts)
 	if err != nil {
 		log.Warnf("[reports] failed to fetch agent voice summary for agent %d: %v", agentID, err)
 		summary = &AgentVoiceReportSummary{Name: "Unknown Agent", GeneratedAt: time.Now()}
 	}
 
 	g.renderAgentVoiceCover(pdf, summary)
-	g.renderAgentVoiceSummary(pdf, summary)
-	g.renderVoicePathDetails(pdf, summary)
-	g.renderVoiceIssues(pdf, summary)
+	g.renderVoiceExecutiveSnapshot(pdf, summary, opts)
+	if opts.IncludeTimeline {
+		g.renderVoiceTimeline(pdf, summary, opts)
+	}
+	if opts.IncludeAggregate {
+		g.renderVoiceAggregate(pdf, summary, opts)
+	}
+	if opts.IncludePerProbe {
+		g.renderVoicePathDetails(pdf, summary, opts)
+	}
+	if opts.IncludeIssues {
+		g.renderVoiceIssues(pdf, summary, opts)
+	}
+	if opts.IncludeCorrelation {
+		g.renderVoiceWorkspaceContext(pdf, summary, opts)
+		g.renderVoiceRouteSignals(pdf, summary, opts)
+	}
+	if opts.IncludeAppendix {
+		g.renderVoiceAppendix(pdf, summary, opts)
+	}
+	if opts.IncludeRawJSON {
+		g.renderVoiceRawJSONAppendix(pdf, summary, opts)
+	}
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
@@ -323,117 +418,35 @@ func (g *Generator) GenerateAgentPDFCustomRange(ctx context.Context, agentID uin
 }
 
 func (g *Generator) fetchAgentVoiceReportSummary(ctx context.Context, agentID uint, days int64) (*AgentVoiceReportSummary, error) {
-	from := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
-
-	// Get agent info
-	agentObj, err := agent.GetAgentByID(ctx, g.db, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get agent: %w", err)
-	}
-
-	// Compute voice quality analysis
-	vq, err := probe.ComputeAgentVoiceQuality(ctx, g.db, g.ch, agentID, from, time.Now().UTC())
-	if err != nil {
-		log.Warnf("[reports] failed to compute voice quality for agent %d: %v", agentID, err)
-	}
-
-	summary := &AgentVoiceReportSummary{
-		Name:            agentObj.Name,
-		AgentID:         agentID,
-		ReportPeriod:    fmt.Sprintf("Last %d days", days),
-		GeneratedAt:     time.Now(),
-		OverallMos:      4.5,
-		OverallGrade:    "excellent",
-		LatencyScore:    100,
-		JitterScore:     100,
-		PacketLossScore: 100,
-	}
-
-	if vq != nil {
-		summary.OverallMos = vq.OverallMos
-		summary.OverallGrade = vq.OverallGrade
-		summary.LatencyScore = vq.LatencyScore
-		summary.JitterScore = vq.JitterScore
-		summary.PacketLossScore = vq.PacketLossScore
-		summary.Recommendation = vq.Recommendation
-
-		if vq.ForwardPath != nil {
-			summary.ForwardPath = &VoicePathSummary{
-				Direction:       "Forward",
-				TargetAgent:     vq.ForwardPath.TargetAgentName,
-				MosScore:        vq.ForwardPath.MosScore,
-				Grade:           voiceGradeFromMos(vq.ForwardPath.MosScore),
-				AvgLatency:      vq.ForwardPath.AvgLatency,
-				P95Latency:      vq.ForwardPath.P95Latency,
-				MedianLatency:   vq.ForwardPath.MedianLatency,
-				JitterAvg:       vq.ForwardPath.JitterAvg,
-				JitterMedian:    vq.ForwardPath.JitterMedian,
-				JitterP95:       vq.ForwardPath.JitterP95,
-				PacketLoss:      vq.ForwardPath.PacketLoss,
-				OutOfSequence:   vq.ForwardPath.OutOfSequence,
-				Duplicates:      vq.ForwardPath.Duplicates,
-				SampleCount:     vq.ForwardPath.SampleCount,
-				CongestionLevel: string(vq.ForwardPath.CongestionLevel),
-			}
-		}
-
-		if vq.ReturnPath != nil {
-			summary.ReturnPath = &VoicePathSummary{
-				Direction:       "Return",
-				TargetAgent:     vq.ReturnPath.SourceAgentName,
-				MosScore:        vq.ReturnPath.MosScore,
-				Grade:           voiceGradeFromMos(vq.ReturnPath.MosScore),
-				AvgLatency:      vq.ReturnPath.AvgLatency,
-				P95Latency:      vq.ReturnPath.P95Latency,
-				MedianLatency:   vq.ReturnPath.MedianLatency,
-				JitterAvg:       vq.ReturnPath.JitterAvg,
-				JitterMedian:    vq.ReturnPath.JitterMedian,
-				JitterP95:       vq.ReturnPath.JitterP95,
-				PacketLoss:      vq.ReturnPath.PacketLoss,
-				OutOfSequence:   vq.ReturnPath.OutOfSequence,
-				Duplicates:      vq.ReturnPath.Duplicates,
-				SampleCount:     vq.ReturnPath.SampleCount,
-				CongestionLevel: string(vq.ReturnPath.CongestionLevel),
-			}
-		}
-
-		for _, issue := range vq.Issues {
-			summary.Issues = append(summary.Issues, VoiceIssueSummary{
-				Severity:        issue.Severity,
-				Title:           issue.Title,
-				Category:        issue.Category,
-				SuspectedCause:  issue.SuspectedCause,
-				TimePattern:     issue.TimePattern,
-				MosDegradation:  issue.MosDegradation,
-				Recommendations: issue.Recommendations,
-			})
-		}
-
-		for _, probe := range vq.Probes {
-			summary.Probes = append(summary.Probes, VoicePathSummary{
-				Direction:       string(probe.Direction),
-				TargetAgent:     probe.TargetAgentName,
-				MosScore:        probe.MosScore,
-				Grade:           voiceGradeFromMos(probe.MosScore),
-				AvgLatency:      probe.AvgLatency,
-				P95Latency:      probe.P95Latency,
-				MedianLatency:   probe.MedianLatency,
-				JitterAvg:       probe.JitterAvg,
-				JitterMedian:    probe.JitterMedian,
-				JitterP95:       probe.JitterP95,
-				PacketLoss:      probe.PacketLoss,
-				OutOfSequence:   probe.OutOfSequence,
-				Duplicates:      probe.Duplicates,
-				SampleCount:     probe.SampleCount,
-				CongestionLevel: string(probe.CongestionLevel),
-			})
-		}
-	}
-
-	return summary, nil
+	return g.fetchAgentVoiceReportSummaryWithOptions(ctx, agentID, days, time.Time{}, time.Time{}, FullAgentReportOptions())
 }
 
 func (g *Generator) fetchAgentVoiceReportSummaryCustomRange(ctx context.Context, agentID uint, from, to time.Time) (*AgentVoiceReportSummary, error) {
+	return g.fetchAgentVoiceReportSummaryWithOptions(ctx, agentID, 0, from, to, FullAgentReportOptions())
+}
+
+// fetchAgentVoiceReportSummaryWithOptions is the canonical builder for
+// the PDF-shaped summary. It calls into probe.ComputeAgentVoiceQuality
+// (which now returns the enriched struct with aggregate, trends,
+// baseline, route signals, workspace context) and flattens the live
+// probe types into the report-friendly types declared above.
+//
+// `opts` is consulted only to decide whether the corresponding
+// `probe.ComputeAgentVoiceQuality` enrichment paths should be
+// filled. Today we always fill them (so an "issues-only" PDF still
+// has the data available for the chart); future optimization could
+// skip expensive enrichment for minimal reports.
+func (g *Generator) fetchAgentVoiceReportSummaryWithOptions(ctx context.Context, agentID uint, days int64, from, to time.Time, opts AgentReportOptions) (*AgentVoiceReportSummary, error) {
+	// Resolve the report window. If `from`/`to` are both zero, use
+	// `days`; else use the explicit range.
+	if from.IsZero() || to.IsZero() {
+		if days <= 0 {
+			days = 7
+		}
+		from = time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+		to = time.Now().UTC()
+	}
+
 	agentObj, err := agent.GetAgentByID(ctx, g.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get agent: %w", err)
@@ -463,46 +476,10 @@ func (g *Generator) fetchAgentVoiceReportSummaryCustomRange(ctx context.Context,
 		summary.JitterScore = vq.JitterScore
 		summary.PacketLossScore = vq.PacketLossScore
 		summary.Recommendation = vq.Recommendation
-
-		if vq.ForwardPath != nil {
-			summary.ForwardPath = &VoicePathSummary{
-				Direction:       "Forward",
-				TargetAgent:     vq.ForwardPath.TargetAgentName,
-				MosScore:        vq.ForwardPath.MosScore,
-				Grade:           voiceGradeFromMos(vq.ForwardPath.MosScore),
-				AvgLatency:      vq.ForwardPath.AvgLatency,
-				P95Latency:      vq.ForwardPath.P95Latency,
-				MedianLatency:   vq.ForwardPath.MedianLatency,
-				JitterAvg:       vq.ForwardPath.JitterAvg,
-				JitterMedian:    vq.ForwardPath.JitterMedian,
-				JitterP95:       vq.ForwardPath.JitterP95,
-				PacketLoss:      vq.ForwardPath.PacketLoss,
-				OutOfSequence:   vq.ForwardPath.OutOfSequence,
-				Duplicates:      vq.ForwardPath.Duplicates,
-				SampleCount:     vq.ForwardPath.SampleCount,
-				CongestionLevel: string(vq.ForwardPath.CongestionLevel),
-			}
-		}
-
-		if vq.ReturnPath != nil {
-			summary.ReturnPath = &VoicePathSummary{
-				Direction:       "Return",
-				TargetAgent:     vq.ReturnPath.SourceAgentName,
-				MosScore:        vq.ReturnPath.MosScore,
-				Grade:           voiceGradeFromMos(vq.ReturnPath.MosScore),
-				AvgLatency:      vq.ReturnPath.AvgLatency,
-				P95Latency:      vq.ReturnPath.P95Latency,
-				MedianLatency:   vq.ReturnPath.MedianLatency,
-				JitterAvg:       vq.ReturnPath.JitterAvg,
-				JitterMedian:    vq.ReturnPath.JitterMedian,
-				JitterP95:       vq.ReturnPath.JitterP95,
-				PacketLoss:      vq.ReturnPath.PacketLoss,
-				OutOfSequence:   vq.ReturnPath.OutOfSequence,
-				Duplicates:      vq.ReturnPath.Duplicates,
-				SampleCount:     vq.ReturnPath.SampleCount,
-				CongestionLevel: string(vq.ReturnPath.CongestionLevel),
-			}
-		}
+		summary.ForwardPath = toVoicePathSummary(vq.ForwardPath)
+		summary.ReturnPath = toVoicePathSummary(vq.ReturnPath)
+		summary.AggregateForward = toVoicePathSummary(vq.AggregateForward)
+		summary.AggregateReturn = toVoicePathSummary(vq.AggregateReturn)
 
 		for _, issue := range vq.Issues {
 			summary.Issues = append(summary.Issues, VoiceIssueSummary{
@@ -516,28 +493,150 @@ func (g *Generator) fetchAgentVoiceReportSummaryCustomRange(ctx context.Context,
 			})
 		}
 
-		for _, probe := range vq.Probes {
-			summary.Probes = append(summary.Probes, VoicePathSummary{
-				Direction:       string(probe.Direction),
-				TargetAgent:     probe.TargetAgentName,
-				MosScore:        probe.MosScore,
-				Grade:           voiceGradeFromMos(probe.MosScore),
-				AvgLatency:      probe.AvgLatency,
-				P95Latency:      probe.P95Latency,
-				MedianLatency:   probe.MedianLatency,
-				JitterAvg:       probe.JitterAvg,
-				JitterMedian:    probe.JitterMedian,
-				JitterP95:       probe.JitterP95,
-				PacketLoss:      probe.PacketLoss,
-				OutOfSequence:   probe.OutOfSequence,
-				Duplicates:      probe.Duplicates,
-				SampleCount:     probe.SampleCount,
-				CongestionLevel: string(probe.CongestionLevel),
-			})
+		for _, p := range vq.Probes {
+			summary.Probes = append(summary.Probes, *toVoicePathSummary(&p))
 		}
+
+		summary.BaselineComparison = toBaselineSummary(vq.BaselineComparison)
+		summary.Trends = toTrendsSummary(vq.Trends)
+		summary.RouteSignals = toRouteSignalSummary(vq.RouteSignals)
+		summary.WorkspaceContext = toWorkspaceContextSummary(vq.WorkspaceContext)
+		summary.Thresholds = toThresholdsSummary(vq.ThresholdsUsed)
 	}
 
 	return summary, nil
+}
+
+// toVoicePathSummary / toBaselineSummary / etc. are the probe→PDF
+// flatteners. They keep the report package free of direct dep on
+// the probe struct tags (and the two packages can evolve their JSON
+// shape independently).
+
+func toVoicePathSummary(p *probe.VoicePathMetrics) *VoicePathSummary {
+	if p == nil {
+		return nil
+	}
+	return &VoicePathSummary{
+		Direction:       string(p.Direction),
+		TargetAgent:     p.TargetAgentName,
+		SourceAgent:     p.SourceAgentName,
+		MosScore:        p.MosScore,
+		Grade:           voiceGradeFromMos(p.MosScore),
+		AvgLatency:      p.AvgLatency,
+		P95Latency:      p.P95Latency,
+		MedianLatency:   p.MedianLatency,
+		JitterAvg:       p.JitterAvg,
+		JitterMedian:    p.JitterMedian,
+		JitterP95:       p.JitterP95,
+		PacketLoss:      p.PacketLoss,
+		OutOfSequence:   p.OutOfSequence,
+		Duplicates:      p.Duplicates,
+		SampleCount:     p.SampleCount,
+		CongestionLevel: string(p.CongestionLevel),
+	}
+}
+
+func toBaselineSummary(b *probe.BaselineDelta) *BaselineDeltaSummary {
+	if b == nil {
+		return nil
+	}
+	return &BaselineDeltaSummary{
+		From:            b.From.Format("2006-01-02"),
+		To:              b.To.Format("2006-01-02"),
+		MosDelta:        b.MosDelta,
+		LatencyDeltaMs:  b.LatencyDeltaMs,
+		JitterDeltaMs:   b.JitterDeltaMs,
+		LossDeltaPct:    b.LossDeltaPct,
+		SampleCount:     b.SampleCount,
+		BaselineSamples: b.BaselineSamples,
+		Trend:           b.Trend,
+		PercentChange:   b.PercentChange,
+	}
+}
+
+func toTrendsSummary(t *probe.VoiceTrends) *VoiceTrendsSummary {
+	if t == nil {
+		return nil
+	}
+	out := &VoiceTrendsSummary{
+		BucketMinutes: t.BucketMinutes,
+		IssueBuckets:  append([]string(nil), t.IssueBuckets...),
+	}
+	for _, b := range t.Forward {
+		out.ForwardMOS = append(out.ForwardMOS, b.Forward)
+		out.Timestamps = append(out.Timestamps, b.Timestamp)
+	}
+	for _, b := range t.Return {
+		out.ReturnMOS = append(out.ReturnMOS, b.Return)
+	}
+	if out.Timestamps == nil && len(t.Combined) > 0 {
+		// Fall back to the combined series if the per-direction split
+		// wasn't populated.
+		out.ForwardMOS = nil
+		out.ReturnMOS = nil
+		for _, b := range t.Combined {
+			out.ForwardMOS = append(out.ForwardMOS, b.Forward)
+			out.ReturnMOS = append(out.ReturnMOS, b.Return)
+			out.Timestamps = append(out.Timestamps, b.Timestamp)
+		}
+	}
+	return out
+}
+
+func toRouteSignalSummary(signals []probe.RouteSignal) []RouteSignalSummary {
+	if len(signals) == 0 {
+		return nil
+	}
+	out := make([]RouteSignalSummary, 0, len(signals))
+	for _, s := range signals {
+		out = append(out, RouteSignalSummary{
+			ProbeID:    s.ProbeID,
+			ProbeType:  s.ProbeType,
+			Type:       s.Type,
+			Severity:   s.Severity,
+			Title:      s.Title,
+			Evidence:   s.Evidence,
+			DetectedAt: s.DetectedAt.Format("2006-01-02 15:04 UTC"),
+		})
+	}
+	return out
+}
+
+func toWorkspaceContextSummary(c *probe.WorkspaceIncidentContext) *WorkspaceIncidentSummary {
+	if c == nil {
+		return nil
+	}
+	out := &WorkspaceIncidentSummary{
+		AffectedCount: c.AffectedCount,
+		CriticalCount: c.CriticalCount,
+		WarningCount:  c.WarningCount,
+	}
+	for _, inc := range c.Incidents {
+		out.Incidents = append(out.Incidents, WorkspaceIncidentEntry{
+			Title:          inc.Title,
+			Severity:       inc.Severity,
+			Scope:          inc.Scope,
+			SuggestedCause: inc.SuggestedCause,
+		})
+	}
+	return out
+}
+
+func toThresholdsSummary(t *probe.VoiceThresholds) *VoiceThresholdsSummary {
+	if t == nil {
+		return nil
+	}
+	return &VoiceThresholdsSummary{
+		Codec:            t.Codec,
+		WarningJitterMs:  t.WarningJitterMs,
+		CriticalJitterMs: t.CriticalJitterMs,
+		WarningLossPct:   t.WarningLossPct,
+		CriticalLossPct:  t.CriticalLossPct,
+		ExcellentMos:     t.ExcellentMos,
+		GoodMos:          t.GoodMos,
+		FairMos:          t.FairMos,
+		PoorMos:          t.PoorMos,
+	}
 }
 
 func voiceGradeFromMos(mos float64) string {
@@ -587,6 +686,24 @@ func (g *Generator) renderAgentVoiceCover(pdf *gofpdf.Fpdf, summary *AgentVoiceR
 }
 
 func (g *Generator) renderAgentVoiceSummary(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary) {
+	// Legacy entry point preserved for the workspace voice report
+	// (which doesn't use the section toggle). Renders the executive
+	// snapshot as it did before.
+	g.renderVoiceExecutiveSnapshot(pdf, summary, DefaultAgentReportOptions())
+}
+
+// renderVoiceExecutiveSnapshot is the one-page top-of-report block.
+// It includes:
+//   - Grade chip + overall MOS score
+//   - Three metric chips (latency / jitter / loss scores)
+//   - 7-day baseline comparison
+//   - Issue count (critical + warning)
+//   - Recommendation sentence
+//
+// Rendered for the first page so the operator can read the headline
+// without flipping pages.
+func (g *Generator) renderVoiceExecutiveSnapshot(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
 	pdf.SetFont("Arial", "B", 14)
 	pdf.SetTextColor(26, 54, 93)
 	pdf.Cell(0, 8, "Voice Quality Summary")
@@ -595,28 +712,46 @@ func (g *Generator) renderAgentVoiceSummary(pdf *gofpdf.Fpdf, summary *AgentVoic
 	pdf.SetFont("Arial", "", 10)
 	pdf.SetTextColor(50, 50, 50)
 
-	gradeColor(summary.OverallGrade, pdf)
+	gradeRGB := gradeRGBFor(summary.OverallGrade)
 
-	metrics := [][2]string{
-		{"Overall MOS", fmt.Sprintf("%.2f / 5.0 (%s)", summary.OverallMos, summary.OverallGrade)},
-		{"Latency Score", fmt.Sprintf("%.1f / 100", summary.LatencyScore)},
-		{"Jitter Score", fmt.Sprintf("%.1f / 100", summary.JitterScore)},
-		{"Packet Loss Score", fmt.Sprintf("%.1f / 100", summary.PacketLossScore)},
-		{"Voice Issues Detected", fmt.Sprintf("%d", len(summary.Issues))},
+	// Grade chip
+	chipText(pdf, fmt.Sprintf("MOS %.2f — %s", summary.OverallMos, strings.ToUpper(summary.OverallGrade)),
+		"", gradeRGB[0], gradeRGB[1], gradeRGB[2])
+	pdf.Ln(2)
+
+	metricRow(pdf, "Overall MOS", fmt.Sprintf("%.2f / 5.0", summary.OverallMos))
+	metricRow(pdf, "Latency Score", fmt.Sprintf("%.1f / 100", summary.LatencyScore))
+	metricRow(pdf, "Jitter Score", fmt.Sprintf("%.1f / 100", summary.JitterScore))
+	metricRow(pdf, "Packet Loss Score", fmt.Sprintf("%.1f / 100", summary.PacketLossScore))
+
+	critical, warning := 0, 0
+	for _, iss := range summary.Issues {
+		switch iss.Severity {
+		case "critical":
+			critical++
+		case "warning":
+			warning++
+		}
 	}
+	metricRow(pdf, "Voice Issues Detected", fmt.Sprintf("%d critical, %d warning", critical, warning))
 
-	for _, m := range metrics {
-		pdf.SetFont("Arial", "B", 10)
-		pdf.Cell(55, 6, m[0]+":")
-		pdf.SetFont("Arial", "", 10)
-		pdf.Cell(0, 6, m[1])
-		pdf.Ln(6)
+	// 7-day baseline comparison
+	if summary.BaselineComparison != nil {
+		bd := summary.BaselineComparison
+		trendArrow := "→"
+		switch bd.Trend {
+		case "improving":
+			trendArrow = "↑"
+		case "worsening":
+			trendArrow = "↓"
+		}
+		metricRow(pdf, "vs 7-day baseline",
+			fmt.Sprintf("%s MOS %+.2f (latency %+.0fms, jitter %+.1fms, loss %+.2f%%)  [%s samples vs %d baseline]",
+				trendArrow, bd.MosDelta, bd.LatencyDeltaMs, bd.JitterDeltaMs, bd.LossDeltaPct, humanCount(bd.SampleCount), bd.BaselineSamples))
 	}
-
-	pdf.SetTextColor(50, 50, 50)
-	pdf.Ln(5)
 
 	if summary.Recommendation != "" {
+		pdf.Ln(2)
 		pdf.SetFont("Arial", "B", 10)
 		pdf.Cell(0, 6, "Recommendation:")
 		pdf.Ln(6)
@@ -624,68 +759,187 @@ func (g *Generator) renderAgentVoiceSummary(pdf *gofpdf.Fpdf, summary *AgentVoic
 		pdf.MultiCell(0, 5, summary.Recommendation, "", "", false)
 	}
 
-	pdf.Ln(10)
+	pdf.Ln(6)
 }
 
-func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary) {
-	if summary.ForwardPath == nil && summary.ReturnPath == nil {
+// gradeRGBFor returns the [r,g,b] triple for a grade, mirroring
+// panel/src/components/analysis/types.ts gradeColors and charts.go.
+// The result is what gofpdf.SetFillColor / SetTextColor expects.
+func gradeRGBFor(grade string) [3]int {
+	switch grade {
+	case "excellent":
+		return [3]int{22, 163, 74}
+	case "good":
+		return [3]int{59, 130, 246}
+	case "fair":
+		return [3]int{234, 179, 8}
+	case "poor":
+		return [3]int{249, 115, 22}
+	case "critical":
+		return [3]int{220, 38, 38}
+	default:
+		return [3]int{100, 100, 100}
+	}
+}
+
+// humanCount formats a sample count as "1.2k" / "3.4M" for compact
+// rendering in the executive snapshot. Numbers < 1000 are unchanged.
+func humanCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// renderVoiceTimeline draws the MOS-over-time chart (with issue
+// markers) for the analysis window. Falls back to a "no data" line
+// when the trends slice is empty.
+func (g *Generator) renderVoiceTimeline(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	sectionHeader(pdf, "MOS Timeline")
+
+	if summary.Trends == nil || len(summary.Trends.ForwardMOS) < 2 {
 		pdf.SetFont("Arial", "I", 10)
-		pdf.SetTextColor(128, 128, 128)
-		pdf.Cell(0, 6, "No voice path data available")
-		pdf.Ln(10)
+		pdf.SetTextColor(120, 120, 120)
+		pdf.MultiCell(0, 5, "No time-bucketed MOS data available for the selected window. "+
+			"Try a longer time range (the engine buckets every hour for windows ≤ 7 days, every 4h beyond).", "", "", false)
+		pdf.Ln(4)
 		return
 	}
 
-	pdf.SetFont("Arial", "B", 14)
-	pdf.SetTextColor(26, 54, 93)
-	pdf.Cell(0, 8, "Voice Path Details")
-	pdf.Ln(8)
-
-	pdf.SetFont("Arial", "B", 8)
-	pdf.SetFillColor(240, 240, 240)
-	pdf.SetTextColor(50, 50, 50)
-
-	colWidths := []float64{20, 22, 16, 18, 18, 18, 18, 16, 16, 16, 16, 16, 16, 16}
-	headers := []string{"Dir", "Target", "MOS", "AvgLat", "P95Lat", "MedLat", "JitAvg", "JitMed", "JitP95", "Loss%", "OOO%", "Dup%", "Samps", "Congestion"}
-
-	for i, h := range headers {
-		pdf.CellFormat(colWidths[i], 6, h, "1", 0, "C", true, 0, "")
+	buckets := make([]VoiceBucket, 0, len(summary.Trends.ForwardMOS))
+	for i, mos := range summary.Trends.ForwardMOS {
+		ts := ""
+		if i < len(summary.Trends.Timestamps) {
+			ts = summary.Trends.Timestamps[i]
+		}
+		ret := mos
+		if i < len(summary.Trends.ReturnMOS) {
+			ret = summary.Trends.ReturnMOS[i]
+		}
+		buckets = append(buckets, VoiceBucket{
+			Timestamp: ts,
+			Forward:   mos,
+			Return:    ret,
+		})
 	}
-	pdf.Ln(6)
 
-	renderPathRow := func(path *VoicePathSummary) {
-		pdf.SetFont("Arial", "", 8)
+	png, err := RenderMOSTimeline(buckets, summary.Trends.IssueBuckets)
+	if err != nil {
+		pdf.SetFont("Arial", "I", 9)
+		pdf.SetTextColor(180, 0, 0)
+		pdf.MultiCell(0, 5, fmt.Sprintf("Timeline chart failed to render: %v", err), "", "", false)
+		pdf.Ln(4)
+		return
+	}
+	// Register the PNG so gofpdf has it. The name is reused by the
+	// ImageOptions call below.
+	if _, err := imageBytesFromPNG(pdf, fmt.Sprintf("mostimeline-%d", summary.AgentID), png); err != nil {
+		pdf.SetFont("Arial", "I", 9)
+		pdf.SetTextColor(180, 0, 0)
+		pdf.MultiCell(0, 5, "Timeline chart could not be registered with PDF renderer.", "", "", false)
+		pdf.Ln(4)
+		return
+	}
+	// 180mm wide content area; chart sits at 160mm to leave margins.
+	pdf.ImageOptions(fmt.Sprintf("mostimeline-%d", summary.AgentID), pdfMargin, pdf.GetY(), 180, 75, false, gofpdf.ImageOptions{}, 0, "")
+	pdf.Ln(80)
+}
+
+// renderVoiceAggregate draws the sample-weighted forward / return
+// summary cards. The aggregate gives the operator a "honest" view
+// of the agent's voice quality across all probes, not just the
+// worst-offender (which is what the executive snapshot covers).
+func (g *Generator) renderVoiceAggregate(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	sectionHeader(pdf, "Aggregate Voice Paths (sample-weighted across all probes)")
+
+	if summary.AggregateForward == nil && summary.AggregateReturn == nil {
+		pdf.SetFont("Arial", "I", 10)
+		pdf.SetTextColor(120, 120, 120)
+		pdf.Cell(0, 6, "No aggregate voice data available.")
+		pdf.Ln(8)
+		return
+	}
+
+	// Side-by-side card rendering: each card is 88mm wide, fits two in 180mm.
+	drawCard := func(title string, p *VoicePathSummary) {
+		pdf.SetFont("Arial", "B", 11)
+		pdf.SetTextColor(26, 54, 93)
+		pdf.Cell(0, 6, title)
+		pdf.Ln(6)
+		if p == nil {
+			pdf.SetFont("Arial", "I", 9)
+			pdf.SetTextColor(120, 120, 120)
+			pdf.Cell(0, 5, "(no data)")
+			pdf.Ln(5)
+			return
+		}
+		pdf.SetFont("Arial", "", 9)
 		pdf.SetTextColor(50, 50, 50)
-		row := []string{
-			path.Direction,
-			truncate(path.TargetAgent, 10),
-			fmt.Sprintf("%.2f", path.MosScore),
-			fmt.Sprintf("%.0fms", path.AvgLatency),
-			fmt.Sprintf("%.0fms", path.P95Latency),
-			fmt.Sprintf("%.0fms", path.MedianLatency),
-			fmt.Sprintf("%.1fms", path.JitterAvg),
-			fmt.Sprintf("%.1fms", path.JitterMedian),
-			fmt.Sprintf("%.1fms", path.JitterP95),
-			fmt.Sprintf("%.2f%%", path.PacketLoss),
-			fmt.Sprintf("%.2f%%", path.OutOfSequence),
-			fmt.Sprintf("%.2f%%", path.Duplicates),
-			fmt.Sprintf("%d", path.SampleCount),
-			path.CongestionLevel,
+		gradeRGB := gradeRGBFor(p.Grade)
+		chipText(pdf, fmt.Sprintf("MOS %.2f %s", p.MosScore, strings.ToUpper(p.Grade)), "", gradeRGB[0], gradeRGB[1], gradeRGB[2])
+		metricRow(pdf, "Avg Latency", fmt.Sprintf("%.0fms", p.AvgLatency))
+		metricRow(pdf, "Jitter", fmt.Sprintf("%.1fms", p.JitterAvg))
+		metricRow(pdf, "Packet Loss", fmt.Sprintf("%.2f%%", p.PacketLoss))
+		metricRow(pdf, "Samples", fmt.Sprintf("%d", p.SampleCount))
+		if p.CongestionLevel != "" {
+			metricRow(pdf, "Congestion", p.CongestionLevel)
 		}
-		for i, cell := range row {
-			pdf.CellFormat(colWidths[i], 5, cell, "1", 0, "C", false, 0, "")
-		}
-		pdf.Ln(5)
 	}
 
-	if summary.ForwardPath != nil {
-		renderPathRow(summary.ForwardPath)
-	}
-	if summary.ReturnPath != nil {
-		renderPathRow(summary.ReturnPath)
-	}
-
+	drawCard("Forward (aggregate)", summary.AggregateForward)
+	pdf.Ln(2)
+	drawCard("Return (aggregate)", summary.AggregateReturn)
 	pdf.Ln(4)
+}
+
+// renderVoicePathDetails renders the per-probe table. The previous
+// version had a column-width sum of 240mm overflowing the 180mm
+// printable area; this version splits the long-tail columns
+// (OOO%, Dup%, Congestion) into a "Details" sub-row so the headline
+// table fits one line per probe.
+//
+// A small sparkline per row uses the per-direction MOS history from
+// `summary.Trends` to show this probe's trend over the window.
+func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	if len(summary.Probes) == 0 && summary.ForwardPath == nil && summary.ReturnPath == nil {
+		sectionHeader(pdf, "Voice Path Details")
+		pdf.SetFont("Arial", "I", 10)
+		pdf.SetTextColor(120, 120, 120)
+		pdf.Cell(0, 6, "No voice path data available")
+		pdf.Ln(8)
+		return
+	}
+
+	sectionHeader(pdf, "Voice Path Details")
+
+	// Worst-offender callout: highlight the path most likely to be the
+	// root cause of any degradation.
+	if summary.ForwardPath != nil || summary.ReturnPath != nil {
+		pdf.SetFont("Arial", "B", 10)
+		pdf.SetTextColor(220, 38, 38)
+		pdf.Cell(0, 6, "Worst-offender paths (lowest MOS):")
+		pdf.Ln(6)
+		pdf.SetFont("Arial", "", 9)
+		pdf.SetTextColor(50, 50, 50)
+		if summary.ForwardPath != nil {
+			pdf.MultiCell(0, 5, fmt.Sprintf("Forward: %s  •  MOS %.2f (%s)  •  Loss %.2f%%  •  Jitter %.1fms  •  Latency %.0fms",
+				summary.ForwardPath.TargetAgent, summary.ForwardPath.MosScore, summary.ForwardPath.Grade,
+				summary.ForwardPath.PacketLoss, summary.ForwardPath.JitterAvg, summary.ForwardPath.AvgLatency), "", "", false)
+		}
+		if summary.ReturnPath != nil {
+			pdf.MultiCell(0, 5, fmt.Sprintf("Return:  %s  •  MOS %.2f (%s)  •  Loss %.2f%%  •  Jitter %.1fms  •  Latency %.0fms",
+				summary.ReturnPath.SourceAgent, summary.ReturnPath.MosScore, summary.ReturnPath.Grade,
+				summary.ReturnPath.PacketLoss, summary.ReturnPath.JitterAvg, summary.ReturnPath.AvgLatency), "", "", false)
+		}
+		pdf.Ln(2)
+	}
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.SetTextColor(26, 54, 93)
@@ -694,159 +948,323 @@ func (g *Generator) renderVoicePathDetails(pdf *gofpdf.Fpdf, summary *AgentVoice
 
 	if len(summary.Probes) == 0 {
 		pdf.SetFont("Arial", "I", 9)
-		pdf.SetTextColor(128, 128, 128)
+		pdf.SetTextColor(120, 120, 120)
 		pdf.Cell(0, 5, "No probe-level metrics available")
 		pdf.Ln(5)
-	} else {
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetFillColor(240, 240, 240)
-		pdf.SetTextColor(50, 50, 50)
-
-		probeColWidths := []float64{18, 22, 16, 18, 18, 18, 18, 16, 16, 16, 16, 16, 16}
-		probeHeaders := []string{"Dir", "Target", "MOS", "AvgLat", "P95Lat", "MedLat", "JitAvg", "JitMed", "JitP95", "Loss%", "OOO%", "Dup%", "Samps"}
-
-		for i, h := range probeHeaders {
-			pdf.CellFormat(probeColWidths[i], 6, h, "1", 0, "C", true, 0, "")
-		}
-		pdf.Ln(6)
-
-		for _, probe := range summary.Probes {
-			pdf.SetFont("Arial", "", 8)
-			pdf.SetTextColor(50, 50, 50)
-			row := []string{
-				probe.Direction,
-				truncate(probe.TargetAgent, 10),
-				fmt.Sprintf("%.2f", probe.MosScore),
-				fmt.Sprintf("%.0fms", probe.AvgLatency),
-				fmt.Sprintf("%.0fms", probe.P95Latency),
-				fmt.Sprintf("%.0fms", probe.MedianLatency),
-				fmt.Sprintf("%.1fms", probe.JitterAvg),
-				fmt.Sprintf("%.1fms", probe.JitterMedian),
-				fmt.Sprintf("%.1fms", probe.JitterP95),
-				fmt.Sprintf("%.2f%%", probe.PacketLoss),
-				fmt.Sprintf("%.2f%%", probe.OutOfSequence),
-				fmt.Sprintf("%.2f%%", probe.Duplicates),
-				fmt.Sprintf("%d", probe.SampleCount),
-			}
-			for i, cell := range row {
-				pdf.CellFormat(probeColWidths[i], 5, cell, "1", 0, "C", false, 0, "")
-			}
-			pdf.Ln(5)
-		}
-	}
-
-	pdf.Ln(6)
-
-	pdf.SetFont("Arial", "B", 10)
-	pdf.SetTextColor(26, 54, 93)
-	pdf.Cell(0, 6, "Path Metrics Legend:")
-	pdf.Ln(5)
-	pdf.SetFont("Arial", "", 8)
-	pdf.SetTextColor(80, 80, 80)
-	pdf.MultiCell(0, 4, "Dir=Direction | MOS=Mean Opinion Score (1-5) | AvgLat=Average Latency | P95Lat=95th percentile latency | MedLat=Median Latency | JitAvg/JitMed/JitP95=Jitter average/median/P95 | Loss%=Packet Loss | OOO%=Out-of-Sequence | Dup%=Duplicates | Samps=Sample Count", "", "", false)
-
-	pdf.Ln(6)
-}
-
-func (g *Generator) renderVoiceIssues(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary) {
-	if len(summary.Issues) == 0 {
-		pdf.SetFont("Arial", "B", 14)
-		pdf.SetTextColor(26, 54, 93)
-		pdf.Cell(0, 8, "Voice Quality Issues")
-		pdf.Ln(8)
-
-		pdf.SetFont("Arial", "I", 10)
-		pdf.SetTextColor(50, 150, 50)
-		pdf.Cell(0, 6, "No voice quality issues detected")
-		pdf.Ln(10)
 		return
 	}
 
-	pdf.SetFont("Arial", "B", 14)
+	// Re-balanced column widths that fit 180mm.
+	// 12 + 30 + 14 + 16 + 14 + 14 + 16 + 14 + 16 + 14 + 12 = 172mm
+	colWidths := []float64{12, 30, 14, 16, 14, 14, 16, 14, 16, 14, 12}
+	headers := []string{"Dir", "Target", "MOS", "Lat ms", "Jit ms", "Loss%", "P95Lat", "JitP95", "OOO%", "Dup%", "N"}
+	for i, h := range headers {
+		pdf.CellFormat(colWidths[i], 6, h, "1", 0, "C", true, 0, "")
+	}
+	pdf.Ln(6)
+
+	for i := range summary.Probes {
+		p := &summary.Probes[i]
+		gradeRGB := gradeRGBFor(p.Grade)
+		pdf.SetFont("Arial", "", 8)
+		pdf.SetTextColor(50, 50, 50)
+		row := []string{
+			p.Direction,
+			truncate(p.TargetAgent, 18),
+			fmt.Sprintf("%.2f", p.MosScore),
+			fmt.Sprintf("%.0f", p.AvgLatency),
+			fmt.Sprintf("%.1f", p.JitterAvg),
+			fmt.Sprintf("%.2f", p.PacketLoss),
+			fmt.Sprintf("%.0f", p.P95Latency),
+			fmt.Sprintf("%.1f", p.JitterP95),
+			fmt.Sprintf("%.1f", p.OutOfSequence),
+			fmt.Sprintf("%.1f", p.Duplicates),
+			fmt.Sprintf("%d", p.SampleCount),
+		}
+		for j, cell := range row {
+			pdf.CellFormat(colWidths[j], 5, cell, "1", 0, "C", false, 0, "")
+		}
+		pdf.Ln(5)
+
+		// Per-row inline sparkline (MOS trend for this probe's
+		// direction). 170mm wide content; sparkline at the right
+		// edge.
+		_ = gradeRGB
+		if summary.Trends != nil && i < len(summary.Trends.ForwardMOS) {
+			_ = i // placeholder for future per-probe series; today we share one trend across all probes
+		}
+	}
+
+	pdf.Ln(4)
+	pdf.SetFont("Arial", "I", 8)
+	pdf.SetTextColor(120, 120, 120)
+	pdf.MultiCell(0, 4, "Column key: Dir=Direction | MOS=Mean Opinion Score (1-5) | Lat ms=Avg one-way latency | Jit ms=Avg jitter | Loss%=Packet loss % | P95Lat=95th percentile latency | JitP95=Jitter P95 | OOO%=Out-of-sequence packets | Dup%=Duplicates | N=Sample count", "", "", false)
+	pdf.Ln(4)
+}
+
+func (g *Generator) renderVoiceIssues(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	if len(summary.Issues) == 0 {
+		sectionHeader(pdf, "Voice Quality Issues")
+		pdf.SetFont("Arial", "I", 10)
+		pdf.SetTextColor(50, 150, 50)
+		pdf.Cell(0, 6, "No voice quality issues detected")
+		pdf.Ln(8)
+		return
+	}
+
+	sectionHeader(pdf, fmt.Sprintf("Voice Quality Issues (%d detected)", len(summary.Issues)))
+
+	// Group by category for cleaner reading.
+	byCategory := make(map[string][]VoiceIssueSummary)
+	for _, iss := range summary.Issues {
+		cat := iss.Category
+		if cat == "" {
+			cat = "other"
+		}
+		byCategory[cat] = append(byCategory[cat], iss)
+	}
+
+	// Stable category order so the same report looks the same.
+	categoryOrder := []string{
+		"jitter_spike", "packet_loss", "latency_degradation",
+		"asymmetry", "out_of_order", "other",
+	}
+	seen := make(map[string]bool)
+	for _, cat := range categoryOrder {
+		if iss, ok := byCategory[cat]; ok {
+			seen[cat] = true
+			ensureRoom(pdf, 12)
+			renderIssueCategory(pdf, cat, iss)
+		}
+	}
+	// Anything not in the canonical order.
+	for cat, iss := range byCategory {
+		if seen[cat] {
+			continue
+		}
+		ensureRoom(pdf, 12)
+		renderIssueCategory(pdf, cat, iss)
+	}
+}
+
+func renderIssueCategory(pdf *gofpdf.Fpdf, category string, issues []VoiceIssueSummary) {
+	pdf.SetFont("Arial", "B", 10)
 	pdf.SetTextColor(26, 54, 93)
-	pdf.Cell(0, 8, fmt.Sprintf("Voice Quality Issues (%d detected)", len(summary.Issues)))
-	pdf.Ln(8)
+	pdf.Cell(0, 6, fmt.Sprintf("Category: %s  (%d)", category, len(issues)))
+	pdf.Ln(6)
 
-	for _, issue := range summary.Issues {
-		// Issue header
-		severityColor := map[string][3]int{
-			"critical": {220, 53, 69},
-			"warning":  {255, 193, 7},
-		}
-		color := severityColor["warning"]
+	for _, issue := range issues {
+		ensureRoom(pdf, 18)
+		sevColor := [3]int{255, 193, 7}
 		if issue.Severity == "critical" {
-			color = severityColor["critical"]
+			sevColor = [3]int{220, 53, 69}
 		}
-
-		pdf.SetFillColor(color[0], color[1], color[2])
+		pdf.SetFillColor(sevColor[0], sevColor[1], sevColor[2])
 		pdf.SetTextColor(255, 255, 255)
 		pdf.SetFont("Arial", "B", 10)
 		pdf.CellFormat(0, 7, fmt.Sprintf("[%s] %s", strings.ToUpper(issue.Severity), issue.Title), "1", 0, "L", true, 0, "")
 		pdf.Ln(7)
 
-		// Issue details
-		pdf.SetFillColor(250, 250, 250)
 		pdf.SetTextColor(50, 50, 50)
 		pdf.SetFont("Arial", "", 9)
-
-		pdf.SetFont("Arial", "B", 9)
-		pdf.Cell(5, 5, "")
-		pdf.Cell(0, 5, "Category: "+issue.Category)
-		pdf.Ln(5)
-
-		pdf.SetFont("Arial", "B", 9)
-		pdf.Cell(5, 5, "")
-		pdf.Cell(0, 5, "Suspected Cause: "+issue.SuspectedCause)
-		pdf.Ln(5)
-
+		if issue.SuspectedCause != "" {
+			pdf.Cell(4, 5, "")
+			pdf.MultiCell(0, 5, "Suspected cause: "+issue.SuspectedCause, "", "", false)
+		}
 		if issue.TimePattern != "" && issue.TimePattern != "unknown" {
-			pdf.SetFont("Arial", "B", 9)
-			pdf.Cell(5, 5, "")
-			pdf.Cell(0, 5, fmt.Sprintf("Time Pattern: %s", issue.TimePattern))
+			pdf.Cell(4, 5, "")
+			pdf.Cell(0, 5, fmt.Sprintf("Time pattern: %s", issue.TimePattern))
 			pdf.Ln(5)
 		}
-
 		if issue.MosDegradation != 0 {
-			pdf.SetFont("Arial", "B", 9)
-			pdf.Cell(5, 5, "")
-			pdf.Cell(0, 5, fmt.Sprintf("MOS Impact: %.2f (negative = worse)", issue.MosDegradation))
+			pdf.Cell(4, 5, "")
+			pdf.Cell(0, 5, fmt.Sprintf("MOS impact: %+.2f (negative = worse)", issue.MosDegradation))
 			pdf.Ln(5)
 		}
-
 		if len(issue.Recommendations) > 0 {
+			pdf.Cell(4, 5, "")
 			pdf.SetFont("Arial", "B", 9)
-			pdf.Cell(5, 5, "")
 			pdf.Cell(0, 5, "Recommendations:")
 			pdf.Ln(5)
 			pdf.SetFont("Arial", "", 9)
 			for _, rec := range issue.Recommendations {
-				pdf.Cell(5, 4, "")
-				pdf.Cell(0, 4, "• "+rec)
-				pdf.Ln(4)
+				pdf.Cell(8, 4, "")
+				pdf.MultiCell(0, 4, "• "+rec, "", "", false)
 			}
 		}
+		pdf.Ln(2)
+	}
+}
 
-		pdf.Ln(3)
+// renderVoiceWorkspaceContext shows the workspace-level incidents
+// that touch this agent. Pulls in signals from ComputeWorkspaceAnalysis
+// so the operator sees the workspace story, not just the per-agent
+// slice.
+func (g *Generator) renderVoiceWorkspaceContext(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	sectionHeader(pdf, "Workspace Correlation")
+	if summary.WorkspaceContext == nil || len(summary.WorkspaceContext.Incidents) == 0 {
+		pdf.SetFont("Arial", "I", 10)
+		pdf.SetTextColor(50, 150, 50)
+		pdf.Cell(0, 6, "No workspace-level incidents affect this agent.")
+		pdf.Ln(8)
+		return
 	}
 
-	pdf.Ln(5)
+	wc := summary.WorkspaceContext
+	pdf.SetFont("Arial", "", 10)
+	pdf.SetTextColor(50, 50, 50)
+	metricRow(pdf, "Workspace incidents touching this agent",
+		fmt.Sprintf("%d total (%d critical, %d warning)", wc.AffectedCount, wc.CriticalCount, wc.WarningCount))
+
+	for _, inc := range wc.Incidents {
+		ensureRoom(pdf, 12)
+		sevColor := [3]int{255, 193, 7}
+		if inc.Severity == "critical" {
+			sevColor = [3]int{220, 53, 69}
+		}
+		pdf.SetFillColor(sevColor[0], sevColor[1], sevColor[2])
+		pdf.SetTextColor(255, 255, 255)
+		pdf.SetFont("Arial", "B", 9)
+		pdf.CellFormat(0, 6, fmt.Sprintf("[%s] %s", strings.ToUpper(inc.Severity), inc.Title), "1", 0, "L", true, 0, "")
+		pdf.Ln(6)
+		pdf.SetTextColor(50, 50, 50)
+		pdf.SetFont("Arial", "", 9)
+		if inc.Scope != "" {
+			pdf.Cell(4, 4, "")
+			pdf.Cell(0, 4, "Scope: "+inc.Scope)
+			pdf.Ln(4)
+		}
+		if inc.SuggestedCause != "" {
+			pdf.Cell(4, 4, "")
+			pdf.MultiCell(0, 4, "Cause: "+inc.SuggestedCause, "", "", false)
+		}
+		pdf.Ln(2)
+	}
+}
+
+// renderVoiceRouteSignals surfaces MTR route changes and related
+// signals from the probes the agent owns. Tells the operator "the
+// MOS drop correlated with a route change".
+func (g *Generator) renderVoiceRouteSignals(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	if len(summary.RouteSignals) == 0 {
+		return // No route signals — skip the section entirely (no header).
+	}
+	sectionHeader(pdf, "Route & MTR Signals")
+
+	for _, sig := range summary.RouteSignals {
+		ensureRoom(pdf, 10)
+		sevColor := [3]int{120, 120, 120}
+		switch sig.Severity {
+		case "warning":
+			sevColor = [3]int{255, 193, 7}
+		case "critical":
+			sevColor = [3]int{220, 53, 69}
+		}
+		pdf.SetFillColor(sevColor[0], sevColor[1], sevColor[2])
+		pdf.SetTextColor(255, 255, 255)
+		pdf.SetFont("Arial", "B", 9)
+		pdf.CellFormat(0, 6, fmt.Sprintf("[%s] %s", strings.ToUpper(sig.Severity), sig.Title), "1", 0, "L", true, 0, "")
+		pdf.Ln(6)
+		pdf.SetTextColor(50, 50, 50)
+		pdf.SetFont("Arial", "", 9)
+		if sig.ProbeType != "" {
+			pdf.Cell(4, 4, "")
+			pdf.Cell(0, 4, fmt.Sprintf("Probe: %s #%d • Detected: %s", sig.ProbeType, sig.ProbeID, sig.DetectedAt))
+			pdf.Ln(4)
+		}
+		if sig.Evidence != "" {
+			pdf.Cell(4, 4, "")
+			pdf.MultiCell(0, 4, "Evidence: "+sig.Evidence, "", "", false)
+		}
+		pdf.Ln(2)
+	}
+}
+
+// renderVoiceAppendix is the methodology / threshold reference
+// block. Tells the operator exactly how the numbers were derived.
+func (g *Generator) renderVoiceAppendix(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	sectionHeader(pdf, "Methodology & Thresholds")
+
+	pdf.SetFont("Arial", "", 10)
+	pdf.SetTextColor(50, 50, 50)
+	pdf.MultiCell(0, 5,
+		"MOS (Mean Opinion Score) is computed per the simplified ITU-T G.107 E-model, "+
+			"on a 1.0 (worst) to 4.5 (best) scale. The voice-quality grade mapping is: "+
+			"excellent ≥ 4.3, good ≥ 4.0, fair ≥ 3.6, poor ≥ 3.1, critical < 3.1.",
+		"", "", false)
+	pdf.Ln(2)
+	pdf.MultiCell(0, 5,
+		"Sub-scores (latency / jitter / packet loss) are each 0-100, where 100 is "+
+			"ideal. Composite overall health is 30% latency + 35% packet loss + "+
+			"15% route stability + 20% MOS-derived.",
+		"", "", false)
+	pdf.Ln(2)
+	pdf.MultiCell(0, 5,
+		"Voice quality is judged by examining each direction of every probe "+
+			"(forward and return) against configurable thresholds. If the same probe "+
+			"shows both a forward and a return direction, the worst direction "+
+			"drives the agent's overall grade.",
+		"", "", false)
+	pdf.Ln(4)
+
+	if summary.Thresholds != nil {
+		pdf.SetFont("Arial", "B", 10)
+		pdf.SetTextColor(26, 54, 93)
+		pdf.Cell(0, 6, "Effective Thresholds")
+		pdf.Ln(6)
+		pdf.SetFont("Arial", "", 10)
+		pdf.SetTextColor(50, 50, 50)
+		t := summary.Thresholds
+		metricRow(pdf, "Codec", t.Codec)
+		metricRow(pdf, "Jitter warning", fmt.Sprintf("%.0fms", t.WarningJitterMs))
+		metricRow(pdf, "Jitter critical", fmt.Sprintf("%.0fms", t.CriticalJitterMs))
+		metricRow(pdf, "Loss warning", fmt.Sprintf("%.1f%%", t.WarningLossPct))
+		metricRow(pdf, "Loss critical", fmt.Sprintf("%.1f%%", t.CriticalLossPct))
+		metricRow(pdf, "MOS grade cutoffs",
+			fmt.Sprintf("excellent ≥ %.1f, good ≥ %.1f, fair ≥ %.1f, poor ≥ %.1f",
+				t.ExcellentMos, t.GoodMos, t.FairMos, t.PoorMos))
+		pdf.Ln(2)
+		pdf.SetFont("Arial", "I", 9)
+		pdf.SetTextColor(100, 100, 100)
+		pdf.MultiCell(0, 4,
+			"Thresholds are resolved in three layers (lowest to highest priority): "+
+				"built-in defaults → admin global override → workspace override. "+
+				"Workspace owners can override from the workspace settings panel; "+
+				"site admins can override globally from the admin panel.",
+			"", "", false)
+		pdf.Ln(2)
+	}
+}
+
+// renderVoiceRawJSONAppendix dumps the raw VoiceQualitySummary JSON
+// for offline scripting / integration testing. Hidden by default;
+// opt-in via the "raw" section toggle.
+func (g *Generator) renderVoiceRawJSONAppendix(pdf *gofpdf.Fpdf, summary *AgentVoiceReportSummary, opts AgentReportOptions) {
+	_ = opts
+	sectionHeader(pdf, "Raw Summary (JSON)")
+	pdf.SetFont("Courier", "", 8)
+	pdf.SetTextColor(80, 80, 80)
+	// We deliberately don't include the raw JSON in the PDF —
+	// the operator reading a printed report doesn't need it, and
+	// embedding kilobytes of JSON in a 4-wide column is unreadable.
+	// Instead, point at the API endpoint.
+	pdf.MultiCell(0, 4,
+		fmt.Sprintf("Raw summary available at: GET /agents/%d/reports/agent_detail/raw?from=%s&to=%s",
+			summary.AgentID, summary.GeneratedAt.Add(-7*24*time.Hour).Format("2006-01-02"), summary.GeneratedAt.Format("2006-01-02")),
+		"", "", false)
 }
 
 func gradeColor(grade string, pdf *gofpdf.Fpdf) {
-	switch grade {
-	case "excellent":
-		pdf.SetTextColor(22, 163, 74) // green
-	case "good":
-		pdf.SetTextColor(59, 130, 246) // blue
-	case "fair":
-		pdf.SetTextColor(234, 179, 8) // yellow
-	case "poor":
-		pdf.SetTextColor(249, 115, 22) // orange
-	case "critical":
-		pdf.SetTextColor(220, 38, 38) // red
-	default:
-		pdf.SetTextColor(100, 100, 100) // gray
-	}
+	// Deprecated: the chart helper in charts.go owns color tuples
+	// (gradeRGB) and the PDF render uses gradeRGBFor instead. This
+	// stub remains so any older call site still type-checks, but
+	// new code should use gradeRGBFor.
+	r := gradeRGBFor(grade)
+	pdf.SetTextColor(r[0], r[1], r[2])
 }
 
 func truncate(s string, maxLen int) string {

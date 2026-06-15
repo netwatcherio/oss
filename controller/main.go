@@ -53,6 +53,12 @@ func main() {
 		log.WithError(err).Fatal("admin bootstrap failed")
 	}
 
+	// Ensure the admin settings table exists for voice threshold
+	// overrides (and any future global settings). Idempotent.
+	if err := probe.EnsureAdminSettingsTable(db); err != nil {
+		log.WithError(err).Warn("admin settings table ensure failed")
+	}
+
 	ch, err := probe.OpenClickHouseFromEnv()
 	if err != nil {
 		log.WithError(err).Fatal("clickhouse open failed")

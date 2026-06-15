@@ -43,6 +43,7 @@ const reportTypes = [
   { value: "workspace_summary", label: "Workspace Summary", desc: "Overview of all agents, probes, and incidents" },
   { value: "probe_detail", label: "Probe Detail", desc: "Detailed metrics for specific probes" },
   { value: "sla", label: "SLA Report", desc: "Uptime and latency SLO compliance" },
+  { value: "workspace_voice", label: "Voice Quality", desc: "Workspace-wide voice quality across all agents" },
 ];
 
 const schedulePresets = [

@@ -218,18 +218,26 @@ export const AgentService = {
      * Download voice quality report for a specific agent as PDF.
      * @param agentId - The agent ID
      * @param options - Time range options: either timeRangeDays (1-365) or custom range with from/to dates
+     * @param sections - Optional CSV of report sections to include (e.g., "summary,timeline,probes,issues")
      * @returns Blob containing the PDF
      */
     async downloadAgentReport(
         agentId: number | string,
-        options: number | { from: Date; to: Date } = 7
+        options: number | { from: Date; to: Date } = 7,
+        sections: string = ""
     ): Promise<Blob> {
         let url = `/agents/${agentId}/reports/agent_detail/run`;
+        const params: string[] = [];
         if (typeof options === 'number') {
-            url += `?time_range_days=${options}`;
+            params.push(`time_range_days=${options}`);
         } else {
-            url += `?from=${options.from.toISOString()}&to=${options.to.toISOString()}`;
+            params.push(`from=${options.from.toISOString()}`);
+            params.push(`to=${options.to.toISOString()}`);
         }
+        if (sections) {
+            params.push(`sections=${encodeURIComponent(sections)}`);
+        }
+        url += `?${params.join('&')}`;
         const { data } = await request.get<Blob>(url, { responseType: 'blob' });
         return data;
     },

@@ -14,6 +14,10 @@ const (
 	ReportTypeWorkspaceSummary ReportType = "workspace_summary"
 	ReportTypeProbeDetail      ReportType = "probe_detail"
 	ReportTypeSLA              ReportType = "sla"
+	// ReportTypeWorkspaceVoice is the workspace-wide voice quality
+	// report (covers every agent's voice probes). Available via
+	// GET /workspaces/:id/reports/voice/run.
+	ReportTypeWorkspaceVoice ReportType = "workspace_voice"
 )
 
 type ReportConfig struct {

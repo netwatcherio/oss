@@ -3,8 +3,10 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -95,8 +97,19 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 
 		wID := uintParam(c, "id")
 
-		analysis, err := probe.ComputeWorkspaceRouteAnalysis(c.UserContext(), ch, pg, wID)
+		// Bound the compute so a slow ClickHouse query never blows past
+		// the Fiber WriteTimeout (30s) and gets the connection killed
+		// mid-response. Returning 504 lets the client surface a real
+		// error instead of a hung spinner.
+		ctx, cancel := context.WithTimeout(c.UserContext(), 25*time.Second)
+		defer cancel()
+
+		analysis, err := probe.ComputeWorkspaceRouteAnalysis(ctx, ch, pg, wID)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("[analysis] routes workspace=%d timeout", wID)
+				return c.Status(http.StatusGatewayTimeout).JSON(fiber.Map{"error": "route analysis timed out"})
+			}
 			log.Printf("[analysis] routes workspace=%d error: %v", wID, err)
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}

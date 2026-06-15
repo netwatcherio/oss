@@ -8,7 +8,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'close'): void;
-    (e: 'generate', timeRange: number | { from: Date; to: Date }): void;
+    (e: 'generate', timeRange: number | { from: Date; to: Date }, sections: string): void;
 }>();
 
 const rangeMode = ref<'preset' | 'custom'>('preset');
@@ -40,8 +40,85 @@ const selectedRange = computed<number | { from: Date; to: Date }>(() => {
     return selectedPreset.value;
 });
 
+// Section toggles — backed by the same set the backend
+// `ParseAgentReportSections` understands. The keys map 1:1 to the
+// CSV tokens (`summary`, `timeline`, `aggregate`, `probes`,
+// `issues`, `correlation`, `appendix`, `raw`). The presets in
+// `sectionPresets` build the CSV for the user.
+interface SectionToggle {
+    key: string;
+    label: string;
+    description: string;
+    icon: string;
+}
+
+const sectionToggles: SectionToggle[] = [
+    { key: 'summary',     label: 'Executive snapshot', description: 'Grade chip, sub-scores, baseline comparison, recommendation', icon: 'bi-card-text' },
+    { key: 'timeline',    label: 'MOS timeline chart', description: 'Forward + return MOS over time with issue markers',          icon: 'bi-graph-up' },
+    { key: 'aggregate',   label: 'Aggregate paths',     description: 'Sample-weighted forward + return summary cards',            icon: 'bi-bar-chart' },
+    { key: 'probes',      label: 'Per-probe table',     description: 'One row per probe with MOS, latency, jitter, loss',         icon: 'bi-table' },
+    { key: 'issues',      label: 'Detected issues',     description: 'Grouped by category with evidence and recommendations',     icon: 'bi-exclamation-triangle' },
+    { key: 'correlation', label: 'Workspace correlation', description: 'Workspace-level incidents and route/MTR signals',         icon: 'bi-diagram-3' },
+    { key: 'appendix',    label: 'Methodology',         description: 'How MOS / sub-scores are computed and the active thresholds', icon: 'bi-book' },
+    { key: 'raw',         label: 'Raw API reference',   description: 'Link to the JSON endpoint for offline scripting',          icon: 'bi-code' },
+];
+
+const sectionEnabled = ref<Record<string, boolean>>({
+    summary:     true,
+    timeline:    true,
+    aggregate:   false,
+    probes:      true,
+    issues:      true,
+    correlation: true,
+    appendix:    false,
+    raw:         false,
+});
+
+type SectionPreset = 'quick' | 'full' | 'minimal' | 'custom';
+const sectionPreset = ref<SectionPreset>('quick');
+
+function applySectionPreset(preset: SectionPreset) {
+    sectionPreset.value = preset;
+    switch (preset) {
+        case 'quick':
+            sectionEnabled.value = {
+                summary: true, timeline: true, aggregate: false, probes: true,
+                issues: true, correlation: true, appendix: false, raw: false,
+            };
+            break;
+        case 'full':
+            sectionEnabled.value = {
+                summary: true, timeline: true, aggregate: true, probes: true,
+                issues: true, correlation: true, appendix: true, raw: true,
+            };
+            break;
+        case 'minimal':
+            sectionEnabled.value = {
+                summary: true, timeline: false, aggregate: false, probes: true,
+                issues: true, correlation: false, appendix: false, raw: false,
+            };
+            break;
+        case 'custom':
+            // Leave current state; user toggles individually.
+            break;
+    }
+}
+
+function onSectionToggle(key: string) {
+    sectionEnabled.value[key] = !sectionEnabled.value[key];
+    sectionPreset.value = 'custom';
+}
+
+const sectionsCSV = computed(() => {
+    const enabled = Object.entries(sectionEnabled.value)
+        .filter(([, on]) => on)
+        .map(([k]) => k)
+        .join(',');
+    return enabled || 'summary';
+});
+
 function handleGenerate() {
-    emit('generate', selectedRange.value);
+    emit('generate', selectedRange.value, sectionsCSV.value);
 }
 
 function formatDateForInput(date: Date): string {
@@ -64,6 +141,10 @@ const showCustomDateHint = computed(() => {
     }
     return null;
 });
+
+const enabledSectionCount = computed(() =>
+    Object.values(sectionEnabled.value).filter(Boolean).length
+);
 </script>
 
 <template>
@@ -159,16 +240,43 @@ const showCustomDateHint = computed(() => {
                     </div>
                 </div>
 
-                <div class="report-contents">
-                    <label class="section-label">Report Will Include</label>
-                    <ul class="content-list">
-                        <li><i class="bi bi-check-circle"></i> Overall MOS score and grade</li>
-                        <li><i class="bi bi-check-circle"></i> Latency, jitter, and packet loss scores</li>
-                        <li><i class="bi bi-check-circle"></i> Forward and return path metrics</li>
-                        <li><i class="bi bi-check-circle"></i> Per-probe health details</li>
-                        <li><i class="bi bi-check-circle"></i> Detected voice quality issues</li>
-                        <li><i class="bi bi-check-circle"></i> Recommendations</li>
-                    </ul>
+                <div class="sections-section">
+                    <div class="sections-header">
+                        <label class="section-label">Report Sections</label>
+                        <div class="section-presets">
+                            <button
+                                v-for="p in (['quick', 'full', 'minimal', 'custom'] as const)"
+                                :key="p"
+                                class="preset-pill"
+                                :class="{ active: sectionPreset === p }"
+                                @click="applySectionPreset(p)"
+                            >{{ p }}</button>
+                        </div>
+                    </div>
+
+                    <div class="sections-grid">
+                        <label
+                            v-for="s in sectionToggles"
+                            :key="s.key"
+                            class="section-toggle"
+                            :class="{ enabled: sectionEnabled[s.key] }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="sectionEnabled[s.key]"
+                                @change="onSectionToggle(s.key)"
+                            />
+                            <i :class="s.icon" class="section-icon"></i>
+                            <div class="section-text">
+                                <div class="section-label-text">{{ s.label }}</div>
+                                <div class="section-desc">{{ s.description }}</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="sections-summary">
+                        <i class="bi bi-info-circle"></i>
+                        {{ enabledSectionCount }} of {{ sectionToggles.length }} sections selected
+                    </div>
                 </div>
             </div>
 
@@ -206,7 +314,7 @@ const showCustomDateHint = computed(() => {
     background: var(--bs-body-bg);
     border-radius: 16px;
     width: 100%;
-    max-width: 480px;
+    max-width: 560px;
     max-height: 90vh;
     overflow: hidden;
     display: flex;
@@ -461,32 +569,107 @@ const showCustomDateHint = computed(() => {
     border-radius: 6px;
 }
 
-.report-contents {
-    background: var(--bs-secondary-bg);
-    border-radius: 10px;
-    padding: 1rem;
+.sections-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 
-.content-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+.sections-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0;
+}
+
+.section-presets {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.preset-pill {
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.preset-pill.active {
+    background: var(--bs-primary);
+    color: var(--bs-white);
+    border-color: var(--bs-primary);
+}
+
+.sections-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0.5rem;
 }
 
-.content-list li {
+.section-toggle {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    align-items: flex-start;
+    gap: 0.625rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    background: var(--bs-body-bg);
+    transition: all 0.15s;
+}
+
+.section-toggle input[type="checkbox"] {
+    margin-top: 0.15rem;
+    cursor: pointer;
+}
+
+.section-toggle.enabled {
+    border-color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), 0.04);
+}
+
+.section-icon {
+    font-size: 1.1rem;
+    color: var(--bs-secondary-color);
+    margin-top: 0.05rem;
+}
+
+.section-toggle.enabled .section-icon {
+    color: var(--bs-primary);
+}
+
+.section-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.section-label-text {
     font-size: 0.85rem;
+    font-weight: 600;
     color: var(--bs-body-color);
 }
 
-.content-list li i {
-    color: var(--bs-success);
-    font-size: 0.9rem;
+.section-desc {
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.3;
+}
+
+.sections-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+    padding: 0.4rem 0.6rem;
 }
 
 .btn {
@@ -585,7 +768,7 @@ const showCustomDateHint = computed(() => {
         transform: rotate(90deg);
     }
 
-    .content-list {
+    .sections-grid {
         grid-template-columns: 1fr;
     }
 }
