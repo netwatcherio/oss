@@ -147,6 +147,20 @@ export interface ProbeUpdateInput {
     replaceAgentTargets?: number[];
 }
 
+/**
+ * ReverseProbeView — AGENT-type probe owned by another agent that targets
+ * this agent. Surfaced read-only on the targeted agent's probe list; editing
+ * and deletion happen on the owner side.
+ */
+export interface ReverseProbeView {
+    probe: Probe;
+    owner_agent_id: number;
+    owner_agent_name: string;
+    owner_workspace_id: number;
+    /** Pre-computed `metadata.bidirectional` flag from the owner probe. */
+    bidirectional: boolean;
+}
+
 /** ===== Users ===== */
 
 export interface User {

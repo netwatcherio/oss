@@ -33,6 +33,20 @@ func panelProbes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueSto
 		return c.JSON(NewListResponse(list))
 	})
 
+	// GET /workspaces/:id/agents/:agentID/probes/reverse - requires CanView (any member)
+	// Returns AGENT-type probes owned by other agents in the SAME workspace whose
+	// targets include this agent. Surfaces a read-only "configured elsewhere,
+	// targeting me" view; editing/deletion always happens on the owner side.
+	base.Get("/reverse", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		aID := uintParam(c, "agentID")
+		list, err := probe.ListReverseAgentProbesWithOwners(c.UserContext(), db, wsID, aID)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(NewListResponse(list))
+	})
+
 	// POST /workspaces/:id/agents/:agentID/probes - requires CanEdit (USER+)
 	base.Post("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
 		aID := uintParam(c, "agentID")

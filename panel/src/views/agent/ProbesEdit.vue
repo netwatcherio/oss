@@ -2,11 +2,12 @@
 import {onMounted, reactive, computed} from "vue";
 import Title from "@/components/Title.vue";
 import core from "@/core";
-import {Agent, Probe, type InterfaceInfo, type Workspace} from "@/types";
+import {Agent, Probe, ReverseProbeView, type InterfaceInfo, type Workspace} from "@/types";
 import {AgentService, ProbeService, WorkspaceService} from "@/services/apiService";
 
 const state = reactive({
   probes: [] as Probe[],
+  reverseProbes: [] as ReverseProbeView[],
   workspace: {} as Workspace,
   ready: false,
   loading: true,
@@ -199,6 +200,24 @@ onMounted(async () => {
 
   ProbeService.list(workspaceID, agentID).then(res => {
     state.probes = res as Probe[] || [];
+  })
+
+  // Fetch reverse probes (other agents' AGENT probes targeting this one).
+  // Loaded in parallel — failure here must not block the owned list.
+  ProbeService.listReverse(workspaceID, agentID).then(res => {
+    state.reverseProbes = (res as ReverseProbeView[]) || [];
+
+    // ?selected={probeId} auto-open: when a user follows a reverse-probe link
+    // to another agent's ProbesEdit page, that agent's page may bounce back
+    // here with a probeId in the query string to deep-link into the modal.
+    const selectedIdRaw = router.currentRoute.value.query["selected"];
+    const selectedId = selectedIdRaw ? Number(selectedIdRaw) : NaN;
+    if (Number.isFinite(selectedId) && selectedId > 0) {
+      const target = state.probes.find(p => p.id === selectedId);
+      if (target) {
+        openProbeDetails(target);
+      }
+    }
   })
 
   // Fetch available interfaces from NETINFO
@@ -734,9 +753,9 @@ async function saveProbeSettings() {
                   <p class="probe-description">{{ getProbeDescription(probe) }}</p>
                   <!-- Target display section -->
                   <div v-if="hasTargets(probe)" class="probe-targets">
-                    <div 
-                      v-for="(targetInfo, idx) in getTargetInfos(probe).slice(0, 2)" 
-                      :key="idx" 
+                    <div
+                      v-for="(targetInfo, idx) in getTargetInfos(probe).slice(0, 2)"
+                      :key="idx"
                       class="target-pill"
                       :class="`target-${targetInfo.type}`"
                       :title="targetInfo.value"
@@ -751,20 +770,70 @@ async function saveProbeSettings() {
                   </div>
                 </div>
                 <div class="probe-actions">
-                  <button 
-                    class="probe-action info" 
+                  <button
+                    class="probe-action info"
                     title="View details"
                     @click.stop="openProbeDetails(probe)"
                   >
                     <i class="bi bi-info-circle"></i>
                   </button>
-                  <button 
+                  <button
                       class="probe-action delete"
                       title="View & delete probe"
                       @click.stop="openProbeDetails(probe)"
                   >
                     <i class="bi bi-trash"></i>
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- REVERSE PROBES: AGENT-type probes owned by OTHER agents targeting
+             this one. Read-only here — the "Edit on Agent X" button jumps to
+             the owning agent's edit page with the probe pre-selected. -->
+        <div v-if="state.reverseProbes.length > 0" class="probe-section reverse-probes-section">
+          <h6 class="section-title">
+            <i class="bi bi-link-45deg"></i>
+            Probes Targeting This Agent
+            <span class="section-count">{{ state.reverseProbes.length }}</span>
+          </h6>
+          <p class="section-subtitle text-muted">
+            Configured on other agents in this workspace. Edit or remove them from the owning agent.
+          </p>
+          <div class="probes-grid">
+            <div
+              v-for="rv in state.reverseProbes"
+              :key="rv.probe.id"
+              class="probe-card reverse-probe-card"
+            >
+              <div class="probe-header">
+                <div class="probe-icon icon-info">
+                  <i class="bi bi-link-45deg"></i>
+                </div>
+                <div class="probe-info">
+                  <h6 class="probe-type">{{ rv.probe.type }}</h6>
+                  <p class="probe-description">
+                    <span class="reverse-owner-label">Configured on</span>
+                    <strong>{{ rv.owner_agent_name }}</strong>
+                    <span
+                      class="badge ms-2"
+                      :class="rv.bidirectional ? 'bg-info' : 'bg-secondary'"
+                    >
+                      <i :class="rv.bidirectional ? 'bi bi-arrow-left-right' : 'bi bi-arrow-right'"></i>
+                      {{ rv.bidirectional ? 'Bidirectional' : 'One-way' }}
+                    </span>
+                  </p>
+                </div>
+                <div class="probe-actions">
+                  <router-link
+                    :to="`/workspaces/${rv.owner_workspace_id}/agents/${rv.owner_agent_id}/probes/edit?selected=${rv.probe.id}`"
+                    class="probe-action owner-link"
+                    title="Edit on owning agent"
+                  >
+                    <i class="bi bi-box-arrow-up-right"></i>
+                  </router-link>
                 </div>
               </div>
             </div>
@@ -2654,5 +2723,45 @@ async function saveProbeSettings() {
   background: rgba(248, 113, 113, 0.15) !important;
   color: #fca5a5 !important;
   border-color: #fca5a5 !important;
+}
+
+/* --- Reverse probes (configured elsewhere, targeting this agent) --- */
+.reverse-probes-section {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed var(--bs-border-color);
+}
+
+.reverse-probes-section .section-subtitle {
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.reverse-probe-card {
+  border-style: dashed;
+  cursor: default;
+}
+
+.reverse-probe-card .icon-info {
+  background: var(--bs-info-bg-subtle);
+  color: var(--bs-info);
+}
+
+.reverse-owner-label {
+  display: inline;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bs-secondary);
+  margin-right: 0.35rem;
+}
+
+.probe-action.owner-link {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bs-info);
 }
 </style>

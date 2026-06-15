@@ -13,6 +13,17 @@ interface ProbeGroup {
   label: string;
   types: string[];
   perType: Record<string, { count: number; enabled: number }>;
+  /**
+   * Present for reverse-probe groups (probes owned by another agent that
+   * target this one). Drives the "configured on Agent X" affordance and
+   * the cross-agent navigation link.
+   */
+  reverseOwner?: {
+    agentId: number;
+    agentName: string;
+    workspaceId: number;
+    bidirectional: boolean;
+  };
 }
 
 interface ProbeGroupStats {
@@ -28,6 +39,12 @@ interface Props {
   loadingProbes: boolean;
   totalProbes: number;
   targetGroups: ProbeGroup[];
+  /**
+   * AGENT-type probes owned by other agents in the same workspace whose
+   * targets include this agent. Rendered as a read-only "configured
+   * elsewhere" section below the owned-probe grid.
+   */
+  reverseGroups?: ProbeGroup[];
   groupStats: Record<string, ProbeGroupStats>;
   targetAgents: Record<number, Agent>;
   agentNames: Record<number, string>;
@@ -56,6 +73,10 @@ function getStatusIcon(status?: string): string {
     default: return 'bi-question-circle';
   }
 }
+
+const anyBidirectional = computed(() => {
+  return (props.reverseGroups ?? []).some(g => g.reverseOwner?.bidirectional);
+});
 </script>
 
 <template>
@@ -204,6 +225,78 @@ function getStatusIcon(status?: string): string {
         </router-link>
       </div>
     </div>
+
+    <!-- REVERSE PROBES SECTION: AGENT-type probes owned by OTHER agents in the
+         same workspace whose targets include this agent. Read-only by design —
+         editing/deletion must happen on the owning agent. -->
+    <div
+      v-if="(reverseGroups?.length ?? 0) > 0"
+      class="content-section reverse-probes-section"
+    >
+      <div class="section-header">
+        <h5 class="section-title">
+          <i class="bi bi-link-45deg"></i>
+          Probes Targeting This Agent
+        </h5>
+        <span class="badge bg-secondary">{{ reverseGroups?.length ?? 0 }}</span>
+      </div>
+      <p class="section-subtitle text-muted">
+        These probes are configured on other agents and target this one.
+        <span v-if="anyBidirectional">Bidirectional ones will run return-path tests against this agent automatically.</span>
+        <span v-else>None are bidirectional, so this agent is not running anything for them.</span>
+      </p>
+      <div class="probes-grid">
+        <div
+          v-for="g in reverseGroups"
+          :key="g.key"
+          class="probe-card reverse-probe-card"
+        >
+          <router-link
+            v-if="g.reverseOwner"
+            :to="`/workspaces/${g.reverseOwner.workspaceId}/agents/${g.reverseOwner.agentId}/probes/${g.probes[0]?.id || ''}`"
+            class="probe-link"
+          >
+            <div class="probe-header">
+              <div class="probe-icon reverse-icon">
+                <i class="bi bi-link-45deg"></i>
+              </div>
+              <div class="probe-status">
+                <i class="bi bi-box-arrow-up-right reverse-external"></i>
+              </div>
+            </div>
+
+            <div class="probe-content">
+              <h6 class="probe-title">
+                <span class="reverse-owner-label">Configured on</span>
+                <span class="reverse-owner-name">{{ g.reverseOwner.agentName }}</span>
+              </h6>
+
+              <div class="probe-types">
+                <span
+                  v-for="t in g.types"
+                  :key="t"
+                  class="probe-type-badge"
+                >
+                  {{ t }} ({{ g.perType[t].count }})
+                </span>
+              </div>
+
+              <div class="probe-stats">
+                <div class="probe-stat">
+                  <i
+                    :class="g.reverseOwner.bidirectional ? 'bi bi-arrow-left-right' : 'bi bi-arrow-right'"
+                  ></i>
+                  <span v-if="g.reverseOwner.bidirectional">Bidirectional — return-path probes are auto-generated</span>
+                  <span v-else>One-way — this agent is not running return-path tests</span>
+                </div>
+              </div>
+            </div>
+
+            <i class="bi bi-box-arrow-up-right probe-arrow reverse-arrow"></i>
+          </router-link>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -250,5 +343,50 @@ function getStatusIcon(status?: string): string {
 
 .ai-analysis-btn i {
   font-size: 14px;
+}
+
+/* --- Reverse probes section --- */
+.reverse-probes-section {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed var(--bs-border-color);
+}
+
+.reverse-probes-section .section-subtitle {
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.reverse-probe-card {
+  border-style: dashed;
+  opacity: 0.95;
+}
+
+.reverse-icon {
+  background: var(--bs-info-bg-subtle);
+  color: var(--bs-info);
+}
+
+.reverse-arrow {
+  color: var(--bs-info);
+}
+
+.reverse-external {
+  font-size: 0.9rem;
+  color: var(--bs-info);
+}
+
+.reverse-owner-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bs-secondary);
+}
+
+.reverse-owner-name {
+  display: block;
+  color: var(--bs-body-color);
 }
 </style>

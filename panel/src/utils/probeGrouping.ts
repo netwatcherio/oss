@@ -21,7 +21,7 @@
  * @module probeGrouping
  * @see docs/panel-architecture.md
  */
-import type { Probe, ProbeType, Target } from "@/types";
+import type { Probe, ProbeType, ReverseProbeView, Target } from "@/types";
 
 export type TargetGroupKind = "host" | "agent" | "local";
 
@@ -49,6 +49,20 @@ export interface ProbeGroupByTarget {
     perType: Record<string, PerTypeStats>;
     probes: Probe[];
     targets: Target[];
+
+    /**
+     * When this group is the result of grouping REVERSE probes (probes owned
+     * by another agent that target this one), this carries the owner context
+     * so the UI can render a "configured on Agent X" affordance. Undefined for
+     * owned-probe groups.
+     */
+    reverseOwner?: {
+        agentId: number;
+        agentName: string;
+        workspaceId: number;
+        /** Whether the source AGENT probe has metadata.bidirectional=true. */
+        bidirectional: boolean;
+    };
 }
 
 interface TypeTotals {
@@ -507,6 +521,110 @@ export function findProbesByInitialTarget(seed: Probe, all: Probe[]): Probe[] {
     if (!seedKey) return [];
 
     return all.filter(p => canonicalTargetKey(p) === seedKey);
+}
+
+/**
+ * Group reverse probes (owned by OTHER agents, targeting this one) by their
+ * OWNER agent. Produces one card per `(owner_agent_id, type)` pair so the UI
+ * can render a single "Agent X is probing me with type Y" tile. The returned
+ * `ProbeGroupByTarget` shape is the same one `groupProbesByTarget` produces,
+ * with `reverseOwner` populated and the `targets` field empty (these are
+ * probes configured elsewhere — we don't render the target endpoints).
+ */
+export function groupReverseProbesByOwner(
+    reverse: ReverseProbeView[],
+): ProbeGroupByTarget[] {
+    type Acc = {
+        owner: { agentId: number; agentName: string; workspaceId: number; bidirectional: boolean };
+        probes: Probe[];
+        first: string | null;
+        last: string | null;
+        perType: Map<string, { count: number; enabled: number; probes: Probe[] }>;
+    };
+
+    const groups = new Map<string, Acc>();
+    for (const rv of reverse) {
+        const p = rv.probe;
+        if (!p) continue;
+        // One card per (owner_agent_id, probe.type) pair. Most owners will
+        // only have a few AGENT probes against a given target, so per-type
+        // bucketing is more useful than flattening all types into one card.
+        const key = `owner:${rv.owner_agent_id}|type:${p.type}`;
+        if (!groups.has(key)) {
+            groups.set(key, {
+                owner: {
+                    agentId: rv.owner_agent_id,
+                    agentName: rv.owner_agent_name,
+                    workspaceId: rv.owner_workspace_id,
+                    bidirectional: !!rv.bidirectional,
+                },
+                probes: [],
+                first: null,
+                last: null,
+                perType: new Map(),
+            });
+        }
+        const acc = groups.get(key)!;
+        acc.probes.push(p);
+        if (acc.first == null || new Date(p.created_at) < new Date(acc.first)) {
+            acc.first = p.created_at;
+        }
+        if (acc.last == null || new Date(p.updated_at) > new Date(acc.last)) {
+            acc.last = p.updated_at;
+        }
+        if (!acc.perType.has(p.type)) {
+            acc.perType.set(p.type, { count: 0, enabled: 0, probes: [] });
+        }
+        const pt = acc.perType.get(p.type)!;
+        pt.count += 1;
+        if (p.enabled) pt.enabled += 1;
+        pt.probes.push(p);
+    }
+
+    const out: ProbeGroupByTarget[] = [];
+    for (const [key, acc] of groups) {
+        const perType: Record<string, PerTypeStats> = {};
+        const types: string[] = [];
+        for (const [t, v] of acc.perType.entries()) {
+            types.push(t);
+            perType[t] = {
+                probes: v.probes,
+                count: v.count,
+                enabled: v.enabled,
+                intervals: [],
+            };
+        }
+        types.sort();
+        out.push({
+            key,
+            kind: "host", // not displayed; click handler bypasses group kind
+            id: acc.owner.agentId,
+            label: acc.owner.agentName,
+            types,
+            countProbes: acc.probes.length,
+            countEnabled: acc.probes.filter(p => p.enabled).length,
+            countTargets: 0,
+            firstSeen: acc.first ?? "",
+            lastSeen: acc.last ?? "",
+            anyServer: false,
+            perType,
+            probes: acc.probes,
+            targets: [],
+            reverseOwner: acc.owner,
+        });
+    }
+
+    // Sort: bidirectional first (these have real runtime impact), then by
+    // owner name. Helps the most important cards surface at the top.
+    out.sort((a, b) => {
+        const ab = a.reverseOwner?.bidirectional ? 1 : 0;
+        const bb = b.reverseOwner?.bidirectional ? 1 : 0;
+        if (ab !== bb) return bb - ab;
+        return String(a.reverseOwner?.agentName ?? "").localeCompare(
+            String(b.reverseOwner?.agentName ?? ""),
+        );
+    });
+    return out;
 }
 
 /** Builds a stable key from a probe's *first* target.

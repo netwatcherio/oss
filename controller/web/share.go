@@ -209,6 +209,25 @@ func RegisterShareRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB) {
 			}
 		}
 
+		// Build redacted reverse-probe views for the public share. Owner agent
+		// names are intentionally hidden from public viewers (no auth context
+		// to verify they should see other agent identities). The bidirectional
+		// flag is preserved so viewers can see whether return-path tests are
+		// actually running for them.
+		reverseViews, rvErr := probe.ListReverseAgentProbesWithOwners(c.UserContext(), db, link.WorkspaceID, link.AgentID)
+		if rvErr != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch reverse probes"})
+		}
+		const redactedOwnerName = "Another agent"
+		publicReverseProbes := make([]probe.ReverseProbeView, 0, len(reverseViews))
+		for _, v := range reverseViews {
+			if !v.Probe.Enabled {
+				continue
+			}
+			v.OwnerAgentName = redactedOwnerName
+			publicReverseProbes = append(publicReverseProbes, v)
+		}
+
 		// Return limited agent info (no secrets)
 		return c.JSON(fiber.Map{
 			"agent": fiber.Map{
@@ -223,6 +242,7 @@ func RegisterShareRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB) {
 				"last_seen_at": ag.LastSeenAt,
 			},
 			"probes":          probes,
+			"reverse_probes":  publicReverseProbes,
 			"reverse_count":   len(reverse), // Number of probes from other agents targeting this one
 			"expires_at":      link.ExpiresAt,
 			"allow_speedtest": link.AllowSpeedtest,

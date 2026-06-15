@@ -1,5 +1,5 @@
 import request from "./request";
-import type { Agent, Probe, ProbeCreateInput, ProbeData, Workspace, Member, Role, ListResponse } from "@/types";
+import type { Agent, Probe, ProbeCreateInput, ProbeData, ReverseProbeView, Workspace, Member, Role, ListResponse } from "@/types";
 
 /** ===== Auth ===== */
 export const AuthService = {
@@ -559,6 +559,17 @@ export const ProbeService = {
             `/workspaces/${workspaceId}/agents/${agentId}/probes/${probeId}`
         );
         return data;
+    },
+    /**
+     * List AGENT-type probes from OTHER agents in the same workspace whose
+     * targets include this agent. Used to render the read-only "configured
+     * elsewhere, targeting me" section on Agent.vue / ProbesEdit.
+     */
+    async listReverse(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.get<ListResponse<ReverseProbeView>>(
+            `/workspaces/${workspaceId}/agents/${agentId}/probes/reverse`
+        );
+        return data.data || [];
     },
     // network information getter
     async netInfo(workspaceId: number | string, agentId: number | string) {

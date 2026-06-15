@@ -1396,6 +1396,89 @@ func ListByAgentWithReverse(ctx context.Context, db *gorm.DB, agentID uint) (own
 	return owned, reverse, nil
 }
 
+// ReverseProbeView is a panel-facing projection of a probe owned by another
+// agent that targets targetAgentID. It carries enough owner context to render
+// a "configured on Agent X" card without a follow-up lookup.
+type ReverseProbeView struct {
+	Probe            Probe  `json:"probe"`
+	OwnerAgentID     uint   `json:"owner_agent_id"`
+	OwnerAgentName   string `json:"owner_agent_name"`
+	OwnerWorkspaceID uint   `json:"owner_workspace_id"`
+	Bidirectional    bool   `json:"bidirectional"`
+}
+
+// ListReverseAgentProbes returns AGENT-type probes from other agents in the
+// same workspace whose targets include targetAgentID. Used by the panel to
+// render a read-only "configured elsewhere, targeting me" section on the
+// targeted agent's view. Excludes soft-deleted and disabled probes.
+func ListReverseAgentProbes(ctx context.Context, db *gorm.DB, workspaceID, targetAgentID uint) ([]Probe, error) {
+	if workspaceID == 0 || targetAgentID == 0 {
+		return nil, fmt.Errorf("%w: workspaceID and targetAgentID required", ErrBadInput)
+	}
+	var out []Probe
+	err := db.WithContext(ctx).
+		Preload("Targets", "deleted_at IS NULL").
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id AND t.deleted_at IS NULL").
+		Where(
+			"probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ? AND probes.workspace_id = ? AND probes.enabled = ? AND probes.deleted_at IS NULL",
+			TypeAgent, targetAgentID, targetAgentID, workspaceID, true,
+		).
+		Order("probes.id DESC").
+		Find(&out).Error
+	return out, err
+}
+
+// ListReverseAgentProbesWithOwners augments the reverse-probe list with the
+// owning agent's name and the pre-computed bidirectional flag, so the panel
+// can render "configured on Agent X" cards in a single round trip. Owner
+// names are batched in one query to avoid N+1.
+func ListReverseAgentProbesWithOwners(ctx context.Context, db *gorm.DB, workspaceID, targetAgentID uint) ([]ReverseProbeView, error) {
+	probes, err := ListReverseAgentProbes(ctx, db, workspaceID, targetAgentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(probes) == 0 {
+		return []ReverseProbeView{}, nil
+	}
+
+	ownerIDSet := make(map[uint]struct{}, len(probes))
+	for _, p := range probes {
+		ownerIDSet[p.AgentID] = struct{}{}
+	}
+	ownerIDs := make([]uint, 0, len(ownerIDSet))
+	for id := range ownerIDSet {
+		ownerIDs = append(ownerIDs, id)
+	}
+
+	ownerNames := make(map[uint]string, len(ownerIDs))
+	var ownerRows []agent.Agent
+	if err := db.WithContext(ctx).
+		Select("id, name").
+		Where("id IN ?", ownerIDs).
+		Find(&ownerRows).Error; err != nil {
+		return nil, fmt.Errorf("failed to load owner agents: %w", err)
+	}
+	for _, a := range ownerRows {
+		ownerNames[a.ID] = a.Name
+	}
+
+	views := make([]ReverseProbeView, 0, len(probes))
+	for _, p := range probes {
+		name := ownerNames[p.AgentID]
+		if name == "" {
+			name = fmt.Sprintf("Agent #%d", p.AgentID)
+		}
+		views = append(views, ReverseProbeView{
+			Probe:            p,
+			OwnerAgentID:     p.AgentID,
+			OwnerAgentName:   name,
+			OwnerWorkspaceID: workspaceID,
+			Bidirectional:    agentProbeHasBidirectional(&p),
+		})
+	}
+	return views, nil
+}
+
 // Update patches fields and (optionally) replaces targets atomically.
 func Update(ctx context.Context, db *gorm.DB, in UpdateInput) (*Probe, error) {
 	if in.ID == 0 {

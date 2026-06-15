@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { PublicShareService } from '@/services/apiService';
 import { since } from '@/time';
-import { groupProbesByTarget, type ProbeGroupByTarget } from '@/utils/probeGrouping';
+import { groupProbesByTarget, groupReverseProbesByOwner, type ProbeGroupByTarget } from '@/utils/probeGrouping';
 import { themeService, type Theme } from '@/services/themeService';
 import PageContainer from '@/components/PageContainer.vue';
 
@@ -27,25 +27,33 @@ const authenticatedPassword = ref<string | null>(null); // Store password after 
 // Agent data
 const agent = ref<any>(null);
 const probes = ref<any[]>([]);
+const reverseProbes = ref<any[]>([]);
 const agentNames = ref<Record<string | number, string>>({});  // Cache for agent names
 
-// Computed: grouped probes by target (like Agent.vue)
-// Filter out groups where the target is THIS agent (reverse probes targeting self)
+// Computed: grouped probes by target (like Agent.vue).
+// We still filter out agent groups that target this very agent — that case
+// is now handled by the dedicated reverse-probes section below (driven by
+// the backend's `reverse_probes` field, with redacted owner names).
 const targetGroups = computed<ProbeGroupByTarget[]>(() => {
     if (!probes.value || probes.value.length === 0) return [];
     // Exclude DNS probes from the normal probe list — they have a dedicated DNS section
     const nonDnsProbes = probes.value.filter((p: any) => p.type !== 'DNS');
     const result = groupProbesByTarget(nonDnsProbes, { excludeDefaults: true, excludeServers: true });
-    
-    // Filter out agent groups that target the current agent itself
-    // These are reverse probes that shouldn't appear as separate cards
+
     const currentAgentId = agent.value?.id;
     return result.groups.filter(g => {
-        // Keep all non-agent groups (host, local)
         if (g.kind !== 'agent') return true;
-        // For agent groups, exclude if targeting self
         return Number(g.id) !== currentAgentId;
     });
+});
+
+// Reverse-probe groups (probes configured on OTHER agents in this workspace
+// that target this agent). Owners are redacted server-side — public viewers
+// don't have auth context to see other agent identities, but they DO get
+// the bidirectional flag so they can tell whether return-path tests run.
+const reverseGroups = computed<ProbeGroupByTarget[]>(() => {
+    if (!reverseProbes.value || reverseProbes.value.length === 0) return [];
+    return groupReverseProbesByOwner(reverseProbes.value);
 });
 
 // Check if agent has DNS probes
@@ -78,6 +86,7 @@ async function submitPassword() {
         const result = await PublicShareService.getAgent(token.value, passwordInput.value);
         agent.value = result.agent;
         probes.value = result.probes || [];
+        reverseProbes.value = result.reverse_probes || [];
         expiresAt.value = result.expires_at;
         allowSpeedtest.value = result.allow_speedtest;
         authenticatedPassword.value = passwordInput.value; // Store for subsequent requests
@@ -156,6 +165,7 @@ async function loadAgent() {
                     const result = await PublicShareService.getAgent(token.value, cachedPassword);
                     agent.value = result.agent;
                     probes.value = result.probes || [];
+                    reverseProbes.value = result.reverse_probes || [];
                     expiresAt.value = result.expires_at;
                     allowSpeedtest.value = result.allow_speedtest;
                     authenticatedPassword.value = cachedPassword;
@@ -179,6 +189,7 @@ async function loadAgent() {
         const result = await PublicShareService.getAgent(token.value);
         agent.value = result.agent;
         probes.value = result.probes || [];
+        reverseProbes.value = result.reverse_probes || [];
         expiresAt.value = result.expires_at;
         allowSpeedtest.value = result.allow_speedtest;
         
@@ -462,6 +473,59 @@ onUnmounted(() => {
                                 </div>
                                 <div class="probe-meta">
                                     <span><i class="bi bi-clock"></i> {{ probe.interval_sec || probe.interval || '?' }}s interval</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reverse Probes (configured on other agents, targeting this one).
+                         On public share links the owner is redacted to "Another agent".
+                         Bidirectional flag is preserved so the viewer knows whether
+                         return-path tests are actually running for them. -->
+                    <div v-if="reverseGroups.length > 0" class="probes-section reverse-probes-section">
+                        <h2>
+                            <i class="bi bi-link-45deg"></i>
+                            Probes Targeting This Agent
+                            <span class="probe-count">{{ reverseGroups.length }}</span>
+                        </h2>
+                        <p class="section-subtitle">
+                            Configured on other agents in this workspace. Owner names are hidden on this public share.
+                        </p>
+                        <div class="probes-grid">
+                            <div
+                                v-for="g in reverseGroups"
+                                :key="g.key"
+                                class="probe-card reverse-probe-card"
+                            >
+                                <div class="probe-link reverse-probe-link">
+                                    <div class="probe-header">
+                                        <div class="probe-icon reverse-icon">
+                                            <i class="bi bi-link-45deg"></i>
+                                        </div>
+                                    </div>
+                                    <div class="probe-content">
+                                        <h6 class="probe-title">
+                                            <span class="reverse-owner-label">Configured on</span>
+                                            <span class="reverse-owner-name">{{ g.reverseOwner?.agentName }}</span>
+                                        </h6>
+                                        <div class="probe-types">
+                                            <span
+                                                v-for="t in g.types"
+                                                :key="t"
+                                                class="probe-type-badge"
+                                                :class="t.toLowerCase()"
+                                            >
+                                                {{ t }} ({{ g.perType[t]?.count || 0 }})
+                                            </span>
+                                        </div>
+                                        <div class="probe-stats">
+                                            <div class="probe-stat">
+                                                <i :class="g.reverseOwner?.bidirectional ? 'bi bi-arrow-left-right' : 'bi bi-arrow-right'"></i>
+                                                <span v-if="g.reverseOwner?.bidirectional">Bidirectional — return-path tests run automatically</span>
+                                                <span v-else>One-way — this agent is not running return-path tests</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -849,6 +913,49 @@ onUnmounted(() => {
     border-radius: 12px;
     border: 1px dashed var(--bs-border-color);
 }
+
+/* --- Reverse probes (configured elsewhere, targeting this agent) --- */
+.reverse-probes-section {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px dashed var(--bs-border-color);
+}
+
+.reverse-probes-section .section-subtitle {
+    color: var(--bs-secondary-color);
+    font-size: 0.9rem;
+    margin: 0 0 1rem 0;
+}
+
+.reverse-probe-card {
+    border-style: dashed;
+    cursor: default;
+}
+
+.reverse-probe-link {
+    cursor: default;
+    text-decoration: none;
+    color: inherit;
+}
+
+.reverse-icon {
+    color: var(--bs-info);
+}
+
+.reverse-owner-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bs-secondary);
+}
+
+.reverse-owner-name {
+    display: block;
+    color: var(--bs-body-color);
+}
+
 
 .no-probes i {
     font-size: 2.5rem;

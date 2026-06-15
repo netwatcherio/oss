@@ -31,7 +31,7 @@ import ElementPair from "@/components/ElementPair.vue";
 import FillChart from "@/components/FillChart.vue";
 import ElementExpand from "@/components/ElementExpand.vue";
 import {AgentService, ProbeService, WorkspaceService, ProbeDataService, OUIService, ReportService} from "@/services/apiService";
-import {groupProbesByTarget, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
+import {groupProbesByTarget, groupReverseProbesByOwner, type TargetGroupKind, type ProbeGroupByTarget} from "@/utils/probeGrouping";
 import ShareAgentModal from "@/components/ShareAgentModal.vue";
 import VoiceReportModal from "@/components/VoiceReportModal.vue";
 import DnsDashboard from "@/views/agent/DNS.vue";
@@ -637,6 +637,9 @@ let state = reactive({
   targetGroupsByKey: {} as Record<string, ProbeGroupByTarget>,
   groupKinds: [] as TargetGroupKind[],
 
+  // reverse-probe groups (probes owned by OTHER agents targeting this one)
+  reverseGroups: [] as ProbeGroupByTarget[],
+
   // Group stats
   groupStats: {} as Record<string, ProbeGroupStats>,
   pingStats: [] as PingStats[],
@@ -1002,6 +1005,18 @@ onMounted(async () => {
         loadingState.probes = false;
       });
 
+  // Fetch reverse probes (other agents' AGENT probes targeting this one) in
+  // parallel. Failures here MUST NOT block the owned-probe load above, hence a
+  // separate .then/.catch chain instead of chaining.
+  ProbeService.listReverse(workspaceID, agentID)
+      .then((rvList) => {
+        state.reverseGroups = groupReverseProbesByOwner(rvList || []);
+      })
+      .catch(err => {
+        console.warn('Failed to load reverse probes:', err);
+        state.reverseGroups = [];
+      });
+
   state.ready = true;
 })
 
@@ -1083,6 +1098,7 @@ onMounted(async () => {
         :loading-probes="loadingState.probes"
         :total-probes="totalProbesCount"
         :target-groups="state.targetGroups"
+        :reverse-groups="state.reverseGroups"
         :group-stats="state.groupStats"
         :target-agents="state.targetAgents"
         :agent-names="state.agentNames"
