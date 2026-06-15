@@ -59,6 +59,77 @@ func TestAgentProbeHasBidirectional(t *testing.T) {
 	}
 }
 
+func TestShouldIncludePingExpansion(t *testing.T) {
+	const envKey = "AGENT_EXPANSION_INCLUDE_PING"
+
+	cases := []struct {
+		name     string
+		envVal   string
+		setEnv   bool
+		metadata datatypes.JSON
+		want     bool
+	}{
+		// Metadata-driven, env unset
+		{"no metadata, env unset", "", false, nil, false},
+		{"no metadata, env false", "false", true, nil, false},
+		{"no metadata, env true", "true", true, nil, true},
+		{"unrelated metadata, env true", "true", true,
+			mdJSON(t, map[string]any{"trafficsim": map[string]any{"voip_mode": true}}), true},
+
+		// Metadata override wins over env
+		{"metadata true overrides env false", "false", true,
+			mdJSON(t, map[string]any{"expansion": map[string]any{"include_ping": true}}), true},
+		{"metadata false overrides env true", "true", true,
+			mdJSON(t, map[string]any{"expansion": map[string]any{"include_ping": false}}), false},
+
+		// Metadata without the expansion key falls back to env
+		{"empty expansion object, env true", "true", true,
+			mdJSON(t, map[string]any{"expansion": map[string]any{}}), true},
+		{"expansion key with wrong type, env true", "true", true,
+			mdJSON(t, map[string]any{"expansion": map[string]any{"include_ping": "yes"}}), true},
+		{"expansion key with wrong type, env unset", "", false,
+			mdJSON(t, map[string]any{"expansion": map[string]any{"include_ping": "yes"}}), false},
+
+		// Malformed metadata falls back to env
+		{"malformed metadata, env true", "true", true,
+			datatypes.JSON([]byte(`{not-json`)), true},
+		{"malformed metadata, env unset", "", false,
+			datatypes.JSON([]byte(`{not-json`)), false},
+
+		// Env truthy variants
+		{"env '1' true", "1", true, nil, true},
+		{"env 'yes' true", "yes", true, nil, true},
+		{"env 'on' true", "on", true, nil, true},
+		{"env 'TRUE' (case-insensitive)", "TRUE", true, nil, true},
+
+		// Env falsy variants
+		{"env '0' false", "0", true, nil, false},
+		{"env 'no' false", "no", true, nil, false},
+		{"env 'off' false", "off", true, nil, false},
+
+		// Unknown env value → default (false)
+		{"env 'maybe' falls back to default", "maybe", true, nil, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv(envKey, tc.envVal)
+			} else {
+				t.Setenv(envKey, "") // isolate from host env
+			}
+			p := &Probe{Metadata: tc.metadata}
+			if got := shouldIncludePingExpansion(p); got != tc.want {
+				t.Errorf("shouldIncludePingExpansion() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	if shouldIncludePingExpansion(nil) {
+		t.Error("shouldIncludePingExpansion(nil) = true, want false")
+	}
+}
+
 func TestSetBidirectionalFlagPreservesExistingMetadata(t *testing.T) {
 	src := Probe{Metadata: mdJSON(t, map[string]any{
 		"trafficsim": map[string]any{

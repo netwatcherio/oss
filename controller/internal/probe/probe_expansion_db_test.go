@@ -180,6 +180,7 @@ func filterByType(list []Probe, typ Type) []Probe {
 // Full new-format expansion: agent A (client) has one AGENT probe targeting
 // agent B (TrafficSim server). Validates everything both agents receive.
 func TestListForAgentNewFormatBidirectional(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "true")
 	db := newTestDB(t)
 	const clientID, serverID = uint(1), uint(2)
 	seedAgent(t, db, clientID, "10.0.0.1", false, 0)
@@ -330,6 +331,7 @@ func TestListForAgentNewFormatBidirectional(t *testing.T) {
 // controller versions, no metadata flag anywhere) must keep working. The rows
 // are seeded directly since Create() no longer produces dual AGENT probes.
 func TestListForAgentLegacyDualProbes(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "true")
 	db := newTestDB(t)
 	const aID, bID = uint(1), uint(2)
 	seedAgent(t, db, aID, "10.0.0.1", false, 0)
@@ -395,5 +397,154 @@ func TestListForAgentLegacyDualProbes(t *testing.T) {
 		if tsmd, ok := md["trafficsim"].(map[string]any); ok && tsmd["bidirectional_server"] == true {
 			t.Error("legacy mode must not generate per-client bidirectional server probes")
 		}
+	}
+}
+
+// PING is opt-in. With both the env and the metadata unset, the default is
+// off and no PING probe should be produced from the AGENT expansion. MTR and
+// TRAFFICSIM (when the target has a server) must still be produced.
+func TestListForAgentPingDefaultOff(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "")
+	db := newTestDB(t)
+	const aID, bID = uint(1), uint(2)
+	seedAgent(t, db, aID, "10.0.0.1", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", true, 5005)
+
+	if _, err := Create(context.Background(), db, CreateInput{
+		WorkspaceID:  1,
+		AgentID:      aID,
+		Type:         TypeAgent,
+		Enabled:      true,
+		AgentTargets: []uint{bID},
+		// No Metadata — defaults to no PING expansion.
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list, err := ListForAgent(context.Background(), db, nil, aID)
+	if err != nil {
+		t.Fatalf("ListForAgent: %v", err)
+	}
+
+	if got := len(filterByType(list, TypeMTR)); got != 1 {
+		t.Errorf("MTR probes = %d, want 1 (MTR is always produced)", got)
+	}
+	if got := len(filterByType(list, TypePing)); got != 0 {
+		t.Errorf("PING probes = %d, want 0 (default off, no env, no metadata)", got)
+	}
+	if got := len(filterByType(list, TypeTrafficSim)); got != 1 {
+		t.Errorf("TRAFFICSIM probes = %d, want 1 (target has a server)", got)
+	}
+}
+
+// Per-probe metadata override beats the env default: env off, metadata true
+// must produce PING.
+func TestListForAgentPingEnabledByMetadata(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "")
+	db := newTestDB(t)
+	const aID, bID = uint(1), uint(2)
+	seedAgent(t, db, aID, "10.0.0.1", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+
+	md, err := json.Marshal(map[string]any{
+		"expansion": map[string]any{"include_ping": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Create(context.Background(), db, CreateInput{
+		WorkspaceID:  1,
+		AgentID:      aID,
+		Type:         TypeAgent,
+		Enabled:      true,
+		AgentTargets: []uint{bID},
+		Metadata:     datatypes.JSON(md),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list, err := ListForAgent(context.Background(), db, nil, aID)
+	if err != nil {
+		t.Fatalf("ListForAgent: %v", err)
+	}
+
+	if got := len(filterByType(list, TypePing)); got != 1 {
+		t.Errorf("PING probes = %d, want 1 (metadata override)", got)
+	}
+	if got := len(filterByType(list, TypeMTR)); got != 1 {
+		t.Errorf("MTR probes = %d, want 1", got)
+	}
+}
+
+// Per-probe metadata override beats the env default: env on, metadata false
+// must NOT produce PING.
+func TestListForAgentPingDisabledByMetadata(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "true")
+	db := newTestDB(t)
+	const aID, bID = uint(1), uint(2)
+	seedAgent(t, db, aID, "10.0.0.1", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+
+	md, err := json.Marshal(map[string]any{
+		"expansion": map[string]any{"include_ping": false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Create(context.Background(), db, CreateInput{
+		WorkspaceID:  1,
+		AgentID:      aID,
+		Type:         TypeAgent,
+		Enabled:      true,
+		AgentTargets: []uint{bID},
+		Metadata:     datatypes.JSON(md),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list, err := ListForAgent(context.Background(), db, nil, aID)
+	if err != nil {
+		t.Fatalf("ListForAgent: %v", err)
+	}
+
+	if got := len(filterByType(list, TypePing)); got != 0 {
+		t.Errorf("PING probes = %d, want 0 (metadata override says no, even with env=true)", got)
+	}
+	if got := len(filterByType(list, TypeMTR)); got != 1 {
+		t.Errorf("MTR probes = %d, want 1", got)
+	}
+}
+
+// Env-on alone (no metadata) must produce PING — covers the operator-friendly
+// case where PING is enabled site-wide via .env.
+func TestListForAgentPingEnabledByEnv(t *testing.T) {
+	t.Setenv("AGENT_EXPANSION_INCLUDE_PING", "true")
+	db := newTestDB(t)
+	const aID, bID = uint(1), uint(2)
+	seedAgent(t, db, aID, "10.0.0.1", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+
+	if _, err := Create(context.Background(), db, CreateInput{
+		WorkspaceID:  1,
+		AgentID:      aID,
+		Type:         TypeAgent,
+		Enabled:      true,
+		AgentTargets: []uint{bID},
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list, err := ListForAgent(context.Background(), db, nil, aID)
+	if err != nil {
+		t.Fatalf("ListForAgent: %v", err)
+	}
+
+	if got := len(filterByType(list, TypePing)); got != 1 {
+		t.Errorf("PING probes = %d, want 1 (env true, no metadata)", got)
+	}
+	if got := len(filterByType(list, TypeMTR)); got != 1 {
+		t.Errorf("MTR probes = %d, want 1", got)
 	}
 }

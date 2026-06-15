@@ -57,6 +57,20 @@ func getenv(k, def string) string {
 	return def
 }
 
+// getenvBool reads an env var as a bool. Accepted truthy values: 1, true, yes, on
+// (case-insensitive). Accepted falsy: 0, false, no, off. Empty/unknown returns def.
+func getenvBool(k string, def bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(k)))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
+}
+
 // MigrateCH creates the tables with configurable retention (idempotent).
 func MigrateCH(ctx context.Context, ch *sql.DB, retentionDays int) error {
 	if retentionDays <= 0 {

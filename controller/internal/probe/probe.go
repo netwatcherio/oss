@@ -969,7 +969,6 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	// - Client probe (AgentID = owner) for sending
 	// - Server probe (AgentID = target) for receiving
 	// Both share the same Probe ID for attribution
-	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
 
 	// Create MTR/PING probes. Each expansion produces a SINGLE probe owned by the
 	// requesting agent. In bidirectional mode the return path is NOT a second probe
@@ -977,17 +976,33 @@ func expandAgentProbeForOwner(ctx context.Context, db *gorm.DB, ch *sql.DB,
 	// it fetches its list, via the reverse AGENT probe expansion. Emitting a
 	// target-owned "pair" probe into this agent's list would make it probe its own
 	// IP (forward path) or run duplicate return probes (reverse path).
+	//
+	// PING is opt-in: controlled by metadata["expansion"]["include_ping"] on the
+	// source AGENT probe, falling back to AGENT_EXPANSION_INCLUDE_PING env (default
+	// off). PING needs ICMP, which is commonly blocked — MTR (and TRAFFICSIM when
+	// the target runs a server) cover the common case.
+	bidirectionalEnabled := agentProbeHasBidirectional(agentProbe)
+	includePing := shouldIncludePingExpansion(agentProbe)
+	if !includePing {
+		log.Debugf("[agent %d] AGENT probe %d -> target agent %d: skipping PING (metadata.expansion.include_ping=false and AGENT_EXPANSION_INCLUDE_PING not set)",
+			ownerAgentID, agentProbe.ID, targetAgentID)
+	}
+
 	if bidirectionalEnabled {
 		mtrProbe := createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID)
 		mtrProbe = setBidirectionalFlag(mtrProbe, true)
 		expanded = append(expanded, mtrProbe)
 
-		pingProbe := createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID)
-		pingProbe = setBidirectionalFlag(pingProbe, true)
-		expanded = append(expanded, pingProbe)
+		if includePing {
+			pingProbe := createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID)
+			pingProbe = setBidirectionalFlag(pingProbe, true)
+			expanded = append(expanded, pingProbe)
+		}
 	} else {
 		expanded = append(expanded, createExpandedProbe(agentProbe, TypeMTR, targetIP, targetAgentID))
-		expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
+		if includePing {
+			expanded = append(expanded, createExpandedProbe(agentProbe, TypePing, targetIP, targetAgentID))
+		}
 	}
 
 	// Create TRAFFICSIM probe(s) when target agent has a server.
@@ -1154,6 +1169,27 @@ func agentProbeHasBidirectional(probe *Probe) bool {
 	}
 
 	return false
+}
+
+// shouldIncludePingExpansion decides whether to emit a PING probe when expanding
+// an AGENT probe. Per-probe override (metadata["expansion"]["include_ping"]) wins
+// over the global env default AGENT_EXPANSION_INCLUDE_PING. Default is false:
+// PING requires ICMP, which is blocked on most networks, so MTR + (conditional)
+// TRAFFICSIM are the primary inter-agent probes.
+func shouldIncludePingExpansion(agentProbe *Probe) bool {
+	if agentProbe != nil && len(agentProbe.Metadata) > 0 {
+		var md map[string]interface{}
+		if err := json.Unmarshal(agentProbe.Metadata, &md); err == nil {
+			if exp, ok := md["expansion"].(map[string]interface{}); ok {
+				if v, ok := exp["include_ping"]; ok {
+					if b, ok := v.(bool); ok {
+						return b
+					}
+				}
+			}
+		}
+	}
+	return getenvBool("AGENT_EXPANSION_INCLUDE_PING", false)
 }
 
 // setBidirectionalFlag sets the bidirectional flag in a TRAFFICSIM probe's metadata.
