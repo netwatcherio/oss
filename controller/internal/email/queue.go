@@ -134,13 +134,14 @@ func (s *QueueStore) EnqueueRegistrationConfirmation(ctx context.Context, toEmai
 }
 
 // EnqueuePasswordReset queues a password reset email
-func (s *QueueStore) EnqueuePasswordReset(ctx context.Context, toEmail, toName, resetToken string, userID uint) error {
+func (s *QueueStore) EnqueuePasswordReset(ctx context.Context, toEmail, toName, resetToken string, userID uint, expiryHours int) error {
 	vars := TemplateVars{
 		ToEmail:       toEmail,
 		ToName:        toName,
 		PanelEndpoint: GetPanelEndpoint(),
 		ResetToken:    resetToken,
 		ActionURL:     GetPanelEndpoint() + "/auth/reset/" + resetToken,
+		ExpiryHours:   expiryHours,
 	}
 
 	subject, body, bodyHTML := DefaultPasswordResetTemplate.Render(vars)

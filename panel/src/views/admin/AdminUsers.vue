@@ -59,14 +59,21 @@
                 <button class="btn btn-sm btn-outline-primary" @click="editUser(user)">
                   <i class="bi bi-pencil"></i>
                 </button>
-                <button 
-                  class="btn btn-sm" 
+                <button
+                  class="btn btn-sm"
                   :class="user.role === 'SITE_ADMIN' ? 'btn-outline-warning' : 'btn-outline-success'"
                   @click="toggleAdmin(user)"
                   :disabled="user.id === currentUserId"
                   :title="user.id === currentUserId ? 'Cannot change own role' : ''"
                 >
                   <i class="bi" :class="user.role === 'SITE_ADMIN' ? 'bi-shield-minus' : 'bi-shield-plus'"></i>
+                </button>
+                <button
+                  class="btn btn-sm btn-outline-info"
+                  @click="confirmResetPassword(user)"
+                  :title="'Send password reset email to ' + user.email"
+                >
+                  <i class="bi bi-key"></i>
                 </button>
                 <button 
                   class="btn btn-sm btn-outline-danger" 
@@ -134,6 +141,30 @@
         </div>
       </div>
     </div>
+
+    <!-- Password Reset Confirmation -->
+    <div class="modal-overlay" v-if="resettingUser" @click.self="resettingUser = null">
+      <div class="modal-content">
+        <h3>Send Password Reset</h3>
+        <p>
+          Send a password reset email to <strong>{{ resettingUser.email }}</strong>?
+        </p>
+        <p class="text-muted small">
+          The link will expire after the configured password-reset window
+          (default 1 hour).
+        </p>
+        <div v-if="resetError" class="alert alert-danger py-2">{{ resetError }}</div>
+        <div v-if="resetSuccess" class="alert alert-success py-2">
+          Reset email sent successfully.
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="resettingUser = null">Cancel</button>
+          <button class="btn btn-primary" @click="doResetPassword" :disabled="saving">
+            {{ saving ? 'Sending...' : 'Send Reset Email' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -141,6 +172,7 @@
 import { ref, onMounted, computed } from 'vue';
 import * as adminService from '@/services/adminService';
 import type { AdminUser } from '@/services/adminService';
+import { AuthService } from '@/services/apiService';
 
 const users = ref<AdminUser[]>([]);
 const loading = ref(true);
@@ -152,6 +184,9 @@ const total = ref(0);
 
 const editingUser = ref<AdminUser | null>(null);
 const deletingUser = ref<AdminUser | null>(null);
+const resettingUser = ref<AdminUser | null>(null);
+const resetError = ref('');
+const resetSuccess = ref(false);
 const saving = ref(false);
 const editForm = ref({ email: '', name: '', verified: false });
 
@@ -242,6 +277,30 @@ async function doDelete() {
     loadUsers();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to delete user';
+  } finally {
+    saving.value = false;
+  }
+}
+
+function confirmResetPassword(user: AdminUser) {
+  resettingUser.value = user;
+  resetError.value = '';
+  resetSuccess.value = false;
+}
+
+async function doResetPassword() {
+  if (!resettingUser.value) return;
+  saving.value = true;
+  resetError.value = '';
+  resetSuccess.value = false;
+  try {
+    await AuthService.adminResetUserPassword(resettingUser.value.id);
+    resetSuccess.value = true;
+    setTimeout(() => {
+      resettingUser.value = null;
+    }, 1500);
+  } catch (e: any) {
+    resetError.value = e?.response?.data?.error || e?.message || 'Failed to send reset email';
   } finally {
     saving.value = false;
   }

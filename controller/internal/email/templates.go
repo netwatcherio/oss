@@ -58,17 +58,24 @@ type Template struct {
 
 // Render replaces {{variable}} placeholders with values
 func (t *Template) Render(vars TemplateVars) (subject, body, bodyHTML string) {
+	expiryStr := strconv.Itoa(vars.ExpiryHours)
+	expiryPlural := ""
+	if vars.ExpiryHours != 1 {
+		expiryPlural = "s"
+	}
 	replacements := map[string]string{
-		"{{to_email}}":       vars.ToEmail,
-		"{{to_name}}":        vars.ToName,
-		"{{workspace_id}}":   uintToStr(vars.WorkspaceID),
-		"{{workspace_name}}": vars.WorkspaceName,
-		"{{panel_endpoint}}": vars.PanelEndpoint,
-		"{{action_url}}":     vars.ActionURL,
-		"{{invite_token}}":   vars.InviteToken,
-		"{{reset_token}}":    vars.ResetToken,
-		"{{role}}":           vars.Role,
-		"{{invited_by}}":     vars.InvitedBy,
+		"{{to_email}}":            vars.ToEmail,
+		"{{to_name}}":             vars.ToName,
+		"{{workspace_id}}":        uintToStr(vars.WorkspaceID),
+		"{{workspace_name}}":      vars.WorkspaceName,
+		"{{panel_endpoint}}":      vars.PanelEndpoint,
+		"{{action_url}}":          vars.ActionURL,
+		"{{invite_token}}":        vars.InviteToken,
+		"{{reset_token}}":         vars.ResetToken,
+		"{{role}}":                vars.Role,
+		"{{invited_by}}":          vars.InvitedBy,
+		"{{expiry_hours}}":        expiryStr,
+		"{{expiry_hours_plural}}": expiryPlural,
 	}
 
 	subject = t.Subject
@@ -250,7 +257,7 @@ We received a request to reset your password for your NetWatcher account.
 Click the link below to reset your password:
 {{action_url}}
 
-This link will expire in 1 hour.
+This link will expire in {{expiry_hours}} hour{{expiry_hours_plural}}.
 
 If you didn't request this, you can safely ignore this email.
 
@@ -262,7 +269,7 @@ If you didn't request this, you can safely ignore this email.
 <tr><td style="padding-top:16px;">Click the button below to choose a new password.</td></tr>`,
 		"{{action_url}}",
 		"Reset Password",
-		"This link will expire in 1 hour. If you didn't request this, you can safely ignore this email.",
+		"This link will expire in {{expiry_hours}} hour{{expiry_hours_plural}}. If you didn't request this, you can safely ignore this email.",
 	),
 }
 

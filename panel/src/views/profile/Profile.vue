@@ -4,6 +4,7 @@ import {ref, reactive, onMounted, computed} from "vue";
 import core from "@/core";
 import Title from "@/components/Title.vue";
 import {setSession, getSession} from "@/session";
+import { AuthService } from "@/services/apiService";
 
 const session = core.session()
 
@@ -140,39 +141,23 @@ async function changePassword() {
     state.passwordError = 'New passwords do not match'
     return
   }
-  
-  if (passwordForm.newPassword.length < 6) {
-    state.passwordError = 'Password must be at least 6 characters'
+
+  if (passwordForm.newPassword.length < 8) {
+    state.passwordError = 'Password must be at least 8 characters'
     return
   }
-  
+
   state.passwordSaving = true
   state.passwordError = ''
-  
+
   try {
-    const response = await fetch('/api/auth/me/password', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session?.token}`
-      },
-      body: JSON.stringify({
-        old_password: passwordForm.oldPassword,
-        new_password: passwordForm.newPassword,
-      })
-    })
-    
-    if (!response.ok) {
-      const err = await response.json()
-      throw new Error(err.error || 'Failed to change password')
-    }
-    
+    await AuthService.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
     state.passwordSuccess = true
     setTimeout(() => {
       closePasswordModal()
     }, 1500)
   } catch (err: any) {
-    state.passwordError = err.message
+    state.passwordError = err?.response?.data?.error || err?.message || 'Failed to change password'
   } finally {
     state.passwordSaving = false
   }

@@ -117,6 +117,18 @@ func panelProbes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueSto
 		return c.JSON(fiber.Map{"ok": true})
 	})
 
+	// DELETE /workspaces/:id/agents/:agentID/probes - requires CanEdit (USER+)
+	// Wipes every probe owned by the agent in a single transaction. The agent
+	// record itself is left intact (re-issue a PIN to reconfigure). ClickHouse
+	// cleanup is enqueued asynchronously.
+	base.Delete("/", RequireRole(wsStore, CanEdit), func(c *fiber.Ctx) error {
+		aID := uintParam(c, "agentID")
+		if err := probe.DeleteByAgent(c.UserContext(), db, deletionStore, aID); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"ok": true})
+	})
+
 	// -------------------- Workspace-Level Probe Operations --------------------
 	// These endpoints operate across agents within a workspace
 

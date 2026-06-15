@@ -27,6 +27,21 @@ export const AuthService = {
         const { data } = await request.post<{ success: boolean; message: string }>("/auth/reset-password", { token, new_password: newPassword });
         return data;
     },
+    async validatePasswordResetToken(token: string) {
+        const { data } = await request.get<{ valid: boolean; reason?: "expired" | "not_found" | "invalid" }>(`/auth/reset-password/${encodeURIComponent(token)}`);
+        return data;
+    },
+    async changePassword(oldPassword: string, newPassword: string) {
+        const { data } = await request.put<{ success: boolean }>("/auth/me/password", {
+            old_password: oldPassword,
+            new_password: newPassword,
+        });
+        return data;
+    },
+    async adminResetUserPassword(userId: number | string) {
+        const { data } = await request.post<{ success: boolean; message: string }>(`/admin/users/${userId}/reset-password`);
+        return data;
+    },
     async verifyEmail(token: string) {
         const { data } = await request.post<{ success: boolean; message: string }>("/auth/verify-email", { token });
         return data;
@@ -159,6 +174,15 @@ export const AgentService = {
     },
     async remove(workspaceId: number | string, agentId: number | string) {
         const { data } = await request.delete<{ ok: boolean }>(`/workspaces/${workspaceId}/agents/${agentId}`);
+        return data;
+    },
+    /**
+     * Wipe every probe owned by the agent. The agent record itself is left
+     * intact — useful when you want to reconfigure from scratch without
+     * re-deploying. ClickHouse data is purged asynchronously.
+     */
+    async clearProbes(workspaceId: number | string, agentId: number | string) {
+        const { data } = await request.delete<{ ok: boolean }>(`/workspaces/${workspaceId}/agents/${agentId}/probes`);
         return data;
     },
     async heartbeat(workspaceId: number | string, agentId: number | string) {

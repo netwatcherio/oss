@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"netwatcher-controller/internal/deletion"
+	"netwatcher-controller/internal/users"
 
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -138,6 +139,19 @@ func (s *CleanupScheduler) runCleanup(ctx context.Context) {
 	// failed (e.g. CH was down or the controller crashed mid-transaction).
 	store := deletion.NewQueueStore(s.db)
 	s.backfillDeletions(ctx, store, backfillCutoff)
+
+	// Sweep expired user tokens (password reset, email verification) so the
+	// user_tokens table doesn't grow without bound. ValidateToken already
+	// deletes on access, but tokens that are never validated linger.
+	tokenResult := s.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now()).
+		Delete(&users.UserToken{})
+	if tokenResult.Error != nil {
+		log.Errorf("Failed to cleanup expired user tokens: %v", tokenResult.Error)
+	} else if tokenResult.RowsAffected > 0 {
+		log.Infof("Cleaned up %d expired user tokens", tokenResult.RowsAffected)
+		totalDeleted += tokenResult.RowsAffected
+	}
 
 	elapsed := time.Since(startTime)
 	if totalDeleted > 0 {

@@ -113,6 +113,9 @@ func RegisterUser(ctx context.Context, db *gorm.DB, in RegisterInput, ip string)
 	if email == "" || strings.TrimSpace(in.Password) == "" {
 		return "", nil, nil, errors.New("email and password are required")
 	}
+	if len(in.Password) < MinPasswordLength {
+		return "", nil, nil, ErrPasswordTooShort
+	}
 
 	var exists int64
 	if err = db.WithContext(ctx).Model(&User{}).Where("email = ?", email).Count(&exists).Error; err != nil {

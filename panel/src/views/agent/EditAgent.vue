@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onMounted, reactive, computed } from "vue";
+import { onMounted, reactive, ref, computed } from "vue";
 import type { Workspace, Agent } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
@@ -15,8 +15,17 @@ const state = reactive({
   error: "",
   touched: {
     name: false
-  }
+  },
+  showClearProbesModal: false,
+  clearingProbes: false,
+  clearProbesError: "",
+  clearProbesConfirmText: ""
 });
+
+const clearProbesConfirmRequired = computed(() => state.agent.name || "");
+const clearProbesConfirmMatch = computed(
+  () => state.clearProbesConfirmText.trim() === state.agent.name.trim()
+);
 
 // Validation
 const validation = computed(() => ({
@@ -31,7 +40,7 @@ const isFormValid = computed(() => validation.value.name.valid);
 onMounted(async () => {
   const agentId = router.currentRoute.value.params["aID"] as string;
   const workspaceId = router.currentRoute.value.params["wID"] as string;
-  
+
   if (!agentId || !workspaceId) {
     state.error = "Missing agent or workspace ID";
     return;
@@ -42,7 +51,7 @@ onMounted(async () => {
       WorkspaceService.get(workspaceId),
       AgentService.get(workspaceId, agentId)
     ]);
-    
+
     state.workspace = workspace as Workspace;
     state.agent = agent as Agent;
     state.ready = true;
@@ -58,7 +67,7 @@ function markTouched(field: keyof typeof state.touched) {
 
 async function submit() {
   state.touched.name = true;
-  
+
   if (!isFormValid.value || !state.agent.id) {
     return;
   }
@@ -81,6 +90,41 @@ async function submit() {
     console.error("Failed to update agent:", err);
     state.error = err?.response?.data?.message || "Failed to update agent. Please try again.";
     state.loading = false;
+  }
+}
+
+function openClearProbesModal() {
+  state.clearProbesError = "";
+  state.clearProbesConfirmText = "";
+  state.showClearProbesModal = true;
+}
+
+function closeClearProbesModal() {
+  if (state.clearingProbes) return;
+  state.showClearProbesModal = false;
+  state.clearProbesError = "";
+  state.clearProbesConfirmText = "";
+}
+
+async function confirmClearProbes() {
+  if (!state.agent.id || !state.workspace.id) return;
+  if (!clearProbesConfirmMatch.value) {
+    state.clearProbesError = `Type "${state.agent.name}" to confirm.`;
+    return;
+  }
+
+  state.clearingProbes = true;
+  state.clearProbesError = "";
+
+  try {
+    await AgentService.clearProbes(state.workspace.id, state.agent.id);
+    state.showClearProbesModal = false;
+    state.clearProbesConfirmText = "";
+    router.push(`/workspaces/${state.workspace.id}/agents/${state.agent.id}`);
+  } catch (err: any) {
+    console.error("Failed to clear probes:", err);
+    state.clearProbesError = err?.response?.data?.error || "Failed to clear probes. Please try again.";
+    state.clearingProbes = false;
   }
 }
 </script>
@@ -331,10 +375,126 @@ async function submit() {
           </div>
         </div>
       </div>
+
+      <!-- Danger Zone -->
+      <div class="row mt-4">
+        <div class="col-12">
+          <div class="card border-danger">
+            <div class="card-header bg-danger text-white">
+              <h5 class="mb-0">
+                <i class="bi bi-exclamation-triangle me-2"></i>Danger Zone
+              </h5>
+            </div>
+            <div class="card-body">
+              <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+                <div>
+                  <h6 class="mb-1">Clear All Configured Probes</h6>
+                  <p class="text-muted small mb-0">
+                    Removes every probe owned by this agent. The agent stays
+                    online and reachable; you can reconfigure probes from
+                    scratch without redeploying. Historical ClickHouse data is
+                    purged asynchronously.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-outline-danger"
+                  :disabled="state.loading"
+                  @click="openClearProbesModal"
+                >
+                  <i class="bi bi-eraser me-1"></i>Clear All Probes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
+    <!-- Clear Probes Confirmation Modal -->
+    <Teleport to="body">
+      <div
+        v-if="state.showClearProbesModal"
+        class="modal-backdrop"
+        @click="closeClearProbesModal"
+      >
+        <div class="modal-dialog" @click.stop>
+          <div class="modal-header">
+            <div class="modal-title-row">
+              <div class="modal-icon icon-red">
+                <i class="bi bi-eraser"></i>
+              </div>
+              <div>
+                <h5 class="modal-title">Clear All Configured Probes</h5>
+                <p class="modal-subtitle">
+                  Wipe every probe owned by
+                  <strong>{{ state.agent.name }}</strong>
+                </p>
+              </div>
+            </div>
+            <button class="modal-close" :disabled="state.clearingProbes" @click="closeClearProbesModal">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <div class="alert alert-warning mb-3">
+              <i class="bi bi-info-circle me-2"></i>
+              <strong>This cannot be undone.</strong> All probes (PING, MTR,
+              DNS, HTTP, etc.) owned by this agent will be deleted, along with
+              their targets, alert rules, alerts, and route baselines. The
+              agent process stays running and connected.
+            </div>
+
+            <p class="mb-2">
+              Type the agent name
+              <code>{{ clearProbesConfirmRequired }}</code> below to confirm.
+            </p>
+
+            <input
+              v-model="state.clearProbesConfirmText"
+              type="text"
+              class="form-control"
+              :class="{ 'is-invalid': state.clearProbesError }"
+              placeholder="Agent name"
+              autocomplete="off"
+              :disabled="state.clearingProbes"
+              @keyup.enter="confirmClearProbes"
+            />
+
+            <div v-if="state.clearProbesError" class="alert alert-danger mt-3 mb-0">
+              <i class="bi bi-x-circle me-2"></i>{{ state.clearProbesError }}
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              class="btn btn-secondary"
+              :disabled="state.clearingProbes"
+              @click="closeClearProbesModal"
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-danger"
+              :disabled="state.clearingProbes || !clearProbesConfirmMatch"
+              @click="confirmClearProbes"
+            >
+              <span v-if="state.clearingProbes">
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                Clearing...
+              </span>
+              <span v-else>
+                <i class="bi bi-eraser me-1"></i>Clear All Probes
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Loading state -->
-    <div v-else-if="!state.error" class="d-flex justify-content-center py-5">
+    <div v-if="!state.ready && !state.error" class="d-flex justify-content-center py-5">
       <div class="spinner-border text-primary" role="status">
         <span class="visually-hidden">Loading...</span>
       </div>

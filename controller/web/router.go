@@ -52,7 +52,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelAnalysis(api, db, ch)
 	panelReports(api, db, ch, emailStore, reportScheduler)
 	agentReports(api, db, ch)
-	RegisterAdminRoutes(api, db, deletionStore)
+	RegisterAdminRoutes(api, db, deletionStore, emailStore)
 
 	// Workspace-scoped metrics (API key auth)
 	// Metrics include workspace_id labels; customers use Prometheus relabeling to filter

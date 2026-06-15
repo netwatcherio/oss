@@ -115,6 +115,12 @@ async function submit(e: MouseEvent) {
     return;
   }
 
+  if (state.user.password.length < 8) {
+    state.error = true;
+    state.errorMessage = "Password must be at least 8 characters.";
+    return;
+  }
+
   begin();
   try {
     const body = {

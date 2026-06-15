@@ -9,16 +9,18 @@ import (
 	"netwatcher-controller/internal/admin"
 	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/deletion"
+	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/users"
 	"netwatcher-controller/internal/workspace"
 
 	"github.com/gofiber/fiber/v2"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 // RegisterAdminRoutes mounts admin API endpoints under /admin
 // All routes require SITE_ADMIN role via AdminMiddleware
-func RegisterAdminRoutes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueStore) {
+func RegisterAdminRoutes(api fiber.Router, db *gorm.DB, deletionStore *deletion.QueueStore, emailStore *email.QueueStore) {
 	adminAPI := api.Group("/admin")
 	adminAPI.Use(AdminMiddleware(db))
 
@@ -32,6 +34,7 @@ func RegisterAdminRoutes(api fiber.Router, db *gorm.DB, deletionStore *deletion.
 	adminAPI.Put("/users/:id", adminUpdateUserHandler(db))
 	adminAPI.Delete("/users/:id", adminDeleteUserHandler(db))
 	adminAPI.Put("/users/:id/role", adminSetUserRoleHandler(db))
+	adminAPI.Post("/users/:id/reset-password", adminResetUserPasswordHandler(db, emailStore))
 
 	// Workspaces
 	adminAPI.Get("/workspaces", adminListWorkspacesHandler(db))
@@ -211,6 +214,42 @@ func adminSetUserRoleHandler(db *gorm.DB) fiber.Handler {
 
 		user, _ := users.Get(context.Background(), db, id)
 		return c.JSON(user)
+	}
+}
+
+// adminResetUserPasswordHandler triggers a password reset email for the given
+// user on behalf of an admin. Returns the same generic response as the
+// user-facing forgot-password endpoint to preserve consistent UX semantics.
+func adminResetUserPasswordHandler(db *gorm.DB, emailStore *email.QueueStore) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id := uintParam(c, "id")
+
+		target, err := users.Get(context.Background(), db, id)
+		if err != nil {
+			if err == users.ErrNotFound {
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+			}
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		if emailStore == nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "email service unavailable"})
+		}
+
+		expiryHours := users.GetPasswordResetExpiryHours()
+		resetToken, err := users.CreateToken(context.Background(), db, target.ID, users.TokenTypePasswordReset, expiryHours)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create reset token"})
+		}
+		if err := emailStore.EnqueuePasswordReset(context.Background(), target.Email, target.Name, resetToken.Token, target.ID, expiryHours); err != nil {
+			log.WithError(err).WithField("user_id", target.ID).Warn("admin: failed to enqueue password reset email")
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to send reset email"})
+		}
+
+		return c.JSON(fiber.Map{
+			"success": true,
+			"message": "password reset email queued",
+		})
 	}
 }
 

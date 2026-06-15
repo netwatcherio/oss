@@ -3,14 +3,17 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"netwatcher-controller/internal/email"
 	"netwatcher-controller/internal/users"
 
 	"github.com/gofiber/fiber/v2"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -53,6 +56,11 @@ func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStor
 		}
 		token, u, _, err := users.RegisterUser(c.UserContext(), db, in, c.IP())
 		if err != nil {
+			if errors.Is(err, users.ErrPasswordTooShort) {
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": fmt.Sprintf("password must be at least %d characters", users.MinPasswordLength),
+				})
+			}
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -122,8 +130,13 @@ func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStor
 			NewPassword: body.NewPassword,
 		})
 		if err != nil {
-			if err == users.ErrBadPassword {
+			switch {
+			case err == users.ErrBadPassword:
 				return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "incorrect current password"})
+			case errors.Is(err, users.ErrPasswordTooShort):
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": fmt.Sprintf("password must be at least %d characters", users.MinPasswordLength),
+				})
 			}
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -212,7 +225,7 @@ func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStor
 	})
 
 	// POST /auth/forgot-password - request password reset
-	auth.Post("/forgot-password", func(c *fiber.Ctx) error {
+	auth.Post("/forgot-password", rateLimitByIP(5, time.Minute), func(c *fiber.Ctx) error {
 		var body struct {
 			Email string `json:"email"`
 		}
@@ -228,16 +241,40 @@ func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStor
 		// Always return success to prevent email enumeration
 		// But only actually send email if user exists
 		user, err := users.GetByEmail(c.UserContext(), db, emailAddr)
+		expiryHours := users.GetPasswordResetExpiryHours()
 		if err == nil && user != nil && emailStore != nil {
 			// Create password reset token
-			resetToken, err := users.CreateToken(c.UserContext(), db, user.ID, users.TokenTypePasswordReset, users.GetPasswordResetExpiryHours())
+			resetToken, err := users.CreateToken(c.UserContext(), db, user.ID, users.TokenTypePasswordReset, expiryHours)
 			if err == nil {
-				_ = emailStore.EnqueuePasswordReset(c.UserContext(), user.Email, user.Name, resetToken.Token, user.ID)
+				if err := emailStore.EnqueuePasswordReset(c.UserContext(), user.Email, user.Name, resetToken.Token, user.ID, expiryHours); err != nil {
+					log.WithError(err).WithField("email", user.Email).Warn("failed to enqueue password reset email")
+				}
+			} else {
+				log.WithError(err).WithField("email", user.Email).Warn("failed to create password reset token")
 			}
 		}
 
 		// Always return success to prevent email enumeration
 		return c.JSON(fiber.Map{"success": true, "message": "if that email exists, a reset link has been sent"})
+	})
+
+	// GET /auth/reset-password/:token - validate a password reset token
+	// Returns { valid: bool, reason?: "expired"|"not_found"|"invalid" }.
+	// Does NOT consume the token — the consume happens on the matching POST.
+	auth.Get("/reset-password/:token", func(c *fiber.Ctx) error {
+		token := c.Params("token")
+		_, err := users.ValidateToken(c.UserContext(), db, token, users.TokenTypePasswordReset)
+		if err != nil {
+			reason := "invalid"
+			switch {
+			case errors.Is(err, users.ErrTokenExpired):
+				reason = "expired"
+			case errors.Is(err, users.ErrTokenNotFound):
+				reason = "not_found"
+			}
+			return c.JSON(fiber.Map{"valid": false, "reason": reason})
+		}
+		return c.JSON(fiber.Map{"valid": true})
 	})
 
 	// POST /auth/reset-password - complete password reset with token
@@ -270,6 +307,11 @@ func registerAuthRoutes(app *fiber.App, db *gorm.DB, emailStore *email.QueueStor
 		if err := users.ChangePassword(c.UserContext(), db, userID, users.ChangePasswordInput{
 			NewPassword: body.NewPassword,
 		}); err != nil {
+			if errors.Is(err, users.ErrPasswordTooShort) {
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": fmt.Sprintf("password must be at least %d characters", users.MinPasswordLength),
+				})
+			}
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update password"})
 		}
 

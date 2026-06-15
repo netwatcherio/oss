@@ -57,6 +57,19 @@ var (
 )
 
 // -----------------------------
+// Constants
+// -----------------------------
+
+// MinPasswordLength is the minimum allowed password length enforced on the
+// server for all password-setting paths (registration, change, reset, invite
+// completion). Mirror this on the client for UX but never rely on it.
+const MinPasswordLength = 8
+
+// ErrPasswordTooShort is returned by password-setting helpers when the new
+// password is below MinPasswordLength.
+var ErrPasswordTooShort = errors.New("password is too short")
+
+// -----------------------------
 // Inputs
 // -----------------------------
 
@@ -97,6 +110,9 @@ func Register(ctx context.Context, db *gorm.DB, in RegisterInput) (*User, error)
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if email == "" || strings.TrimSpace(in.Password) == "" {
 		return nil, errors.New("email and password are required")
+	}
+	if len(in.Password) < MinPasswordLength {
+		return nil, ErrPasswordTooShort
 	}
 
 	var count int64
@@ -235,6 +251,9 @@ func UpdateProfile(ctx context.Context, db *gorm.DB, id uint, in UpdateProfileIn
 func ChangePassword(ctx context.Context, db *gorm.DB, id uint, in ChangePasswordInput) error {
 	if strings.TrimSpace(in.NewPassword) == "" {
 		return errors.New("new password cannot be empty")
+	}
+	if len(in.NewPassword) < MinPasswordLength {
+		return ErrPasswordTooShort
 	}
 
 	var u User
@@ -391,6 +410,9 @@ func GetOrCreatePendingUser(ctx context.Context, db *gorm.DB, email, name string
 func CompleteRegistration(ctx context.Context, db *gorm.DB, id uint, name, password string) error {
 	if strings.TrimSpace(password) == "" {
 		return errors.New("password cannot be empty")
+	}
+	if len(password) < MinPasswordLength {
+		return ErrPasswordTooShort
 	}
 
 	var u User

@@ -8,6 +8,8 @@ import { AuthService } from "@/services/apiService";
 const route = useRoute();
 const router = useRouter();
 
+type InvalidReason = "missing_token" | "expired" | "not_found" | "invalid" | "network";
+
 const state = reactive({
   token: "" as string,
   newPassword: "",
@@ -17,18 +19,42 @@ const state = reactive({
   errorMessage: "",
   success: false,
   validating: true,
+  // null while loading/valid, "valid" once the backend confirms, or a reason when invalid
+  tokenStatus: null as null | "valid" | InvalidReason,
 });
 
-onMounted(() => {
+const MIN_PASSWORD_LENGTH = 8;
+
+onMounted(async () => {
   const token = route.params.token as string;
   if (!token) {
+    state.tokenStatus = "missing_token";
     state.error = true;
     state.errorMessage = "Invalid reset link. No token provided.";
     state.validating = false;
     return;
   }
   state.token = token;
-  state.validating = false;
+
+  try {
+    const res = await AuthService.validatePasswordResetToken(token);
+    if (res.valid) {
+      state.tokenStatus = "valid";
+    } else {
+      state.tokenStatus = (res.reason as InvalidReason) || "invalid";
+      state.error = true;
+      state.errorMessage =
+        state.tokenStatus === "expired"
+          ? "This reset link has expired. Please request a new one."
+          : "This reset link is invalid or has already been used.";
+    }
+  } catch (err) {
+    state.tokenStatus = "network";
+    state.error = true;
+    state.errorMessage = "Unable to validate this reset link. Please try again.";
+  } finally {
+    state.validating = false;
+  }
 });
 
 function begin() {
@@ -55,9 +81,9 @@ async function submit(e: Event) {
     return;
   }
 
-  if (state.newPassword.length < 6) {
+  if (state.newPassword.length < MIN_PASSWORD_LENGTH) {
     state.error = true;
-    state.errorMessage = "Password must be at least 6 characters long.";
+    state.errorMessage = `Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`;
     return;
   }
 
@@ -74,8 +100,12 @@ async function submit(e: Event) {
     const serverError = err?.response?.data?.error ?? "";
     if (serverError.includes("expired")) {
       state.errorMessage = "This reset link has expired. Please request a new one.";
-    } else if (serverError.includes("not found")) {
+      state.tokenStatus = "expired";
+    } else if (serverError.includes("not found") || serverError.includes("invalid")) {
       state.errorMessage = "This reset link is invalid or has already been used.";
+      state.tokenStatus = "not_found";
+    } else if (serverError.toLowerCase().includes("too short") || serverError.includes(`${MIN_PASSWORD_LENGTH}`)) {
+      state.errorMessage = serverError;
     } else {
       state.errorMessage = "Unable to reset password. Please try again or request a new link.";
     }
@@ -114,6 +144,18 @@ async function submit(e: Event) {
           </router-link>
         </div>
 
+        <!-- Invalid token: no form, just CTA to request a new link -->
+        <div v-else-if="state.tokenStatus && state.tokenStatus !== 'valid'" class="invalid-content">
+          <div class="invalid-icon">
+            <i class="bi bi-shield-exclamation"></i>
+          </div>
+          <h4 class="mt-3">Reset Link Unavailable</h4>
+          <p class="text-muted mb-4">{{ state.errorMessage }}</p>
+          <router-link to="/auth/reset" class="btn btn-primary">
+            Request a new link
+          </router-link>
+        </div>
+
         <!-- Form State -->
         <template v-else>
           <p class="text-muted small mb-3">
@@ -131,8 +173,10 @@ async function submit(e: Event) {
                 required
                 type="password"
                 autocomplete="new-password"
+                :minlength="MIN_PASSWORD_LENGTH"
               />
               <label for="new-password">New Password</label>
+              <small class="text-muted">Must be at least {{ MIN_PASSWORD_LENGTH }} characters.</small>
             </div>
 
             <div class="form-floating mb-3">
@@ -145,6 +189,7 @@ async function submit(e: Event) {
                 required
                 type="password"
                 autocomplete="new-password"
+                :minlength="MIN_PASSWORD_LENGTH"
               />
               <label for="confirm-password">Confirm Password</label>
             </div>
@@ -206,20 +251,30 @@ async function submit(e: Event) {
   opacity: 1;
 }
 
-.success-content {
+.success-content,
+.invalid-content {
   text-align: center;
   padding: 1rem 0;
 }
 
-.success-icon {
+.success-icon,
+.invalid-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 4rem;
   height: 4rem;
   border-radius: 50%;
+  font-size: 2rem;
+}
+
+.success-icon {
   background: rgba(34, 197, 94, 0.15);
   color: #22c55e;
-  font-size: 2rem;
+}
+
+.invalid-icon {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 </style>
