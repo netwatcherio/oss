@@ -17,6 +17,9 @@ function baseURL(): string {
 const client: AxiosInstance = axios.create({
     baseURL: baseURL(),
     withCredentials: false,
+    // Surface slow endpoints (e.g. /analysis/routes hanging on a slow
+    // ClickHouse query) as a real error instead of a permanent spinner.
+    timeout: 15000,
 });
 
 client.interceptors.request.use((config) => {
