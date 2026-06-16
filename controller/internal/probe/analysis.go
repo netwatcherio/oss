@@ -3823,18 +3823,25 @@ LIMIT 5000
 
 // resolveMTRTarget produces a display-friendly (target, targetIP, agentName)
 // tuple for an MTR trace group. The priority is:
-//  1. The MTR payload's resolved target (info.target.ip/hostname) — most
-//     accurate for IP-literal targets like 69.165.88.238.
-//  2. The target_agent name (for agent-to-agent probes) — used when the
-//     payload doesn't expose the target.
-//  3. Empty string — caller falls back to the target_agent name for display.
+//
+//  1. The target_agent's agent name (for AGENT / bidirectional probes) —
+//     preferred because users recognise "Bob's laptop" over "10.0.0.5".
+//  2. The MTR payload's resolved target.hostname (DNS hostname) — used when
+//     the probe is targeting a literal hostname like "google.com".
+//  3. The MTR payload's resolved target.ip — last resort; only used when
+//     the trace was to an IP literal we can't otherwise name.
+//
+// targetIP is always populated from the final hop IP so the shared-destination
+// card can show both "Bob's laptop" and "10.0.0.5" together.
 func resolveMTRTarget(agentByID map[uint]agentInfo, rows []ProbeData, targetAgent uint) (target, targetIP, targetAgentName string) {
 	if targetAgent != 0 {
 		if a, ok := agentByID[targetAgent]; ok {
 			targetAgentName = a.Name
 		}
 	}
-	// Use the most recent row's payload to resolve the target.
+
+	// Always derive the final-hop IP from the most recent MTR payload —
+	// useful for both display and for cross-referencing with NETINFO / DNS.
 	for i := range rows {
 		var mp MtrPayload
 		if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
@@ -3843,23 +3850,21 @@ func resolveMTRTarget(agentByID map[uint]agentInfo, rows []ProbeData, targetAgen
 		if targetIP == "" {
 			targetIP = mp.Report.HopFinalIP()
 		}
-		if target == "" {
-			// Prefer hostname-style target for display; fall back to IP.
-			// The MtrPayload struct doesn't carry Report.Info (yet) so we
-			// re-parse the raw JSON for the info.target block.
-			target = extractMTRTargetHostname(rows[i].Payload)
-		}
-		if target != "" {
-			return target, targetIP, targetAgentName
-		}
+		break // only need the most recent row for IP
 	}
-	if target == "" && targetAgentName != "" {
+
+	// 1. AGENT probe → use the target agent's name.
+	if targetAgentName != "" {
 		return targetAgentName, targetIP, targetAgentName
 	}
-	if target == "" {
-		return targetIP, targetIP, targetAgentName
+
+	// 2/3. Non-AGENT probe → use the payload's resolved hostname, or IP.
+	for i := range rows {
+		if t := extractMTRTargetHostname(rows[i].Payload); t != "" {
+			return t, targetIP, ""
+		}
 	}
-	return target, targetIP, targetAgentName
+	return targetIP, targetIP, ""
 }
 
 // extractMTRTargetHostname pulls report.info.target.hostname out of a raw
