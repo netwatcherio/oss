@@ -3383,8 +3383,29 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 
 	// Cache of route baselines by probe_id (Postgres is fast but worth
 	// caching for the many (probe, target) tuples an AGENT probe generates).
+	// For bidirectional AGENT probes both A→B (from A) and B→A (from B) share
+	// the same probe_id, so we also cache the probe owner and only attach the
+	// baseline to the FORWARD direction (reporting agent == probe owner).
+	// Otherwise the reverse path would be compared against the forward
+	// baseline and falsely flagged as a route change.
 	baselineByProbe := make(map[uint]routeBaseline)
-	loadBaseline := func(probeID uint) (routeBaseline, bool) {
+	probeOwnerByID := make(map[uint]uint)
+	loadBaselineForDirection := func(probeID, reportingAgentID uint) (routeBaseline, bool) {
+		owner, known := probeOwnerByID[probeID]
+		if !known {
+			var o uint
+			if err := pg.WithContext(ctx).Model(&Probe{}).Select("agent_id").Where("id = ?", probeID).Scan(&o).Error; err != nil {
+				log.Warnf("[route-analysis] failed to read probe owner for probe %d: %v", probeID, err)
+				return routeBaseline{}, false
+			}
+			owner = o
+			probeOwnerByID[probeID] = owner
+		}
+		// No owner recorded (probe missing) or this is a reverse-direction row
+		// → no baseline applies.
+		if owner == 0 || owner != reportingAgentID {
+			return routeBaseline{}, false
+		}
 		if b, ok := baselineByProbe[probeID]; ok {
 			return b, true
 		}
@@ -3445,7 +3466,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 			if targetAgentName != "" {
 				pri.TargetAgentName = targetAgentName
 			}
-			if b, ok := loadBaseline(pathKey.probeID); ok {
+			if b, ok := loadBaselineForDirection(pathKey.probeID, pathKey.agentID); ok {
 				pri.BaselineFingerprint = b.Fingerprint
 				pri.BaselineHopCount = b.HopCount
 				pri.BaselineRoutePath = b.RoutePath

@@ -27,7 +27,7 @@ func initMtr(db *sql.DB, pg *gorm.DB) {
 				return err
 			}
 
-			captureMtrBaseline(ctx, pg, data.ProbeID, p)
+			captureMtrBaseline(ctx, pg, data.ProbeID, data.AgentID, p)
 
 			log.Printf("[mtr] probe=%d hops=%d triggered=%v",
 				data.ProbeID, len(p.Report.Hops), data.Triggered)
@@ -36,10 +36,31 @@ func initMtr(db *sql.DB, pg *gorm.DB) {
 	))
 }
 
-func captureMtrBaseline(ctx context.Context, pg *gorm.DB, probeID uint, p mtrPayload) {
+// captureMtrBaseline records the "expected" route for change detection. It
+// only ever runs for the FORWARD direction of a probe (the rows reported by
+// the probe owner) so that a single bidirectional AGENT probe — which stores
+// both A→B rows (from A) and B→A rows (from B) under the same probe_id —
+// does not race-overwrite the baseline with the reverse path. The reverse
+// direction has no baseline in the analysis view, which is correct: we want
+// to detect changes in the forward direction, not compare the reverse path
+// against the forward path as if they were the same link.
+func captureMtrBaseline(ctx context.Context, pg *gorm.DB, probeID, reporterAgentID uint, p mtrPayload) {
 	if pg == nil {
 		return
 	}
+	// Look up the probe owner so we can tell forward rows from reverse rows
+	// sharing the same probe_id.
+	var ownerAgentID uint
+	if err := pg.WithContext(ctx).Model(&Probe{}).Select("agent_id").Where("id = ?", probeID).Scan(&ownerAgentID).Error; err != nil {
+		log.WithError(err).Warnf("mtr: failed to read probe owner for baseline gate (probe=%d)", probeID)
+		return
+	}
+	if ownerAgentID == 0 || ownerAgentID != reporterAgentID {
+		// Reverse-direction row (or probe vanished). Skip baseline capture so
+		// the forward baseline isn't clobbered by the return path.
+		return
+	}
+
 	payloadJSON, err := json.Marshal(p)
 	if err != nil {
 		log.WithError(err).Warnf("mtr: failed to marshal payload for baseline capture (probe=%d)", probeID)

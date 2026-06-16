@@ -29,6 +29,13 @@ type ProbeContext struct {
 	AgentID     uint
 	AgentName   string
 	WorkspaceID uint
+	// ReporterAgentID is the agent that reported this MTR row. For a
+	// bidirectional AGENT probe both directions share a probe_id, so the
+	// row's reporter distinguishes the forward path (reporter == AgentID,
+	// the probe owner) from the reverse path (reporter == target agent).
+	// Zero means "unknown" — callers that don't track the reporter fall back
+	// to the old probe-only behaviour.
+	ReporterAgentID uint
 }
 
 // EvaluationResult holds the result of rule evaluation
@@ -291,8 +298,18 @@ func evaluateMtrRule(ctx context.Context, db *gorm.DB, rule *AlertRule, pctx Pro
 	return &EvaluationResult{Triggered: false}
 }
 
-// evaluateRouteChange checks if the route has changed from baseline
+// evaluateRouteChange checks if the route has changed from baseline.
+// Only the FORWARD direction of a probe is checked — for bidirectional
+// AGENT probes both directions share a probe_id, so a reverse row would
+// otherwise be compared against (and overwrite) the forward baseline.
 func evaluateRouteChange(ctx context.Context, db *gorm.DB, pctx ProbeContext, mtr *MtrPayload) *EvaluationResult {
+	// Skip reverse-direction rows. ReporterAgentID == 0 means the caller
+	// didn't tell us who reported the row, in which case we fall back to
+	// the old probe-only behaviour for compatibility.
+	if pctx.ReporterAgentID != 0 && pctx.ReporterAgentID != pctx.AgentID {
+		return &EvaluationResult{Triggered: false}
+	}
+
 	currentFP := GetRouteFingerprint(mtr)
 	currentPath := GetRoutePathString(mtr)
 

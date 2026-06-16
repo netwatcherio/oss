@@ -72,13 +72,14 @@ func SaveRecordWithAlertEval(
 
 	// Build probe context with enriched information
 	pctx := alert.ProbeContext{
-		ProbeID:     data.ProbeID,
-		ProbeType:   kind,
-		ProbeName:   string(probe.Type), // Use probe type as display name
-		ProbeTarget: targetStr,
-		AgentID:     probe.AgentID,
-		AgentName:   agent.Name,
-		WorkspaceID: agent.WorkspaceID,
+		ProbeID:         data.ProbeID,
+		ProbeType:       kind,
+		ProbeName:       string(probe.Type), // Use probe type as display name
+		ProbeTarget:     targetStr,
+		AgentID:         probe.AgentID,
+		AgentName:       agent.Name,
+		WorkspaceID:     agent.WorkspaceID,
+		ReporterAgentID: data.AgentID, // who actually reported this MTR row
 	}
 
 	// Evaluate alerts (non-blocking, log errors)
