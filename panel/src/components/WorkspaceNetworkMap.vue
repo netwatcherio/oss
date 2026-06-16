@@ -175,7 +175,8 @@
                 </td>
                 <td>
                   <span v-for="pt in dest.probe_types" :key="pt" 
-                        class="probe-badge" :class="'probe-' + pt.toLowerCase()">
+                        class="probe-badge" :class="'probe-' + pt.toLowerCase()"
+                        :title="probeTypeTitle(pt)">
                     {{ pt }}
                   </span>
                 </td>
@@ -213,16 +214,16 @@
                         </template>
                       </span>
                       <span class="col-probe">
-                        <i v-if="ep.has_mtr" class="bi bi-check-circle-fill text-success"></i>
-                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                        <i v-if="ep.has_mtr" class="bi bi-check-circle-fill text-success" title="MTR enabled"></i>
+                        <i v-else class="bi bi-dash-circle text-muted" title="MTR not enabled"></i>
                       </span>
                       <span class="col-probe">
-                        <i v-if="ep.has_ping" class="bi bi-check-circle-fill text-success"></i>
-                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                        <i v-if="ep.has_ping" class="bi bi-check-circle-fill text-success" title="PING enabled"></i>
+                        <i v-else class="bi bi-dash-circle text-muted" title="PING not enabled (ICMP often blocked)"></i>
                       </span>
                       <span class="col-probe">
-                        <i v-if="ep.has_trafficsim" class="bi bi-check-circle-fill text-success"></i>
-                        <i v-else class="bi bi-dash-circle text-muted"></i>
+                        <i v-if="ep.has_trafficsim" class="bi bi-check-circle-fill text-success" title="TrafficSim enabled"></i>
+                        <i v-else class="bi bi-dash-circle text-muted" title="TrafficSim not enabled (target has no server)"></i>
                       </span>
                       <span class="col-latency" :class="getLatencyClass(ep.avg_latency)">
                         {{ ep.avg_latency?.toFixed(1) || '0' }} ms
@@ -628,6 +629,22 @@ const getDestinationLabel = (target: string): string => {
     return getAgentName(agentId);
   }
   return target;
+};
+
+// Tooltip text for probe-type pills in the destinations table. The pill
+// lights up based on either data presence OR AGENT-probe expansion, so
+// the hover text explains that to the user.
+const probeTypeTitle = (pt: string): string => {
+  switch (pt) {
+    case 'MTR':
+      return 'MTR enabled (traceroute + packet loss)';
+    case 'PING':
+      return 'PING enabled (ICMP latency — may be blocked upstream)';
+    case 'TRAFFICSIM':
+      return 'TrafficSim enabled (continuous packet stream)';
+    default:
+      return `${pt} enabled`;
+  }
 };
 
 // Aggregate and deduplicate routes for display

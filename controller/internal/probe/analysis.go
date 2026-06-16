@@ -3475,7 +3475,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		}
 		if latestPayload != nil {
 			pri.TraceCount = len(rows)
-			pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.BaselineFingerprint, pri.LatestSignature, sigs, len(rows))
+			pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.LatestSignature, pri.BaselineRoutePath, sigs, len(rows))
 			if len(latestPayload.Report.Hops) > 0 {
 				lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
 				pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
@@ -3731,9 +3731,23 @@ func sortCommonTargets(cs []CommonTargetInfo) {
 	})
 }
 
-func decideRouteChangeStatus(baseline, latest string, sigs map[string]int, traceCount int) (bool, float64) {
-	if baseline != "" {
-		if baseline == latest {
+// routeEcmpSimilarityThreshold is the minimum Jaccard similarity between the
+// baseline and current hop-IP sets for a route to be considered "the same
+// path" despite fingerprint differences. ECMP / load-balancing typically
+// swaps 1-2 hops out of ~10-15, yielding similarity ~0.8-0.9; a real route
+// change (different upstream, agent moved networks) lands well below this.
+const routeEcmpSimilarityThreshold = 0.7
+
+// routeBaselineStaleThreshold is the maximum age of a stored baseline before
+// the MTR handler rewrites it to the current fingerprint. This way
+// intentional long-term route changes (e.g. agent moved networks, ISP
+// rerouted the path) are eventually picked up after a stabilization period
+// and stop emitting route_change alerts indefinitely.
+const routeBaselineStaleThreshold = 7 * 24 * time.Hour
+
+func decideRouteChangeStatus(latestHops, baselineHops string, sigs map[string]int, traceCount int) (bool, float64) {
+	if baselineHops != "" {
+		if hopSetJaccard(parseHopPath(baselineHops), parseHopPath(latestHops)) >= routeEcmpSimilarityThreshold {
 			return false, 100
 		}
 		return true, dominantSignatureStabilityPct(sigs, traceCount)
@@ -3755,6 +3769,54 @@ func dominantSignatureStabilityPct(sigs map[string]int, traceCount int) float64 
 		}
 	}
 	return math.Round(float64(maxCount)/float64(traceCount)*100*10) / 10
+}
+
+func parseHopPath(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '-' || r == '>' || r == ' '
+	})
+	out := parts[:0]
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func hopSetJaccard(a, b []string) float64 {
+	aSet := make(map[string]struct{}, len(a))
+	for _, h := range a {
+		if h == "" || h == "*" {
+			continue
+		}
+		aSet[h] = struct{}{}
+	}
+	bSet := make(map[string]struct{}, len(b))
+	for _, h := range b {
+		if h == "" || h == "*" {
+			continue
+		}
+		bSet[h] = struct{}{}
+	}
+	if len(aSet) == 0 && len(bSet) == 0 {
+		return 1
+	}
+	intersection := 0
+	for h := range bSet {
+		if _, ok := aSet[h]; ok {
+			intersection++
+		}
+	}
+	union := len(aSet) + len(bSet) - intersection
+	if union == 0 {
+		return 1
+	}
+	return float64(intersection) / float64(union)
 }
 
 // mtrPathKey uniquely identifies a (probe, agent, target) tuple for grouping

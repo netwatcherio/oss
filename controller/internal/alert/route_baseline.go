@@ -47,6 +47,56 @@ func GetRouteBaseline(ctx context.Context, db *gorm.DB, probeID uint) (*RouteBas
 	return &baseline, nil
 }
 
+// EnsureRouteBaseline captures the baseline for a probe if one does not yet
+// exist. It is safe to call on every MTR data point: if a baseline row is
+// already present, this is a no-op so the first-observed route is preserved.
+// This is intentionally independent of alert rule evaluation so the analysis
+// view has a baseline to compare against even when no route_change rule is
+// configured.
+func EnsureRouteBaseline(ctx context.Context, db *gorm.DB, probeID uint, fingerprint, routePath string, hopCount int) (created bool, err error) {
+	var existing RouteBaseline
+	err = db.WithContext(ctx).Where("probe_id = ?", probeID).First(&existing).Error
+	if err == nil {
+		return false, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return false, err
+	}
+	if err := SetRouteBaseline(ctx, db, probeID, fingerprint, routePath, hopCount); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RefreshRouteBaselineIfStale rewrites the stored baseline to the supplied
+// fingerprint/routePath/hopCount when the existing baseline's UpdatedAt is
+// at least staleThreshold old. It is safe to call on every MTR data point.
+//
+// Purpose: pick up intentional long-term route changes (e.g. agent moves
+// networks, ISP reroutes the path) after a stabilization period, so the
+// user is not alerted indefinitely against an obsolete baseline. ECMP /
+// transient single-hop variations are handled in the analysis view by
+// Jaccard similarity, not here, so a stable new route will eventually
+// overwrite the baseline and stop firing route-change alerts.
+//
+// staleThreshold <= 0 disables refresh.
+func RefreshRouteBaselineIfStale(ctx context.Context, db *gorm.DB, probeID uint, fingerprint, routePath string, hopCount int, staleThreshold time.Duration) (refreshed bool, err error) {
+	if staleThreshold <= 0 {
+		return false, nil
+	}
+	var existing RouteBaseline
+	if err := db.WithContext(ctx).Where("probe_id = ?", probeID).First(&existing).Error; err != nil {
+		return false, err
+	}
+	if time.Since(existing.UpdatedAt) < staleThreshold {
+		return false, nil
+	}
+	if err := SetRouteBaseline(ctx, db, probeID, fingerprint, routePath, hopCount); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DeleteRouteBaseline removes the baseline for a probe
 func DeleteRouteBaseline(ctx context.Context, db *gorm.DB, probeID uint) error {
 	return db.WithContext(ctx).Where("probe_id = ?", probeID).Delete(&RouteBaseline{}).Error

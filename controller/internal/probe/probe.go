@@ -1192,6 +1192,173 @@ func shouldIncludePingExpansion(agentProbe *Probe) bool {
 	return getenvBool("AGENT_EXPANSION_INCLUDE_PING", false)
 }
 
+// expandedAgentProbeTypes returns the set of concrete probe types that an
+// AGENT probe would expand into for a specific (owner → target_agent) pair.
+//
+// This mirrors the expansion logic in expandAgentProbeForOwner, so the
+// network map / route analysis can render "MTR / PING / TRAFFICSIM" status
+// even for (owner, target) pairs that have an enabled AGENT probe but
+// haven't received any data yet. The return value is the slice of probe
+// type names (matching the constants in Type: "MTR", "PING", "TRAFFICSIM").
+//
+// targetHasServer should be true when the target agent has its
+// `trafficsim_enabled` setting on (i.e. it can accept inbound traffic).
+// When false, no TRAFFICSIM probe is emitted.
+func expandedAgentProbeTypes(agentProbe *Probe, targetHasServer bool) []string {
+	if agentProbe == nil {
+		return nil
+	}
+	types := []string{string(TypeMTR)} // AGENT probes always emit MTR
+	if shouldIncludePingExpansion(agentProbe) {
+		types = append(types, string(TypePing))
+	}
+	if targetHasServer {
+		types = append(types, string(TypeTrafficSim))
+	}
+	return types
+}
+
+// workspaceServerAgents returns the set of agent IDs in the workspace that
+// have `trafficsim_enabled` true. These agents can accept inbound
+// TrafficSim probes, so any AGENT probe that targets one of them will
+// expand a TRAFFICSIM probe for it.
+//
+// Single Postgres query — much cheaper than calling hasTrafficSimServer
+// per probe target. The agents table is small (one row per agent) and
+// indexed on workspace_id, so this is sub-millisecond.
+func workspaceServerAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) (map[uint]bool, error) {
+	ids := make(map[uint]bool)
+	if pg == nil {
+		return ids, nil
+	}
+	// agents.trafficsim_enabled is a top-level column on the agents table.
+	// Scan into a slice first (GORM cannot scan directly into a map key type).
+	type row struct {
+		ID uint
+	}
+	var rows []row
+	if err := pg.WithContext(ctx).
+		Table("agents").
+		Select("id").
+		Where("workspace_id = ? AND trafficsim_enabled = ? AND deleted_at IS NULL",
+			workspaceID, true).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		ids[r.ID] = true
+	}
+	return ids, nil
+}
+
+// workspaceAgentProbePlans returns, for the workspace, a map keyed by
+// (owner_agent_id, target_agent_id) → sorted list of enabled probe type
+// names that the owner will run against the target.
+//
+// This powers the "is this probe enabled?" pill on the network map's
+// destination panel — without it, the chart can only report what data
+// has actually arrived in ClickHouse, which lags behind newly-enabled
+// probes (especially PING, which is ICMP-rate-limited and may not produce
+// rows for several minutes after enablement).
+//
+// AGENT-probe expansion is the only thing that needs to be modeled here:
+// standalone MTR / PING / TRAFFICSIM probes are already in the probes
+// table and are picked up by the standard listProbes call. The AGENT
+// expansion logic mirrors expandAgentProbeForOwner.
+func workspaceAgentProbePlans(ctx context.Context, pg *gorm.DB, workspaceID uint) (map[uint]map[uint][]string, error) {
+	out := make(map[uint]map[uint][]string)
+	if pg == nil {
+		return out, nil
+	}
+
+	// 1. Load all enabled AGENT probes in the workspace (no Targets yet).
+	type probeRow struct {
+		ID       uint
+		AgentID  uint
+		Metadata datatypes.JSON
+	}
+	var probes []probeRow
+	if err := pg.WithContext(ctx).
+		Table("probes").
+		Select("id, agent_id, metadata").
+		Where("workspace_id = ? AND type = ? AND enabled = ? AND deleted_at IS NULL",
+			workspaceID, TypeAgent, true).
+		Find(&probes).Error; err != nil {
+		return nil, err
+	}
+	if len(probes) == 0 {
+		return out, nil
+	}
+
+	// 2. Load the AGENT probe targets in one query (probe_targets rows
+	// whose probe_id is in our probe set AND target's agent_id is set).
+	probeIDs := make([]uint, len(probes))
+	for i, p := range probes {
+		probeIDs[i] = p.ID
+	}
+	type targetRow struct {
+		ProbeID uint
+		AgentID *uint
+	}
+	var targets []targetRow
+	if err := pg.WithContext(ctx).
+		Table("probe_targets").
+		Select("probe_id, agent_id").
+		Where("probe_id IN ? AND deleted_at IS NULL AND agent_id IS NOT NULL", probeIDs).
+		Find(&targets).Error; err != nil {
+		return nil, err
+	}
+	targetsByProbe := make(map[uint][]*uint, len(probes))
+	for _, t := range targets {
+		if t.AgentID == nil {
+			continue
+		}
+		targetsByProbe[t.ProbeID] = append(targetsByProbe[t.ProbeID], t.AgentID)
+	}
+
+	// 3. Pre-compute which target agents have a TRAFFICSIM server. AGENT
+	// probes that point at non-server agents do not emit a TRAFFICSIM
+	// sub-probe, so this cuts the per-probe recursion.
+	servers, err := workspaceServerAgents(ctx, pg, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Walk each AGENT probe's target-agent targets and compute the
+	// expansion. PING is conditional on metadata; TRAFFICSIM is conditional
+	// on the target having a server.
+	for _, p := range probes {
+		probe := &Probe{
+			ID:       p.ID,
+			AgentID:  p.AgentID,
+			Type:     TypeAgent,
+			Metadata: p.Metadata,
+		}
+		for _, targetAgentIDPtr := range targetsByProbe[p.ID] {
+			target := *targetAgentIDPtr
+			types := expandedAgentProbeTypes(probe, servers[target])
+			if len(types) == 0 {
+				continue
+			}
+			if out[p.AgentID] == nil {
+				out[p.AgentID] = make(map[uint][]string)
+			}
+			// Merge (preserve order, dedupe). Multiple AGENT probes between
+			// the same pair can exist; the union of types is what we want.
+			existing := out[p.AgentID][target]
+			seen := make(map[string]bool)
+			for _, t := range append(existing, types...) {
+				if !seen[t] {
+					seen[t] = true
+					existing = append(existing, t)
+				}
+			}
+			out[p.AgentID][target] = existing
+		}
+	}
+	return out, nil
+}
+
 // setBidirectionalFlag sets the bidirectional flag in a TRAFFICSIM probe's metadata.
 // This is used for the single-probe bidirectional approach where the server detects
 // the flag and enables bidirectional mode without needing a separate reverse marker probe.

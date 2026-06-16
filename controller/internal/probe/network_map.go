@@ -207,8 +207,22 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 		trafficMetrics = make(map[string]trafficStats)
 	}
 
+	// 4b. Compute the probe-expansion plan: for every (owner, target_agent)
+	// pair that has an enabled AGENT probe, determine which concrete probe
+	// types (MTR / PING / TRAFFICSIM) are *enabled by definition*, even
+	// before any data has arrived. This is what makes the "PING enabled"
+	// pill light up immediately after the user enables it, rather than
+	// after the first ICMP row lands in ClickHouse (which can take
+	// minutes because ICMP is rate-limited).
+	probePlans, err := workspaceAgentProbePlans(ctx, pg, workspaceID)
+	if err != nil {
+		// Non-fatal - we'll still have data-derived enablement
+		log.Warnf("[network-map] workspace=%d probe plan query error: %v", workspaceID, err)
+		probePlans = nil
+	}
+
 	// 5. Build the topology graph
-	mapData := buildNetworkMap(agents, mtrData, pingMetrics, trafficMetrics, workspaceID)
+	mapData := buildNetworkMap(agents, mtrData, pingMetrics, trafficMetrics, workspaceID, probePlans)
 
 	return mapData, nil
 }
@@ -705,7 +719,41 @@ LIMIT 5000
 	return results, rows.Err()
 }
 
-func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[string]pingStats, trafficMetrics map[string]trafficStats, workspaceID uint) *NetworkMapData {
+// applyProbePlan annotates a ProbeEndpointDetail with the MTR / PING /
+// TRAFFICSIM enablement implied by the AGENT-probe expansion plan. The
+// data-derived HasMTR / HasPing / HasTrafficSim flags only light up once
+// ClickHouse has received a row, which can lag the user's "I just
+// enabled PING" action by several minutes (ICMP is heavily rate-limited
+// upstream). The expansion plan, in contrast, is computed straight from
+// the probes table and reflects enablement immediately.
+//
+// This is a no-op when the plan is nil (older callers / test harnesses)
+// or when the (source, target) pair has no AGENT probe between them
+// (in which case the data-derived flags remain authoritative).
+//
+// Pass-by-pointer so we can mutate the detail in place; the helper is
+// safe to call on a nil receiver (early-returns).
+func applyProbePlan(detail *ProbeEndpointDetail, plans map[uint]map[uint][]string, sourceAgentID, targetAgentID uint) {
+	if detail == nil || plans == nil {
+		return
+	}
+	types, ok := plans[sourceAgentID][targetAgentID]
+	if !ok {
+		return
+	}
+	for _, t := range types {
+		switch t {
+		case string(TypeMTR):
+			detail.HasMTR = true
+		case string(TypePing):
+			detail.HasPing = true
+		case string(TypeTrafficSim):
+			detail.HasTrafficSim = true
+		}
+	}
+}
+
+func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[string]pingStats, trafficMetrics map[string]trafficStats, workspaceID uint, probePlans map[uint]map[uint][]string) *NetworkMapData {
 	nodeMap := make(map[string]*NetworkMapNode)
 	edgeMap := make(map[string]*NetworkMapEdge)
 
@@ -964,6 +1012,12 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
+		// Annotate with the probe-expansion plan (MTR / PING / TRAFFICSIM
+		// enabled by definition, even before data arrives). For owner→target
+		// pairs that have an AGENT probe, the plan tells us which concrete
+		// types are emitted, so we can light up the enablement pill
+		// without waiting for ClickHouse data.
+		applyProbePlan(destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey], probePlans, sourceAgentID, targetAgentIDKey)
 
 		// Track the final responding hop IP as an endpoint (for DNS targets that resolve to multiple IPs)
 		// IMPORTANT: Don't track endpoints for agent-to-agent paths - the destination IS the agent
@@ -1387,6 +1441,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
+		// Annotate with probe-expansion plan (see applyProbePlan comment).
+		applyProbePlan(destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey], probePlans, sourceAgentID, targetAgentIDKey)
 
 		// Create EndpointInfo for agent-to-agent PING probes (legacy)
 		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
@@ -1584,6 +1640,8 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			}
 			destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey] = &detail
 		}
+		// Annotate with probe-expansion plan (see applyProbePlan comment).
+		applyProbePlan(destEndpointDetails[destKey][sourceAgentID][targetAgentIDKey], probePlans, sourceAgentID, targetAgentIDKey)
 
 		// Create EndpointInfo for agent-to-agent TrafficSim probes (legacy)
 		if stats.TargetAgent > 0 && len(stats.ProbeAgents) > 0 {
@@ -1642,8 +1700,26 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			continue // This target IP is an endpoint of a different hostname destination
 		}
 		summary.AgentCount = len(destAgents[target])
-		summary.ProbeTypes = make([]string, 0, len(destProbes[target]))
+		// Build ProbeTypes from both data-derived and plan-derived enablement
+		// so the destination-level badge reflects what's actually being
+		// probed, not just what data has arrived. (Individual endpoint
+		// rows in ExpandedEndpoints are merged with the plan too — see
+		// applyProbePlan.)
+		probeTypeSet := make(map[string]bool)
 		for pt := range destProbes[target] {
+			probeTypeSet[pt] = true
+		}
+		if probePlans != nil {
+			for _, agentMap := range probePlans {
+				for _, types := range agentMap {
+					for _, t := range types {
+						probeTypeSet[t] = true
+					}
+				}
+			}
+		}
+		summary.ProbeTypes = make([]string, 0, len(probeTypeSet))
+		for pt := range probeTypeSet {
 			summary.ProbeTypes = append(summary.ProbeTypes, pt)
 		}
 

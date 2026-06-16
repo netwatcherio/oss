@@ -2,6 +2,7 @@ package probe
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 )
 
@@ -123,13 +124,14 @@ func TestBuildHopDetailsWithAgents(t *testing.T) {
 }
 
 func TestDecideRouteChangeStatus_BaselineMatch(t *testing.T) {
+	hops := "1.1.1.1->2.2.2.2->3.3.3.3"
 	hasChange, stability := decideRouteChangeStatus(
-		"sig-A", "sig-A",
+		hops, hops,
 		map[string]int{"sig-A": 5, "sig-B": 1},
 		6,
 	)
 	if hasChange {
-		t.Errorf("Expected no route change when latest signature matches baseline")
+		t.Errorf("Expected no route change when baseline hops match latest hops")
 	}
 	if stability != 100 {
 		t.Errorf("Expected stability 100 when baseline matches, got %v", stability)
@@ -137,22 +139,53 @@ func TestDecideRouteChangeStatus_BaselineMatch(t *testing.T) {
 }
 
 func TestDecideRouteChangeStatus_BaselineMismatch(t *testing.T) {
+	baselineHops := "1.1.1.1->2.2.2.2->3.3.3.3"
+	latestHops := "1.1.1.1->2.2.2.2->99.99.99.99"
 	hasChange, stability := decideRouteChangeStatus(
-		"sig-A", "sig-B",
+		latestHops, baselineHops,
 		map[string]int{"sig-A": 1, "sig-B": 4},
 		5,
 	)
 	if !hasChange {
-		t.Errorf("Expected route change when latest signature differs from baseline")
+		t.Errorf("Expected route change when latest path differs significantly from baseline")
 	}
 	if stability != 80 {
 		t.Errorf("Expected stability 80 (4/5) from dominant signature, got %v", stability)
 	}
 }
 
+func TestDecideRouteChangeStatus_EcmpTolerated(t *testing.T) {
+	baselineHops := "1.1.1.1->2.2.2.2->3.3.3.3->4.4.4.4->5.5.5.5->6.6.6.6->7.7.7.7->8.8.8.8->9.9.9.9->10.10.10.10"
+	latestHops := "1.1.1.1->2.2.2.2->3.3.3.3->4.4.4.4->5.5.5.5->6.6.6.6->7.7.7.7->8.8.8.8->9.9.9.9->99.99.99.99"
+	hasChange, _ := decideRouteChangeStatus(
+		latestHops, baselineHops,
+		map[string]int{"sig-A": 1, "sig-B": 1},
+		2,
+	)
+	if hasChange {
+		t.Errorf("Expected no route change for single-hop ECMP swap on 10-hop path, got change=true")
+	}
+}
+
+func TestDecideRouteChangeStatus_RealRouteChange(t *testing.T) {
+	baselineHops := "1.1.1.1->2.2.2.2->3.3.3.3->4.4.4.4->5.5.5.5"
+	latestHops := "10.10.10.10->20.20.20.20->30.30.30.30->40.40.40.40->50.50.50.50"
+	hasChange, stability := decideRouteChangeStatus(
+		latestHops, baselineHops,
+		map[string]int{"sig-A": 1, "sig-B": 1},
+		2,
+	)
+	if !hasChange {
+		t.Errorf("Expected route change for completely different path, got change=false")
+	}
+	if stability != 50 {
+		t.Errorf("Expected stability 50 (1/2) from dominant signature, got %v", stability)
+	}
+}
+
 func TestDecideRouteChangeStatus_NoBaselineSingleSignature(t *testing.T) {
 	hasChange, stability := decideRouteChangeStatus(
-		"", "sig-A",
+		"sig-A", "",
 		map[string]int{"sig-A": 10},
 		10,
 	)
@@ -166,7 +199,7 @@ func TestDecideRouteChangeStatus_NoBaselineSingleSignature(t *testing.T) {
 
 func TestDecideRouteChangeStatus_NoBaselineMultipleSignatures(t *testing.T) {
 	hasChange, stability := decideRouteChangeStatus(
-		"", "sig-A",
+		"sig-A", "",
 		map[string]int{"sig-A": 8, "sig-B": 2},
 		10,
 	)
@@ -179,15 +212,66 @@ func TestDecideRouteChangeStatus_NoBaselineMultipleSignatures(t *testing.T) {
 }
 
 func TestDecideRouteChangeStatus_EmptySigsWithBaseline(t *testing.T) {
+	hops := "1.1.1.1->2.2.2.2"
 	hasChange, stability := decideRouteChangeStatus(
-		"sig-A", "sig-A",
+		hops, hops,
 		map[string]int{},
 		0,
 	)
 	if hasChange {
-		t.Errorf("Expected no route change with matching baseline even if sigs is empty")
+		t.Errorf("Expected no route change with matching baseline path even if sigs is empty")
 	}
 	if stability != 100 {
 		t.Errorf("Expected stability 100, got %v", stability)
+	}
+}
+
+func TestHopSetJaccard(t *testing.T) {
+	cases := []struct {
+		name     string
+		a, b     []string
+		expected float64
+	}{
+		{"identical", []string{"1.1.1.1", "2.2.2.2"}, []string{"1.1.1.1", "2.2.2.2"}, 1.0},
+		{"disjoint", []string{"1.1.1.1", "2.2.2.2"}, []string{"3.3.3.3", "4.4.4.4"}, 0.0},
+		{"one of two common", []string{"1.1.1.1", "2.2.2.2"}, []string{"1.1.1.1", "3.3.3.3"}, 1.0 / 3.0},
+		{"empty both", []string{}, []string{}, 1.0},
+		{"wildcard skipped", []string{"*", "1.1.1.1"}, []string{"*", "1.1.1.1"}, 1.0},
+		{"ecmp swap one of three", []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"}, []string{"1.1.1.1", "9.9.9.9", "3.3.3.3"}, 0.5},
+		{"ecmp swap one of ten", []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5", "6.6.6.6", "7.7.7.7", "8.8.8.8", "9.9.9.9", "10.10.10.10"}, []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5", "6.6.6.6", "7.7.7.7", "8.8.8.8", "9.9.9.9", "99.99.99.99"}, 9.0 / 11.0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := hopSetJaccard(tc.a, tc.b)
+			if math.Abs(got-tc.expected) > 1e-9 {
+				t.Errorf("hopSetJaccard(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestParseHopPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"arrow separator", "1.1.1.1->2.2.2.2", []string{"1.1.1.1", "2.2.2.2"}},
+		{"arrow with spaces", "1.1.1.1 -> 2.2.2.2", []string{"1.1.1.1", "2.2.2.2"}},
+		{"empty", "", nil},
+		{"wildcard", "*->1.1.1.1", []string{"*", "1.1.1.1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseHopPath(tc.input)
+			if len(got) != len(tc.expected) {
+				t.Fatalf("parseHopPath(%q) = %v, want %v", tc.input, got, tc.expected)
+			}
+			for i := range got {
+				if got[i] != tc.expected[i] {
+					t.Errorf("parseHopPath(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.expected[i])
+				}
+			}
+		})
 	}
 }

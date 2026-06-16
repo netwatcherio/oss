@@ -3,10 +3,13 @@ package probe
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"time"
+
+	"netwatcher-controller/internal/alert"
 )
 
 func initMtr(db *sql.DB, pg *gorm.DB) {
@@ -24,11 +27,41 @@ func initMtr(db *sql.DB, pg *gorm.DB) {
 				return err
 			}
 
+			captureMtrBaseline(ctx, pg, data.ProbeID, p)
+
 			log.Printf("[mtr] probe=%d hops=%d triggered=%v",
 				data.ProbeID, len(p.Report.Hops), data.Triggered)
 			return nil
 		},
 	))
+}
+
+func captureMtrBaseline(ctx context.Context, pg *gorm.DB, probeID uint, p mtrPayload) {
+	if pg == nil {
+		return
+	}
+	payloadJSON, err := json.Marshal(p)
+	if err != nil {
+		log.WithError(err).Warnf("mtr: failed to marshal payload for baseline capture (probe=%d)", probeID)
+		return
+	}
+	parsed, err := alert.ParseMtrPayload(payloadJSON)
+	if err != nil {
+		log.WithError(err).Warnf("mtr: failed to parse payload for baseline capture (probe=%d)", probeID)
+		return
+	}
+	fp := alert.GetRouteFingerprint(parsed)
+	path := alert.GetRoutePathString(parsed)
+	hops := len(parsed.Report.Hops)
+	if _, err := alert.EnsureRouteBaseline(ctx, pg, probeID, fp, path, hops); err != nil {
+		log.WithError(err).Warnf("mtr: failed to ensure route baseline (probe=%d)", probeID)
+		return
+	}
+	if refreshed, err := alert.RefreshRouteBaselineIfStale(ctx, pg, probeID, fp, path, hops, routeBaselineStaleThreshold); err != nil {
+		log.WithError(err).Warnf("mtr: failed to refresh route baseline (probe=%d)", probeID)
+	} else if refreshed {
+		log.Infof("mtr: refreshed stale route baseline (probe=%d)", probeID)
+	}
 }
 
 type mtrPayload struct {
