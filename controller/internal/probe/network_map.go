@@ -213,6 +213,16 @@ func GetWorkspaceNetworkMap(ctx context.Context, ch *sql.DB, pg *gorm.DB, worksp
 	return mapData, nil
 }
 
+// GetWorkspaceAgentsForDebug exposes getWorkspaceAgents for cmd/ debug tools.
+func GetWorkspaceAgentsForDebug(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]agentInfo, error) {
+	return getWorkspaceAgents(ctx, pg, workspaceID)
+}
+
+// GetWorkspaceMTRDataForDebug exposes getWorkspaceMTRData for cmd/ debug tools.
+func GetWorkspaceMTRDataForDebug(ctx context.Context, ch *sql.DB, pg *gorm.DB, agentIDs []uint, from time.Time) ([]mtrTrace, error) {
+	return getWorkspaceMTRData(ctx, ch, pg, agentIDs, from)
+}
+
 func getWorkspaceAgents(ctx context.Context, pg *gorm.DB, workspaceID uint) ([]agentInfo, error) {
 	var agents []agentInfo
 	err := pg.WithContext(ctx).
@@ -257,8 +267,22 @@ func getWorkspaceMTRData(ctx context.Context, ch *sql.DB, pg *gorm.DB, agentIDs 
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
 
+	// Two-pass query strategy to avoid N+1 lookups:
+	//   1. Stream all MTR rows (up to 1000) from ClickHouse, collecting the
+	//      unique probe_ids that need Postgres enrichment.
+	//   2. BATCH-LOAD probe + probe_target for those probe_ids in a single
+	//      query each.
+	// Without this, the per-row Postgres lookups dominated runtime and the
+	// network-map endpoint hit the Fiber WriteTimeout (30s) on workspaces
+	// with 1000+ MTR rows.
+	//
+	// The new AGENT (bidirectional) probe format stores target_agent directly
+	// in the probe_data row, so most rows can skip the Postgres lookup
+	// entirely — the fallback is kept for the OLD format where target_agent
+	// had to be derived from probe_targets.
+	const mtrRowLimit = 1000
 	q := fmt.Sprintf(`
-SELECT 
+SELECT
     agent_id,
     target,
     target_agent,
@@ -270,130 +294,161 @@ WHERE type = 'MTR'
   AND agent_id IN (%s)
   AND created_at >= %s
 ORDER BY created_at DESC
-LIMIT 1000
-`, agentIDList, chQuoteTime(from))
+LIMIT %d
+`, agentIDList, chQuoteTime(from), mtrRowLimit)
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
 		log.Printf("[NetworkMap] MTR query error: %v", err)
 		return nil, err
 	}
-	defer rows.Close()
 
-	// Cache probe targets to avoid repeated DB lookups
-	probeTargetCache := make(map[uint]string)
-
-	// Keep only the latest trace per agent+target
-	seenPaths := make(map[string]bool)
-	var traces []mtrTrace
-	rowCount := 0
-
+	type rawRow struct {
+		agentID      uint64
+		target       string
+		targetAgent  uint64
+		probeAgentID uint64
+		probeID      uint64
+		payloadRaw   string
+	}
+	var rawRows []rawRow
+	probeIDsToEnrich := make(map[uint]bool)
 	for rows.Next() {
-		rowCount++
-		var agentID uint64
-		var target string
-		var targetAgent uint64
-		var probeAgentID uint64
-		var probeID uint64
-		var payloadRaw string
-
-		if err := rows.Scan(&agentID, &target, &targetAgent, &probeAgentID, &probeID, &payloadRaw); err != nil {
+		var r rawRow
+		if err := rows.Scan(&r.agentID, &r.target, &r.targetAgent, &r.probeAgentID, &r.probeID, &r.payloadRaw); err != nil {
 			log.Printf("[NetworkMap] Row scan error: %v", err)
 			continue
 		}
+		rawRows = append(rawRows, r)
+		// Skip enrichment when the row already has everything we need:
+		//   * non-empty target string, OR
+		//   * target_agent set (the new AGENT / bidirectional format)
+		if r.probeID > 0 && r.target == "" && r.targetAgent == 0 {
+			probeIDsToEnrich[uint(r.probeID)] = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
-		// Parse MTR payload first so we can extract target if empty
-		var payload mtrPayload
-		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
-			log.Printf("[NetworkMap] JSON parse error for agent %d: %v", agentID, err)
-			continue
+	// Batch-load the small set of probes that need enrichment.
+	type probeInfo struct {
+		ownerAgentID  uint
+		targetStr     string
+		targetAgentID uint
+	}
+	probeInfoByID := make(map[uint]probeInfo, len(probeIDsToEnrich))
+	if len(probeIDsToEnrich) > 0 && pg != nil {
+		probeIDList := make([]uint, 0, len(probeIDsToEnrich))
+		for id := range probeIDsToEnrich {
+			probeIDList = append(probeIDList, id)
 		}
 
-		// Target resolution priority:
-		// 1. Database target column (if agent sent it)
-		// 2. Probe definition target (original hostname like google.com)
-		// 3. MTR payload resolved IP (fallback - may differ from original target)
-		if probeID > 0 && pg != nil {
-			type probeInfo struct {
-				target        string
-				targetAgentID uint // Agent ID in Target (for forward direction)
-				ownerAgentID  uint // Owner of the probe
+		// One query for probes (owner + enabled etc).
+		var probes []Probe
+		if err := pg.WithContext(ctx).Where("id IN ?", probeIDList).Find(&probes).Error; err == nil {
+			for _, p := range probes {
+				probeInfoByID[p.ID] = probeInfo{ownerAgentID: p.AgentID}
 			}
+		}
 
-			// Look up probe info (with caching for the simple target string)
-			cacheKey := uint(probeID)
-			var info probeInfo
-			var needsLookup bool
-
-			if cachedStr, ok := probeTargetCache[cacheKey]; ok {
-				info.target = cachedStr
-				// For cached entries, we only have target string, need to requery for agent info
-				// This is fine since we need full probe info anyway
-				needsLookup = true
-			} else {
-				needsLookup = true
-			}
-
-			if needsLookup {
-				// First get the probe to get owner AgentID
-				var probe Probe
-				if err := pg.WithContext(ctx).Where("id = ?", probeID).First(&probe).Error; err == nil {
-					info.ownerAgentID = probe.AgentID
+		// One query for probe_targets (target string + target agent).
+		// We pre-filter on deleted_at IS NULL (GORM soft-delete column).
+		var probeTargets []Target
+		if err := pg.WithContext(ctx).
+			Where("probe_id IN ? AND deleted_at IS NULL", probeIDList).
+			Order("probe_id ASC, id ASC").
+			Find(&probeTargets).Error; err == nil {
+			// Keep the first target per probe (matches the old LIMIT 1).
+			seen := make(map[uint]bool)
+			for _, t := range probeTargets {
+				if seen[t.ProbeID] {
+					continue
 				}
+				seen[t.ProbeID] = true
+				if info, ok := probeInfoByID[t.ProbeID]; ok {
+					info.targetStr = t.Target
+					if t.AgentID != nil {
+						info.targetAgentID = *t.AgentID
+					}
+					probeInfoByID[t.ProbeID] = info
+				}
+			}
+		}
+	}
 
-				// Then get the target to get target string and target AgentID
-				var probeTargets []Target
-				if err := pg.WithContext(ctx).Where("probe_id = ?", probeID).Limit(1).Find(&probeTargets).Error; err == nil && len(probeTargets) > 0 {
-					info.target = probeTargets[0].Target
-					if probeTargets[0].AgentID != nil {
-						info.targetAgentID = *probeTargets[0].AgentID
+	// Keep only the latest trace per agent+target.
+	seenPaths := make(map[string]bool)
+	var traces []mtrTrace
+	rowCount := len(rawRows)
+
+	for _, r := range rawRows {
+		target := r.target
+		targetAgent := r.targetAgent
+
+		// Postgres enrichment is only needed for the OLD format where
+		// target_agent was derived from probe_targets.
+		if r.probeID > 0 && target == "" && targetAgent == 0 {
+			if info, ok := probeInfoByID[uint(r.probeID)]; ok {
+				if target == "" {
+					target = info.targetStr
+				}
+				if targetAgent == 0 {
+					if uint(r.agentID) == info.ownerAgentID && info.targetAgentID > 0 {
+						// Forward direction: owner -> target
+						targetAgent = uint64(info.targetAgentID)
+					} else if uint(r.agentID) == info.targetAgentID && info.ownerAgentID > 0 {
+						// Reverse direction: target -> owner
+						targetAgent = uint64(info.ownerAgentID)
 					}
 				}
-				probeTargetCache[cacheKey] = info.target
 			}
+		}
 
-			// Use probe target if DB target is empty
-			if target == "" && info.target != "" {
-				target = info.target
-			}
-
-			// Determine target_agent based on direction
-			// If reporting agent is the probe owner -> target is Target.AgentID
-			// If reporting agent is the target agent -> target is the probe owner (reverse direction)
-			if targetAgent == 0 {
-				if uint(agentID) == info.ownerAgentID && info.targetAgentID > 0 {
-					// Forward direction: owner -> target
-					targetAgent = uint64(info.targetAgentID)
-				} else if uint(agentID) == info.targetAgentID && info.ownerAgentID > 0 {
-					// Reverse direction: target -> owner
-					targetAgent = uint64(info.ownerAgentID)
+		// Final fallback: pull from MTR payload's report.info.target when
+		// neither the row nor the probe has the target (handles raw-IP
+		// targets, MTR probes with no Probe definition, etc).
+		if target == "" {
+			var payload mtrPayload
+			if err := json.Unmarshal([]byte(r.payloadRaw), &payload); err == nil {
+				target = payload.Report.Info.Target.Hostname
+				if target == "" {
+					target = payload.Report.Info.Target.IP
 				}
 			}
 		}
 
-		// Fallback to MTR payload if still empty
+		// Skip if still no target — can't draw an edge to nothing.
 		if target == "" {
-			target = payload.Report.Info.Target.Hostname
-			if target == "" {
-				target = payload.Report.Info.Target.IP
-			}
-		}
-
-		// Skip if still no target
-		if target == "" {
-			log.Printf("[NetworkMap] Agent %d: no target found in DB, probe, or payload, skipping", agentID)
+			log.Printf("[NetworkMap] Agent %d: no target found in DB, probe, or payload, skipping", r.agentID)
 			continue
 		}
 
-		pathKey := fmt.Sprintf("%d:%s", agentID, target)
+		// AGENT (new format) probes can have target_agent set but no
+		// target string. Use the target_agent as a synthetic key for the
+		// dedupe so we don't accidentally treat 53→12 (probe 717) and
+		// 12→53 (probe 717 reverse) as the same path.
+		var dedupeTarget string
+		if targetAgent > 0 {
+			dedupeTarget = fmt.Sprintf("agent:%d", targetAgent)
+		} else {
+			dedupeTarget = target
+		}
+		pathKey := fmt.Sprintf("%d:%s", r.agentID, dedupeTarget)
 		if seenPaths[pathKey] {
-			continue // Already have latest trace for this path
+			continue
 		}
 		seenPaths[pathKey] = true
 
-		log.Printf("[NetworkMap] Agent %d -> %s parsed: %d hops in payload.Report.Hops", agentID, target, len(payload.Report.Hops))
+		log.Printf("[NetworkMap] Agent %d -> %s (targetAgent=%d) parsed", r.agentID, target, targetAgent)
 
-		// Build ordered hop list
+		// Parse hops.
+		var payload mtrPayload
+		if err := json.Unmarshal([]byte(r.payloadRaw), &payload); err != nil {
+			log.Printf("[NetworkMap] JSON parse error for agent %d: %v", r.agentID, err)
+			continue
+		}
 		var hops []mtrHop
 		for _, hop := range payload.Report.Hops {
 			var ip, hostname string
@@ -409,19 +464,19 @@ LIMIT 1000
 			})
 		}
 
-		log.Printf("[NetworkMap] Trace: agent %d -> %s has %d hops", agentID, target, len(hops))
+		log.Printf("[NetworkMap] Trace: agent %d -> %s has %d hops", r.agentID, target, len(hops))
 		traces = append(traces, mtrTrace{
-			AgentID:      uint(agentID),
+			AgentID:      uint(r.agentID),
 			Target:       target,
 			TargetAgent:  uint(targetAgent),
-			ProbeAgentID: uint(probeAgentID),
-			ProbeID:      uint(probeID),
+			ProbeAgentID: uint(r.probeAgentID),
+			ProbeID:      uint(r.probeID),
 			Hops:         hops,
 		})
 	}
 
 	log.Printf("[NetworkMap] MTR query returned %d rows, parsed %d traces", rowCount, len(traces))
-	return traces, rows.Err()
+	return traces, nil
 }
 
 type pingStats struct {
@@ -668,7 +723,9 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		agentByID[agent.ID] = agent
 	}
 
-	// Add agent nodes (Layer 0)
+	// Add agent nodes (Layer 0). Hostname is set explicitly so that
+	// DestinationSummary.Hostname (which copies from node.Hostname in the
+	// final pass) inherits the agent name for agent-to-agent paths.
 	for _, agent := range agents {
 		nodeID := fmt.Sprintf("agent:%d", agent.ID)
 		isOnline := time.Since(agent.UpdatedAt) < time.Minute
@@ -680,6 +737,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			ID:        nodeID,
 			Type:      "agent",
 			Label:     agent.Name,
+			Hostname:  agent.Name,
 			AgentID:   &agent.ID,
 			IP:        agent.PublicIPOverride,
 			IsOnline:  isOnline,
