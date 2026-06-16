@@ -831,6 +831,23 @@ type MtrReport struct {
 	Hops []MtrHop `json:"hops"`
 }
 
+// HopFinalIP returns the IP of the final (destination) hop, or "" if the
+// trace is empty or the last hop has no host.
+func (r MtrReport) HopFinalIP() string {
+	if len(r.Hops) == 0 {
+		return ""
+	}
+	last := r.Hops[len(r.Hops)-1]
+	if len(last.Hosts) == 0 {
+		return ""
+	}
+	ip := last.Hosts[0].IP
+	if ip == "" || ip == "*" {
+		return ""
+	}
+	return ip
+}
+
 type MtrPayload struct {
 	Report         MtrReport `json:"report"`
 	StopTimestamp  string    `json:"stop_timestamp"`
