@@ -193,6 +193,63 @@ function timeAgo(date: string): string {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
+// Duration helper — same units as timeAgo but without the " ago" suffix,
+// used to express "changed for 3h" rather than "changed 3h ago".
+function durationLabel(date: string): string {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+  if (seconds < 0) return '0m'
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
+  return `${Math.floor(seconds / 86400)}d`
+}
+
+// Parse the baseline route path string ("a -> b -> c") into an ordered list
+// of hops. Mirrors parseHopPath on the backend so the diff matches.
+function parseBaselineHops(path: string | undefined): string[] {
+  if (!path) return []
+  return path.split(/\s*->\s*/).map(p => p.trim()).filter(p => p && p !== '*')
+}
+
+// Compute a hop-level diff between the baseline and current path. Returns
+// the ordered list of hops with a per-hop status: unchanged / added / removed.
+interface DiffHop {
+  ip: string
+  status: 'unchanged' | 'added' | 'removed'
+}
+
+function diffRouteHops(baselinePath: string | undefined, latestHops: string[] | undefined): DiffHop[] {
+  const baseline = parseBaselineHops(baselinePath)
+  const current = (latestHops || []).filter(ip => ip && ip !== '*')
+  const out: DiffHop[] = []
+  const usedCurrent = new Set<number>()
+
+  // Walk baseline in order, greedily matching each current hop that still
+  // appears later in the path. This preserves positional context so the
+  // diff reads as "hop 3 swapped for a new one" rather than just two lists.
+  for (let i = 0; i < baseline.length; i++) {
+    const b = baseline[i]
+    let matchedIdx = -1
+    for (let j = 0; j < current.length; j++) {
+      if (usedCurrent.has(j)) continue
+      if (current[j] === b) { matchedIdx = j; break }
+    }
+    if (matchedIdx >= 0) {
+      usedCurrent.add(matchedIdx)
+      out.push({ ip: b, status: 'unchanged' })
+    } else {
+      out.push({ ip: b, status: 'removed' })
+    }
+  }
+  // Remaining current hops that didn't match anything in baseline are new.
+  for (let j = 0; j < current.length; j++) {
+    if (!usedCurrent.has(j)) {
+      out.push({ ip: current[j], status: 'added' })
+    }
+  }
+  return out
+}
+
 // Hop display helpers
 function getHopDisplay(route: any, idx: number): { ip: string; label: string; isAgent: boolean } {
   if (route.latest_hops_detail && route.latest_hops_detail[idx]) {
@@ -261,25 +318,11 @@ onUnmounted(() => {
 <template>
   <div class="route-analysis">
     <!-- Loading state (initial load) -->
-    <div v-if="loading && !analysis" class="loading-state">
-      <div class="loading-indicator">
-        <div class="spinner-border text-primary" role="status">
-          <span class="visually-hidden">Loading...</span>
-        </div>
-        <div class="loading-text">
-          <div class="loading-title">Analyzing routes…</div>
-          <div class="loading-subtitle">Computing shared hops, destinations and incidents across agents</div>
-        </div>
+    <div v-if="loading && !analysis" class="text-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
       </div>
-      <div class="skeleton-stats"></div>
-      <div class="skeleton-section-title"></div>
-      <div class="skeleton-cards">
-        <div class="skeleton-card" v-for="i in 6" :key="i"></div>
-      </div>
-      <div class="skeleton-section-title"></div>
-      <div class="skeleton-list">
-        <div class="skeleton-list-item" v-for="i in 3" :key="i"></div>
-      </div>
+      <p class="text-muted mt-2">Analyzing routes across agents...</p>
     </div>
 
     <!-- Error -->
@@ -678,9 +721,29 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="route.has_route_change" class="route-change-banner">
-                  <i class="bi bi-shuffle"></i>
-                  Route changed
-                  <span v-if="route.baseline_hop_count">(was {{ route.baseline_hop_count }} hops)</span>
+                  <div class="route-change-header">
+                    <i class="bi bi-shuffle"></i>
+                    <span>Route changed</span>
+                    <span v-if="route.route_changed_at" class="route-change-duration">
+                      for {{ durationLabel(route.route_changed_at) }}
+                    </span>
+                  </div>
+                  <div v-if="route.baseline_route_path && route.latest_hops?.length" class="route-change-diff">
+                    <div class="diff-legend">
+                      <span class="diff-tag added">+{{ diffRouteHops(route.baseline_route_path, route.latest_hops).filter(d => d.status === 'added').length }}</span>
+                      <span class="diff-tag removed">−{{ diffRouteHops(route.baseline_route_path, route.latest_hops).filter(d => d.status === 'removed').length }}</span>
+                      <span class="diff-baseline">baseline: {{ route.baseline_hop_count || diffRouteHops(route.baseline_route_path, route.latest_hops).length }} hops</span>
+                    </div>
+                    <div class="diff-chain">
+                      <template v-for="(d, idx) in diffRouteHops(route.baseline_route_path, route.latest_hops)" :key="`${d.ip}-${idx}`">
+                        <span v-if="idx > 0" class="diff-arrow">→</span>
+                        <code class="diff-hop" :class="d.status">{{ d.ip }}</code>
+                      </template>
+                    </div>
+                  </div>
+                  <div v-else-if="route.baseline_hop_count" class="route-change-meta">
+                    (was {{ route.baseline_hop_count }} hops)
+                  </div>
                 </div>
 
                 <!-- Route Hops -->
@@ -797,99 +860,6 @@ onUnmounted(() => {
   padding: 0;
   position: relative;
   min-height: 200px;
-}
-
-/* Loading state */
-.loading-state {
-  padding: 1rem;
-}
-
-.loading-indicator {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 1rem 1.1rem;
-  margin-bottom: 1.25rem;
-  background: var(--bs-secondary-bg);
-  border: 1px solid var(--bs-border-color);
-  border-radius: 12px;
-}
-
-.loading-indicator .spinner-border {
-  flex-shrink: 0;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-width: 0.2em;
-}
-
-.loading-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.loading-title {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--bs-body-color);
-}
-
-.loading-subtitle {
-  font-size: 0.78rem;
-  color: var(--bs-secondary-color);
-}
-
-.skeleton-stats {
-  height: 60px;
-  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 12px;
-  margin-bottom: 1rem;
-}
-
-.skeleton-section-title {
-  height: 14px;
-  width: 180px;
-  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 6px;
-  margin: 0.75rem 0 0.5rem;
-}
-
-.skeleton-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 0.75rem;
-}
-
-.skeleton-card {
-  height: 100px;
-  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 10px;
-}
-
-.skeleton-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.skeleton-list-item {
-  height: 56px;
-  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 10px;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
 }
 
 /* Header */
@@ -1536,12 +1506,108 @@ onUnmounted(() => {
   font-size: 11px;
   color: #f59e0b;
   background: rgba(245, 158, 11, 0.1);
-  padding: 4px 8px;
+  padding: 8px 10px;
   border-radius: 4px;
   margin-bottom: 8px;
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.route-change-header {
+  display: flex;
   align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.route-change-duration {
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+  font-size: 10px;
+}
+
+.route-change-meta {
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+  font-size: 10px;
+}
+
+.route-change-diff {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
+}
+
+.diff-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--bs-secondary-color);
+}
+
+.diff-tag {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.diff-tag.added {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.diff-tag.removed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.diff-baseline {
+  margin-left: auto;
+}
+
+.diff-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.diff-arrow {
+  color: var(--bs-secondary-color);
+  opacity: 0.6;
+}
+
+.diff-hop {
+  font-family: monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
+}
+
+.diff-hop.unchanged {
+  opacity: 0.55;
+}
+
+.diff-hop.added {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.diff-hop.removed {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  font-weight: 600;
 }
 
 /* Hop chain */
@@ -1864,11 +1930,6 @@ onUnmounted(() => {
 }
 
 /* Dark mode adjustments */
-[data-theme="dark"] .skeleton-stats,
-[data-theme="dark"] .skeleton-card {
-  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
-}
-
 [data-theme="dark"] .hop-node {
   background: var(--bs-tertiary-bg);
 }

@@ -15,8 +15,7 @@ const state = reactive({
     name: "",
     location: "",
     description: "",
-    template_agent_id: null,
-    bidirectional: true
+    template_agent_id: null
   } as Partial<Agent>,
   error: "",
   touched: {
@@ -24,7 +23,6 @@ const state = reactive({
   },
   advancedOpen: false,
   templateAgentId: null,
-  bidirectional: true,
   agents: []
 });
 
@@ -81,7 +79,6 @@ async function submit() {
 
   // Pass advanced options to the agent object
   state.agent.template_agent_id = state.templateAgentId;
-  state.agent.bidirectional = state.bidirectional;
 
   try {
     const result = await AgentService.create(state.workspace.id, state.agent);
@@ -214,15 +211,13 @@ async function submit() {
                   <div class="form-text">Optionally copy probes from an existing agent as a template</div>
                 </div>
 
-                <!-- Bidirectional Toggle -->
-                <div class="mb-0">
-                  <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="bidirectional" v-model="state.bidirectional">
-                    <label class="form-check-label" for="bidirectional">
-                      <strong>Bidirectional probes</strong>
-                    </label>
+                <!-- Bidirectionality Note -->
+                <div v-if="state.templateAgentId" class="mb-0">
+                  <div class="form-text">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Bidirectionality on copied probes is inherited from the template
+                    agent. Edit individual probes after creation if you need to change it.
                   </div>
-                  <div class="form-text">When enabled, probes will automatically create reverse connections. Default: ON</div>
                 </div>
               </div>
             </div>

@@ -173,6 +173,7 @@ export interface ProbeRouteInfo {
     latest_hops?: string[]
     latest_hops_detail?: HopDetail[]
     has_route_change: boolean
+    route_changed_at?: string
     trace_count?: number
     route_stability_pct?: number
     avg_end_hop_latency?: number

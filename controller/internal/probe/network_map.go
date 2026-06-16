@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -954,11 +955,14 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			lastHop = trace.Hops[len(trace.Hops)-1]
 		}
 
-		// Track source agent (who ran this probe)
+		// Track source agent (who reported this trace). The runner's
+		// agent_id is the source for both forward and reverse MTR rows —
+		// probe_agent_id points to the AGENT probe owner, but using it as
+		// the source caused a self-loop in the AGENT owner's destination
+		// (Agent A→Agent A) because the reverse row's target_agent is the
+		// AGENT owner. PING/TrafficSim processing uses agent_id
+		// consistently; this brings MTR into line.
 		sourceAgentID := trace.AgentID
-		if trace.ProbeAgentID > 0 && trace.ProbeAgentID != trace.AgentID {
-			sourceAgentID = trace.ProbeAgentID // reverse probe - use probe owner
-		}
 
 		// Track endpoint detail for expanded view (ALL probes, agent or not)
 		// Use targetAgentID=0 for non-agent targets as grouping key
@@ -1689,6 +1693,58 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 	}
 
+	// Bidirectional detection happens in two passes across ALL
+	// destinations, not per-destination:
+	//
+	// 1. Pass 1 — collect every observed (source, target) agent pair into a
+	//    global set. AGENT-probe expansion puts forward data on the
+	//    TARGET's destination list and reverse data on the OWNER's
+	//    destination list, so a per-destination check would never match
+	//    forward against reverse (they live in different destinations).
+	//    The pre-fix check was a self-check (it looked up the same entry
+	//    in agentDetails[target][source] which is the current entry).
+	//
+	// 2. Pass 2 — for each agent-to-agent entry, mark it bidirectional if
+	//    (a) the reverse pair is observed somewhere in the workspace AND
+	//    (b) the pair is part of an AGENT probe expansion (either
+	//    direction). Independent unidirectional standalone probes that
+	//    happen to be configured in both directions are NOT marked
+	//    bidirectional — only AGENT-probe-driven dual direction counts.
+	observedPairs := make(map[string]bool)   // "X:Y" → true
+	agentPairedPair := make(map[string]bool) // "X:Y" → true if (X,Y) or (Y,X) is in any AGENT probe plan
+	for _, dest := range destMetrics {
+		if agentDetails, ok := destEndpointDetails[dest.Target]; ok {
+			for sourceID, targetMap := range agentDetails {
+				for _, detail := range targetMap {
+					if detail.TargetAgentID == 0 || sourceID == detail.TargetAgentID {
+						continue // not agent-to-agent or self-loop
+					}
+					observedPairs[fmt.Sprintf("%d:%d", sourceID, detail.TargetAgentID)] = true
+				}
+			}
+		}
+	}
+	if probePlans != nil {
+		for ownerID, agentMap := range probePlans {
+			for targetID := range agentMap {
+				a, b := ownerID, targetID
+				if a > b {
+					a, b = b, a
+				}
+				agentPairedPair[fmt.Sprintf("%d:%d", a, b)] = true
+			}
+		}
+	}
+
+	// Helper: is the (X, Y) pair AGENT-paired?
+	isAgentPaired := func(x, y uint) bool {
+		a, b := x, y
+		if a > b {
+			a, b = b, a
+		}
+		return agentPairedPair[fmt.Sprintf("%d:%d", a, b)]
+	}
+
 	// Build destination summaries (filtering out endpoint IPs that belong to other destinations)
 	destinations := make([]DestinationSummary, 0, len(destMetrics))
 	for target, summary := range destMetrics {
@@ -1709,11 +1765,30 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		for pt := range destProbes[target] {
 			probeTypeSet[pt] = true
 		}
-		if probePlans != nil {
-			for _, agentMap := range probePlans {
-				for _, types := range agentMap {
+		if probePlans != nil && strings.HasPrefix(target, "agent:") {
+			// Only add plan-derived types from AGENT probes that involve
+			// THIS destination agent. Pre-fix this loop iterated every
+			// plan in the workspace and added every type to every
+			// destination, which polluted unrelated destinations (e.g. a
+			// hostname destination ended up showing TRAFFICSIM just because
+			// some AGENT probe pair in the workspace had it enabled).
+			if destAgentID, err := strconv.ParseUint(strings.TrimPrefix(target, "agent:"), 10, 64); err == nil {
+				dID := uint(destAgentID)
+				// Plans where this agent is the OWNER (forward direction).
+				for _, types := range probePlans[dID] {
 					for _, t := range types {
 						probeTypeSet[t] = true
+					}
+				}
+				// Plans where this agent is the TARGET (reverse direction).
+				// workspaceAgentProbePlans mirrors the (owner, target) slot
+				// into the (target, owner) slot, so the same type list is
+				// queryable from both sides.
+				for _, agentMap := range probePlans {
+					if types, ok := agentMap[dID]; ok {
+						for _, t := range types {
+							probeTypeSet[t] = true
+						}
 					}
 				}
 			}
@@ -1734,27 +1809,16 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 		}
 
 		// Build ExpandedEndpoints with all probe details per agent
-		// Also detect bidirectional probes
+		// Bidirectional detection is cross-destination (see pre-pass above):
+		// the pre-fix per-destination self-check was effectively
+		// `agentDetails[target][source]`, which is the current entry —
+		// it always returned true (or always false) and never compared
+		// the forward row in destination B against the reverse row in
+		// destination A.
 		if agentDetails, ok := destEndpointDetails[target]; ok {
-			// Build a set of bidirectional pairs for quick lookup
-			bidirectionalPairs := make(map[string]bool) // "sourceID:targetID" format
-			for sourceAgentID, targetMap := range agentDetails {
-				for targetAgentID, detail := range targetMap {
-					if detail.TargetAgentID > 0 {
-						// Check if reverse exists
-						if reverseDetails, ok := agentDetails[detail.TargetAgentID]; ok {
-							if _, reverseExists := reverseDetails[sourceAgentID]; reverseExists {
-								// Bidirectional found!
-								bidirectionalPairs[fmt.Sprintf("%d:%d", sourceAgentID, targetAgentID)] = true
-								bidirectionalPairs[fmt.Sprintf("%d:%d", targetAgentID, sourceAgentID)] = true
-							}
-						}
-					}
-				}
-			}
-
 			// Collect all details
 			var allDetails []ProbeEndpointDetail
+			anyBidir := false
 			for _, targetMap := range agentDetails {
 				for _, detail := range targetMap {
 					// Build probe types list
@@ -1768,9 +1832,14 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 					if detail.HasTrafficSim {
 						detail.ProbeTypes = append(detail.ProbeTypes, "TRAFFICSIM")
 					}
-					// Mark bidirectional
-					if detail.TargetAgentID > 0 {
-						detail.IsBidirectional = bidirectionalPairs[fmt.Sprintf("%d:%d", detail.AgentID, detail.TargetAgentID)]
+					// Mark bidirectional: reverse pair observed AND the
+					// pair is part of an AGENT probe expansion.
+					if detail.TargetAgentID > 0 && detail.AgentID != detail.TargetAgentID {
+						reverseKey := fmt.Sprintf("%d:%d", detail.TargetAgentID, detail.AgentID)
+						detail.IsBidirectional = observedPairs[reverseKey] && isAgentPaired(detail.AgentID, detail.TargetAgentID)
+						if detail.IsBidirectional {
+							anyBidir = true
+						}
 					}
 					allDetails = append(allDetails, *detail)
 				}
@@ -1790,7 +1859,7 @@ func buildNetworkMap(agents []agentInfo, mtrData []mtrTrace, pingMetrics map[str
 			})
 
 			summary.ExpandedEndpoints = allDetails
-			summary.HasBidirectional = len(bidirectionalPairs) > 0
+			summary.HasBidirectional = anyBidir
 		}
 
 		// Determine status

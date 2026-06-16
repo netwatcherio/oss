@@ -60,6 +60,13 @@ interface LoginResponse {
 
 let legacySession = core.session?.();
 
+function safeRedirectTarget(raw: unknown): string {
+    if (typeof raw !== "string") return "/";
+    // Same-origin only: must start with a single "/" and not "//" (protocol-relative URL)
+    if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
+    return raw;
+}
+
 function onLogin(payload: LoginResponse) {
   done();
 
@@ -76,7 +83,9 @@ function onLogin(payload: LoginResponse) {
   if (payload.email_verification_required && !payload.data?.verified) {
     router.push("/auth/verify-required");
   } else {
-    router.push("/");
+    // Honor ?redirect=<path> from the 401 interceptor; fall back to home
+    const target = safeRedirectTarget(route.value.query.redirect);
+    router.push(target);
   }
 }
 

@@ -94,17 +94,15 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, deletionStore *delet
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// If template_agent_id provided, copy probes from template to new agent
+		// If template_agent_id provided, copy probes from template to new agent.
+		// Bidirectional stays nil so each copied probe inherits metadata.bidirectional
+		// from its source probe; if a future override is needed, pass it explicitly.
 		if body.TemplateAgentID != 0 {
-			bidir := true // default to true
-			if body.Bidirectional != nil {
-				bidir = *body.Bidirectional
-			}
 			copyInput := probe.CopyInput{
 				SourceAgentID: body.TemplateAgentID,
 				DestAgentIDs:  []uint{out.Agent.ID},
 				WorkspaceID:   wsID,
-				Bidirectional: &bidir,
+				Bidirectional: body.Bidirectional,
 			}
 			if _, err := probe.CopyProbes(c.UserContext(), db, copyInput); err != nil {
 				// Log but don't fail - agent was already created

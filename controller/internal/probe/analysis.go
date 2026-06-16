@@ -3106,6 +3106,7 @@ type ProbeRouteInfo struct {
 	LatestHops          []string    `json:"latest_hops,omitempty"`        // IPs only (for signature computation)
 	LatestHopsDetail    []HopDetail `json:"latest_hops_detail,omitempty"` // Enriched with agent names
 	HasRouteChange      bool        `json:"has_route_change"`
+	RouteChangedAt      *time.Time  `json:"route_changed_at,omitempty"` // First time (within lookback) the signature differed from the baseline
 	TraceCount          int         `json:"trace_count,omitempty"`
 	RouteStabilityPct   float64     `json:"route_stability_pct,omitempty"`
 	AvgEndHopLatency    float64     `json:"avg_end_hop_latency,omitempty"`
@@ -3476,6 +3477,30 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		if latestPayload != nil {
 			pri.TraceCount = len(rows)
 			pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.LatestSignature, pri.BaselineRoutePath, sigs, len(rows))
+			// When the route has changed, find the first (newest) MTR row
+			// whose signature differs from the baseline so the UI can show
+			// how long the route has been changed. Rows are sorted
+			// newest-first, so the first match gives us the upper bound
+			// on the change duration.
+			if pri.HasRouteChange && pri.BaselineRoutePath != "" {
+				for i := range rows {
+					var mp MtrPayload
+					if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
+						continue
+					}
+					hops := make([]string, 0, len(mp.Report.Hops))
+					for _, h := range mp.Report.Hops {
+						if len(h.Hosts) > 0 && h.Hosts[0].IP != "" {
+							hops = append(hops, h.Hosts[0].IP)
+						}
+					}
+					if hopSetJaccard(parseHopPath(pri.BaselineRoutePath), hops) < routeEcmpSimilarityThreshold {
+						ts := rows[i].CreatedAt
+						pri.RouteChangedAt = &ts
+						break
+					}
+				}
+			}
 			if len(latestPayload.Report.Hops) > 0 {
 				lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
 				pri.AvgEndHopLatency = parseLatency(lastHop.Avg)

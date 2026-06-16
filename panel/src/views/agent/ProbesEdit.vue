@@ -23,7 +23,8 @@ const state = reactive({
   copySelectedProbes: [] as number[],
   copyDestAgents: [] as number[],
   copyMatchTargets: false,
-  copyBidirectional: false, // For agent probes: create reverse probes too
+  // Note: copied probes always inherit metadata.bidirectional from each source probe.
+  // The destination probe can be edited after copy if that needs to change.
   copyLoading: false,
   copyResults: null as {
     created: number;
@@ -98,7 +99,6 @@ function openCopyModal() {
   state.copySelectedProbes = [];
   state.copyDestAgents = [];
   state.copyMatchTargets = false;
-  state.copyBidirectional = false;
   state.copyResults = null;
   state.showCopyModal = true;
 }
@@ -160,8 +160,7 @@ async function executeCopy() {
       source_agent_id: state.agent.id,
       dest_agent_ids: state.copyDestAgents,
       probe_ids: state.copySelectedProbes,
-      match_targets: state.copyMatchTargets,
-      bidirectional: state.copyBidirectional || undefined
+      match_targets: state.copyMatchTargets
     });
     state.copyResults = result;
   } catch (error) {
@@ -433,7 +432,7 @@ const generalProbes = computed(() => {
   });
 });
 
-// Check if any selected probes are AGENT type (for bidirectional option)
+// Check if any selected probes are AGENT type (for the bidirectional note)
 const hasSelectedAgentProbes = computed(() => {
   return state.copySelectedProbes.some(probeId => {
     const probe = state.probes.find(p => p.id === probeId);
@@ -1238,11 +1237,13 @@ async function saveProbeSettings() {
               <!-- Options -->
               <div class="copy-options-wrapper">
                 <div v-if="hasSelectedAgentProbes" class="copy-options">
-                  <label class="option-item bidirectional-option">
-                    <input type="checkbox" v-model="state.copyBidirectional">
-                    <span>Enable bidirectional monitoring (return-path probes are generated automatically — no reverse probe is created)</span>
-                    <small class="option-hint">Only applies to Agent-to-Agent probes</small>
-                  </label>
+                  <div class="option-note">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <span>
+                      Bidirectionality is inherited from each source probe. You can change
+                      it after copying from the probe list.
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2409,16 +2410,17 @@ async function saveProbeSettings() {
   accent-color: #3b82f6;
 }
 
-.bidirectional-option {
-  flex-wrap: wrap;
-}
-
-.option-hint {
-  width: 100%;
-  margin-left: 24px;
-  font-size: 0.75rem;
-  color: #6b7280;
-  margin-top: 0.125rem;
+.option-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: #4b5563;
+  line-height: 1.4;
 }
 
 /* Copy Results */
@@ -2688,8 +2690,10 @@ async function saveProbeSettings() {
   color: #e2e8f0 !important;
 }
 
-[data-theme="dark"] .option-hint {
-  color: #94a3b8 !important;
+[data-theme="dark"] .option-note {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: #374151 !important;
+  color: #cbd5e1 !important;
 }
 
 [data-theme="dark"] .empty-selection {

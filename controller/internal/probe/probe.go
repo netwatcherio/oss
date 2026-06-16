@@ -1354,6 +1354,27 @@ func workspaceAgentProbePlans(ctx context.Context, pg *gorm.DB, workspaceID uint
 				}
 			}
 			out[p.AgentID][target] = existing
+
+			// Also populate the reverse (target, owner) slot. The reverse
+			// expansion is what populates the target agent's probe list with
+			// return-path MTR/PING/TrafficSim probes owned by the target, so
+			// for the destination overview's "MTR/PING/TRAFFICSIM enabled"
+			// pills we need the same type set queryable from the target's
+			// side too. This is what makes applyProbePlan light up the
+			// correct pills for the destination agent when the data hasn't
+			// arrived in ClickHouse yet.
+			if out[target] == nil {
+				out[target] = make(map[uint][]string)
+			}
+			existingReverse := out[target][p.AgentID]
+			seenR := make(map[string]bool)
+			for _, t := range append(existingReverse, types...) {
+				if !seenR[t] {
+					seenR[t] = true
+					existingReverse = append(existingReverse, t)
+				}
+			}
+			out[target][p.AgentID] = existingReverse
 		}
 	}
 	return out, nil
@@ -1936,10 +1957,11 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 				}
 			}
 
-			// Apply bidirectional from CopyInput if set
-			if in.Bidirectional != nil && *in.Bidirectional {
-				copyInput.Bidirectional = true
-			}
+			// Bidirectional is intentionally not overridden: metadata.bidirectional
+			// is copied verbatim from srcProbe.Metadata above, and the Create path
+			// normalises any legacy top-level flag into metadata. Callers that need
+			// a one-off override should edit the probe after copy.
+			_ = in.Bidirectional
 
 			// Always check for duplicates — silently skip if one already exists.
 			if err := checkDuplicateProbe(ctx, db, copyInput); err != nil {
