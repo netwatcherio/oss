@@ -909,9 +909,11 @@ Check which GeoIP databases are loaded.
 
 MAC address vendor (OUI) lookup using the IEEE database.
 
+> **Note:** MAC addresses may be supplied URL-encoded (e.g. `%3A` for `:`) or with raw `:` / `-` / `.` separators. The handler percent-decodes the path parameter before lookup, so a request to `/lookup/oui/de%3Ade%3Aa7%3A40%3Aa6%3Af9` resolves to the same vendor as `/lookup/oui/de:de:a7:40:a6:f9`.
+
 ### `GET /lookup/oui/{mac}`
 
-Look up the vendor for a MAC address.
+Look up the vendor for a MAC address. Returns `200` whether the vendor is found or not — a miss is signaled by `found: false` and a `null` vendor, not by a 4xx status. A `400` is returned only for malformed input (e.g. wrong number of hex digits, non-hex characters).
 
 **Path Parameters:**
 | Param | Type | Required | Description |
@@ -922,14 +924,33 @@ Look up the vendor for a MAC address.
 - `00:1C:42:XX:XX:XX`
 - `00-1C-42-XX-XX-XX`
 - `001C42XXXXXX`
+- OUI-only (6 hex chars), e.g. `00:1C:42`
 
-**Response:**
+**Response (found):**
 ```json
 {
   "mac": "00:1C:42:AB:CD:EF",
   "oui": "00-1C-42",
   "vendor": "Parallels, Inc.",
   "found": true
+}
+```
+
+**Response (not found — still 200):**
+```json
+{
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "oui": "AA-BB-CC",
+  "vendor": null,
+  "found": false
+}
+```
+
+**Response (malformed — 400):**
+```json
+{
+  "error": "invalid MAC \"not-a-mac\": expected 6 or 12 hex chars, got 8",
+  "mac": "not-a-mac"
 }
 ```
 
@@ -942,7 +963,7 @@ Bulk MAC vendor lookup (maximum 100 per request).
 **Request Body:**
 ```json
 {
-  "macs": ["00:1C:42:AB:CD:EF", "00:00:5E:00:01:01"]
+  "macs": ["00:1C:42:AB:CD:EF", "00:00:5E:00:01:01", "not-a-mac"]
 }
 ```
 
@@ -951,25 +972,33 @@ Bulk MAC vendor lookup (maximum 100 per request).
 {
   "results": [
     { "mac": "00:1C:42:AB:CD:EF", "oui": "00-1C-42", "vendor": "Parallels, Inc.", "found": true },
-    { "mac": "00:00:5E:00:01:01", "oui": "00-00-5E", "vendor": "ICANN, IANA Department", "found": true }
+    { "mac": "00:00:5E:00:01:01", "oui": "00-00-5E", "vendor": "ICANN, IANA Department", "found": true },
+    { "mac": "not-a-mac", "oui": "", "vendor": null, "found": false, "error": "invalid MAC \"not-a-mac\": expected 6 or 12 hex chars, got 8" }
   ],
-  "count": 2
+  "count": 3
 }
 ```
+
+Per-MAC parse errors are returned as the `error` field on the offending result entry — a single bad input does not sink the rest of the batch.
 
 ---
 
 ### `GET /lookup/oui/status`
 
-Check if the OUI database is loaded.
+Check if the OUI database is loaded. The `parse_errors` and `loaded_at` fields are intended for verifying the loaded file is healthy and fresh.
 
 **Response:**
 ```json
 {
   "loaded": true,
-  "entry_count": 35000
+  "entry_count": 38421,
+  "parse_errors": 0,
+  "loaded_at": "2026-05-01T04:00:14Z",
+  "source_path": "/data/oui/oui.txt"
 }
 ```
+
+A non-zero `parse_errors` indicates the source file contains lines that look like OUI entries but failed to parse — usually a sign of a corrupted file or the wrong file being mounted at `OUI_PATH`. A stale `loaded_at` means the file on disk was updated after the controller started (no hot-reload — restart the container to pick up changes).
 
 ---
 

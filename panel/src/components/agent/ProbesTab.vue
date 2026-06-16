@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Agent, Probe } from '@/types';
 import { useAgentStatus, type AgentStatusTier } from '@/composables/useAgentStatus';
 import { since } from '@/time';
 import ProbeHealthPopup from '@/components/analysis/ProbeHealthPopup.vue';
+import ProbeAnalysisView from '@/components/analysis/ProbeAnalysisView.vue';
 
 interface ProbeGroup {
   key: string;
@@ -77,6 +78,26 @@ function getStatusIcon(status?: string): string {
 const anyBidirectional = computed(() => {
   return (props.reverseGroups ?? []).some(g => g.reverseOwner?.bidirectional);
 });
+
+// ── Detailed analysis modal ────────────────────────────────────────────
+// ProbeHealthPopup's footer "View Detailed Analysis" emits `view-detail` but
+// doesn't carry the probe ID, so we track which group's popup was opened
+// last and surface that here when the modal opens.
+const detailProbeId = ref<number | string | null>(null);
+const detailProbeLabel = ref<string>('');
+
+// `view-detail` from the popup carries the probe ID; map it to the group
+// so we can also show a friendly label in the modal header.
+function onPopupViewDetail(g: ProbeGroup) {
+  detailProbeId.value = g.probes[0]?.id ?? null;
+  detailProbeLabel.value = g.kind === 'agent'
+    ? (props.agentNames[Number(g.id)] || `Agent #${g.id}`)
+    : g.label;
+}
+
+function closeDetail() {
+  detailProbeId.value = null;
+}
 </script>
 
 <template>
@@ -129,11 +150,12 @@ const anyBidirectional = computed(() => {
             :agent-name="g.kind === 'agent' ? (agentNames[Number(g.id)] || `Agent #${g.id}`) : undefined"
             :target="g.kind === 'host' ? g.label : undefined"
             trigger="click"
+            @view-detail="onPopupViewDetail(g)"
           >
             <template #default="{ show }">
               <div class="probe-link-wrapper">
-                <router-link 
-                  :to="`/workspaces/${workspaceId}/agents/${agentId}/probes/${g.probes[0]?.id || ''}`" 
+                <router-link
+                  :to="`/workspaces/${workspaceId}/agents/${agentId}/probes/${g.probes[0]?.id || ''}`"
                   class="probe-link"
                 >
                   <div class="probe-header">
@@ -297,6 +319,33 @@ const anyBidirectional = computed(() => {
         </div>
       </div>
     </div>
+
+    <!-- Detailed AI Analysis modal — opened from the popup's "View Detailed Analysis" footer. -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div
+          v-if="detailProbeId !== null"
+          class="analysis-modal-backdrop"
+          @click.self="closeDetail"
+        >
+          <div class="analysis-modal-container">
+            <div class="analysis-modal-header">
+              <h3><i class="bi bi-cpu"></i> AI Analysis</h3>
+              <span class="analysis-modal-subtitle">{{ detailProbeLabel }}</span>
+              <button class="close-btn" @click="closeDetail">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div class="analysis-modal-body">
+              <ProbeAnalysisView
+                :workspace-id="workspaceId"
+                :probe-id="detailProbeId"
+              />
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -388,5 +437,89 @@ const anyBidirectional = computed(() => {
 .reverse-owner-name {
   display: block;
   color: var(--bs-body-color);
+}
+
+/* --- Detailed analysis modal (mirrors Probe.vue) --- */
+.analysis-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(var(--bs-dark-rgb), 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 1rem;
+}
+.analysis-modal-container {
+  background: var(--bs-body-bg);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 760px;
+  max-height: 88vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(var(--bs-dark-rgb), 0.3);
+  border: 1px solid var(--bs-border-color);
+}
+.analysis-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+.analysis-modal-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--bs-body-color);
+}
+.analysis-modal-subtitle {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  font-weight: 400;
+}
+.analysis-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.analysis-modal-header .close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--bs-secondary-color);
+  font-size: 14px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.analysis-modal-header .close-btn:hover {
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+}
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.modal-fade-enter-active .analysis-modal-container,
+.modal-fade-leave-active .analysis-modal-container {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+.modal-fade-enter-from .analysis-modal-container,
+.modal-fade-leave-to .analysis-modal-container {
+  transform: scale(0.95) translateY(-10px);
+  opacity: 0;
 }
 </style>

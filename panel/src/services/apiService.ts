@@ -495,10 +495,14 @@ export const ProbeDataService = {
     /**
      * Workspace-level route/path analysis for cross-agent route comparison.
      * GET /workspaces/{id}/analysis/routes
+     * Query: lookback=<hours, default 24>
      */
-    async workspaceRouteAnalysis(workspaceId: number | string) {
+    async workspaceRouteAnalysis(workspaceId: number | string, params?: { lookback?: number }) {
+        const qs = new URLSearchParams();
+        if (params?.lookback) qs.set("lookback", String(params.lookback));
+        const suffix = qs.toString() ? `?${qs}` : "";
         const { data } = await request.get<any>(
-            `/workspaces/${workspaceId}/analysis/routes`
+            `/workspaces/${workspaceId}/analysis/routes${suffix}`
         );
         return data;
     },

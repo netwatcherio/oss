@@ -392,6 +392,7 @@ export interface TrafficSimResult {
     oneWayLatency?: number;
     delayImp?: number;
     lossImp?: number;
+    codecImp?: number;
     playoutBufferMin?: number;
     playoutBufferMax?: number;
     maxConsecutiveLoss?: number;

@@ -49,7 +49,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB, emailStore *email.Q
 	panelOUI(api, ouiStore)
 	panelAlerts(api, db, ch)
 	panelShareLinks(api, db)
-	panelAnalysis(api, db, ch)
+	panelAnalysis(api, db, ch, geoStore)
 	panelReports(api, db, ch, emailStore, reportScheduler)
 	agentReports(api, db, ch)
 	workspaceVoiceReport(api, db, ch)

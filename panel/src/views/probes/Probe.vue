@@ -12,6 +12,7 @@ import MtrTable from "@/components/MtrTable.vue";
 import MtrSummary from "@/components/MtrSummary.vue";
 import MtrDetailModal from "@/components/MtrDetailModal.vue";
 import ProbeAnalysisView from "@/components/analysis/ProbeAnalysisView.vue";
+import ProbeHealthPopup from "@/components/analysis/ProbeHealthPopup.vue";
 import VueDatePicker from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
 import { themeService } from '@/services/themeService';
@@ -768,6 +769,176 @@ async function reloadData() {
   }
 }
 
+// ---------- Incremental data loading (time-range buttons) ----------
+//
+// When the user clicks a 1H/6H/24H/7D/All button in the trafficsim graph, the
+// page-level state.timeRange changes. The naive approach — calling
+// reloadData() — clears every data array and re-fetches the whole range from
+// scratch, which the user perceives as a "page reload".
+//
+// loadMissingTrafficSimData(from, to) keeps the existing state.trafficSimData
+// in place, computes the *gap* between the new range and the data we already
+// hold, fetches only that gap, and merges by probe_id/agent_id/created_at
+// (via addProbeDataUnique). agentPairData is rebuilt from the new combined
+// set so any chart bound to a forward/reverse direction picks up the change.
+//
+// PING/MTR/RPERF are intentionally left alone here — the time-range buttons
+// only live in the trafficsim graph, and the live websocket already keeps
+// those arrays fresh. If the user ever wires a PING-range picker, the same
+// pattern applies.
+function dataRangeMs(arr: { created_at?: string }[]): [number, number] | null {
+  if (arr.length === 0) return null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const d of arr) {
+    const t = new Date(d.created_at ?? '').getTime();
+    if (Number.isNaN(t)) continue;
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return [lo, hi];
+}
+
+async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
+  if (!workspaceID || !state.probes?.length) return;
+  state.loadingTrafficSim = true;
+  try {
+    const existing = dataRangeMs(state.trafficSimData as any);
+    // If we have no data at all, fall back to a single full-range fetch.
+    const gaps: Array<{ from: Date; to: Date }> = [];
+    if (!existing) {
+      gaps.push({ from, to });
+    } else {
+      const [lo, hi] = existing;
+      if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
+      if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
+    }
+    if (gaps.length === 0) {
+      console.log('[Probe] No missing trafficsim data; skipping fetch');
+      return;
+    }
+
+    // Pick an aggregation bucket that targets ~500 points per gap, capped to
+    // the gap size (so a 30-minute gap doesn't use a 1-hour bucket).
+    const targetPoints = 500;
+    const tasks: Promise<void>[] = [];
+    for (const gap of gaps) {
+      const rangeMs = gap.to.getTime() - gap.from.getTime();
+      const rangeSec = Math.max(1, rangeMs / 1000);
+      let aggregateSec = 0;
+      if (rangeSec > 60) {
+        let idealBucket = Math.ceil(rangeSec / targetPoints);
+        if (idealBucket <= 10) aggregateSec = 10;
+        else if (idealBucket <= 30) aggregateSec = 30;
+        else if (idealBucket <= 60) aggregateSec = 60;
+        else if (idealBucket <= 120) aggregateSec = 120;
+        else if (idealBucket <= 300) aggregateSec = 300;
+        else if (idealBucket <= 600) aggregateSec = 600;
+        else if (idealBucket <= 1800) aggregateSec = 1800;
+        else if (idealBucket <= 3600) aggregateSec = 3600;
+        else if (idealBucket <= 7200) aggregateSec = 7200;
+        else if (idealBucket <= 14400) aggregateSec = 14400;
+        else if (idealBucket <= 21600) aggregateSec = 21600;
+        else aggregateSec = Math.ceil(idealBucket / 21600) * 21600;
+        // Don't aggregate a small gap into fewer points than fit naturally
+        if (rangeSec < aggregateSec * 4) aggregateSec = 0;
+      }
+      const useAgg = aggregateSec > 0;
+      for (const p of state.probes) {
+        const probeType = p.type as string;
+        const fetchAndMerge = async (subType: string) => {
+          try {
+            const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+              from: toRFC3339(gap.from),
+              to: toRFC3339(gap.to),
+              limit: useAgg ? undefined : 300,
+              asc: false,
+              aggregate: useAgg ? aggregateSec : undefined,
+              type: subType,
+            });
+            for (const d of rows) {
+              addProbeDataUnique(state.probeData, d);
+              addProbeDataUnique(state.trafficSimData, d);
+            }
+            console.log(`[Probe ${p.id}] Incremental ${subType} gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+          } catch (err) {
+            console.warn(`[Probe ${p.id}] Incremental ${subType} fetch failed:`, err);
+          }
+        };
+        if (probeType === 'AGENT') {
+          tasks.push(fetchAndMerge('TRAFFICSIM'));
+        } else if (probeType === 'TRAFFICSIM') {
+          tasks.push(fetchAndMerge('TRAFFICSIM'));
+        }
+      }
+    }
+    await Promise.allSettled(tasks);
+    rebuildAgentPairData();
+  } finally {
+    state.loadingTrafficSim = false;
+  }
+}
+
+// Re-derive state.agentPairData from the current state.trafficSimData /
+// pingData / mtrData / rperfData. Called after incremental loads so any view
+// bound to pair.trafficSimData sees the new data.
+function rebuildAgentPairData(): void {
+  if (!state.isAgentProbe) return;
+  const firstTarget = (state.probe?.targets?.[0] ?? {}) as any;
+  const targetAgentId = firstTarget?.agent_id as number | undefined;
+  if (targetAgentId == null) return;
+  const sourceAgentId = Number(agentID);
+  const mainProbeId = state.probe?.id;
+  if (mainProbeId == null) return;
+
+  const sourceAgentName = state.agent?.name || `Agent ${sourceAgentId}`;
+  const targetAgentName = state.probeAgent?.name || `Agent ${targetAgentId}`;
+
+  const allTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
+  const forwardTrafficSimData = allTrafficSimData.filter(d => d.agent_id === sourceAgentId);
+  const reverseTrafficSimData = allTrafficSimData.filter(d => d.agent_id === targetAgentId);
+  const allPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
+  const forwardPingData = allPingData.filter(d => d.agent_id === sourceAgentId);
+  const reversePingData = allPingData.filter(d => d.agent_id === targetAgentId);
+  const allMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
+  const forwardMtrData = allMtrData.filter(d => d.agent_id === sourceAgentId);
+  const reverseMtrData = allMtrData.filter(d => d.agent_id === targetAgentId);
+  const forwardRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId);
+  const hasBidirectional = reverseTrafficSimData.length > 0 || reversePingData.length > 0 || reverseMtrData.length > 0;
+  const reverseRperfData = state.rperfData.filter(d => d.probe_id === mainProbeId && d.agent_id === targetAgentId);
+
+  state.agentPairData = [{
+    direction: 'forward' as const,
+    probeId: mainProbeId,
+    sourceAgentId,
+    targetAgentId,
+    sourceAgentName,
+    targetAgentName,
+    pingData: forwardPingData,
+    mtrData: forwardMtrData,
+    trafficSimData: forwardTrafficSimData,
+    rperfData: forwardRperfData,
+  }];
+  if (hasBidirectional) {
+    state.agentPairData.push({
+      direction: 'reverse' as const,
+      probeId: mainProbeId,
+      sourceAgentId: targetAgentId,
+      targetAgentId: sourceAgentId,
+      sourceAgentName: targetAgentName,
+      targetAgentName: sourceAgentName,
+      pingData: reversePingData,
+      mtrData: reverseMtrData,
+      trafficSimData: reverseTrafficSimData,
+      rperfData: reverseRperfData,
+    });
+  }
+  if (state.selectedDirection >= state.agentPairData.length) {
+    state.selectedDirection = 0;
+  }
+}
+
 // ---------- Guards / helpers ----------
 function containsProbeType(type: ProbeType): boolean {
   switch(type) {
@@ -1047,50 +1218,6 @@ async function reloadMtrData() {
   }
 }
 
-async function reloadTrafficSimData() {
-  state.loadingTrafficSim = true;
-  const [from, to] = state.timeRange;
-  const rangeMs = new Date(to).getTime() - new Date(from).getTime();
-  const rangeSec = rangeMs / 1000;
-  const targetPoints = 500;
-  let aggregateSec = 0;
-  
-  if (rangeSec > 60) {
-    const idealBucket = Math.ceil(rangeSec / targetPoints);
-    if (idealBucket <= 10) aggregateSec = 10;
-    else if (idealBucket <= 30) aggregateSec = 30;
-    else if (idealBucket <= 60) aggregateSec = 60;
-    else if (idealBucket <= 120) aggregateSec = 120;
-    else if (idealBucket <= 300) aggregateSec = 300;
-    else if (idealBucket <= 600) aggregateSec = 600;
-    else if (idealBucket <= 1800) aggregateSec = 1800;
-    else aggregateSec = 3600;
-  }
-  
-  try {
-    const trafficAgg = aggregateSec > 0;
-    const newTrafficData: ProbeData[] = [];
-    
-    for (const p of state.probes) {
-      try {
-        const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
-          from: toRFC3339(from), to: toRFC3339(to),
-          limit: trafficAgg ? undefined : 300, asc: false,
-          aggregate: trafficAgg ? aggregateSec : undefined, type: 'TRAFFICSIM'
-        });
-        newTrafficData.push(...rows);
-      } catch (err) { console.warn(`[Reload] TRAFFICSIM probe ${p.id} failed:`, err); }
-    }
-    
-    state.trafficSimData = newTrafficData;
-    console.log(`[Reload] TRAFFICSIM: ${newTrafficData.length} rows`);
-  } catch (e) {
-    console.error('[Reload] TRAFFICSIM failed:', e);
-  } finally {
-    state.loadingTrafficSim = false;
-  }
-}
-
 // Theme subscription for date picker
 let themeUnsubscribe: (() => void) | null = null;
 
@@ -1145,31 +1272,40 @@ onUnmounted(() => {
   }
 });
 
-// Debounced watch on timeRange to reload data when date picker changes
+// Debounced watch on timeRange. Two paths:
+//   1) First load (no data yet) — full reloadData() so we get metadata, probes,
+//      and a baseline dataset in one go.
+//   2) Subsequent range changes (e.g. user clicks a time-range button in the
+//      trafficsim graph) — incremental load for trafficsim only. Existing
+//      data is preserved; only the gap between the new range and what we
+//      already hold is fetched.
 let timeRangeDebounceTimer: number | null = null;
 watch(
   () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
   (newVal, oldVal) => {
-    // Skip if values are the same or initial mount
     if (!newVal[0] || !newVal[1]) return;
     if (oldVal && newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) return;
-    
-    console.log('[Probe] Time range changed, debouncing reload...');
-    
-    // Clear any pending reload
+
+    console.log('[Probe] Time range changed, debouncing...');
+
     if (timeRangeDebounceTimer) {
       clearTimeout(timeRangeDebounceTimer);
     }
-    
-    // Debounce reload by 500ms to avoid rapid-fire requests
+
     timeRangeDebounceTimer = window.setTimeout(() => {
-      console.log('[Probe] Debounced reload triggered');
-      // Call full reloadData which handles data clearing and agentPairData rebuilding
-      reloadData();
+      const [fromMs, toMs] = newVal as [number, number];
+      const from = new Date(fromMs);
+      const to = new Date(toMs);
+      if (state.trafficSimData.length === 0) {
+        console.log('[Probe] No data yet — full reloadData()');
+        reloadData();
+      } else {
+        console.log(`[Probe] Incremental trafficsim fetch for [${from.toISOString()}..${to.toISOString()}]`);
+        loadMissingTrafficSimData(from, to);
+      }
       timeRangeDebounceTimer = null;
     }, 500);
-  },
-  { deep: false }
+  }
 );
 
 // WebSocket subscription for real-time updates
@@ -1262,6 +1398,65 @@ const handleLiveProbeData = (data: ProbeDataEvent) => {
   }
 };
 
+// ── AI Analysis popup data ─────────────────────────────────────────────
+// Pulls the rich TrafficSim rows (jitter_avg/median/p95, p95RTT, p99RTT, MOS)
+// for BOTH directions so the popup shows a quick glance of forward + return
+// in a single window. Falls back to the API for probes that don't have
+// local TrafficSim data.
+const popupForwardRows = computed<TrafficSimResult[]>(() => {
+  let rows: ProbeData[] = []
+  if (state.isAgentProbe && state.agentPairData.length > 0) {
+    // First pair is always the forward direction
+    rows = state.agentPairData[0]?.trafficSimData || []
+  } else {
+    rows = state.trafficSimData
+  }
+  return transformToTrafficSimResult(rows)
+})
+
+const popupReverseRows = computed<TrafficSimResult[]>(() => {
+  if (!state.isAgentProbe || state.agentPairData.length < 2) return []
+  // Second pair is the reverse direction (target → source)
+  return transformToTrafficSimResult(state.agentPairData[1]?.trafficSimData || [])
+})
+
+const popupForwardAgentName = computed(() => {
+  if (state.isAgentProbe && state.agentPairData.length > 0) {
+    return state.agentPairData[0]?.sourceAgentName || state.agent?.name
+  }
+  return state.agent?.name
+})
+
+const popupForwardTarget = computed(() => {
+  if (state.isAgentProbe && state.agentPairData.length > 0) {
+    return state.agentPairData[0]?.targetAgentName || state.target
+  }
+  return state.target
+})
+
+const popupReverseAgentName = computed(() => {
+  if (state.isAgentProbe && state.agentPairData.length > 1) {
+    return state.agentPairData[1]?.sourceAgentName
+  }
+  return state.agent?.name
+})
+
+const popupReverseTarget = computed(() => {
+  if (state.isAgentProbe && state.agentPairData.length > 1) {
+    return state.agentPairData[1]?.targetAgentName
+  }
+  return state.target
+})
+
+const popupTimeRange = computed<[Date, Date] | null>(() => {
+  const r = state.timeRange
+  if (!r || r.length !== 2) return null
+  const [from, to] = r
+  if (!(from instanceof Date) || !(to instanceof Date)) return null
+  if (isNaN(from.getTime()) || isNaN(to.getTime())) return null
+  return [from, to]
+})
+
 // Set up WebSocket subscription for this probe
 const { connected: wsConnected } = useProbeSubscription(
   workspaceIdRef,
@@ -1282,19 +1477,35 @@ const { connected: wsConnected } = useProbeSubscription(
         :title="state.title"
         subtitle="information about this target">
       <div v-if="state.ready" class="d-flex gap-2 align-items-center date-picker-wrapper">
-        <button
-          class="btn btn-sm ai-analysis-toggle"
-          :class="showAnalysisModal ? 'active' : ''"
-          @click="showAnalysisModal = !showAnalysisModal"
-          title="AI Analysis"
+        <ProbeHealthPopup
+          v-if="state.probe?.id && workspaceIdRef"
+          :probe-id="state.probe.id"
+          :workspace-id="workspaceIdRef"
+          :agent-name="popupForwardAgentName"
+          :target="popupForwardTarget"
+          :traffic-sim-data="popupForwardRows"
+          :reverse-traffic-sim-data="popupReverseRows"
+          :reverse-agent-name="popupReverseAgentName"
+          :reverse-target="popupReverseTarget"
+          :current-time-range="popupTimeRange"
+          trigger="click"
+          @view-detail="showAnalysisModal = true"
         >
-          <i class="bi bi-cpu me-1"></i>
-          AI Analysis
-        </button>
-        <VueDatePicker 
+          <template #default="{ show }">
+            <button
+              class="btn btn-sm ai-analysis-toggle"
+              title="AI Analysis"
+              @click="show"
+            >
+              <i class="bi bi-cpu me-1"></i>
+              AI Analysis
+            </button>
+          </template>
+        </ProbeHealthPopup>
+        <VueDatePicker
           v-model="state.timeRange"
           @update:model-value="onTimeRangeUpdate"
-          :partial-range="false" 
+          :partial-range="false"
           range
           :dark="isDark"
           :enable-time-picker="true"
@@ -1378,19 +1589,11 @@ const { connected: wsConnected } = useProbeSubscription(
               <!-- Traffic Sim Data (Primary for voice quality) -->
               <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
                 <div class="card h-100">
-                  <div class="card-header d-flex justify-content-between align-items-center">
+                  <div class="card-header">
                     <h6 class="mb-0">
                       <i class="bi bi-broadcast me-2"></i>
                       Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                     </h6>
-                    <button 
-                      class="btn btn-sm btn-outline-primary" 
-                      @click="reloadTrafficSimData" 
-                      :disabled="state.loadingTrafficSim"
-                      title="Reload traffic simulation data"
-                    >
-                      <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                    </button>
                   </div>
                   <div class="card-body">
                     <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
@@ -1520,19 +1723,9 @@ const { connected: wsConnected } = useProbeSubscription(
           <!-- TrafficSim Graph (Primary for voice quality) -->
           <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM') && state.trafficSimData.length > 0">
             <div class="card mb-3">
-              <div class="card-header d-flex justify-content-between align-items-center">
-                <div>
-                  <h5 class="card-title mb-0">Simulated Traffic</h5>
-                  <small class="text-muted">displays the stats for simulated traffic</small>
-                </div>
-                <button 
-                  class="btn btn-sm btn-outline-primary" 
-                  @click="reloadTrafficSimData" 
-                  :disabled="state.loadingTrafficSim"
-                  title="Reload traffic simulation data"
-                >
-                  <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
-                </button>
+              <div class="card-header">
+                <h5 class="card-title mb-0">Simulated Traffic</h5>
+                <small class="text-muted">displays the stats for simulated traffic</small>
               </div>
               <div class="card-body">
                 <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
@@ -1656,7 +1849,13 @@ const { connected: wsConnected } = useProbeSubscription(
           </button>
         </div>
         <div class="analysis-modal-body">
-          <ProbeAnalysisView :workspace-id="workspaceIdRef" :probe-id="state.probe.id" />
+          <ProbeAnalysisView
+            :workspace-id="workspaceIdRef"
+            :probe-id="state.probe.id"
+            :traffic-sim-data="popupForwardRows"
+            :reverse-traffic-sim-data="popupReverseRows"
+            :current-time-range="popupTimeRange"
+          />
         </div>
       </div>
     </div>

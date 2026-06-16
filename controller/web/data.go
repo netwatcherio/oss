@@ -234,7 +234,7 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 			}
 		} else {
 			// Standard non-aggregated query
-			rows, err = probe.GetProbeDataByProbe(c.UserContext(), ch, probeID, agentID, from, to, asc, limit)
+			rows, err = probe.GetProbeDataByProbe(c.UserContext(), ch, probeID, agentID, from, to, asc, limit, "")
 			// Log raw query for debugging
 			if err == nil && aggregateSec > 0 {
 				log.Printf("[ProbeData] Raw query (type=%s not supported for aggregation): probeID=%d -> %d rows",
@@ -338,7 +338,7 @@ func panelProbeData(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 				}
 				out = append(out, bundle{ProbeID: pid, Latest: row})
 			} else {
-				rows, err := probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(pid), nil, from, to, false, limit)
+				rows, err := probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(pid), nil, from, to, false, limit, "")
 				if err != nil {
 					return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 				}

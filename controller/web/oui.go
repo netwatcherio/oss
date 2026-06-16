@@ -1,7 +1,11 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"netwatcher-controller/internal/oui"
 
@@ -24,21 +28,26 @@ func panelOUI(api fiber.Router, ouiStore *oui.Store) {
 			})
 		}
 
-		entry, found := ouiStore.Lookup(mac)
-		if !found {
-			return c.Status(http.StatusNotFound).JSON(fiber.Map{
-				"mac":    mac,
-				"vendor": nil,
-				"found":  false,
+		entry, found, err := ouiStore.Lookup(mac)
+		if err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+				"mac":   mac,
 			})
 		}
 
-		return c.JSON(fiber.Map{
-			"mac":    mac,
-			"oui":    entry.OUI,
-			"vendor": entry.Vendor,
-			"found":  true,
-		})
+		decodedMAC, _ := url.PathUnescape(mac)
+		body := fiber.Map{
+			"mac":   decodedMAC,
+			"oui":   formatOUI(decodedMAC),
+			"found": found,
+		}
+		if found {
+			body["vendor"] = entry.Vendor
+		} else {
+			body["vendor"] = nil
+		}
+		return c.JSON(body)
 	})
 
 	// Bulk lookup
@@ -68,21 +77,28 @@ func panelOUI(api fiber.Router, ouiStore *oui.Store) {
 
 		results := make([]fiber.Map, len(req.MACs))
 		for i, mac := range req.MACs {
-			entry, found := ouiStore.Lookup(mac)
-			if found {
+			entry, found, err := ouiStore.Lookup(mac)
+			if err != nil {
 				results[i] = fiber.Map{
 					"mac":    mac,
-					"oui":    entry.OUI,
-					"vendor": entry.Vendor,
-					"found":  true,
-				}
-			} else {
-				results[i] = fiber.Map{
-					"mac":    mac,
+					"oui":    formatOUI(mac),
 					"vendor": nil,
 					"found":  false,
+					"error":  err.Error(),
 				}
+				continue
 			}
+			body := fiber.Map{
+				"mac":   mac,
+				"oui":   formatOUI(mac),
+				"found": found,
+			}
+			if found {
+				body["vendor"] = entry.Vendor
+			} else {
+				body["vendor"] = nil
+			}
+			results[i] = body
 		}
 
 		return c.JSON(fiber.Map{
@@ -93,9 +109,28 @@ func panelOUI(api fiber.Router, ouiStore *oui.Store) {
 
 	// Status endpoint
 	api.Get("/lookup/oui/status", func(c *fiber.Ctx) error {
+		loadedAt := time.Time{}
+		if ouiStore.IsLoaded() {
+			loadedAt = ouiStore.LoadedAt().UTC()
+		}
 		return c.JSON(fiber.Map{
-			"loaded":      ouiStore.IsLoaded(),
-			"entry_count": ouiStore.EntryCount(),
+			"loaded":       ouiStore.IsLoaded(),
+			"entry_count":  ouiStore.EntryCount(),
+			"parse_errors": ouiStore.ParseErrors(),
+			"loaded_at":    loadedAt.Format(time.RFC3339),
+			"source_path":  ouiStore.SourcePath(),
 		})
 	})
+}
+
+// formatOUI returns the XX-XX-XX prefix from a MAC string for echo in API
+// responses. Returns an empty string if the input doesn't contain at least
+// 6 hex digits after separator-stripping.
+func formatOUI(mac string) string {
+	cleaned := strings.ToUpper(mac)
+	cleaned = strings.NewReplacer(":", "", "-", "", ".", "", " ", "").Replace(cleaned)
+	if len(cleaned) < 6 {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s-%s", cleaned[:2], cleaned[2:4], cleaned[4:6])
 }

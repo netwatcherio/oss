@@ -201,6 +201,40 @@ export interface SharedHopInfo {
     avg_latency?: number
 }
 
+export interface SharedDestinationInfo {
+    target: string
+    target_ip?: string
+    agent_ids: number[]
+    agent_names: string[]
+    agent_count: number
+    avg_end_latency_ms?: number
+    avg_end_loss_pct?: number
+    has_issues: boolean
+}
+
+export interface SharedAsnInfo {
+    asn: number
+    asn_org?: string
+    hop_ips: string[]
+    agent_ids: number[]
+    agent_names: string[]
+    agent_count: number
+    has_issues: boolean
+    avg_latency_ms?: number
+    avg_loss_pct?: number
+}
+
+export interface CommonTargetInfo {
+    target: string
+    agent_ids: number[]
+    agent_names: string[]
+    agent_count: number
+    probe_count: number
+    avg_end_latency_ms?: number
+    avg_end_loss_pct?: number
+    has_issues: boolean
+}
+
 export interface RouteIncident {
     id: string
     type: 'ip_change' | 'isp_change' | 'route_change'
@@ -218,6 +252,9 @@ export interface WorkspaceRouteAnalysis {
     workspace_id: number
     agents: AgentRouteInfo[]
     shared_hops: SharedHopInfo[]
+    shared_destinations?: SharedDestinationInfo[]
+    shared_asns?: SharedAsnInfo[]
+    common_targets?: CommonTargetInfo[]
     incidents: RouteIncident[]
     total_agents: number
     total_routes: number

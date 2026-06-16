@@ -704,6 +704,151 @@ async function loadProbeData() {
     }
 }
 
+// ---------- Incremental data loading (time-range buttons) ----------
+//
+// When the user clicks a 1H/6H/24H/7D/All button in the trafficsim graph, the
+// page-level state.timeRange changes. The naive approach — calling
+// loadProbeData() — clears every data array and re-fetches from scratch.
+//
+// loadMissingTrafficSimData(from, to) keeps state.trafficSimData in place,
+// computes the gap between the new range and what we already hold, fetches
+// only that gap, and merges via addProbeDataUnique. agentPairData is rebuilt
+// from the new combined set so any chart bound to a forward/reverse direction
+// picks up the change.
+function dataRangeMs(arr: { created_at?: string }[]): [number, number] | null {
+    if (arr.length === 0) return null;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const d of arr) {
+        const t = new Date(d.created_at ?? '').getTime();
+        if (Number.isNaN(t)) continue;
+        if (t < lo) lo = t;
+        if (t > hi) hi = t;
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    return [lo, hi];
+}
+
+async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
+    if (!probeId.value || !token.value) return;
+    state.loadingTrafficSim = true;
+    try {
+        const existing = dataRangeMs(state.trafficSimData);
+        const gaps: Array<{ from: Date; to: Date }> = [];
+        if (!existing) {
+            gaps.push({ from, to });
+        } else {
+            const [lo, hi] = existing;
+            if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
+            if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
+        }
+        if (gaps.length === 0) {
+            console.log('[SharedProbe] No missing trafficsim data; skipping fetch');
+            return;
+        }
+
+        const tasks: Promise<void>[] = [];
+        for (const gap of gaps) {
+            // Reuse the same bucketing logic the initial load uses, but cap
+            // to the gap size so a 30-minute gap doesn't ask for 1-hour buckets.
+            const fullAggregateSec = calculateAggregateBucket(gap.from, gap.to);
+            const gapSec = Math.max(1, (gap.to.getTime() - gap.from.getTime()) / 1000);
+            const aggregateSec = fullAggregateSec > 0 && gapSec > fullAggregateSec * 4
+                ? fullAggregateSec
+                : (fullAggregateSec > 0 ? 0 : 0);
+            const useAgg = aggregateSec > 0;
+
+            // Determine the probe id to query. For AGENT probes the data is
+            // stored against the AGENT probe id and the sub-type 'TRAFFICSIM'.
+            // For standalone TRAFFICSIM probes it's the probe itself.
+            const queryProbeId = state.isAgentProbe ? probeId.value : probeId.value;
+            tasks.push((async () => {
+                try {
+                    const resp = await PublicShareService.getProbeData(
+                        token.value,
+                        queryProbeId,
+                        {
+                            from: toRFC3339(gap.from),
+                            to: toRFC3339(gap.to),
+                            type: 'TRAFFICSIM',
+                            aggregate: useAgg ? aggregateSec : undefined,
+                            limit: useAgg ? undefined : 300,
+                            password: authenticatedPassword.value || undefined,
+                        }
+                    );
+                    const rows = parseDataResult(resp, queryProbeId);
+                    for (const d of rows) {
+                        addProbeDataUnique(state.probeData, d);
+                        addProbeDataUnique(state.trafficSimData, d);
+                    }
+                    console.log(`[SharedProbe] Incremental TRAFFICSIM gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+                } catch (err) {
+                    console.warn('[SharedProbe] Incremental TRAFFICSIM fetch failed:', err);
+                }
+            })());
+        }
+        await Promise.allSettled(tasks);
+        rebuildAgentPairData();
+    } finally {
+        state.loadingTrafficSim = false;
+    }
+}
+
+// Re-derive state.agentPairData from the current state.trafficSimData /
+// pingData / mtrData. Called after incremental loads so any view bound to
+// pair.trafficSimData sees the new data.
+function rebuildAgentPairData(): void {
+    if (!state.isAgentProbe) return;
+    const firstTarget = probe.value?.targets?.[0];
+    if (!firstTarget?.agent_id) return;
+    const targetAgentId = firstTarget.agent_id;
+    const sourceAgentId = probe.value.agent_id || agent.value?.id;
+    if (sourceAgentId == null) return;
+    const mainProbeId = probeId.value;
+    if (mainProbeId == null) return;
+
+    const sourceAgentName = agent.value?.name || `Agent ${sourceAgentId}`;
+    const targetAgentName = probeAgent.value?.name || `Agent ${targetAgentId}`;
+
+    const allTrafficSimData = state.trafficSimData.filter(d => d.probe_id === mainProbeId);
+    const forwardTrafficSimData = allTrafficSimData.filter(d => d.agent_id === sourceAgentId);
+    const reverseTrafficSimData = allTrafficSimData.filter(d => d.agent_id === targetAgentId);
+    const allPingData = state.pingData.filter(d => d.probe_id === mainProbeId);
+    const forwardPingData = allPingData.filter(d => d.agent_id === sourceAgentId);
+    const reversePingData = allPingData.filter(d => d.agent_id === targetAgentId);
+    const allMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
+    const forwardMtrData = allMtrData.filter(d => d.agent_id === sourceAgentId);
+    const reverseMtrData = allMtrData.filter(d => d.agent_id === targetAgentId);
+    const hasBidirectional = reverseTrafficSimData.length > 0 || reversePingData.length > 0 || reverseMtrData.length > 0;
+
+    state.agentPairData = [{
+        direction: 'forward' as const,
+        probeId: mainProbeId,
+        sourceAgentId,
+        targetAgentId,
+        sourceAgentName,
+        targetAgentName,
+        pingData: forwardPingData,
+        mtrData: forwardMtrData,
+        trafficSimData: forwardTrafficSimData,
+        rperfData: [],
+    }];
+    if (hasBidirectional) {
+        state.agentPairData.push({
+            direction: 'reverse' as const,
+            probeId: mainProbeId,
+            sourceAgentId: targetAgentId,
+            targetAgentId: sourceAgentId,
+            sourceAgentName: targetAgentName,
+            targetAgentName: sourceAgentName,
+            pingData: reversePingData,
+            mtrData: reverseMtrData,
+            trafficSimData: reverseTrafficSimData,
+            rperfData: [],
+        });
+    }
+}
+
 // WebSocket connection for real-time probe data updates
 async function connectWebSocket() {
     try {
@@ -936,28 +1081,36 @@ onUnmounted(() => {
     SharedWebSocketService.disconnect();
 });
 
-// Debounced watch on timeRange to reload data when date picker changes
+// Debounced watch on timeRange. Same pattern as Probe.vue: first load does
+// the full loadProbeData() (which also loads metadata); subsequent range
+// changes (e.g. user clicks a 1H/6H/24H/7D/All button in the trafficsim
+// graph) do an incremental load for trafficsim only, preserving the data
+// already in state.trafficSimData.
 let timeRangeDebounceTimer: number | null = null;
 watch(
     () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
     (newVal, oldVal) => {
-        // Skip if values are the same or initial mount
         if (!newVal[0] || !newVal[1]) return;
         if (oldVal && newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) return;
-        
-        console.log('[SharedProbe] Time range changed, debouncing reload...');
-        
-        // Clear any pending reload
+
+        console.log('[SharedProbe] Time range changed, debouncing...');
+
         if (timeRangeDebounceTimer) {
             clearTimeout(timeRangeDebounceTimer);
         }
-        
-        // Debounce reload by 500ms to avoid rapid-fire requests
+
         timeRangeDebounceTimer = window.setTimeout(() => {
-            console.log('[SharedProbe] Debounced reload triggered, clearing cache for fresh data');
-            // Clear probe data cache for this token to ensure fresh data for new time range
-            PublicShareService.clearCache(token.value);
-            loadProbeData();
+            const [fromMs, toMs] = newVal as [number, number];
+            const from = new Date(fromMs);
+            const to = new Date(toMs);
+            if (state.trafficSimData.length === 0) {
+                console.log('[SharedProbe] No data yet — full loadProbeData()');
+                PublicShareService.clearCache(token.value);
+                loadProbeData();
+            } else {
+                console.log(`[SharedProbe] Incremental trafficsim fetch for [${from.toISOString()}..${to.toISOString()}]`);
+                loadMissingTrafficSimData(from, to);
+            }
             timeRangeDebounceTimer = null;
         }, 500);
     },

@@ -2,34 +2,6 @@
   <div class="traffic-graph-container">
     <!-- Chart Container -->
     <div id="trafficGraph" ref="trafficGraph"></div>
-
-    <!-- Controls Row -->
-    <div class="controls-row">
-      <!-- Time Range Selector -->
-      <div class="time-range-selector">
-        <button 
-          v-for="range in timeRanges" 
-          :key="range.value"
-          :class="['time-btn', { active: selectedRange === range.value }]"
-          @click="setTimeRange(range.value)">
-          {{ range.label }}
-        </button>
-      </div>
-      
-      <!-- Annotation Toggle -->
-      <div class="annotation-toggle">
-        <label class="toggle-label">
-          <input 
-            type="checkbox" 
-            v-model="showAnnotations" 
-            @change="toggleAnnotations"
-            class="toggle-input"
-          />
-          <span class="toggle-switch"></span>
-          <span class="toggle-text">Show All Annotations</span>
-        </label>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -64,25 +36,15 @@ export default {
   setup(props: { trafficResults: TrafficSimResult[]; intervalSec: number; currentTimeRange: [Date, Date] | null }, { emit }: { emit: (event: 'time-range-change', payload: [Date, Date]) => void }) {
     const trafficGraph = ref(null);
     const chart = ref<ApexCharts | null>(null);
-    const selectedRange = ref('all');
-    const showAnnotations = ref(true);
     const isDark = ref(themeService.getTheme() === 'dark');
     let themeUnsubscribe: (() => void) | null = null;
-    
+
     // Calculate the maximum allowed gap dynamically based on probe interval
     // Use 3x the interval to avoid breaking lines with sparse data
     const maxAllowedGap = computed(() => {
       const intervalMs = (props.intervalSec || 60) * 1000;
       return Math.max(intervalMs * 3, 180000); // At least 3 minutes minimum
     });
-    
-    const timeRanges = [
-      { label: '1H', value: '1h' },
-      { label: '6H', value: '6h' },
-      { label: '24H', value: '24h' },
-      { label: '7D', value: '7d' },
-      { label: 'All', value: 'all' }
-    ];
 
     // Calculate statistics
     const statistics = computed(() => {
@@ -208,64 +170,30 @@ export default {
       return 'critical';
     };
 
-    const setTimeRange = (range: string) => {
-      selectedRange.value = range;
-      
-      // Compute absolute time range and emit to parent so the whole page updates
-      if (range === 'all') {
-        // 'all' means let parent decide the full range - emit null to signal reset
-        emit('time-range-change', [new Date(0), new Date()]);
-      } else {
-        const ranges: Record<string, number> = {
-          '1h': 60 * 60 * 1000,
-          '6h': 6 * 60 * 60 * 1000,
-          '24h': 24 * 60 * 60 * 1000,
-          '7d': 7 * 24 * 60 * 60 * 1000
-        };
-        const now = new Date();
-        const from = new Date(now.getTime() - ranges[range]);
-        emit('time-range-change', [from, now]);
-      }
-      
-      drawGraph();
-    };
-
-    const toggleAnnotations = () => {
-      if (chart.value) {
-        // Update the chart with or without annotations
-        drawGraph();
-      }
-    };
-
-    const filterDataByTimeRange = (data: TrafficSimResult[]) => {
-      if (selectedRange.value === 'all') return data;
-      
-      const now = new Date().getTime();
-      const ranges: Record<string, number> = {
-        '1h': 60 * 60 * 1000,
-        '6h': 6 * 60 * 60 * 1000,
-        '24h': 24 * 60 * 60 * 1000,
-        '7d': 7 * 24 * 60 * 60 * 1000
-      };
-      
-      const cutoff = now - ranges[selectedRange.value];
-      return data.filter(d => new Date(d.reportTime).getTime() > cutoff);
-    };
-
     const drawGraph = () => {
       if (!trafficGraph.value || !props.trafficResults || props.trafficResults.length === 0) {
         return;
       }
 
-      const filteredData = filterDataByTimeRange(props.trafficResults);
-      
+      // The page-level picker already filters the data we receive via
+      // props.trafficResults, so no in-component time-range filter is
+      // needed.
+      const filteredData = props.trafficResults;
+
       if (chart.value) {
-        chart.value.updateOptions(createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
-        // Explicitly bind zoom events after updateOptions to ensure they fire
-        chart.value.removeEvents();
-        chart.value.addEventsListeners();
+        // updateOptions re-applies the events block (including the new
+        // emit/props closure). ApexCharts has no removeEvents /
+        // addEventsListeners API; those calls were stale and threw.
+        // Note: updateOptions resets the user's zoom. The suppressRedraw
+        // flag in the watch below prevents this from being called on every
+        // parent re-render — the parent builds a new array reference each
+        // render (transformToTrafficSimResult uses .map), so a reference-
+        // based watch would loop forever: chart re-renders → zoom resets
+        // → zoomed event → parent updates → parent re-renders → new array
+        // → watch fires → re-render → ...
+        chart.value.updateOptions(createChartOptions(filteredData, 'all', maxAllowedGap.value, isDark.value, emit, props, notifyZoomFromChart));
       } else {
-        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, selectedRange.value, showAnnotations.value, maxAllowedGap.value, isDark.value));
+        chart.value = new ApexCharts(trafficGraph.value, createChartOptions(filteredData, 'all', maxAllowedGap.value, isDark.value, emit, props, notifyZoomFromChart));
         chart.value.render();
       }
     };
@@ -297,19 +225,47 @@ export default {
       }
     });
 
-    watch(() => props.trafficResults, drawGraph, { deep: true });
+    // Flag set by the chart's own zoom/reset handler to tell the watch
+    // "the change came from me, don't redraw". The parent will get the
+    // new range, update state.timeRange, and the template will pass a
+    // new trafficResults array reference (transformToTrafficSimResult
+    // uses .map()). Without this guard the watch would fire, drawGraph
+    // would call updateOptions, and updateOptions resets the zoom —
+    // feedback loop.
+    let suppressRedraw = false;
 
-    return { 
-      trafficGraph, 
-      statistics, 
+    // Content-based watch: redraw when the *actual* data changes (length
+    // or last reportTime), not on every reference change. The parent
+    // produces a new array reference on every render, so a reference-
+    // based watch would loop with the chart's own zoom events.
+    watch(
+      () => {
+        const arr = props.trafficResults;
+        if (!arr || arr.length === 0) return 0;
+        const last = arr[arr.length - 1] as any;
+        return arr.length + (last?.reportTime ?? last?.created_at ?? 0);
+      },
+      () => {
+        if (suppressRedraw) {
+          suppressRedraw = false;
+          return;
+        }
+        drawGraph();
+      }
+    );
+
+    // Expose the flag setter to createChartOptions so the events block
+    // can mark "I caused this range change, don't redraw."
+    function notifyZoomFromChart() {
+      suppressRedraw = true;
+    }
+
+    return {
+      trafficGraph,
+      statistics,
       lastHourStats,
-      getLatencyClass, 
+      getLatencyClass,
       getPacketLossClass,
-      timeRanges,
-      selectedRange,
-      setTimeRange,
-      showAnnotations,
-      toggleAnnotations
     };
   },
 };
@@ -420,7 +376,15 @@ function getTrafficBucketSize(data: TrafficSimResult[], timeRange: string): numb
   return bucketSize;
 }
 
-function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnnotations: boolean, maxAllowedGap: number = DEFAULT_MAX_GAP, darkMode: boolean = false): ApexCharts.ApexOptions {
+function createChartOptions(
+  data: TrafficSimResult[],
+  timeRange: string,
+  maxAllowedGap: number = DEFAULT_MAX_GAP,
+  darkMode: boolean = false,
+  emit?: (event: 'time-range-change', payload: [Date, Date]) => void,
+  props?: { currentTimeRange: [Date, Date] | null },
+  notifyZoomFromChart?: () => void
+): ApexCharts.ApexOptions {
   // Theme-aware color definitions
   const colors = darkMode ? {
     foreColor: '#e5e7eb',
@@ -560,19 +524,21 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
     points: []
   };
 
-  // Only add other annotations if showAnnotations is true
-  if (showAnnotations) {
+  // Anomaly regions are always drawn (the toggle was removed — there was no
+  // legitimate reason to hide latency / loss regions in the troubleshooting
+  // view).
+  {
     const anomalyThreshold = 300; // ms
-    
+
     // Group consecutive high-latency anomalies into regions (like PingGraph)
     let latencyRegion: { start: number; end: number } | null = null;
-    
+
     processedData.forEach((d, i) => {
       const avgRtt = d.averageRTT;
       const maxRtt = d.maxRTT;
       const isAnomaly = avgRtt > anomalyThreshold || maxRtt > anomalyThreshold;
       const timestamp = new Date(d.reportTime).getTime();
-      
+
       if (isAnomaly) {
         if (!latencyRegion) {
           latencyRegion = { start: timestamp, end: timestamp };
@@ -592,7 +558,7 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         latencyRegion = null;
       }
     });
-    
+
     // Handle final region if data ends with anomaly
     if (latencyRegion) {
       annotations.xaxis!.push({
@@ -604,20 +570,20 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         strokeDashArray: 0
       } as any);
     }
-    
+
     // Group consecutive packet loss periods into regions
     let lossRegion: { start: number; end: number; severity: 'low' | 'moderate' | 'high' } | null = null;
-    
+
     processedData.forEach((d, i) => {
       const packetLoss = lossPercent(d);
       const timestamp = new Date(d.reportTime).getTime();
-      
+
       // Determine severity
       let severity: 'low' | 'moderate' | 'high' | null = null;
       if (packetLoss >= 10) severity = 'high';
       else if (packetLoss >= 5) severity = 'moderate';
       else if (packetLoss >= 1) severity = 'low';
-      
+
       if (severity) {
         if (!lossRegion) {
           lossRegion = { start: timestamp, end: timestamp, severity };
@@ -630,11 +596,11 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         }
       } else if (lossRegion) {
         // End of loss region - add subtle shaded annotation
-        const color = lossRegion.severity === 'high' ? '#fecaca' : 
+        const color = lossRegion.severity === 'high' ? '#fecaca' :
                       lossRegion.severity === 'moderate' ? '#fed7aa' : '#fef3c7';
-        const borderColor = lossRegion.severity === 'high' ? '#ef4444' : 
+        const borderColor = lossRegion.severity === 'high' ? '#ef4444' :
                             lossRegion.severity === 'moderate' ? '#f97316' : '#eab308';
-        
+
         annotations.xaxis!.push({
           x: lossRegion.start,
           x2: lossRegion.end,
@@ -646,14 +612,14 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
         lossRegion = null;
       }
     });
-    
+
     // Handle final region
     if (lossRegion) {
-      const color = lossRegion.severity === 'high' ? '#fecaca' : 
+      const color = lossRegion.severity === 'high' ? '#fecaca' :
                     lossRegion.severity === 'moderate' ? '#fed7aa' : '#fef3c7';
-      const borderColor = lossRegion.severity === 'high' ? '#ef4444' : 
+      const borderColor = lossRegion.severity === 'high' ? '#ef4444' :
                           lossRegion.severity === 'moderate' ? '#f97316' : '#eab308';
-      
+
       annotations.xaxis!.push({
         x: lossRegion.start,
         x2: lossRegion.end,
@@ -721,13 +687,18 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
             const newFrom = new Date(xaxis.min);
             const newTo = new Date(xaxis.max);
             console.log('[TrafficSimGraph] Zoomed to:', newFrom.toISOString(), '->', newTo.toISOString());
-            emit('time-range-change', [newFrom, newTo]);
+            // Mark the next trafficResults re-render as "caused by us" so
+            // the watch skips drawGraph — otherwise updateOptions resets
+            // the zoom right back to the data range (feedback loop).
+            notifyZoomFromChart?.();
+            emit?.('time-range-change', [newFrom, newTo]);
           }
         },
         beforeResetZoom: () => {
-          if (props.currentTimeRange && props.currentTimeRange.length === 2) {
+          if (props?.currentTimeRange && props.currentTimeRange.length === 2) {
             console.log('[TrafficSimGraph] Reset zoom, restoring original range');
-            emit('time-range-change', props.currentTimeRange);
+            notifyZoomFromChart?.();
+            emit?.('time-range-change', props.currentTimeRange);
           }
           return undefined;
         }
@@ -1242,100 +1213,9 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   color: #1e293b;
 }
 
-.controls-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 1rem;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
+/* Time-range buttons and annotation toggle were removed — the page-level
+   date picker controls the range, and anomaly regions are always on. */
 
-.time-range-selector {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.time-btn {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid #e5e7eb;
-  background: white;
-  color: #6b7280;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.time-btn:hover {
-  background: #f9fafb;
-  color: #374151;
-}
-
-.time-btn.active {
-  background: #3b82f6;
-  color: white;
-  border-color: #3b82f6;
-}
-
-/* Annotation Toggle Styles */
-.annotation-toggle {
-  display: flex;
-  align-items: center;
-}
-
-.toggle-label {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-
-.toggle-input {
-  position: absolute;
-  opacity: 0;
-  cursor: pointer;
-  height: 0;
-  width: 0;
-}
-
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 24px;
-  background-color: #e5e7eb;
-  border-radius: 12px;
-  margin-right: 0.5rem;
-  transition: background-color 0.2s;
-}
-
-.toggle-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  background-color: white;
-  border-radius: 50%;
-  transition: transform 0.2s;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.toggle-input:checked + .toggle-switch {
-  background-color: #3b82f6;
-}
-
-.toggle-input:checked + .toggle-switch::after {
-  transform: translateX(20px);
-}
-
-.toggle-text {
-  font-size: 0.875rem;
-  color: #374151;
-  font-weight: 500;
-}
 
 /* Custom tooltip styles */
 :deep(.traffic-sim-tooltip) {
@@ -1406,19 +1286,10 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
   margin-left: auto;
 }
 
-/* Responsive adjustments */
+/* Responsive adjustments — controls row was removed */
 @media (max-width: 640px) {
-  .controls-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .time-range-selector {
-    justify-content: center;
-  }
-  
-  .annotation-toggle {
-    justify-content: center;
+  #trafficGraph {
+    height: 280px;
   }
 }
 
@@ -1440,25 +1311,6 @@ function createChartOptions(data: TrafficSimResult[], timeRange: string, showAnn
 
 :global([data-theme="dark"]) .stat-value {
   color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .time-btn {
-  background: #1e293b;
-  border-color: #475569;
-  color: #9ca3af;
-}
-
-:global([data-theme="dark"]) .time-btn:hover {
-  background: #334155;
-  color: #f9fafb;
-}
-
-:global([data-theme="dark"]) .toggle-switch {
-  background-color: #475569;
-}
-
-:global([data-theme="dark"]) .toggle-text {
-  color: #e5e7eb;
 }
 
 /* Dark mode tooltips */

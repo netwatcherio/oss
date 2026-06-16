@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,14 @@ import (
 // llmProvider is the optional LLM provider for enriching analysis summaries.
 // Nil by default (disabled). Set via SetLLMProvider during startup.
 var llmProvider llm.Provider
+
+// GeoIPResolver is a minimal interface satisfied by *geoip.Store. Decoupling
+// keeps the probe package free of an import cycle on geoip (which itself
+// depends on agent types) and lets tests inject a stub.
+type GeoIPResolver interface {
+	HasASN() bool
+	LookupASN(ipStr string) (asn uint, org string, ok bool)
+}
 
 // SetLLMProvider configures the optional LLM provider for analysis enrichment.
 func SetLLMProvider(p llm.Provider) {
@@ -136,15 +145,15 @@ type MtrPathAnalysis struct {
 
 // ProbeAnalysis is the complete analysis result for a single probe direction
 type ProbeAnalysis struct {
-	ProbeID      uint              `json:"probe_id"`
-	ProbeType    string            `json:"probe_type"`
-	Target       string            `json:"target"`
-	AgentID      uint              `json:"agent_id"`
-	AgentName    string            `json:"agent_name"`
-	Health       HealthVector      `json:"health"`
-	Metrics      ProbeMetrics      `json:"metrics"`
-	PathAnalysis *MtrPathAnalysis  `json:"path_analysis,omitempty"`
-	Reverse      *ProbeAnalysis    `json:"reverse,omitempty"`
+	ProbeID      uint             `json:"probe_id"`
+	ProbeType    string           `json:"probe_type"`
+	Target       string           `json:"target"`
+	AgentID      uint             `json:"agent_id"`
+	AgentName    string           `json:"agent_name"`
+	Health       HealthVector     `json:"health"`
+	Metrics      ProbeMetrics     `json:"metrics"`
+	PathAnalysis *MtrPathAnalysis `json:"path_analysis,omitempty"`
+	Reverse      *ProbeAnalysis   `json:"reverse,omitempty"`
 	// CombinedHealth merges forward and reverse health for bidirectional probes,
 	// weighted toward the worse direction (a path is only as usable as its worse
 	// direction). Nil when no reverse data exists.
@@ -3137,18 +3146,67 @@ type RouteIncident struct {
 
 // WorkspaceRouteAnalysis is the top-level response for route/path visualization.
 type WorkspaceRouteAnalysis struct {
-	WorkspaceID uint             `json:"workspace_id"`
-	Agents      []AgentRouteInfo `json:"agents"`
-	SharedHops  []SharedHopInfo  `json:"shared_hops"`
-	Incidents   []RouteIncident  `json:"incidents"`
-	TotalAgents int              `json:"total_agents"`
-	TotalRoutes int              `json:"total_routes"`
-	GeneratedAt time.Time        `json:"generated_at"`
+	WorkspaceID        uint                    `json:"workspace_id"`
+	Agents             []AgentRouteInfo        `json:"agents"`
+	SharedHops         []SharedHopInfo         `json:"shared_hops"`
+	SharedDestinations []SharedDestinationInfo `json:"shared_destinations"`
+	SharedASNs         []SharedASNInfo         `json:"shared_asns"`
+	CommonTargets      []CommonTargetInfo      `json:"common_targets"`
+	Incidents          []RouteIncident         `json:"incidents"`
+	TotalAgents        int                     `json:"total_agents"`
+	TotalRoutes        int                     `json:"total_routes"`
+	GeneratedAt        time.Time               `json:"generated_at"`
+}
+
+// SharedDestinationInfo represents a destination IP/hostname that 2+ agents
+// are MTR-ing to. This is the most common "shared path" pattern across agents
+// targeting the same internet endpoint (e.g. 8.8.8.8, dns.google).
+type SharedDestinationInfo struct {
+	Target          string   `json:"target"` // Hostname or IP target
+	TargetIP        string   `json:"target_ip,omitempty"`
+	AgentIDs        []uint   `json:"agent_ids"`
+	AgentNames      []string `json:"agent_names"`
+	AgentCount      int      `json:"agent_count"`
+	AvgEndLatencyMs float64  `json:"avg_end_latency_ms,omitempty"`
+	AvgEndLossPct   float64  `json:"avg_end_loss_pct,omitempty"`
+	HasIssues       bool     `json:"has_issues"`
+}
+
+// SharedASNInfo groups intermediate hop IPs by ASN, showing common upstream
+// networks that 2+ agents traverse. This is the most resilient shared-route
+// signal because agents on different last-mile ISPs still share ASN-level
+// transit (e.g. Level3, Cogent, NTT).
+type SharedASNInfo struct {
+	ASN        uint     `json:"asn"`
+	ASNOrg     string   `json:"asn_org,omitempty"`
+	HopIPs     []string `json:"hop_ips"`
+	AgentIDs   []uint   `json:"agent_ids"`
+	AgentNames []string `json:"agent_names"`
+	AgentCount int      `json:"agent_count"`
+	HasIssues  bool     `json:"has_issues"`
+	AvgLatency float64  `json:"avg_latency_ms,omitempty"`
+	AvgLoss    float64  `json:"avg_loss_pct,omitempty"`
+}
+
+// CommonTargetInfo summarizes a target (e.g. "google.com") that multiple
+// agents are MTR-ing to. This is the "what are agents probing in common"
+// view, irrespective of whether the actual path hops overlap.
+type CommonTargetInfo struct {
+	Target          string   `json:"target"`
+	AgentIDs        []uint   `json:"agent_ids"`
+	AgentNames      []string `json:"agent_names"`
+	AgentCount      int      `json:"agent_count"`
+	ProbeCount      int      `json:"probe_count"`
+	AvgEndLatencyMs float64  `json:"avg_end_latency_ms,omitempty"`
+	AvgEndLossPct   float64  `json:"avg_end_loss_pct,omitempty"`
+	HasIssues       bool     `json:"has_issues"`
 }
 
 // ComputeWorkspaceRouteAnalysis aggregates route/path data across all agents in a workspace
-// for the route/path matching visualization.
-func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspaceID uint) (*WorkspaceRouteAnalysis, error) {
+// for the route/path matching visualization. Pass nil for geoStore to skip ASN grouping.
+//
+//	lookbackHours bounds the MTR / NETINFO lookback window. 0 = default (24h MTR, 1h NETINFO).
+func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, geoStore GeoIPResolver, workspaceID uint, lookbackHours int) (*WorkspaceRouteAnalysis, error) {
 	// 1. Get agents
 	agents, err := getWorkspaceAgents(ctx, pg, workspaceID)
 	if err != nil {
@@ -3176,8 +3234,14 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		}
 	}
 
-	// Look back 24 hours for MTR data and 1 hour for net-info changes
-	mtrFrom := time.Now().UTC().Add(-24 * time.Hour)
+	// MTR lookback default = 24h, NETINFO lookback fixed at 1h.
+	// The lookbackHours param scales only the MTR window — NETINFO must stay
+	// tight so a public IP change from 25h ago doesn't bleed into a "current"
+	// view.
+	if lookbackHours <= 0 {
+		lookbackHours = 24
+	}
+	mtrFrom := time.Now().UTC().Add(-time.Duration(lookbackHours) * time.Hour)
 	netInfoFrom := time.Now().UTC().Add(-60 * time.Minute)
 
 	// 2. Get latest NETINFO per agent in a single batched query.
@@ -3187,6 +3251,20 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 	// type='NETINFO' partition, then pick the latest row per agent with
 	// row_number().
 	netInfoByAgent := getLatestNetInfoForAgents(ctx, ch, agentIDs, netInfoFrom)
+
+	// 2b. Augment agentIPToID with NETINFO-derived public IPs. The public
+	// IP itself rarely appears in the agent's own outbound MTR (NAT + ICMP
+	// rate-limiting at the CPE), but it DOES show up in any MTR another
+	// agent runs against this one — without this, agent-to-agent hops
+	// never get their "is_agent" label.
+	for agentID, ni := range netInfoByAgent {
+		if ni == nil || ni.PublicAddress == "" {
+			continue
+		}
+		if _, exists := agentIPToID[ni.PublicAddress]; !exists {
+			agentIPToID[ni.PublicAddress] = agentID
+		}
+	}
 
 	// 3. Detect IP/ISP changes
 	netInfoChanges, _ := getWorkspaceNetInfoChanges(ctx, ch, agentIDs, netInfoFrom)
@@ -3200,6 +3278,29 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 	hopIndex := make(map[string]map[uint]HopMetrics) // hopIP -> agentID -> metrics
 	routeIncidents := make([]RouteIncident, 0)
 	totalRoutes := 0
+
+	// Cross-agent aggregation: keyed by normalized target string so that
+	// "8.8.8.8", "dns.google" and "google.com" don't fragment the view.
+	// The first observation wins for display (we prefer hostname-style).
+	type destStats struct {
+		agents      map[uint]bool
+		probeCount  int
+		totalLat    float64
+		totalLoss   float64
+		latSamples  int
+		lossSamples int
+		hasIssues   bool
+		targetIP    string
+		displayName string
+	}
+	destAgg := make(map[string]*destStats) // normalized target -> stats
+
+	// commonTargetKey normalizes a target string for grouping. We treat IP
+	// literals and hostnames together only when they're actually the same
+	// endpoint — otherwise we'd merge google.com and 8.8.8.8 incorrectly.
+	// Resolution is left to a future improvement (would need IP→hostname
+	// enrichment from the latest MTR payload's resolved target).
+	commonTargetKey := func(t string) string { return strings.ToLower(strings.TrimSpace(t)) }
 
 	for _, a := range agents {
 		ari := AgentRouteInfo{
@@ -3278,8 +3379,14 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 				pri.BaselineRoutePath = baseline.RoutePath
 			}
 
-			// Get latest MTR data for this probe
-			mtrRows, err := GetProbeDataByProbe(ctx, ch, uint64(p.ID), nil, mtrFrom, time.Now().UTC(), false, 50)
+			// Get latest MTR data for this probe. CRITICAL: filter by type='MTR'
+			// at the SQL level. Without this, GetProbeDataByProbe returns the
+			// most-recent 50 rows of ANY type for the probe — on probes that
+			// also run PING or TRAFFICSIM, MTRs are pushed out of the LIMIT
+			// and the route analysis silently returns empty routes.
+			// This is the same pattern Probe.vue uses (limit=500, type filter
+			// applied via the /probe-data/probes/:id/data endpoint).
+			mtrRows, err := GetProbeDataByProbe(ctx, ch, uint64(p.ID), nil, mtrFrom, time.Now().UTC(), false, 500, "MTR")
 			if err == nil && len(mtrRows) > 0 {
 				// Build route signatures and compute stability
 				sigs := make(map[string]int)
@@ -3342,9 +3449,13 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 				}
 			}
 
-			// Index hops for shared-hop computation
-			if len(pri.LatestHops) > 1 {
-				for _, ip := range pri.LatestHops[:len(pri.LatestHops)-1] {
+			// Index hops for shared-hop computation. Include the *final* hop
+			// (the destination) — the destination is the most common shared
+			// element across agents (e.g. all of them MTR-ing 8.8.8.8).
+			// Final-hop metrics aren't in IntermediateHops so synthesize them
+			// from end-hop latency/loss when present.
+			if len(pri.LatestHops) >= 1 {
+				for idx, ip := range pri.LatestHops {
 					if ip == "" || ip == "*" {
 						continue
 					}
@@ -3352,6 +3463,8 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 						hopIndex[ip] = make(map[uint]HopMetrics)
 					}
 					metrics := HopMetrics{Count: 1}
+					// Try intermediate-hops first (covers all but the final hop)
+					matched := false
 					for _, ih := range pri.IntermediateHops {
 						if ih.IP == ip {
 							metrics.TotalLoss += ih.Loss
@@ -3359,10 +3472,49 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 							if ih.Loss > 0 || ih.Latency > 100 {
 								metrics.HasIssues = true
 							}
+							matched = true
 							break
 						}
 					}
+					// Fall back to end-hop metrics for the final hop
+					if !matched && idx == len(pri.LatestHops)-1 {
+						metrics.TotalLoss += pri.AvgEndHopLoss
+						metrics.TotalLatency += pri.AvgEndHopLatency
+						if pri.AvgEndHopLoss > 0 || pri.AvgEndHopLatency > 100 {
+							metrics.HasIssues = true
+						}
+					}
 					hopIndex[ip][a.ID] = metrics
+				}
+			}
+
+			// Aggregate per-target stats for the cross-agent views.
+			if target != "" {
+				key := commonTargetKey(target)
+				ds, ok := destAgg[key]
+				if !ok {
+					ds = &destStats{agents: make(map[uint]bool), displayName: target}
+					destAgg[key] = ds
+				}
+				if !ds.agents[a.ID] {
+					ds.agents[a.ID] = true
+				}
+				ds.probeCount++
+				if pri.AvgEndHopLatency > 0 {
+					ds.totalLat += pri.AvgEndHopLatency
+					ds.latSamples++
+				}
+				if pri.AvgEndHopLoss > 0 {
+					ds.totalLoss += pri.AvgEndHopLoss
+					ds.lossSamples++
+				}
+				if pri.HasRouteChange {
+					ds.hasIssues = true
+				}
+				// Capture the destination IP from the final hop (most
+				// reliable for IP-literal targets) when we see it.
+				if ds.targetIP == "" && len(pri.LatestHops) > 0 {
+					ds.targetIP = pri.LatestHops[len(pri.LatestHops)-1]
 				}
 			}
 
@@ -3431,15 +3583,199 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		sharedHops = append(sharedHops, sh)
 	}
 
+	// 6. Build shared destinations — any target that 2+ agents are MTR-ing.
+	// This is the most useful "common route" view because it surfaces
+	// internet endpoints the deployment is collectively monitoring.
+	sharedDestinations := make([]SharedDestinationInfo, 0)
+	for _, ds := range destAgg {
+		if len(ds.agents) < 2 {
+			continue
+		}
+		sd := SharedDestinationInfo{
+			Target:     ds.displayName,
+			TargetIP:   ds.targetIP,
+			AgentCount: len(ds.agents),
+		}
+		if ds.latSamples > 0 {
+			sd.AvgEndLatencyMs = ds.totalLat / float64(ds.latSamples)
+		}
+		if ds.lossSamples > 0 {
+			sd.AvgEndLossPct = ds.totalLoss / float64(ds.lossSamples)
+		}
+		sd.HasIssues = ds.hasIssues
+		for aid := range ds.agents {
+			sd.AgentIDs = append(sd.AgentIDs, aid)
+			if a, ok := agentByID[aid]; ok {
+				sd.AgentNames = append(sd.AgentNames, a.Name)
+			}
+		}
+		sharedDestinations = append(sharedDestinations, sd)
+	}
+
+	// 7. Build common targets — every target probed by ≥1 agent, sorted by
+	// agent count. Single-agent targets still get a row, so the UI can
+	// answer "what is this agent MTR-ing?" without leaving the tab.
+	commonTargets := make([]CommonTargetInfo, 0, len(destAgg))
+	for _, ds := range destAgg {
+		ct := CommonTargetInfo{
+			Target:     ds.displayName,
+			AgentCount: len(ds.agents),
+			ProbeCount: ds.probeCount,
+			HasIssues:  ds.hasIssues,
+		}
+		if ds.latSamples > 0 {
+			ct.AvgEndLatencyMs = ds.totalLat / float64(ds.latSamples)
+		}
+		if ds.lossSamples > 0 {
+			ct.AvgEndLossPct = ds.totalLoss / float64(ds.lossSamples)
+		}
+		for aid := range ds.agents {
+			ct.AgentIDs = append(ct.AgentIDs, aid)
+			if a, ok := agentByID[aid]; ok {
+				ct.AgentNames = append(ct.AgentNames, a.Name)
+			}
+		}
+		commonTargets = append(commonTargets, ct)
+	}
+	// Stable ordering: most-shared first, then alphabetical.
+	sortCommonTargets(commonTargets)
+
+	// 8. Build shared ASNs — group hop IPs by their ASN, only emit ASNs
+	// that 2+ agents traverse. This is the "common upstream network"
+	// view that survives last-mile ISP diversity.
+	sharedASNs := buildSharedASNs(geoStore, hopIndex, agentByID)
+
 	return &WorkspaceRouteAnalysis{
-		WorkspaceID: workspaceID,
-		Agents:      agentRoutes,
-		SharedHops:  sharedHops,
-		Incidents:   routeIncidents,
-		TotalAgents: len(agents),
-		TotalRoutes: totalRoutes,
-		GeneratedAt: time.Now().UTC(),
+		WorkspaceID:        workspaceID,
+		Agents:             agentRoutes,
+		SharedHops:         sharedHops,
+		SharedDestinations: sharedDestinations,
+		SharedASNs:         sharedASNs,
+		CommonTargets:      commonTargets,
+		Incidents:          routeIncidents,
+		TotalAgents:        len(agents),
+		TotalRoutes:        totalRoutes,
+		GeneratedAt:        time.Now().UTC(),
 	}, nil
+}
+
+// sortCommonTargets orders: highest agent count first, then alpha by target.
+func sortCommonTargets(cs []CommonTargetInfo) {
+	sort.SliceStable(cs, func(i, j int) bool {
+		if cs[i].AgentCount != cs[j].AgentCount {
+			return cs[i].AgentCount > cs[j].AgentCount
+		}
+		return cs[i].Target < cs[j].Target
+	})
+}
+
+// buildSharedASNs groups shared hop IPs by their autonomous system. Each
+// emitted SharedASNInfo represents an ASN whose network is traversed by
+// 2+ agents, with rollup latency/loss across the contributing hops.
+//
+// The geoStore parameter is an interface to keep this package import-free
+// of the geoip package. Pass nil to skip ASN grouping (e.g. when no
+// MaxMind DB is configured — HasASN() returns false in that case anyway).
+func buildSharedASNs(geoStore GeoIPResolver, hopIndex map[string]map[uint]HopMetrics, agentByID map[uint]agentInfo) []SharedASNInfo {
+	if geoStore == nil || !geoStore.HasASN() {
+		return []SharedASNInfo{}
+	}
+
+	// ASN -> set of contributing hop IPs (for dedup in output)
+	type asnBucket struct {
+		asn      uint
+		org      string
+		hopIPs   map[string]struct{}
+		agents   map[uint]bool
+		hasIssue bool
+		latSum   float64
+		lossSum  float64
+		latN     int
+		lossN    int
+	}
+	buckets := make(map[uint]*asnBucket)
+
+	for hopIP, agentMetricsMap := range hopIndex {
+		if len(agentMetricsMap) < 2 {
+			continue
+		}
+		asn, org, ok := geoStore.LookupASN(hopIP)
+		if !ok || asn == 0 {
+			continue
+		}
+		b, exists := buckets[asn]
+		if !exists {
+			b = &asnBucket{
+				asn:    asn,
+				org:    org,
+				hopIPs: make(map[string]struct{}),
+				agents: make(map[uint]bool),
+			}
+			buckets[asn] = b
+		}
+		b.hopIPs[hopIP] = struct{}{}
+		var hopLat, hopLoss float64
+		var hopLatN, hopLossN int
+		for aid, metrics := range agentMetricsMap {
+			b.agents[aid] = true
+			if metrics.HasIssues {
+				b.hasIssue = true
+			}
+			// Average per-agent latency/loss for this hop
+			if metrics.Count > 0 {
+				avgLat := metrics.TotalLatency / float64(metrics.Count)
+				avgLoss := metrics.TotalLoss / float64(metrics.Count)
+				hopLat += avgLat
+				hopLatN++
+				if avgLoss > 0 {
+					hopLoss += avgLoss
+					hopLossN++
+				}
+			}
+		}
+		b.latSum += hopLat
+		b.latN += hopLatN
+		b.lossSum += hopLoss
+		b.lossN += hopLossN
+	}
+
+	out := make([]SharedASNInfo, 0, len(buckets))
+	for _, b := range buckets {
+		if len(b.agents) < 2 {
+			continue
+		}
+		s := SharedASNInfo{
+			ASN:        b.asn,
+			ASNOrg:     b.org,
+			AgentCount: len(b.agents),
+			HasIssues:  b.hasIssue,
+		}
+		for ip := range b.hopIPs {
+			s.HopIPs = append(s.HopIPs, ip)
+		}
+		for aid := range b.agents {
+			s.AgentIDs = append(s.AgentIDs, aid)
+			if a, ok := agentByID[aid]; ok {
+				s.AgentNames = append(s.AgentNames, a.Name)
+			}
+		}
+		if b.latN > 0 {
+			s.AvgLatency = b.latSum / float64(b.latN)
+		}
+		if b.lossN > 0 {
+			s.AvgLoss = b.lossSum / float64(b.lossN)
+		}
+		out = append(out, s)
+	}
+
+	// Sort: most agents first, then by ASN
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].AgentCount != out[j].AgentCount {
+			return out[i].AgentCount > out[j].AgentCount
+		}
+		return out[i].ASN < out[j].ASN
+	})
+	return out
 }
 
 // ── Voice Quality Types ──────────────────────────────────────────────────────
@@ -3515,16 +3851,16 @@ type VoiceTrends struct {
 // ("improving", "stable", "worsening", "unknown") for executive
 // summary text.
 type BaselineDelta struct {
-	From             time.Time `json:"from"`
-	To               time.Time `json:"to"`
-	MosDelta         float64   `json:"mos_delta"`
-	LatencyDeltaMs   float64   `json:"latency_delta_ms"`
-	JitterDeltaMs    float64   `json:"jitter_delta_ms"`
-	LossDeltaPct     float64   `json:"loss_delta_pct"`
-	SampleCount      int       `json:"sample_count"`
-	BaselineSamples  int       `json:"baseline_samples"`
-	Trend            string    `json:"trend"` // improving | stable | worsening | unknown
-	PercentChange    float64   `json:"percent_change"`
+	From            time.Time `json:"from"`
+	To              time.Time `json:"to"`
+	MosDelta        float64   `json:"mos_delta"`
+	LatencyDeltaMs  float64   `json:"latency_delta_ms"`
+	JitterDeltaMs   float64   `json:"jitter_delta_ms"`
+	LossDeltaPct    float64   `json:"loss_delta_pct"`
+	SampleCount     int       `json:"sample_count"`
+	BaselineSamples int       `json:"baseline_samples"`
+	Trend           string    `json:"trend"` // improving | stable | worsening | unknown
+	PercentChange   float64   `json:"percent_change"`
 }
 
 // WorkspaceIncidentContext is the slice of workspace-level incidents
@@ -3532,10 +3868,10 @@ type BaselineDelta struct {
 // in the voice report so the operator sees the workspace story, not
 // just the per-agent slice.
 type WorkspaceIncidentContext struct {
-	AffectedCount   int                   `json:"affected_count"`
-	CriticalCount   int                   `json:"critical_count"`
-	WarningCount    int                   `json:"warning_count"`
-	Incidents       []DetectedIncident    `json:"incidents"`
+	AffectedCount int                `json:"affected_count"`
+	CriticalCount int                `json:"critical_count"`
+	WarningCount  int                `json:"warning_count"`
+	Incidents     []DetectedIncident `json:"incidents"`
 }
 
 // RouteSignal is one MTR route change or routing-related signal
@@ -3544,8 +3880,8 @@ type WorkspaceIncidentContext struct {
 type RouteSignal struct {
 	ProbeID    uint      `json:"probe_id"`
 	ProbeType  string    `json:"probe_type"`
-	Type       string    `json:"type"`        // route_change, hop_count_change, isp_change, ip_change
-	Severity   string    `json:"severity"`    // info, warning, critical
+	Type       string    `json:"type"`     // route_change, hop_count_change, isp_change, ip_change
+	Severity   string    `json:"severity"` // info, warning, critical
 	Title      string    `json:"title"`
 	Evidence   string    `json:"evidence"`
 	DetectedAt time.Time `json:"detected_at"`
@@ -3578,22 +3914,22 @@ type VoiceQualityIssue struct {
 // aggregates across all probes, see `AggregateForward` / `AggregateReturn`.
 // For a full per-probe breakdown, see `Probes`.
 type VoiceQualitySummary struct {
-	AgentID         uint                `json:"agent_id"`
-	AgentName       string              `json:"agent_name"`
-	OverallMos      float64             `json:"overall_mos"`       // weighted average of forward + return
-	OverallGrade    string              `json:"overall_grade"`     // excellent/good/fair/poor/critical
-	LatencyScore    float64             `json:"latency_score"`     // 0-100
-	JitterScore     float64             `json:"jitter_score"`      // 0-100
-	PacketLossScore float64             `json:"packet_loss_score"` // 0-100
+	AgentID         uint    `json:"agent_id"`
+	AgentName       string  `json:"agent_name"`
+	OverallMos      float64 `json:"overall_mos"`       // weighted average of forward + return
+	OverallGrade    string  `json:"overall_grade"`     // excellent/good/fair/poor/critical
+	LatencyScore    float64 `json:"latency_score"`     // 0-100
+	JitterScore     float64 `json:"jitter_score"`      // 0-100
+	PacketLossScore float64 `json:"packet_loss_score"` // 0-100
 
 	// Per-direction rollups. `*Path` is the worst-offender (preserved
 	// name for backward compat); `Aggregate*` is the sample-weighted
 	// average; `Probes` is the full per-probe list.
-	ForwardPath     *VoicePathMetrics  `json:"forward_path,omitempty"`
-	ReturnPath      *VoicePathMetrics  `json:"return_path,omitempty"`
-	AggregateForward *VoicePathMetrics `json:"aggregate_forward,omitempty"`
-	AggregateReturn  *VoicePathMetrics `json:"aggregate_return,omitempty"`
-	Probes          []VoicePathMetrics `json:"probes"` // all probe-level metrics
+	ForwardPath      *VoicePathMetrics  `json:"forward_path,omitempty"`
+	ReturnPath       *VoicePathMetrics  `json:"return_path,omitempty"`
+	AggregateForward *VoicePathMetrics  `json:"aggregate_forward,omitempty"`
+	AggregateReturn  *VoicePathMetrics  `json:"aggregate_return,omitempty"`
+	Probes           []VoicePathMetrics `json:"probes"` // all probe-level metrics
 
 	// Time series for the MOS timeline / jitter-loss charts. Optional
 	// (only populated when ComputeAgentVoiceQuality is called with a
@@ -4638,16 +4974,16 @@ func aggregateVoicePathMetrics(probes []*VoicePathMetrics, dir VoicePathDirectio
 	}
 	w := float64(totalSamples)
 	out := &VoicePathMetrics{
-		Direction:     dir,
-		SampleCount:   totalSamples,
-		MosScore:      weightedMos / w,
-		AvgLatency:    weightedLat / w,
-		P95Latency:    p95Lat,
-		JitterAvg:     weightedJitter / w,
-		JitterP95:     jitterP95,
-		PacketLoss:    weightedLoss / w,
-		OutOfSequence: weightedOOO / w,
-		Duplicates:    weightedDup / w,
+		Direction:       dir,
+		SampleCount:     totalSamples,
+		MosScore:        weightedMos / w,
+		AvgLatency:      weightedLat / w,
+		P95Latency:      p95Lat,
+		JitterAvg:       weightedJitter / w,
+		JitterP95:       jitterP95,
+		PacketLoss:      weightedLoss / w,
+		OutOfSequence:   weightedOOO / w,
+		Duplicates:      weightedDup / w,
 		MosContributors: dedupeStrings(mosContribs),
 	}
 	out.MedianLatency = out.AvgLatency // close enough for an aggregate label

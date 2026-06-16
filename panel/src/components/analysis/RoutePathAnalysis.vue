@@ -353,6 +353,20 @@ onUnmounted(() => {
               <span class="stat-label">shared hops</span>
             </div>
           </div>
+          <div v-if="analysis.shared_destinations?.length" class="stat-pill primary">
+            <div class="stat-inner">
+              <i class="bi bi-geo-alt"></i>
+              <span class="stat-value">{{ analysis.shared_destinations.length }}</span>
+              <span class="stat-label">shared dests</span>
+            </div>
+          </div>
+          <div v-if="analysis.shared_asns?.length" class="stat-pill primary">
+            <div class="stat-inner">
+              <i class="bi bi-globe-americas"></i>
+              <span class="stat-value">{{ analysis.shared_asns.length }}</span>
+              <span class="stat-label">shared ASNs</span>
+            </div>
+          </div>
           <div v-if="routeChangeCount > 0" class="stat-pill warning">
             <div class="stat-inner">
               <i class="bi bi-shuffle"></i>
@@ -424,13 +438,130 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Shared Hops -->
-      <div v-if="analysis.shared_hops?.length" class="shared-hops-section">
+      <!-- Common Targets — "what endpoints are agents MTR-ing in common?" -->
+      <div v-if="analysis.common_targets?.length" class="common-targets-section">
+        <h6 class="section-title">
+          <i class="bi bi-bullseye me-1"></i>Common MTR Targets
+          <span class="badge-count">{{ analysis.common_targets.length }}</span>
+        </h6>
+        <p class="section-subtitle">Endpoints that 1+ agents are MTR-ing. Targets shared by multiple agents are highlighted.</p>
+        <div class="common-targets-list">
+          <div v-for="t in analysis.common_targets" :key="t.target" class="target-row" :class="{ 'multi-agent': t.agent_count > 1, 'has-issues': t.has_issues }">
+            <div class="target-main">
+              <i class="bi bi-bullseye target-icon" :class="t.agent_count > 1 ? 'text-primary' : 'text-muted'"></i>
+              <code class="target-name">{{ t.target }}</code>
+              <span v-if="t.target_ip && t.target_ip !== t.target" class="target-ip">{{ t.target_ip }}</span>
+            </div>
+            <div class="target-meta">
+              <span v-if="t.avg_end_latency_ms != null" class="metric-badge" :class="hopHealthClass(t.avg_end_latency_ms, t.avg_end_loss_pct || 0)">
+                {{ t.avg_end_latency_ms.toFixed(0) }}ms
+              </span>
+              <span v-if="t.avg_end_loss_pct != null && t.avg_end_loss_pct > 0" class="metric-badge loss" :class="hopHealthClass(t.avg_end_latency_ms || 0, t.avg_end_loss_pct)">
+                {{ t.avg_end_loss_pct.toFixed(1) }}%
+              </span>
+              <span class="agent-count-badge" :class="{ 'multi': t.agent_count > 1 }">
+                <i class="bi bi-hdd-network"></i>
+                {{ t.agent_count }}<span class="text-muted">/{{ t.probe_count }}</span>
+              </span>
+            </div>
+            <div v-if="t.agent_names?.length" class="target-agents">
+              <span v-for="name in t.agent_names.slice(0, 4)" :key="name" class="agent-tag">{{ name }}</span>
+              <span v-if="t.agent_names.length > 4" class="agent-tag more">+{{ t.agent_names.length - 4 }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared Destinations — endpoints reached by 2+ agents -->
+      <div v-if="analysis.shared_destinations?.length" class="shared-destinations-section">
+        <h6 class="section-title">
+          <i class="bi bi-geo-alt me-1"></i>Shared Destinations
+          <span class="badge-count">{{ analysis.shared_destinations.length }}</span>
+        </h6>
+        <p class="section-subtitle">Internet endpoints reached by 2+ agents — these are the routes most likely to share common infrastructure.</p>
+        <div class="shared-destinations-grid">
+          <div v-for="dest in analysis.shared_destinations" :key="dest.target" class="destination-card" :class="hopHealthClass(dest.avg_end_latency_ms || 0, dest.avg_end_loss_pct || 0)">
+            <div class="destination-header">
+              <div class="destination-icon">
+                <i class="bi bi-geo-alt-fill"></i>
+              </div>
+              <div class="destination-info">
+                <code class="destination-target">{{ dest.target }}</code>
+                <div v-if="dest.target_ip && dest.target_ip !== dest.target" class="destination-target-ip">{{ dest.target_ip }}</div>
+              </div>
+              <div class="destination-count">
+                <span class="count-badge">{{ dest.agent_count }}</span>
+                <span class="count-label">agents</span>
+              </div>
+            </div>
+            <div v-if="dest.avg_end_latency_ms != null || dest.avg_end_loss_pct != null" class="destination-metrics">
+              <span v-if="dest.avg_end_latency_ms != null" class="metric-badge" :class="hopHealthClass(dest.avg_end_latency_ms, dest.avg_end_loss_pct || 0)">
+                {{ dest.avg_end_latency_ms.toFixed(0) }}ms
+              </span>
+              <span v-if="dest.avg_end_loss_pct != null && dest.avg_end_loss_pct > 0" class="metric-badge loss" :class="hopHealthClass(dest.avg_end_latency_ms || 0, dest.avg_end_loss_pct)">
+                {{ dest.avg_end_loss_pct.toFixed(1) }}%
+              </span>
+            </div>
+            <div class="destination-agents">
+              <span v-for="name in dest.agent_names.slice(0, 4)" :key="name" class="agent-tag">{{ name }}</span>
+              <span v-if="dest.agent_names.length > 4" class="agent-tag more">+{{ dest.agent_names.length - 4 }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared ASNs — common upstream networks traversed by 2+ agents -->
+      <div v-if="analysis.shared_asns?.length" class="shared-asns-section">
+        <h6 class="section-title">
+          <i class="bi bi-globe-americas me-1"></i>Shared Upstream Networks (ASN)
+          <span class="badge-count">{{ analysis.shared_asns.length }}</span>
+        </h6>
+        <p class="section-subtitle">Autonomous Systems that route traffic for 2+ agents. This surfaces common transit networks even when last-mile hops differ.</p>
+        <div class="shared-asns-grid">
+          <div v-for="asn in analysis.shared_asns" :key="asn.asn" class="asn-card" :class="hopHealthClass(asn.avg_latency_ms || 0, asn.avg_loss_pct || 0)">
+            <div class="asn-header">
+              <div class="asn-icon">
+                <i class="bi bi-globe-americas"></i>
+              </div>
+              <div class="asn-info">
+                <div class="asn-number">AS{{ asn.asn }}</div>
+                <div v-if="asn.asn_org" class="asn-org">{{ asn.asn_org }}</div>
+              </div>
+              <div class="asn-count">
+                <span class="count-badge">{{ asn.agent_count }}</span>
+                <span class="count-label">agents</span>
+              </div>
+            </div>
+            <div v-if="asn.avg_latency_ms != null || asn.avg_loss_pct != null" class="asn-metrics">
+              <span v-if="asn.avg_latency_ms != null" class="metric-badge" :class="hopHealthClass(asn.avg_latency_ms, asn.avg_loss_pct || 0)">
+                {{ asn.avg_latency_ms.toFixed(0) }}ms
+              </span>
+              <span v-if="asn.avg_loss_pct != null && asn.avg_loss_pct > 0" class="metric-badge loss" :class="hopHealthClass(asn.avg_latency_ms || 0, asn.avg_loss_pct)">
+                {{ asn.avg_loss_pct.toFixed(1) }}%
+              </span>
+            </div>
+            <div class="asn-agents">
+              <span v-for="name in asn.agent_names.slice(0, 3)" :key="name" class="agent-tag">{{ name }}</span>
+              <span v-if="asn.agent_names.length > 3" class="agent-tag more">+{{ asn.agent_names.length - 3 }}</span>
+            </div>
+            <div v-if="asn.hop_ips?.length" class="asn-hops" :title="asn.hop_ips.join(', ')">
+              <i class="bi bi-router"></i>
+              <span class="hop-ip-text">{{ asn.hop_ips.slice(0, 3).join(', ') }}<span v-if="asn.hop_ips.length > 3"> +{{ asn.hop_ips.length - 3 }} more</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared Hops (exact IP matches across agents) -->
+      <div class="shared-hops-section">
         <h6 class="section-title">
           <i class="bi bi-share me-1"></i>Shared Network Hops
-          <span class="badge-count">{{ analysis.shared_hops.length }}</span>
+          <span v-if="analysis.shared_hops?.length" class="badge-count">{{ analysis.shared_hops.length }}</span>
         </h6>
-        <div class="shared-hops-grid">
+        <p v-if="!analysis.shared_hops?.length" class="section-subtitle">
+          <i class="bi bi-info-circle me-1"></i>No exact IP matches found across agent routes. Agents on different last-mile ISPs typically have different intermediate routers — check the <strong>Shared Destinations</strong> and <strong>Shared ASNs</strong> sections above for cross-agent patterns.
+        </p>
+        <div v-else class="shared-hops-grid">
           <div v-for="hop in analysis.shared_hops" :key="hop.hop_ip" class="hop-card" :class="hopHealthClass(hop.avg_latency || 0, hop.avg_loss || 0)">
             <div class="hop-header">
               <div class="hop-icon">
@@ -1674,5 +1805,334 @@ onUnmounted(() => {
 
 [data-theme="dark"] .hop-metric-value {
   background: var(--bs-secondary-bg);
+}
+
+/* Section subtitle — small explainer under section titles */
+.section-subtitle {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  margin: 0.25rem 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Common Targets — list of MTR targets across all agents */
+.common-targets-section,
+.shared-destinations-section,
+.shared-asns-section {
+  margin-bottom: 1.5rem;
+}
+
+.common-targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bs-body-bg);
+}
+
+.target-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bs-border-color);
+  font-size: 0.85rem;
+}
+
+.target-row:last-child { border-bottom: none; }
+
+.target-row.multi-agent {
+  background: rgba(var(--bs-primary-rgb), 0.04);
+}
+
+.target-row.has-issues {
+  border-left: 3px solid #f59e0b;
+}
+
+.target-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.target-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.target-name {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bs-secondary-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.target-ip {
+  font-size: 11px;
+  color: var(--bs-secondary-color);
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.target-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-count-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.agent-count-badge.multi {
+  background: rgba(var(--bs-primary-rgb), 0.15);
+  color: var(--bs-primary);
+}
+
+.agent-count-badge i {
+  font-size: 10px;
+}
+
+.target-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  grid-column: 1 / -1;
+  padding-left: 22px;
+}
+
+/* Shared Destinations grid (cards) */
+.shared-destinations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.destination-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 12px;
+  transition: all 0.15s;
+}
+
+.destination-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.destination-card.healthy { border-left: 3px solid #10b981; }
+.destination-card.degraded { border-left: 3px solid #f59e0b; }
+.destination-card.poor { border-left: 3px solid #ef4444; }
+
+.destination-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.destination-icon {
+  font-size: 16px;
+  color: var(--bs-secondary-color);
+  flex-shrink: 0;
+}
+
+.destination-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.destination-target {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bs-secondary-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.destination-target-ip {
+  font-size: 10px;
+  color: var(--bs-secondary-color);
+  font-family: monospace;
+  margin-top: 2px;
+}
+
+.destination-count {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.destination-count .count-label {
+  font-size: 9px;
+  color: var(--bs-secondary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.destination-metrics {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.destination-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Shared ASNs grid */
+.shared-asns-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.asn-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 12px;
+  transition: all 0.15s;
+}
+
+.asn-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.asn-card.healthy { border-left: 3px solid #10b981; }
+.asn-card.degraded { border-left: 3px solid #f59e0b; }
+.asn-card.poor { border-left: 3px solid #ef4444; }
+
+.asn-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.asn-icon {
+  font-size: 16px;
+  color: var(--bs-secondary-color);
+  flex-shrink: 0;
+}
+
+.asn-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.asn-number {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--bs-body-color);
+  font-family: monospace;
+}
+
+.asn-org {
+  font-size: 11px;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asn-count {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.asn-count .count-label {
+  font-size: 9px;
+  color: var(--bs-secondary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.asn-metrics {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.asn-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.asn-hops {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--bs-secondary-color);
+  border-top: 1px solid var(--bs-border-color);
+  padding-top: 6px;
+  font-family: monospace;
+}
+
+.asn-hops i {
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.hop-ip-text {
+  word-break: break-all;
+  line-height: 1.3;
+}
+
+/* Responsive — on narrow screens stack the common-targets row */
+@media (max-width: 640px) {
+  .target-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .target-agents {
+    padding-left: 0;
+  }
+}
+
+/* Dark mode adjustments for new sections */
+[data-theme="dark"] .common-targets-list {
+  background: var(--bs-tertiary-bg);
+}
+
+[data-theme="dark"] .target-row.multi-agent {
+  background: rgba(var(--bs-primary-rgb), 0.08);
+}
+
+[data-theme="dark"] .destination-card,
+[data-theme="dark"] .asn-card {
+  background: var(--bs-tertiary-bg);
 }
 </style>

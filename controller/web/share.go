@@ -421,7 +421,7 @@ func RegisterShareRoutes(app *fiber.App, db *gorm.DB, ch *sql.DB) {
 			rows, queryErr = probe.GetProbeDataAggregated(c.UserContext(), ch, uint64(probeID), nil, probeType, fromTime, toTime, aggregateSec, limit)
 		} else {
 			// Standard non-aggregated query
-			rows, queryErr = probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(probeID), nil, fromTime, toTime, asc, limit)
+			rows, queryErr = probe.GetProbeDataByProbe(c.UserContext(), ch, uint64(probeID), nil, fromTime, toTime, asc, limit, "")
 			// Post-filter by type if specified
 			if queryErr == nil && probeType != "" {
 				filtered := make([]probe.ProbeData, 0, len(rows))

@@ -14,10 +14,11 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
+	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/probe"
 )
 
-func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
+func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB, geoStore *geoip.Store) {
 	// ------------------------------------------
 	// GET /workspaces/:id/analysis
 	// Workspace health overview with per-agent health vectors
@@ -86,6 +87,7 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	// ------------------------------------------
 	// GET /workspaces/:id/analysis/routes
 	// Route/path analysis for cross-agent route comparison and divergence detection
+	// Query: lookback=<hours, default 24>
 	// ------------------------------------------
 	api.Get("/workspaces/:id/analysis/routes", func(c *fiber.Ctx) error {
 		defer func() {
@@ -96,6 +98,7 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		}()
 
 		wID := uintParam(c, "id")
+		lookbackHours := intOrDefault(c.Query("lookback"), 24)
 
 		// Bound the compute so a slow ClickHouse query never blows past
 		// the Fiber WriteTimeout (30s) and gets the connection killed
@@ -104,7 +107,13 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		ctx, cancel := context.WithTimeout(c.UserContext(), 25*time.Second)
 		defer cancel()
 
-		analysis, err := probe.ComputeWorkspaceRouteAnalysis(ctx, ch, pg, wID)
+		// The probe package accepts a nil geoStore and skips ASN grouping.
+		// We pass the real store when available so we get shared-ASN data.
+		var geoResolver probe.GeoIPResolver
+		if geoStore != nil {
+			geoResolver = geoStoreAdapter{geoStore}
+		}
+		analysis, err := probe.ComputeWorkspaceRouteAnalysis(ctx, ch, pg, geoResolver, wID, lookbackHours)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				log.Printf("[analysis] routes workspace=%d timeout", wID)
@@ -175,4 +184,19 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		c.Set("Content-Type", "application/json")
 		return c.Send(jsonBytes)
 	})
+}
+
+// geoStoreAdapter wraps *geoip.Store to satisfy probe.GeoIPResolver. We can't
+// import the probe package's interface from inside geoip, and the probe
+// package can't import geoip (cycle risk), so the conversion lives at the
+// wiring layer (web).
+type geoStoreAdapter struct{ s *geoip.Store }
+
+func (g geoStoreAdapter) HasASN() bool { return g.s.HasASN() }
+func (g geoStoreAdapter) LookupASN(ipStr string) (uint, string, bool) {
+	info, err := g.s.LookupASN(ipStr)
+	if err != nil || info == nil {
+		return 0, "", false
+	}
+	return info.Number, info.Organization, true
 }

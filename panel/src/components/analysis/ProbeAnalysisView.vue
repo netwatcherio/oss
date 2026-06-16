@@ -1,12 +1,19 @@
 <script lang="ts" setup>
 import { ref, onMounted, watch, computed } from 'vue'
 import { ProbeDataService } from '@/services/apiService'
-import type { ProbeAnalysis, HealthVector } from './types'
+import type { ProbeAnalysis, HealthVector, ProbeMetrics } from './types'
 import { gradeColors, severityIcons } from './types'
+import type { TrafficSimResult } from '@/types'
 
 const props = defineProps<{
   workspaceId: number | string
   probeId: number | string
+  // When provided, missing/zero values in the API's metrics (jitter_median,
+  // jitter_p95, median_latency, p99_latency) are filled in from this local
+  // TrafficSim data so the detailed modal matches the popup's richness.
+  trafficSimData?: TrafficSimResult[]
+  reverseTrafficSimData?: TrafficSimResult[]
+  currentTimeRange?: [Date, Date] | null
 }>()
 
 const analysis = ref<ProbeAnalysis | null>(null)
@@ -64,6 +71,101 @@ function hopHealthClass(latency: number, loss: number): string {
   if (latency >= 50 || loss > 0) return 'degraded'
   return 'healthy'
 }
+
+// ── Local TrafficSim summary (same aggregation as the popup) ────────────
+function lossPercentLocal(d: { lostPackets: number; totalPackets: number }): number {
+  return d.totalPackets > 0 ? (d.lostPackets / d.totalPackets) * 100 : 0
+}
+
+function avgOf(vals: number[]): number {
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+}
+
+function percentileOf(vals: number[], p: number): number {
+  if (vals.length === 0) return 0
+  const sorted = [...vals].sort((a, b) => a - b)
+  const idx = (p / 100) * (sorted.length - 1)
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo)
+}
+
+function buildLocalSummary(rows: TrafficSimResult[] | undefined) {
+  if (!rows || rows.length === 0) return null
+  let filtered = rows
+  if (props.currentTimeRange && props.currentTimeRange[0] && props.currentTimeRange[1]) {
+    const fromMs = props.currentTimeRange[0].getTime()
+    const toMs = props.currentTimeRange[1].getTime()
+    filtered = filtered.filter(d => {
+      const t = new Date(d.reportTime).getTime()
+      return t >= fromMs && t <= toMs
+    })
+  }
+  if (filtered.length === 0) return null
+
+  const latencies = filtered.map(d => d.averageRTT).filter(v => v > 0)
+  const medianRTTs = filtered.map(d => d.medianRTT).filter((v): v is number => v != null && v > 0)
+  const p95RTTs = filtered.map(d => d.p95RTT).filter((v): v is number => v != null && v > 0)
+  const p99RTTs = filtered.map(d => d.p99RTT).filter((v): v is number => v != null && v > 0)
+  const jitterAvgs = filtered.map(d => d.jitterAvg).filter((v): v is number => v != null && v > 0)
+  const jitterMedians = filtered.map(d => d.jitterMedian).filter((v): v is number => v != null && v > 0)
+  const jitterP95s = filtered.map(d => d.jitterP95).filter((v): v is number => v != null && v > 0)
+  const mosVals = filtered.map(d => d.mos ?? d.mosScore).filter((v): v is number => v != null && v > 0)
+  const losses = filtered.map(lossPercentLocal)
+
+  return {
+    avgLatency: avgOf(latencies),
+    medianLatency: medianRTTs.length > 0 ? avgOf(medianRTTs) : percentileOf(latencies, 50),
+    p95Latency: p95RTTs.length > 0 ? avgOf(p95RTTs) : percentileOf(latencies, 95),
+    p99Latency: p99RTTs.length > 0 ? avgOf(p99RTTs) : 0,
+    avgJitter: avgOf(jitterAvgs),
+    medianJitter: jitterMedians.length > 0 ? avgOf(jitterMedians) : 0,
+    p95Jitter: jitterP95s.length > 0 ? avgOf(jitterP95s) : 0,
+    avgLoss: avgOf(losses),
+    avgMos: avgOf(mosVals),
+    sampleCount: filtered.length,
+  }
+}
+
+const localTrafficSummary = computed(() => buildLocalSummary(props.trafficSimData))
+const reverseLocalTrafficSummary = computed(() => buildLocalSummary(props.reverseTrafficSimData))
+
+// When the API returns 0 for jitter/latency percentiles, fall back to the
+// local TrafficSim aggregation so the detailed view is consistent with
+// the popup. This handles the case where the backend only populates
+// jitter_avg (PING path) but we have rich jitter data on the page.
+function pickLocal(apiVal: number | undefined, localVal: number | undefined): number {
+  const a = apiVal ?? 0
+  if (a > 0) return a
+  return localVal ?? 0
+}
+
+const mergedMetrics = computed<ProbeMetrics | null>(() => {
+  if (!analysis.value) return null
+  const m = analysis.value.metrics
+  const local = localTrafficSummary.value
+  return {
+    ...m,
+    median_latency: pickLocal(m.median_latency, local?.medianLatency),
+    p99_latency: pickLocal(m.p99_latency, local?.p99Latency),
+    jitter_median: pickLocal(m.jitter_median, local?.medianJitter),
+    jitter_p95: pickLocal(m.jitter_p95, local?.p95Jitter),
+  }
+})
+
+const mergedReverseMetrics = computed<ProbeMetrics | null>(() => {
+  if (!analysis.value?.reverse) return null
+  const m = analysis.value.reverse.metrics
+  const local = reverseLocalTrafficSummary.value
+  return {
+    ...m,
+    median_latency: pickLocal(m.median_latency, local?.medianLatency),
+    p99_latency: pickLocal(m.p99_latency, local?.p99Latency),
+    jitter_median: pickLocal(m.jitter_median, local?.medianJitter),
+    jitter_p95: pickLocal(m.jitter_p95, local?.p95Jitter),
+  }
+})
 
 const hasBidirectional = computed(() => !!analysis.value?.reverse)
 
@@ -158,7 +260,7 @@ watch(() => props.probeId, fetchAnalysis)
       <!-- Overview Tab -->
       <div v-if="activeTab === 'overview'" class="tab-content">
         <!-- Metric Comparison Table -->
-        <div class="metrics-grid" :class="{ bidirectional: hasBidirectional }">
+        <div v-if="mergedMetrics" class="metrics-grid" :class="{ bidirectional: hasBidirectional }">
           <div class="metric-header">Metric</div>
           <div class="metric-header">
             <i class="bi bi-arrow-right me-1"></i>Forward
@@ -170,7 +272,7 @@ watch(() => props.probeId, fetchAnalysis)
           <!-- Avg Latency -->
           <div class="metric-label">Avg Latency</div>
           <div class="metric-value">
-            {{ formatMs(analysis.metrics.avg_latency) }}
+            {{ formatMs(mergedMetrics.avg_latency) }}
             <i
               v-if="hasIcmpLatencyIncomplete"
               class="bi bi-info-circle text-info ms-1"
@@ -178,7 +280,7 @@ watch(() => props.probeId, fetchAnalysis)
             ></i>
           </div>
           <div v-if="hasBidirectional" class="metric-value">
-            {{ formatMs(analysis.reverse!.metrics.avg_latency) }}
+            {{ formatMs(mergedReverseMetrics!.avg_latency) }}
             <i
               v-if="analysis.reverse?.signals?.some(s => s.type === 'icmp_latency_incomplete')"
               class="bi bi-info-circle text-info ms-1"
@@ -188,42 +290,58 @@ watch(() => props.probeId, fetchAnalysis)
 
           <!-- Median Latency -->
           <div class="metric-label">Median Latency</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.median_latency) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.median_latency) }}</div>
+          <div class="metric-value" :class="{ 'text-muted': mergedMetrics.median_latency <= 0 }">
+            {{ formatMs(mergedMetrics.median_latency) }}
+          </div>
+          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-muted': mergedReverseMetrics!.median_latency <= 0 }">
+            {{ formatMs(mergedReverseMetrics!.median_latency) }}
+          </div>
 
           <!-- P95 Latency -->
           <div class="metric-label">P95 Latency</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.p95_latency) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.p95_latency) }}</div>
+          <div class="metric-value">{{ formatMs(mergedMetrics.p95_latency) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(mergedReverseMetrics!.p95_latency) }}</div>
 
           <!-- P99 Latency -->
           <div class="metric-label">P99 Latency</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.p99_latency) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.p99_latency) }}</div>
+          <div class="metric-value" :class="{ 'text-muted': mergedMetrics.p99_latency <= 0 }">
+            {{ formatMs(mergedMetrics.p99_latency) }}
+          </div>
+          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-muted': mergedReverseMetrics!.p99_latency <= 0 }">
+            {{ formatMs(mergedReverseMetrics!.p99_latency) }}
+          </div>
 
           <!-- Packet Loss -->
           <div class="metric-label">Packet Loss</div>
-          <div class="metric-value" :class="{ 'text-danger': analysis.metrics.packet_loss > 3 }">
-            {{ formatPct(analysis.metrics.packet_loss) }}
+          <div class="metric-value" :class="{ 'text-danger': mergedMetrics.packet_loss > 3 }">
+            {{ formatPct(mergedMetrics.packet_loss) }}
           </div>
-          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-danger': analysis.reverse!.metrics.packet_loss > 3 }">
-            {{ formatPct(analysis.reverse!.metrics.packet_loss) }}
+          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-danger': mergedReverseMetrics!.packet_loss > 3 }">
+            {{ formatPct(mergedReverseMetrics!.packet_loss) }}
           </div>
 
           <!-- Jitter Avg -->
           <div class="metric-label">Jitter (Avg)</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_avg) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_avg) }}</div>
+          <div class="metric-value">{{ formatMs(mergedMetrics.jitter_avg) }}</div>
+          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(mergedReverseMetrics!.jitter_avg) }}</div>
 
           <!-- Jitter Median -->
           <div class="metric-label">Jitter (Med)</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_median) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_median) }}</div>
+          <div class="metric-value" :class="{ 'text-muted': mergedMetrics.jitter_median <= 0 }">
+            {{ formatMs(mergedMetrics.jitter_median) }}
+          </div>
+          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-muted': mergedReverseMetrics!.jitter_median <= 0 }">
+            {{ formatMs(mergedReverseMetrics!.jitter_median) }}
+          </div>
 
           <!-- Jitter P95 -->
           <div class="metric-label">Jitter (P95)</div>
-          <div class="metric-value">{{ formatMs(analysis.metrics.jitter_p95) }}</div>
-          <div v-if="hasBidirectional" class="metric-value">{{ formatMs(analysis.reverse!.metrics.jitter_p95) }}</div>
+          <div class="metric-value" :class="{ 'text-muted': mergedMetrics.jitter_p95 <= 0 }">
+            {{ formatMs(mergedMetrics.jitter_p95) }}
+          </div>
+          <div v-if="hasBidirectional" class="metric-value" :class="{ 'text-muted': mergedReverseMetrics!.jitter_p95 <= 0 }">
+            {{ formatMs(mergedReverseMetrics!.jitter_p95) }}
+          </div>
 
           <!-- MOS -->
           <div class="metric-label">MOS Score</div>
@@ -236,8 +354,8 @@ watch(() => props.probeId, fetchAnalysis)
 
           <!-- Samples -->
           <div class="metric-label">Samples</div>
-          <div class="metric-value text-muted">{{ analysis.metrics.sample_count }}</div>
-          <div v-if="hasBidirectional" class="metric-value text-muted">{{ analysis.reverse!.metrics.sample_count }}</div>
+          <div class="metric-value text-muted">{{ mergedMetrics.sample_count }}</div>
+          <div v-if="hasBidirectional" class="metric-value text-muted">{{ mergedReverseMetrics!.sample_count }}</div>
         </div>
 
         <!-- Health Vector Bars -->
@@ -273,9 +391,13 @@ watch(() => props.probeId, fetchAnalysis)
           </div>
         </div>
 
-        <!-- Path Analysis (if available) -->
+        <!-- Path Analysis (Forward) -->
         <div v-if="analysis.path_analysis" class="path-analysis mt-3">
-          <h6 class="small text-muted mb-2">Path Analysis</h6>
+          <h6 class="small text-muted mb-2 d-flex align-items-center gap-2">
+            <i class="bi bi-arrow-right"></i>
+            <span>Forward Path</span>
+            <span class="text-muted ms-2" style="font-size:10px">{{ analysis.agent_name }} → {{ analysis.target }}</span>
+          </h6>
           <div class="path-stats">
             <div class="path-stat">
               <div class="stat-value">{{ analysis.path_analysis.hop_count }}</div>
@@ -294,42 +416,166 @@ watch(() => props.probeId, fetchAnalysis)
               <div class="stat-label">ICMP Limited</div>
             </div>
           </div>
-          <!-- Hop Chain with friendly names -->
-          <div v-if="analysis.path_analysis.latest_hops_detail?.length" class="hop-chain mt-3">
-            <div class="hops-chain">
-              <div class="hop-node source">
-                <i class="bi bi-pc-display"></i>
-                <span class="hop-label">{{ analysis.agent_name || 'Source' }}</span>
+          <!-- Hop List (vertical, no side-scroll) -->
+          <div v-if="analysis.path_analysis.latest_hops_detail?.length" class="hop-list mt-3">
+            <h6 class="small text-muted mb-2 d-flex align-items-center gap-2">
+              <i class="bi bi-signpost-split"></i>
+              <span>Hops ({{ analysis.path_analysis.hop_count }})</span>
+              <span class="text-muted ms-auto" style="font-size:10px">{{ analysis.path_analysis.unique_routes }} route{{ analysis.path_analysis.unique_routes !== 1 ? 's' : '' }}</span>
+            </h6>
+            <div class="hop-list-body">
+              <div class="hop-row hop-row-header">
+                <span class="hop-cell hop-cell-num">#</span>
+                <span class="hop-cell hop-cell-host">Host</span>
+                <span class="hop-cell hop-cell-metric">Latency</span>
+                <span class="hop-cell hop-cell-metric">Loss</span>
               </div>
-              <div v-for="(hop, idx) in analysis.path_analysis.latest_hops_detail" :key="idx" class="hop-wrapper">
-                <div class="hop-arrow">
-                  <i class="bi bi-arrow-right"></i>
-                </div>
-                <div class="hop-node" :class="{ 
-                  'agent-hop': hop.is_agent, 
-                  'rate-limited': hop.is_rate_limited,
-                  'dest': hop.is_final_hop
-                }">
+              <div class="hop-row hop-row-source">
+                <span class="hop-cell hop-cell-num">
+                  <i class="bi bi-pc-display"></i>
+                </span>
+                <span class="hop-cell hop-cell-host">{{ analysis.agent_name || 'Source' }}</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+              </div>
+              <div
+                v-for="(hop, idx) in analysis.path_analysis.latest_hops_detail"
+                :key="`fwd-${idx}`"
+                class="hop-row"
+                :class="{
+                  'hop-row-agent': hop.is_agent,
+                  'hop-row-rate-limited': hop.is_rate_limited,
+                  'hop-row-dest': hop.is_final_hop,
+                }"
+              >
+                <span class="hop-cell hop-cell-num">
                   <i :class="hop.is_agent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
-                  <span class="hop-label" :title="hop.ip">{{ hop.hostname || hop.ip }}</span>
-                  <div v-if="hop.latency != null || hop.loss != null" class="hop-node-metrics">
-                    <span v-if="hop.latency != null" class="hop-node-metric" :class="hopHealthClass(hop.latency, hop.loss || 0)">
-                      {{ formatMs(hop.latency) }}
-                    </span>
-                    <span v-if="hop.loss != null && hop.loss > 0" class="hop-node-metric" :class="hopHealthClass(hop.latency || 0, hop.loss)">
-                      {{ hop.loss.toFixed(1) }}%
-                    </span>
-                  </div>
-                </div>
+                  <span class="hop-cell-num-text">{{ idx + 1 }}</span>
+                </span>
+                <span class="hop-cell hop-cell-host" :title="hop.ip">
+                  <span class="hop-hostname">{{ hop.hostname || hop.ip }}</span>
+                  <span v-if="hop.hostname && hop.hostname !== hop.ip" class="hop-ip text-muted">{{ hop.ip }}</span>
+                  <span v-if="hop.is_rate_limited" class="hop-badge-icmp">ICMP</span>
+                </span>
+                <span
+                  v-if="hop.latency != null"
+                  class="hop-cell hop-cell-metric"
+                  :class="hopHealthClass(hop.latency, hop.loss || 0)"
+                >
+                  {{ formatMs(hop.latency) }}
+                </span>
+                <span v-else class="hop-cell hop-cell-metric text-muted">—</span>
+                <span
+                  v-if="hop.loss != null && hop.loss > 0"
+                  class="hop-cell hop-cell-metric"
+                  :class="hopHealthClass(hop.latency || 0, hop.loss)"
+                >
+                  {{ hop.loss.toFixed(1) }}%
+                </span>
+                <span v-else class="hop-cell hop-cell-metric text-muted">0%</span>
               </div>
-              <div class="hop-wrapper">
-                <div class="hop-arrow">
-                  <i class="bi bi-arrow-right"></i>
-                </div>
-                <div class="hop-node dest">
+              <div class="hop-row hop-row-dest-row">
+                <span class="hop-cell hop-cell-num">
                   <i class="bi bi-bullseye"></i>
-                  <span class="hop-label">{{ analysis.target || 'Target' }}</span>
-                </div>
+                </span>
+                <span class="hop-cell hop-cell-host">{{ analysis.target || 'Target' }}</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Path Analysis (Reverse) — shown inline when bidirectional -->
+        <div v-if="hasBidirectional && analysis.reverse?.path_analysis" class="path-analysis path-analysis-reverse mt-3">
+          <h6 class="small text-muted mb-2 d-flex align-items-center gap-2">
+            <i class="bi bi-arrow-left"></i>
+            <span>Return Path</span>
+            <span class="text-muted ms-2" style="font-size:10px">{{ analysis.reverse.agent_name }} → {{ analysis.reverse.target }}</span>
+          </h6>
+          <div class="path-stats">
+            <div class="path-stat">
+              <div class="stat-value">{{ analysis.reverse.path_analysis.hop_count }}</div>
+              <div class="stat-label">Hops</div>
+            </div>
+            <div class="path-stat">
+              <div class="stat-value">{{ analysis.reverse.path_analysis.unique_routes }}</div>
+              <div class="stat-label">Routes</div>
+            </div>
+            <div class="path-stat">
+              <div class="stat-value">{{ Math.round(analysis.reverse.path_analysis.route_stability_pct) }}%</div>
+              <div class="stat-label">Stability</div>
+            </div>
+            <div class="path-stat" v-if="analysis.reverse.path_analysis.rate_limited_hops?.length">
+              <div class="stat-value text-info">{{ analysis.reverse.path_analysis.rate_limited_hops.length }}</div>
+              <div class="stat-label">ICMP Limited</div>
+            </div>
+          </div>
+          <!-- Hop List (vertical, no side-scroll) -->
+          <div v-if="analysis.reverse.path_analysis.latest_hops_detail?.length" class="hop-list mt-3">
+            <h6 class="small text-muted mb-2 d-flex align-items-center gap-2">
+              <i class="bi bi-signpost-split"></i>
+              <span>Hops ({{ analysis.reverse.path_analysis.hop_count }})</span>
+              <span class="text-muted ms-auto" style="font-size:10px">{{ analysis.reverse.path_analysis.unique_routes }} route{{ analysis.reverse.path_analysis.unique_routes !== 1 ? 's' : '' }}</span>
+            </h6>
+            <div class="hop-list-body">
+              <div class="hop-row hop-row-header">
+                <span class="hop-cell hop-cell-num">#</span>
+                <span class="hop-cell hop-cell-host">Host</span>
+                <span class="hop-cell hop-cell-metric">Latency</span>
+                <span class="hop-cell hop-cell-metric">Loss</span>
+              </div>
+              <div class="hop-row hop-row-source">
+                <span class="hop-cell hop-cell-num">
+                  <i class="bi bi-pc-display"></i>
+                </span>
+                <span class="hop-cell hop-cell-host">{{ analysis.reverse.agent_name || 'Source' }}</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+              </div>
+              <div
+                v-for="(hop, idx) in analysis.reverse.path_analysis.latest_hops_detail"
+                :key="`rev-${idx}`"
+                class="hop-row"
+                :class="{
+                  'hop-row-agent': hop.is_agent,
+                  'hop-row-rate-limited': hop.is_rate_limited,
+                  'hop-row-dest': hop.is_final_hop,
+                }"
+              >
+                <span class="hop-cell hop-cell-num">
+                  <i :class="hop.is_agent ? 'bi bi-hdd-network' : 'bi bi-router'"></i>
+                  <span class="hop-cell-num-text">{{ idx + 1 }}</span>
+                </span>
+                <span class="hop-cell hop-cell-host" :title="hop.ip">
+                  <span class="hop-hostname">{{ hop.hostname || hop.ip }}</span>
+                  <span v-if="hop.hostname && hop.hostname !== hop.ip" class="hop-ip text-muted">{{ hop.ip }}</span>
+                  <span v-if="hop.is_rate_limited" class="hop-badge-icmp">ICMP</span>
+                </span>
+                <span
+                  v-if="hop.latency != null"
+                  class="hop-cell hop-cell-metric"
+                  :class="hopHealthClass(hop.latency, hop.loss || 0)"
+                >
+                  {{ formatMs(hop.latency) }}
+                </span>
+                <span v-else class="hop-cell hop-cell-metric text-muted">—</span>
+                <span
+                  v-if="hop.loss != null && hop.loss > 0"
+                  class="hop-cell hop-cell-metric"
+                  :class="hopHealthClass(hop.latency || 0, hop.loss)"
+                >
+                  {{ hop.loss.toFixed(1) }}%
+                </span>
+                <span v-else class="hop-cell hop-cell-metric text-muted">0%</span>
+              </div>
+              <div class="hop-row hop-row-dest-row">
+                <span class="hop-cell hop-cell-num">
+                  <i class="bi bi-bullseye"></i>
+                </span>
+                <span class="hop-cell hop-cell-host">{{ analysis.reverse.target || 'Target' }}</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
+                <span class="hop-cell hop-cell-metric text-muted">—</span>
               </div>
             </div>
           </div>
@@ -566,6 +812,14 @@ watch(() => props.probeId, fetchAnalysis)
   gap: 12px;
   flex-wrap: wrap;
 }
+.path-analysis {
+  padding: 8px 0;
+}
+.path-analysis-reverse {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--bs-border-color);
+}
 .path-stat {
   background: var(--bs-secondary-bg);
   border: 1px solid var(--bs-border-color);
@@ -718,146 +972,127 @@ watch(() => props.probeId, fetchAnalysis)
   border-bottom-color: #e5e7eb;
 }
 
-/* Hop Chain */
-.hops-chain {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  min-width: max-content;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-.hop-wrapper {
-  display: flex;
-  align-items: center;
-}
-.hop-arrow {
-  padding: 0 6px;
-  color: var(--bs-secondary-color);
+/* Hop List (vertical table — no side scroll) */
+.hop-list {
   font-size: 12px;
 }
-.hop-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 10px;
-  background: var(--bs-body-bg);
+.hop-list-body {
   border: 1px solid var(--bs-border-color);
   border-radius: 8px;
-  min-width: 80px;
-  max-width: 140px;
-  position: relative;
-}
-.hop-node.source,
-.hop-node.dest {
-  background: rgba(var(--bs-primary-rgb), 0.1);
-  border-color: rgba(var(--bs-primary-rgb), 0.3);
-}
-.hop-node i {
-  font-size: 16px;
-  color: var(--bs-secondary-color);
-}
-.hop-node.source i,
-.hop-node.dest i {
-  color: var(--bs-primary);
-}
-.hop-label {
-  font-size: 10px;
-  color: var(--bs-body-color);
-  text-align: center;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+  background: var(--bs-body-bg);
 }
-.hop-metrics {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  justify-content: center;
+.hop-row {
+  display: grid;
+  grid-template-columns: 48px 1fr 90px 70px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bs-border-color-translucent);
+  transition: background 0.15s;
 }
-.hop-badge {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+.hop-row:last-child {
+  border-bottom: none;
 }
-.hop-badge.latency.good {
-  background: rgba(var(--bs-success-rgb), 0.15);
-  color: var(--bs-success);
-}
-.hop-badge.latency.warning {
-  background: rgba(var(--bs-warning-rgb), 0.2);
-  color: var(--bs-warning-text-emphasis, var(--bs-warning));
-}
-.hop-badge.latency.critical {
-  background: rgba(var(--bs-danger-rgb), 0.15);
-  color: var(--bs-danger);
-}
-.hop-badge.loss.good {
-  background: rgba(var(--bs-success-rgb), 0.15);
-  color: var(--bs-success);
-}
-.hop-badge.loss.warning {
-  background: rgba(var(--bs-warning-rgb), 0.2);
-  color: var(--bs-warning-text-emphasis, var(--bs-warning));
-}
-.hop-badge.loss.critical {
-  background: rgba(var(--bs-danger-rgb), 0.15);
-  color: var(--bs-danger);
-}
-.hop-node-metrics {
-  display: flex;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.hop-node-metric {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 6px;
-  white-space: nowrap;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-
-.hop-node-metric.healthy {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
-.hop-node-metric.degraded {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-}
-
-.hop-node-metric.poor {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-.hop-node.rate-limited {
-  border-style: dashed;
-  border-color: var(--bs-info);
-}
-.hop-node.rate-limited::after {
-  content: 'ICMP';
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  font-size: 8px;
-  background: var(--bs-info);
-  color: white;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-[data-theme="dark"] .hop-node {
+.hop-row:not(.hop-row-header):not(.hop-row-source):not(.hop-row-dest-row):hover {
   background: var(--bs-tertiary-bg);
 }
-[data-theme="dark"] .hop-node.source,
-[data-theme="dark"] .hop-node.dest {
-  background: rgba(var(--bs-primary-rgb), 0.15);
+.hop-row-header {
+  background: var(--bs-tertiary-bg);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+  padding: 6px 12px;
+}
+.hop-row-source,
+.hop-row-dest-row {
+  background: rgba(var(--bs-primary-rgb), 0.06);
+  font-weight: 500;
+}
+.hop-row-agent {
+  background: rgba(var(--bs-info-rgb), 0.06);
+}
+.hop-row-rate-limited {
+  border-left: 3px solid var(--bs-info);
+}
+.hop-row-dest {
+  background: rgba(var(--bs-primary-rgb), 0.04);
+}
+.hop-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hop-cell-num {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--bs-secondary-color);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hop-cell-num i {
+  font-size: 14px;
+  color: var(--bs-secondary-color);
+}
+.hop-row-header .hop-cell-num i {
+  display: none;
+}
+.hop-cell-num-text {
+  font-weight: 600;
+}
+.hop-cell-host {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.hop-hostname {
+  font-weight: 500;
+  color: var(--bs-body-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hop-ip {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hop-cell-metric {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: right;
+  justify-content: flex-end;
+}
+.hop-cell-metric.healthy { color: #10b981; }
+.hop-cell-metric.degraded { color: #f59e0b; }
+.hop-cell-metric.poor { color: #ef4444; }
+.hop-badge-icmp {
+  font-size: 8px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bs-info);
+  color: white;
+  text-transform: uppercase;
+  align-self: flex-start;
+  margin-left: 6px;
+}
+.hop-cell-metric.text-muted,
+.hop-cell.text-muted {
+  color: var(--bs-secondary-color);
+}
+[data-theme="dark"] .hop-list-body {
+  background: var(--bs-tertiary-bg);
+}
+[data-theme="dark"] .hop-row-header {
+  background: rgba(var(--bs-dark-rgb), 0.3);
 }
 </style>

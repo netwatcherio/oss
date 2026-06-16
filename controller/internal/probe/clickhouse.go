@@ -376,6 +376,7 @@ func GetProbeDataByProbe(
 	from, to time.Time,
 	ascending bool,
 	limit int,
+	typeFilter string, // empty = all types; otherwise exact match (e.g. "MTR")
 ) ([]ProbeData, error) {
 
 	var clauses []string
@@ -383,6 +384,10 @@ func GetProbeDataByProbe(
 
 	if agentID != nil {
 		clauses = append(clauses, fmt.Sprintf("agent_id = %d", *agentID))
+	}
+
+	if typeFilter != "" {
+		clauses = append(clauses, fmt.Sprintf("type = %s", chQuoteString(typeFilter)))
 	}
 
 	if !from.IsZero() {
@@ -683,12 +688,12 @@ func GetProbeDataAggregated(
 ) ([]ProbeData, error) {
 	if aggregateSec <= 0 {
 		// Fall back to non-aggregated query
-		return GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, limit)
+		return GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, limit, "")
 	}
 
 	// Fetch raw data from ClickHouse with a sensible limit
 	// This prevents memory exhaustion on very large time ranges
-	rawData, err := GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, MaxRawRowsForAggregation)
+	rawData, err := GetProbeDataByProbe(ctx, db, probeID, agentID, from, to, false, MaxRawRowsForAggregation, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch raw probe data: %w", err)
 	}
