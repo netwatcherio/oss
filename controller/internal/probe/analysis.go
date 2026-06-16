@@ -3475,18 +3475,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		}
 		if latestPayload != nil {
 			pri.TraceCount = len(rows)
-			if len(sigs) > 1 {
-				maxCount := 0
-				for _, c := range sigs {
-					if c > maxCount {
-						maxCount = c
-					}
-				}
-				pri.RouteStabilityPct = math.Round(float64(maxCount)/float64(len(rows))*100*10) / 10
-				pri.HasRouteChange = true
-			} else {
-				pri.RouteStabilityPct = 100
-			}
+			pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.BaselineFingerprint, pri.LatestSignature, sigs, len(rows))
 			if len(latestPayload.Report.Hops) > 0 {
 				lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
 				pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
@@ -3577,6 +3566,13 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 
 		// Route-change incident.
 		if pri.HasRouteChange {
+			evidence := []string{
+				fmt.Sprintf("Current signature: %s", pri.LatestSignature),
+			}
+			if pri.BaselineFingerprint != "" {
+				evidence = append(evidence, fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint))
+			}
+			evidence = append(evidence, fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount))
 			routeIncidents = append(routeIncidents, RouteIncident{
 				ID:        fmt.Sprintf("route_change_%d_%d", pathKey.agentID, pathKey.probeID),
 				Type:      "route_change",
@@ -3586,11 +3582,7 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 				ProbeID:   pathKey.probeID,
 				Target:    target,
 				Message:   fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", ari.AgentName, target, pri.RouteStabilityPct),
-				Evidence: []string{
-					fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint),
-					fmt.Sprintf("Current signature: %s", pri.LatestSignature),
-					fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount),
-				},
+				Evidence:  evidence,
 			})
 		}
 	}
@@ -3737,6 +3729,32 @@ func sortCommonTargets(cs []CommonTargetInfo) {
 		}
 		return cs[i].Target < cs[j].Target
 	})
+}
+
+func decideRouteChangeStatus(baseline, latest string, sigs map[string]int, traceCount int) (bool, float64) {
+	if baseline != "" {
+		if baseline == latest {
+			return false, 100
+		}
+		return true, dominantSignatureStabilityPct(sigs, traceCount)
+	}
+	if len(sigs) > 1 {
+		return true, dominantSignatureStabilityPct(sigs, traceCount)
+	}
+	return false, 100
+}
+
+func dominantSignatureStabilityPct(sigs map[string]int, traceCount int) float64 {
+	if traceCount <= 0 {
+		return 100
+	}
+	maxCount := 0
+	for _, c := range sigs {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+	return math.Round(float64(maxCount)/float64(traceCount)*100*10) / 10
 }
 
 // mtrPathKey uniquely identifies a (probe, agent, target) tuple for grouping

@@ -121,3 +121,73 @@ func TestBuildHopDetailsWithAgents(t *testing.T) {
 		t.Errorf("Expected last hop to be final")
 	}
 }
+
+func TestDecideRouteChangeStatus_BaselineMatch(t *testing.T) {
+	hasChange, stability := decideRouteChangeStatus(
+		"sig-A", "sig-A",
+		map[string]int{"sig-A": 5, "sig-B": 1},
+		6,
+	)
+	if hasChange {
+		t.Errorf("Expected no route change when latest signature matches baseline")
+	}
+	if stability != 100 {
+		t.Errorf("Expected stability 100 when baseline matches, got %v", stability)
+	}
+}
+
+func TestDecideRouteChangeStatus_BaselineMismatch(t *testing.T) {
+	hasChange, stability := decideRouteChangeStatus(
+		"sig-A", "sig-B",
+		map[string]int{"sig-A": 1, "sig-B": 4},
+		5,
+	)
+	if !hasChange {
+		t.Errorf("Expected route change when latest signature differs from baseline")
+	}
+	if stability != 80 {
+		t.Errorf("Expected stability 80 (4/5) from dominant signature, got %v", stability)
+	}
+}
+
+func TestDecideRouteChangeStatus_NoBaselineSingleSignature(t *testing.T) {
+	hasChange, stability := decideRouteChangeStatus(
+		"", "sig-A",
+		map[string]int{"sig-A": 10},
+		10,
+	)
+	if hasChange {
+		t.Errorf("Expected no route change with single signature and no baseline")
+	}
+	if stability != 100 {
+		t.Errorf("Expected stability 100 with single signature, got %v", stability)
+	}
+}
+
+func TestDecideRouteChangeStatus_NoBaselineMultipleSignatures(t *testing.T) {
+	hasChange, stability := decideRouteChangeStatus(
+		"", "sig-A",
+		map[string]int{"sig-A": 8, "sig-B": 2},
+		10,
+	)
+	if !hasChange {
+		t.Errorf("Expected route change fallback when multiple signatures and no baseline")
+	}
+	if stability != 80 {
+		t.Errorf("Expected stability 80 (8/10) from dominant signature, got %v", stability)
+	}
+}
+
+func TestDecideRouteChangeStatus_EmptySigsWithBaseline(t *testing.T) {
+	hasChange, stability := decideRouteChangeStatus(
+		"sig-A", "sig-A",
+		map[string]int{},
+		0,
+	)
+	if hasChange {
+		t.Errorf("Expected no route change with matching baseline even if sigs is empty")
+	}
+	if stability != 100 {
+		t.Errorf("Expected stability 100, got %v", stability)
+	}
+}

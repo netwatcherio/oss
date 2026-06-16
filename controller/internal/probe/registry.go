@@ -154,7 +154,7 @@ func Dispatch(ctx context.Context, pp ProbeData) error {
 func InitWorkers(ch *sql.DB, pg *gorm.DB) {
 	initNetInfo(ch)
 	initSysInfo(ch)
-	initMtr(ch)
+	initMtr(ch, pg)
 	initPing(ch, pg)
 	initSpeedtest(ch)
 	initTrafficSim(ch, pg)

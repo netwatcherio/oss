@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 	"time"
 )
 
-func initMtr(db *sql.DB) {
+func initMtr(db *sql.DB, pg *gorm.DB) {
 	Register(NewHandler[mtrPayload](
 		TypeMTR,
 		func(p mtrPayload) error {
@@ -18,12 +19,11 @@ func initMtr(db *sql.DB) {
 			return nil
 		},
 		func(ctx context.Context, data ProbeData, p mtrPayload) error {
-			if err := SaveRecordCH(ctx, db, data, string(TypeMTR), p); err != nil {
+			if err := SaveRecordWithAlertEval(ctx, db, pg, data, string(TypeMTR), p); err != nil {
 				log.WithError(err).Error("save mtr record (CH)")
 				return err
 			}
 
-			// Store to DB / compute / alert as needed:
 			log.Printf("[mtr] probe=%d hops=%d triggered=%v",
 				data.ProbeID, len(p.Report.Hops), data.Triggered)
 			return nil
