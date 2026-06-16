@@ -260,11 +260,25 @@ onUnmounted(() => {
 
 <template>
   <div class="route-analysis">
-    <!-- Loading skeleton -->
+    <!-- Loading state (initial load) -->
     <div v-if="loading && !analysis" class="loading-state">
+      <div class="loading-indicator">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <div class="loading-text">
+          <div class="loading-title">Analyzing routes…</div>
+          <div class="loading-subtitle">Computing shared hops, destinations and incidents across agents</div>
+        </div>
+      </div>
       <div class="skeleton-stats"></div>
+      <div class="skeleton-section-title"></div>
       <div class="skeleton-cards">
         <div class="skeleton-card" v-for="i in 6" :key="i"></div>
+      </div>
+      <div class="skeleton-section-title"></div>
+      <div class="skeleton-list">
+        <div class="skeleton-list-item" v-for="i in 3" :key="i"></div>
       </div>
     </div>
 
@@ -785,9 +799,45 @@ onUnmounted(() => {
   min-height: 200px;
 }
 
-/* Loading skeleton */
+/* Loading state */
 .loading-state {
   padding: 1rem;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+}
+
+.loading-indicator .spinner-border {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-width: 0.2em;
+}
+
+.loading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.loading-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--bs-body-color);
+}
+
+.loading-subtitle {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
 }
 
 .skeleton-stats {
@@ -799,6 +849,16 @@ onUnmounted(() => {
   margin-bottom: 1rem;
 }
 
+.skeleton-section-title {
+  height: 14px;
+  width: 180px;
+  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+  margin: 0.75rem 0 0.5rem;
+}
+
 .skeleton-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -807,6 +867,20 @@ onUnmounted(() => {
 
 .skeleton-card {
   height: 100px;
+  background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 10px;
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-list-item {
+  height: 56px;
   background: linear-gradient(90deg, var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 50%, var(--bs-secondary-bg) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;

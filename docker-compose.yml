@@ -22,6 +22,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     env_file:
       - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   postgres:
     image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
@@ -41,6 +46,11 @@ services:
       timeout: 3s
       retries: 30
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   clickhouse:
     image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG}
@@ -88,6 +98,11 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # (healthcheck intentionally removed)
 
   panel:
@@ -103,3 +118,8 @@ services:
       CONTROLLER_ENDPOINT: ${CONTROLLER_ENDPOINT}
     ports:
       - "3000:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
