@@ -444,7 +444,7 @@ func TestListForAgentPingEnabledByMetadata(t *testing.T) {
 	db := newTestDB(t)
 	const aID, bID = uint(1), uint(2)
 	seedAgent(t, db, aID, "10.0.0.1", false, 0)
-	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", true, 5005)
 
 	md, err := json.Marshal(map[string]any{
 		"expansion": map[string]any{"include_ping": true},
@@ -484,7 +484,7 @@ func TestListForAgentPingDisabledByMetadata(t *testing.T) {
 	db := newTestDB(t)
 	const aID, bID = uint(1), uint(2)
 	seedAgent(t, db, aID, "10.0.0.1", false, 0)
-	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", true, 5005)
 
 	md, err := json.Marshal(map[string]any{
 		"expansion": map[string]any{"include_ping": false},
@@ -524,7 +524,7 @@ func TestListForAgentPingEnabledByEnv(t *testing.T) {
 	db := newTestDB(t)
 	const aID, bID = uint(1), uint(2)
 	seedAgent(t, db, aID, "10.0.0.1", false, 0)
-	seedAgent(t, db, bID, "10.0.0.2", false, 0)
+	seedAgent(t, db, bID, "10.0.0.2", true, 5005)
 
 	if _, err := Create(context.Background(), db, CreateInput{
 		WorkspaceID:  1,

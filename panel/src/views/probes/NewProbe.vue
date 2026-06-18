@@ -66,6 +66,10 @@ interface ProbeState {
   options: SelectOption[];
   probe: ProbeCreateInput;
   agents: Agent[];
+  // Global agents from OTHER workspaces (cross-workspace targets). Used by the
+  // AGENT-probe target dropdown with a "[Global]" prefix. Excludes the current
+  // workspace by virtue of the controller route /agents/global.
+  globalAgents: Agent[];
   customServer: boolean;
   targetAgent: boolean;
   targetAgentSelected: Agent | null;
@@ -124,6 +128,7 @@ const state = reactive<ProbeState>({
     agent_targets: []
   } as ProbeCreateInput,
   agents: [],
+  globalAgents: [],
   customServer: false,
   target: {} as Target,
   targetAgent: true,
@@ -215,10 +220,48 @@ const showCustomTargetInput = computed(() => {
   return !state.targetAgent || !showTargetAgentOption.value;
 });
 
+// In-workspace agents eligible as an AGENT-probe target: every other agent in
+// this workspace that has a TrafficSim server enabled. Cross-workspace
+// globals are merged in below with a "[Global]" prefix.
+const localEligibleAgentTargets = computed(() => {
+  return state.agents.filter(
+    agent => agent.id !== state.agent.id && agent.trafficsim_enabled
+  );
+});
+
+const globalEligibleAgentTargets = computed(() => {
+  return state.globalAgents
+    .filter(agent => agent.trafficsim_enabled)
+    .map(agent => ({ ...agent, __isGlobal: true }));
+});
+
+const hasEligibleAgentTargets = computed(() => {
+  return localEligibleAgentTargets.value.length > 0 ||
+    globalEligibleAgentTargets.value.length > 0;
+});
+
+// Target list shown in the AGENT-probe target dropdown. For AGENT probes the
+// list is restricted to TrafficSim-enabled agents (in-workspace first, then
+// cross-workspace globals with a "[Global]" prefix). For other probe types
+// (MTR/PING/RPERF) the original "all in-workspace agents" list is used so
+// the rest of the form is unaffected.
 const availableAgentsForSelection = computed(() => {
-  // Filter out the current agent from the list
+  if (state.selected.value === 'AGENT') {
+    return [
+      ...localEligibleAgentTargets.value,
+      ...globalEligibleAgentTargets.value,
+    ];
+  }
   return state.agents.filter(agent => agent.id !== state.agent.id);
 });
+
+// Display label for an option in the AGENT-probe target dropdown. Adds the
+// "[Global]" prefix for cross-workspace entries so users can tell them apart
+// from local ones in the same workspace.
+function targetAgentOptionLabel(agent: Agent & { __isGlobal?: boolean }): string {
+  const base = agent.location ? `${agent.name} (${agent.location})` : agent.name;
+  return agent.__isGlobal ? `[Global] ${base}` : base;
+}
 
 const probeTypeConfig = computed(() => {
   const config: Record<string, any> = {
@@ -374,6 +417,18 @@ function initializeOptions() {
     }
   ];
 }
+
+// Reactive view of the probe type options. The AGENT card is dynamically
+// disabled when no in-workspace or global agents with a TrafficSim server are
+// available, since AGENT probes require such a target.
+const probeTypeOptions = computed(() => {
+  return state.options.map(opt => {
+    if (opt.value === 'AGENT') {
+      return { ...opt, disabled: !hasEligibleAgentTargets.value };
+    }
+    return opt;
+  });
+});
 
 // EDIT: computed - enhance isValidProbe for TRAFFICSIM server
 const isValidProbe = computed(() => {
@@ -754,6 +809,16 @@ onMounted(async () => {
     const agentsResponse = await AgentService.list(workspaceID);
     state.agents = agentsResponse.data as Agent[];
 
+    // Load global agents from other workspaces (non-fatal if the call fails —
+    // we just degrade to local-only targets). Powers the "[Global]" entries
+    // in the AGENT-probe target dropdown.
+    try {
+      state.globalAgents = await AgentService.listAvailableGlobal(workspaceID);
+    } catch (err) {
+      console.debug('Could not fetch global agents:', err);
+      state.globalAgents = [];
+    }
+
     // Initialize probe options
     initializeOptions();
 
@@ -823,7 +888,7 @@ onMounted(async () => {
           <div class="card-body">
             <div class="row g-3">
               <div
-                  v-for="option in state.options"
+                  v-for="option in probeTypeOptions"
                   :key="option.value"
                   class="col-lg-6 col-xl-4">
                 <div
@@ -845,6 +910,14 @@ onMounted(async () => {
                   </div>
                   <p class="probe-description mb-0">
                     {{ getProbeDescription(option.value) }}
+                  </p>
+                  <p
+                      v-if="option.value === 'AGENT' && option.disabled"
+                      class="probe-disabled-hint small text-muted mb-0 mt-2"
+                  >
+                    <i class="bi bi-info-circle me-1"></i>
+                    No other agents with a TrafficSim server are available to
+                    monitor.
                   </p>
                   <div class="selection-indicator">
                     <i class="bi bi-check-circle"></i>
@@ -919,12 +992,21 @@ onMounted(async () => {
                       :key="agent.id"
                       :value="agent"
                   >
-                    {{ agent.name }}
-                    <span v-if="agent.location">({{ agent.location }})</span>
+                    {{ targetAgentOptionLabel(agent) }}
                   </option>
                 </select>
-                <small v-if="availableAgentsForSelection.length === 0" class="text-warning">
-                  <i class="bi bi-info-circle me-1"></i>No other agents available in this workspace
+                <small
+                    v-if="availableAgentsForSelection.length === 0"
+                    class="text-warning"
+                >
+                  <i class="bi bi-info-circle me-1"></i>
+                  <template v-if="state.selected.value === 'AGENT'">
+                    No eligible target agents. Agent Monitoring requires the target
+                    agent to have a TrafficSim server enabled.
+                  </template>
+                  <template v-else>
+                    No other agents available in this workspace
+                  </template>
                 </small>
                 
                 <!-- Bidirectional Probe Toggle -->

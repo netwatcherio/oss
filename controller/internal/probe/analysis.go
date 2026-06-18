@@ -981,7 +981,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 
 		// Prefer the legacy reciprocal probe when one exists (hybrid/legacy DBs);
 		// otherwise use the new-format same-ID reverse rows.
-		if reverseProbes, rerr := findReverseAgentProbes(ctx, pg, p.AgentID); rerr == nil {
+		if reverseProbes, rerr := FindReverseAgentProbes(ctx, pg, p.AgentID); rerr == nil {
 			for _, rp := range reverseProbes {
 				if rp.AgentID == targetAgentID {
 					revProbeID = rp.ID
@@ -5084,7 +5084,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	}
 
 	// Find return path probes (reverse AGENT probes from other agents targeting this agent)
-	reverseAgentProbes, err := findReverseAgentProbes(ctx, db, agentID)
+	reverseAgentProbes, err := FindReverseAgentProbes(ctx, db, agentID)
 	if err != nil {
 		log.Warnf("[voice] failed to find reverse agent probes for agent %d: %v", agentID, err)
 	}

@@ -177,6 +177,18 @@ export const AgentService = {
         return data;
     },
     /**
+     * List global agents from OTHER workspaces (excludes the current workspace).
+     * Used by the probe-create page to surface cross-workspace Agent Monitoring
+     * targets with a "[Global]" prefix. Returns the same Agent shape as list(),
+     * so callers can use trafficsim_enabled / is_global etc. directly.
+     */
+    async listAvailableGlobal(workspaceId: number | string) {
+        const { data } = await request.get<{ data: Agent[] }>(
+            `/workspaces/${workspaceId}/agents/global`
+        );
+        return (data.data || []) as Agent[];
+    },
+    /**
      * Wipe every probe owned by the agent. The agent record itself is left
      * intact — useful when you want to reconfigure from scratch without
      * re-deploying. ClickHouse data is purged asynchronously.

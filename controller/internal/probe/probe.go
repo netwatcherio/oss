@@ -344,6 +344,13 @@ func Create(ctx context.Context, db *gorm.DB, in CreateInput) (*Probe, error) {
 		}
 	}
 
+	// AGENT-probe targets must have a TrafficSim server enabled. Without it
+	// the expansion would silently drop the TRAFFICSIM child probe and the
+	// "Agent Monitoring" promise would be half-fulfilled.
+	if err := validateAgentProbeTargets(ctx, db, in.Type, in.AgentTargets); err != nil {
+		return nil, err
+	}
+
 	// Check for duplicate probe (same agent, type, and targets)
 	if err := checkDuplicateProbe(ctx, db, in); err != nil {
 		return nil, err
@@ -591,7 +598,7 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	// For GLOBAL agents: we DO expand reverse probes from any workspace. This is the
 	// core global agent behavior — any workspace can target a global agent and the
 	// global agent automatically probes back (if bidirectional_default is true).
-	reverseAgentProbes, revErr := findReverseAgentProbes(ctx, db, agentID)
+	reverseAgentProbes, revErr := FindReverseAgentProbes(ctx, db, agentID)
 	if revErr != nil {
 		log.Warnf("[agent %d] Failed to find reverse AGENT probes: %v", agentID, revErr)
 	}
@@ -907,16 +914,42 @@ func ListForAgent(ctx context.Context, db *gorm.DB, ch *sql.DB, agentID uint) ([
 	return out, nil
 }
 
-// findReverseAgentProbes finds AGENT-type probes from other agents that target this agent.
-func findReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint) ([]Probe, error) {
+// FindReverseAgentProbes finds AGENT-type probes from any workspace that target
+// this agent. Used to detect when a TrafficSim server cannot be disabled
+// because other agents' Agent Monitoring probes still depend on it. Excludes
+// soft-deleted and disabled probes.
+func FindReverseAgentProbes(ctx context.Context, db *gorm.DB, targetAgentID uint) ([]Probe, error) {
 	var probes []Probe
 	err := db.WithContext(ctx).
-		Preload("Targets").
-		Joins("JOIN probe_targets t ON t.probe_id = probes.id").
-		Where("probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ?",
-			TypeAgent, targetAgentID, targetAgentID).
+		Preload("Targets", "deleted_at IS NULL").
+		Joins("JOIN probe_targets t ON t.probe_id = probes.id AND t.deleted_at IS NULL").
+		Where("probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ? AND probes.enabled = ? AND probes.deleted_at IS NULL",
+			TypeAgent, targetAgentID, targetAgentID, true).
+		Order("probes.id DESC").
 		Find(&probes).Error
 	return probes, err
+}
+
+// validateAgentProbeTargets ensures every target of an AGENT probe has a
+// TrafficSim server enabled. Cross-workspace targets are supported: the
+// constraint is per-agent, not per-workspace. Used by Create/Update/Copy so
+// that a misconfigured AGENT probe (whose expansion would silently drop the
+// TRAFFICSIM child) cannot be persisted.
+func validateAgentProbeTargets(ctx context.Context, db *gorm.DB, probeType Type, agentTargets []uint) error {
+	if probeType != TypeAgent || len(agentTargets) == 0 {
+		return nil
+	}
+	var missing []uint
+	for _, id := range agentTargets {
+		a, err := agent.GetAgentByID(ctx, db, id)
+		if err != nil || a == nil || !a.TrafficSimEnabled {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: AGENT probe target(s) %v must have TrafficSim server enabled", ErrBadInput, missing)
+	}
+	return nil
 }
 
 // expandAgentProbeForOwner expands an AGENT probe for the owning agent.
@@ -1595,25 +1628,42 @@ type ReverseProbeView struct {
 	Bidirectional    bool   `json:"bidirectional"`
 }
 
-// ListReverseAgentProbes returns AGENT-type probes from other agents in the
-// same workspace whose targets include targetAgentID. Used by the panel to
-// render a read-only "configured elsewhere, targeting me" section on the
-// targeted agent's view. Excludes soft-deleted and disabled probes.
+// ListReverseAgentProbes returns AGENT-type probes from other agents whose
+// targets include targetAgentID. When the target agent is a global agent
+// (is_global=true), probes from all workspaces are returned; otherwise only
+// probes from the same workspace are returned. Used by the panel to render a
+// read-only "configured elsewhere, targeting me" section. Excludes soft-deleted
+// and disabled probes.
 func ListReverseAgentProbes(ctx context.Context, db *gorm.DB, workspaceID, targetAgentID uint) ([]Probe, error) {
 	if workspaceID == 0 || targetAgentID == 0 {
 		return nil, fmt.Errorf("%w: workspaceID and targetAgentID required", ErrBadInput)
 	}
-	var out []Probe
-	err := db.WithContext(ctx).
+
+	// Look up the target agent to decide whether cross-workspace probes are
+	// visible. Global agents accept probes from any workspace, so we widen the
+	// query to surface those. Non-global agents keep the same-workspace scope.
+	var targetAgent agent.Agent
+	if err := db.WithContext(ctx).Select("id, is_global").First(&targetAgent, targetAgentID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return []Probe{}, nil
+		}
+		return nil, err
+	}
+
+	q := db.WithContext(ctx).
 		Preload("Targets", "deleted_at IS NULL").
 		Joins("JOIN probe_targets t ON t.probe_id = probes.id AND t.deleted_at IS NULL").
-		Where(
-			"probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ? AND probes.workspace_id = ? AND probes.enabled = ? AND probes.deleted_at IS NULL",
-			TypeAgent, targetAgentID, targetAgentID, workspaceID, true,
-		).
-		Order("probes.id DESC").
-		Find(&out).Error
-	return out, err
+		Where("probes.type = ? AND t.agent_id = ? AND probes.agent_id <> ? AND probes.enabled = ? AND probes.deleted_at IS NULL",
+			TypeAgent, targetAgentID, targetAgentID, true)
+	if !targetAgent.IsGlobal {
+		q = q.Where("probes.workspace_id = ?", workspaceID)
+	}
+
+	var out []Probe
+	if err := q.Order("probes.id DESC").Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ListReverseAgentProbesWithOwners augments the reverse-probe list with the
@@ -1656,11 +1706,14 @@ func ListReverseAgentProbesWithOwners(ctx context.Context, db *gorm.DB, workspac
 		if name == "" {
 			name = fmt.Sprintf("Agent #%d", p.AgentID)
 		}
+		// OwnerWorkspaceID is the probe's own workspace, which may differ from
+		// the caller's workspaceID when the target agent is global and the probe
+		// originated in another workspace.
 		views = append(views, ReverseProbeView{
 			Probe:            p,
 			OwnerAgentID:     p.AgentID,
 			OwnerAgentName:   name,
-			OwnerWorkspaceID: workspaceID,
+			OwnerWorkspaceID: p.WorkspaceID,
 			Bidirectional:    agentProbeHasBidirectional(&p),
 		})
 	}
@@ -1671,6 +1724,18 @@ func ListReverseAgentProbesWithOwners(ctx context.Context, db *gorm.DB, workspac
 func Update(ctx context.Context, db *gorm.DB, in UpdateInput) (*Probe, error) {
 	if in.ID == 0 {
 		return nil, fmt.Errorf("%w: id required", ErrBadInput)
+	}
+
+	// AGENT-probe targets must have a TrafficSim server enabled. The existing
+	// probe's type is needed to gate this check, so we look it up front.
+	if len(in.ReplaceAgentTargets) > 0 {
+		existing, err := GetByID(ctx, db, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateAgentProbeTargets(ctx, db, existing.Type, in.ReplaceAgentTargets); err != nil {
+			return nil, err
+		}
 	}
 
 	now := time.Now()
@@ -1954,6 +2019,19 @@ func CopyProbes(ctx context.Context, db *gorm.DB, in CopyInput) (*CopyOutput, er
 					copyInput.AgentTargets = append(copyInput.AgentTargets, *t.AgentID)
 				} else if t.Target != "" {
 					copyInput.Targets = append(copyInput.Targets, t.Target)
+				}
+			}
+
+			// AGENT-probe targets must have a TrafficSim server enabled; the
+			// Create path will re-validate, but checking up front lets us record
+			// a clean per-probe error in CopyResult instead of a global fail.
+			if srcProbe.Type == TypeAgent && len(copyInput.AgentTargets) > 0 {
+				if err := validateAgentProbeTargets(ctx, db, srcProbe.Type, copyInput.AgentTargets); err != nil {
+					result.Error = err.Error()
+					output.Errors++
+					output.Results = append(output.Results, result)
+					log.Warnf("[COPY] Skipped AGENT probe %d copy to agent %d: %v", srcProbe.ID, destAgentID, err)
+					continue
 				}
 			}
 

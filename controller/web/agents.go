@@ -5,11 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"netwatcher-controller/internal/deletion"
 	"netwatcher-controller/internal/limits"
 	"netwatcher-controller/internal/probe"
 	"netwatcher-controller/internal/workspace"
+	"strings"
 	"time"
 
 	"netwatcher-controller/internal/agent"
@@ -163,6 +165,35 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, deletionStore *delet
 		if err := c.BodyParser(&body); err != nil {
 			return c.SendStatus(http.StatusBadRequest)
 		}
+
+		// Guard: disabling the TrafficSim server is only allowed if no other
+		// agent's AGENT probe (from any workspace) currently targets this agent.
+		// Otherwise those probes would silently lose their TRAFFICSIM child.
+		if body.TrafficSimEnabled != nil && !*body.TrafficSimEnabled {
+			incoming, err := probe.FindReverseAgentProbes(c.UserContext(), db, aID)
+			if err != nil {
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
+			if len(incoming) > 0 {
+				seen := map[uint]bool{}
+				ownerNames := make([]string, 0, len(incoming))
+				for _, p := range incoming {
+					if seen[p.AgentID] {
+						continue
+					}
+					seen[p.AgentID] = true
+					if owner, _ := agent.GetAgentByID(c.UserContext(), db, p.AgentID); owner != nil {
+						ownerNames = append(ownerNames, owner.Name)
+					}
+				}
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": "Cannot disable TrafficSim server: " +
+						fmt.Sprintf("%d AGENT probe(s) from %s still target this agent. Remove those probes first.",
+							len(incoming), strings.Join(ownerNames, ", ")),
+				})
+			}
+		}
+
 		patch := map[string]any{}
 		if body.Name != nil {
 			patch["name"] = *body.Name

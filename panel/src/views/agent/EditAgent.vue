@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref, computed } from "vue";
-import type { Workspace, Agent } from "@/types";
+import type { Workspace, Agent, ReverseProbeView } from "@/types";
 import core from "@/core";
 import Title from "@/components/Title.vue";
-import { AgentService, WorkspaceService } from "@/services/apiService";
+import { AgentService, ProbeService, WorkspaceService } from "@/services/apiService";
 
 const router = core.router();
 
@@ -19,7 +19,12 @@ const state = reactive({
   showClearProbesModal: false,
   clearingProbes: false,
   clearProbesError: "",
-  clearProbesConfirmText: ""
+  clearProbesConfirmText: "",
+  // Incoming AGENT probes from other agents in the same workspace (or any
+  // workspace when this agent is global). Surfaced to gate the TrafficSim
+  // toggle: disabling the server would silently break these probes' TRAFFICSIM
+  // child, so the user must remove them first.
+  incomingAgentProbes: [] as ReverseProbeView[],
 });
 
 const clearProbesConfirmRequired = computed(() => state.agent.name || "");
@@ -58,7 +63,38 @@ onMounted(async () => {
   } catch (err) {
     console.error("Failed to load data:", err);
     state.error = "Failed to load agent data";
+    return;
   }
+
+  // Non-fatal: load incoming AGENT probes from other agents. The list is used
+  // to gate the TrafficSim toggle. If the call fails, the toggle stays
+  // enabled and the server-side guard catches any unsafe disable.
+  try {
+    state.incomingAgentProbes = await ProbeService.listReverse(workspaceId, agentId);
+  } catch (err) {
+    console.debug('Could not fetch incoming AGENT probes:', err);
+    state.incomingAgentProbes = [];
+  }
+});
+
+// The TrafficSim toggle is locked while the server is ON and at least one
+// other agent's AGENT probe targets this agent. Enabling is always allowed
+// (the constraint only protects the OFF transition).
+const trafficsimLockedByIncomingProbes = computed(() => {
+  return state.agent.trafficsim_enabled === true &&
+    state.incomingAgentProbes.length > 0;
+});
+
+// De-duplicated list of distinct owner names for the warning message.
+const incomingProbeOwnerSummary = computed(() => {
+  const seen = new Set<number>();
+  const names: string[] = [];
+  for (const v of state.incomingAgentProbes) {
+    if (seen.has(v.owner_agent_id)) continue;
+    seen.add(v.owner_agent_id);
+    names.push(v.owner_agent_name);
+  }
+  return names;
 });
 
 function markTouched(field: keyof typeof state.touched) {
@@ -250,13 +286,28 @@ async function confirmClearProbes() {
                     role="switch"
                     id="trafficsimEnabled"
                     v-model="state.agent.trafficsim_enabled"
-                    :disabled="state.loading"
+                    :disabled="state.loading || trafficsimLockedByIncomingProbes"
                   >
                   <label class="form-check-label" for="trafficsimEnabled">
                     Enable TrafficSim Server
                   </label>
                 </div>
                 <div class="form-text">Run a TrafficSim server on this agent for inter-agent traffic simulation testing.</div>
+                <div
+                  v-if="trafficsimLockedByIncomingProbes"
+                  class="alert alert-warning mt-2 mb-0 py-2 small"
+                  data-testid="trafficsim-locked-warning"
+                >
+                  <i class="bi bi-info-circle me-1"></i>
+                  Cannot disable: <strong>{{ state.incomingAgentProbes.length }}</strong>
+                  Agent Monitoring probe{{ state.incomingAgentProbes.length === 1 ? '' : 's' }}
+                  from
+                  <strong>{{ incomingProbeOwnerSummary.join(', ') }}</strong>
+                  currently depend on this server.
+                  <router-link :to="`/workspaces/${state.workspace.id}/agents/${state.agent.id}/probes/edit`">
+                    Manage probes
+                  </router-link>
+                </div>
               </div>
 
               <div v-if="state.agent.trafficsim_enabled" class="row mb-3">
