@@ -67,9 +67,14 @@ interface ProbeState {
   probe: ProbeCreateInput;
   agents: Agent[];
   // Global agents from OTHER workspaces (cross-workspace targets). Used by the
-  // AGENT-probe target dropdown with a "[Global]" prefix. Excludes the current
-  // workspace by virtue of the controller route /agents/global.
+  // AGENT-probe target dropdown with a "[Global]" prefix. Includes the
+  // current workspace's own global agents too — the panel dedupes against the
+  // local list and labels them as [Global] in the dropdown.
   globalAgents: Agent[];
+  // Non-fatal warnings surfaced from background fetches (e.g. global agents
+  // failed to load). Rendered as a non-blocking alert so the user knows
+  // something is incomplete without losing the rest of the form.
+  fetchWarnings: string[];
   customServer: boolean;
   targetAgent: boolean;
   targetAgentSelected: Agent | null;
@@ -129,6 +134,7 @@ const state = reactive<ProbeState>({
   } as ProbeCreateInput,
   agents: [],
   globalAgents: [],
+  fetchWarnings: [],
   customServer: false,
   target: {} as Target,
   targetAgent: true,
@@ -221,17 +227,22 @@ const showCustomTargetInput = computed(() => {
 });
 
 // In-workspace agents eligible as an AGENT-probe target: every other agent in
-// this workspace that has a TrafficSim server enabled. Cross-workspace
-// globals are merged in below with a "[Global]" prefix.
+// this workspace that has a TrafficSim server enabled. Agents flagged as
+// `is_global` get the `__isGlobal` marker so the dropdown shows them with a
+// "[Global]" prefix (consistent with the cross-workspace globals list).
 const localEligibleAgentTargets = computed(() => {
-  return state.agents.filter(
-    agent => agent.id !== state.agent.id && agent.trafficsim_enabled
-  );
+  return state.agents
+    .filter(agent => agent.id !== state.agent.id && agent.trafficsim_enabled)
+    .map(agent => ({ ...agent, __isGlobal: agent.is_global === true }));
 });
 
 const globalEligibleAgentTargets = computed(() => {
+  // The /workspaces/:id/agents/global endpoint now returns ALL global
+  // agents (own + cross-workspace). Drop entries that already appear in the
+  // local list so we don't show the same agent twice in the dropdown.
+  const localIDs = new Set(state.agents.map(a => a.id));
   return state.globalAgents
-    .filter(agent => agent.trafficsim_enabled)
+    .filter(agent => agent.trafficsim_enabled && !localIDs.has(agent.id))
     .map(agent => ({ ...agent, __isGlobal: true }));
 });
 
@@ -809,14 +820,18 @@ onMounted(async () => {
     const agentsResponse = await AgentService.list(workspaceID);
     state.agents = agentsResponse.data as Agent[];
 
-    // Load global agents from other workspaces (non-fatal if the call fails —
-    // we just degrade to local-only targets). Powers the "[Global]" entries
-    // in the AGENT-probe target dropdown.
+    // Load global agents from other workspaces (and the current workspace's
+    // own globals). Non-fatal if the call fails — we degrade to local-only
+    // targets and surface a warning so the user knows cross-workspace
+    // targets may be missing from the dropdown.
     try {
       state.globalAgents = await AgentService.listAvailableGlobal(workspaceID);
-    } catch (err) {
-      console.debug('Could not fetch global agents:', err);
+    } catch (err: any) {
+      console.warn('Could not fetch global agents:', err?.message || err);
       state.globalAgents = [];
+      state.fetchWarnings.push(
+        'Could not load global agents. Cross-workspace targets may be missing from the list.'
+      );
     }
 
     // Initialize probe options
@@ -876,6 +891,19 @@ onMounted(async () => {
           <div class="d-flex align-items-center">
             <i class="bi bi-exclamation-triangle me-2"></i>
             <span>{{ state.duplicateWarning }}</span>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        <!-- Non-fatal fetch warnings (e.g. global agents failed to load).
+             Surfaces silently-swallowed errors from onMounted so the user
+             can see why the target list might be incomplete. -->
+        <div v-if="state.fetchWarnings.length > 0" class="alert alert-warning alert-dismissible fade show mb-3" role="alert" data-testid="fetch-warnings">
+          <div class="d-flex align-items-start">
+            <i class="bi bi-exclamation-triangle me-2 mt-1"></i>
+            <ul class="mb-0 ps-0" style="list-style: none;">
+              <li v-for="(w, idx) in state.fetchWarnings" :key="idx">{{ w }}</li>
+            </ul>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>

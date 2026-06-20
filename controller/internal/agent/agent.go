@@ -597,6 +597,16 @@ func ListGlobalAgents(ctx context.Context, db *gorm.DB) ([]Agent, error) {
 	return out, err
 }
 
+// ListGlobalAgentsForWorkspace returns all global agents across all
+// workspaces. Used by the panel's probe-create page so the user can target
+// global agents from any workspace, including their own — unlike
+// ListGlobalAgentsExcludingWorkspace, this does NOT drop the caller's own
+// workspace. The panel dedupes against the local agent list and labels the
+// remaining entries as "[Global]" in the dropdown.
+func ListGlobalAgentsForWorkspace(ctx context.Context, db *gorm.DB) ([]Agent, error) {
+	return ListGlobalAgents(ctx, db)
+}
+
 // ListGlobalAgentsExcludingWorkspace returns all global agents NOT in the given workspace.
 // Used when a workspace wants to discover global agents from other workspaces to target.
 func ListGlobalAgentsExcludingWorkspace(ctx context.Context, db *gorm.DB, excludeWorkspaceID uint) ([]Agent, error) {

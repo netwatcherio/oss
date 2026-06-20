@@ -3,7 +3,9 @@ package probe
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
+	"time"
 )
 
 // Test the MtrPayload unmarshaling with actual agent JSON
@@ -273,5 +275,290 @@ func TestParseHopPath(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AGENT-bidirectional inflation regression tests
+//
+// A single bidirectional AGENT probe (one probe_id, two rowsets: forward
+// from owner→target, reverse from target→owner) must NOT inflate the
+// workspace route analysis. The aggregator must attribute everything to
+// the probe OWNER (probe_agent_id), not the reporter (agent_id):
+//
+//   - totalRoutes counts unique probe_ids, not (probe, direction) tuples
+//   - route_change incidents emit at most once per probe_id
+//   - hopIndex entries are attributed to the OWNER
+//   - commonTargets / sharedDestinations probe_count is per probe, not
+//     per (probe, direction)
+//   - both directions still materialise as separate ProbeRouteInfo
+//     entries (so the UI can render forward vs reverse) — they just
+//     attach to the owner's AgentRouteInfo, not the reporter's.
+// ---------------------------------------------------------------------------
+
+func TestMTRPathKey_OwnerAndReverseDetection(t *testing.T) {
+	cases := []struct {
+		name          string
+		key           mtrPathKey
+		wantOwner     uint
+		wantIsReverse bool
+	}{
+		{
+			name:          "standalone MTR: reporter == owner",
+			key:           mtrPathKey{probeID: 1, agentID: 10, targetAgent: 0, probeAgentID: 10},
+			wantOwner:     10,
+			wantIsReverse: false,
+		},
+		{
+			name:          "AGENT probe forward (A→B): reporter == owner",
+			key:           mtrPathKey{probeID: 793, agentID: 10, targetAgent: 20, probeAgentID: 10},
+			wantOwner:     10,
+			wantIsReverse: false,
+		},
+		{
+			name:          "AGENT probe reverse (B→A): reporter != owner",
+			key:           mtrPathKey{probeID: 793, agentID: 20, targetAgent: 10, probeAgentID: 10},
+			wantOwner:     10,
+			wantIsReverse: true,
+		},
+		{
+			name:          "legacy row: probeAgentID == 0 falls back to reporter",
+			key:           mtrPathKey{probeID: 2, agentID: 30, targetAgent: 0, probeAgentID: 0},
+			wantOwner:     30,
+			wantIsReverse: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.key.ownerAgent(); got != tc.wantOwner {
+				t.Errorf("ownerAgent() = %d, want %d", got, tc.wantOwner)
+			}
+			if got := tc.key.isReverse(); got != tc.wantIsReverse {
+				t.Errorf("isReverse() = %v, want %v", got, tc.wantIsReverse)
+			}
+		})
+	}
+}
+
+// fixtureMTRRow builds a ProbeData for the MTR aggregator with a single
+// hop list. Used by the AGENT-bidirectional tests below.
+func fixtureMTRRow(probeID, agentID, probeAgentID, targetAgent uint, hops []string) ProbeData {
+	mtrHops := make([]MtrHop, len(hops))
+	for i, ip := range hops {
+		mtrHops[i] = MtrHop{
+			TTL:     i + 1,
+			Hosts:   []MtrHopHost{{IP: ip}},
+			Avg:     "10.0",
+			LossPct: "0.0%",
+		}
+	}
+	payload, _ := json.Marshal(MtrPayload{Report: MtrReport{Hops: mtrHops}})
+	return ProbeData{
+		CreatedAt:    time.Now().UTC(),
+		Type:         TypeMTR,
+		ProbeID:      probeID,
+		ProbeAgentID: probeAgentID,
+		AgentID:      agentID,
+		TargetAgent:  targetAgent,
+		Payload:      payload,
+	}
+}
+
+// newAgentInfo returns an agentInfo for tests.
+func newAgentInfo(id uint, name string) agentInfo {
+	return agentInfo{ID: id, Name: name}
+}
+
+func TestMTRPathAgg_AGENTBidirectionalDoesNotInflate(t *testing.T) {
+	// Two agents A=10 and B=20. One bidirectional AGENT probe 793
+	// between them. ClickHouse holds two rowsets:
+	//   - Forward: agent_id=10, target_agent=20, probe_agent_id=10
+	//   - Reverse: agent_id=20, target_agent=10, probe_agent_id=10
+	const (
+		probeID uint = 793
+		ownerA  uint = 10
+		ownerB  uint = 20
+	)
+	transitHop := "1.1.1.1"
+
+	ariA := &AgentRouteInfo{AgentID: ownerA, AgentName: "agent-A"}
+	ariB := &AgentRouteInfo{AgentID: ownerB, AgentName: "agent-B"}
+	ariByAgent := map[uint]*AgentRouteInfo{ownerA: ariA, ownerB: ariB}
+	agentByID := map[uint]agentInfo{
+		ownerA: newAgentInfo(ownerA, "agent-A"),
+		ownerB: newAgentInfo(ownerB, "agent-B"),
+	}
+
+	routeByKey := make(map[routeKey]*ProbeRouteInfo)
+	hopIndex := make(map[string]map[uint]HopMetrics)
+	destAgg := make(map[string]*destStats)
+	seenProbeIDs := make(map[uint]struct{})
+	incidentProbeIDs := make(map[uint]struct{})
+
+	agg := newMTRPathAgg(mtrPathAggConfig{
+		ARIByAgent:       ariByAgent,
+		AgentByID:        agentByID,
+		AgentIPToID:      map[string]uint{},
+		CommonTargetKey:  func(s string) string { return strings.ToLower(strings.TrimSpace(s)) },
+		RouteByKey:       routeByKey,
+		HopIndex:         hopIndex,
+		DestAgg:          destAgg,
+		SeenProbeIDs:     seenProbeIDs,
+		IncidentProbeIDs: incidentProbeIDs,
+		// No baseline → route stays "stable" (single signature, no baseline
+		// to compare against → HasRouteChange=false).
+		LoadBaselineForDir: func(uint, uint) (routeBaseline, bool) { return routeBaseline{}, false },
+	})
+
+	var routeIncidents []RouteIncident
+
+	// Forward: A runs trace A→transit→B. probe 793, reporter A=10, owner A=10.
+	forwardKey := mtrPathKey{
+		probeID: probeID, agentID: ownerA, targetAgent: ownerB, probeAgentID: ownerA,
+	}
+	forwardRows := []ProbeData{
+		fixtureMTRRow(probeID, ownerA, ownerA, ownerB, []string{"10.0.0.1", transitHop, "10.0.0.2"}),
+	}
+
+	// Reverse: B runs trace B→transit→A. Same probe 793, reporter B=20,
+	// owner A=10.
+	reverseKey := mtrPathKey{
+		probeID: probeID, agentID: ownerB, targetAgent: ownerA, probeAgentID: ownerA,
+	}
+	reverseRows := []ProbeData{
+		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", transitHop, "10.0.0.1"}),
+	}
+
+	agg.process(forwardKey, forwardRows, &routeIncidents)
+	agg.process(reverseKey, reverseRows, &routeIncidents)
+
+	// (1) totalRoutes = unique probe IDs = 1, not 2.
+	if len(seenProbeIDs) != 1 {
+		t.Errorf("seenProbeIDs has %d entries, want 1 (one probe, two directions)", len(seenProbeIDs))
+	}
+	if _, ok := seenProbeIDs[probeID]; !ok {
+		t.Errorf("seenProbeIDs missing probe %d", probeID)
+	}
+
+	// (2) Both directions still materialise as separate ProbeRouteInfo
+	// entries so the UI can render forward + reverse.
+	if len(routeByKey) != 2 {
+		t.Errorf("routeByKey has %d entries, want 2 (forward + reverse)", len(routeByKey))
+	}
+	for _, pri := range routeByKey {
+		// Each ProbeRouteInfo's AgentID is the OWNER (probe_agent_id),
+		// not the reporter. So both forward and reverse attach to A's
+		// AgentRouteInfo.
+		if pri.AgentID != ownerA {
+			t.Errorf("ProbeRouteInfo.AgentID = %d, want owner %d", pri.AgentID, ownerA)
+		}
+		if pri.ProbeID != probeID {
+			t.Errorf("ProbeRouteInfo.ProbeID = %d, want %d", pri.ProbeID, probeID)
+		}
+	}
+
+	// (3) Transit hop (1.1.1.1) is attributed ONLY to the OWNER (A=10).
+	// Pre-fix this hopIndex would have been split across A and B and
+	// falsely flagged as "shared" in sharedHops.
+	transitAgents, ok := hopIndex[transitHop]
+	if !ok {
+		t.Fatalf("hopIndex missing transit hop %s", transitHop)
+	}
+	if len(transitAgents) != 1 {
+		t.Errorf("transit hop %s attributed to %d agents, want 1 (owner only): %v",
+			transitHop, len(transitAgents), transitAgents)
+	}
+	if _, ok := transitAgents[ownerA]; !ok {
+		t.Errorf("transit hop %s not attributed to owner %d: got %v",
+			transitHop, ownerA, transitAgents)
+	}
+	if _, ok := transitAgents[ownerB]; ok {
+		t.Errorf("transit hop %s wrongly attributed to reporter %d (the reverse-direction agent)",
+			transitHop, ownerB)
+	}
+
+	// (4) commonTargets probe_count is per probe, not per direction.
+	// We have two distinct target names ("agent-B" for forward,
+	// "agent-A" for reverse). For each, probeCount must be exactly 1.
+	for target, ds := range destAgg {
+		if ds.probeCount != 1 {
+			t.Errorf("destAgg[%q].probeCount = %d, want 1 (one probe contributes both directions)",
+				target, ds.probeCount)
+		}
+		// And the owner is the sole agent on the target.
+		if len(ds.agents) != 1 {
+			t.Errorf("destAgg[%q] has %d agents, want 1 (owner only): %v",
+				target, len(ds.agents), ds.agents)
+		}
+		if !ds.agents[ownerA] {
+			t.Errorf("destAgg[%q] missing owner %d in agents set: %v",
+				target, ownerA, ds.agents)
+		}
+	}
+}
+
+// When the forward direction shows a route change, the reverse direction
+// of the SAME probe must NOT emit a second route_change incident.
+func TestMTRPathAgg_AGENTBidirectionalSingleIncident(t *testing.T) {
+	const (
+		probeID uint = 793
+		ownerA  uint = 10
+		ownerB  uint = 20
+	)
+	ariA := &AgentRouteInfo{AgentID: ownerA, AgentName: "agent-A"}
+	ariByAgent := map[uint]*AgentRouteInfo{ownerA: ariA, ownerB: {AgentID: ownerB, AgentName: "agent-B"}}
+	agentByID := map[uint]agentInfo{
+		ownerA: newAgentInfo(ownerA, "agent-A"),
+		ownerB: newAgentInfo(ownerB, "agent-B"),
+	}
+
+	// Baseline that doesn't match either trace's signature → both rows
+	// report HasRouteChange=true. Without the per-probe incident dedupe
+	// this would emit two incidents.
+	mismatchBaseline := routeBaseline{
+		Fingerprint: "different-fingerprint",
+		RoutePath:   "99.99.99.99->88.88.88.88",
+		HopCount:    2,
+	}
+	loadBaseline := func(pID, _ uint) (routeBaseline, bool) {
+		if pID == probeID {
+			return mismatchBaseline, true
+		}
+		return routeBaseline{}, false
+	}
+
+	agg := newMTRPathAgg(mtrPathAggConfig{
+		ARIByAgent:         ariByAgent,
+		AgentByID:          agentByID,
+		AgentIPToID:        map[string]uint{},
+		CommonTargetKey:    func(s string) string { return strings.ToLower(strings.TrimSpace(s)) },
+		RouteByKey:         make(map[routeKey]*ProbeRouteInfo),
+		HopIndex:           make(map[string]map[uint]HopMetrics),
+		DestAgg:            make(map[string]*destStats),
+		SeenProbeIDs:       make(map[uint]struct{}),
+		IncidentProbeIDs:   make(map[uint]struct{}),
+		LoadBaselineForDir: loadBaseline,
+	})
+
+	var incidents []RouteIncident
+	forwardKey := mtrPathKey{probeID: probeID, agentID: ownerA, targetAgent: ownerB, probeAgentID: ownerA}
+	reverseKey := mtrPathKey{probeID: probeID, agentID: ownerB, targetAgent: ownerA, probeAgentID: ownerA}
+
+	agg.process(forwardKey, []ProbeData{
+		fixtureMTRRow(probeID, ownerA, ownerA, ownerB, []string{"10.0.0.1", "10.0.0.2"}),
+	}, &incidents)
+	agg.process(reverseKey, []ProbeData{
+		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", "10.0.0.1"}),
+	}, &incidents)
+
+	if len(incidents) != 1 {
+		t.Fatalf("got %d route_change incidents, want 1 (forward + reverse of same probe must dedupe): %+v",
+			len(incidents), incidents)
+	}
+	if incidents[0].ProbeID != probeID {
+		t.Errorf("incident.ProbeID = %d, want %d", incidents[0].ProbeID, probeID)
+	}
+	if incidents[0].AgentID != ownerA {
+		t.Errorf("incident.AgentID = %d, want owner %d", incidents[0].AgentID, ownerA)
 	}
 }

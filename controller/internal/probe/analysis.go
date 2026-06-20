@@ -3417,220 +3417,41 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 		return routeBaseline{}, false
 	}
 
-	// Group (agent, probe) → *ProbeRouteInfo so the per-target tuples
-	// appear as distinct routes under the same agent.
-	type routeKey struct {
-		probeID     uint
-		agentID     uint
-		targetAgent uint // 0 for non-AGENT targets
-	}
+	// routeKey is defined at package scope (above) so the per-pathKey
+	// aggregator (mtrPathAgg.process) can share the type with the call site.
 	routeByKey := make(map[routeKey]*ProbeRouteInfo)
 
-	// Cross-agent aggregation: keyed by display target so multiple
-	// agents MTR-ing 8.8.8.8 group together.
-	type destStats struct {
-		agents      map[uint]bool
-		probeCount  int
-		totalLat    float64
-		totalLoss   float64
-		latSamples  int
-		lossSamples int
-		hasIssues   bool
-		targetIP    string
-		displayName string
-	}
+	// destStats is defined at package scope (above) so the per-pathKey
+	// aggregator can share the type with the call site.
 	destAgg := make(map[string]*destStats)
 	commonTargetKey := func(t string) string { return strings.ToLower(strings.TrimSpace(t)) }
 
+	// Track the unique probe IDs we've seen so totalRoutes counts probes, not
+	// (probe, direction) tuples — a single bidirectional AGENT probe must
+	// only inflate this counter by 1 even though both A→B and B→A rows
+	// materialise as separate ProbeRouteInfo entries.
+	seenProbeIDs := make(map[uint]struct{})
+
+	// Track which probes have already emitted a route_change incident so
+	// forward and reverse directions of the same probe collapse into one
+	// incident. Keyed on probe_id (not (probe, agent)) for the same reason.
+	incidentProbeIDs := make(map[uint]struct{})
+
+	agg := newMTRPathAgg(mtrPathAggConfig{
+		ARIByAgent:         ariByAgent,
+		AgentByID:          agentByID,
+		AgentIPToID:        agentIPToID,
+		CommonTargetKey:    commonTargetKey,
+		RouteByKey:         routeByKey,
+		HopIndex:           hopIndex,
+		DestAgg:            destAgg,
+		SeenProbeIDs:       seenProbeIDs,
+		IncidentProbeIDs:   incidentProbeIDs,
+		LoadBaselineForDir: loadBaselineForDirection,
+	})
+
 	for pathKey, rows := range mtrByPath {
-		// Skip if reporting agent isn't in this workspace (shouldn't happen
-		// because the query filters by agent_id IN (...), but be defensive).
-		ari, ok := ariByAgent[pathKey.agentID]
-		if !ok {
-			continue
-		}
-
-		// Resolve target: for AGENT probes target_agent is set; otherwise
-		// fall back to the resolved target IP / hostname from the payload.
-		target, targetIP, targetAgentName := resolveMTRTarget(agentByID, rows, pathKey.targetAgent)
-
-		key := routeKey{probeID: pathKey.probeID, agentID: pathKey.agentID, targetAgent: pathKey.targetAgent}
-		pri, exists := routeByKey[key]
-		if !exists {
-			pri = &ProbeRouteInfo{
-				ProbeID:       pathKey.probeID,
-				AgentID:       pathKey.agentID,
-				Target:        target,
-				TargetAgentID: pathKey.targetAgent,
-			}
-			if targetAgentName != "" {
-				pri.TargetAgentName = targetAgentName
-			}
-			if b, ok := loadBaselineForDirection(pathKey.probeID, pathKey.agentID); ok {
-				pri.BaselineFingerprint = b.Fingerprint
-				pri.BaselineHopCount = b.HopCount
-				pri.BaselineRoutePath = b.RoutePath
-			}
-			routeByKey[key] = pri
-		}
-
-		// Process the MTR rows for this (probe, agent, target) tuple.
-		sigs := make(map[string]int)
-		var latestPayload *MtrPayload
-		for i := range rows {
-			var mp MtrPayload
-			if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
-				continue
-			}
-			sig := getMtrRouteSignature(mp.Report.Hops)
-			sigs[sig]++
-			if latestPayload == nil {
-				latestPayload = &mp
-				pri.LatestSignature = sig
-				for _, hop := range mp.Report.Hops {
-					if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" {
-						pri.LatestHops = append(pri.LatestHops, hop.Hosts[0].IP)
-					}
-				}
-				pri.LatestHopsDetail = buildHopDetails(latestPayload, agentIPToID, agentByID)
-			}
-		}
-		if latestPayload != nil {
-			pri.TraceCount = len(rows)
-			pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.LatestSignature, pri.BaselineRoutePath, sigs, len(rows))
-			// When the route has changed, find the first (newest) MTR row
-			// whose signature differs from the baseline so the UI can show
-			// how long the route has been changed. Rows are sorted
-			// newest-first, so the first match gives us the upper bound
-			// on the change duration.
-			if pri.HasRouteChange && pri.BaselineRoutePath != "" {
-				for i := range rows {
-					var mp MtrPayload
-					if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
-						continue
-					}
-					hops := make([]string, 0, len(mp.Report.Hops))
-					for _, h := range mp.Report.Hops {
-						if len(h.Hosts) > 0 && h.Hosts[0].IP != "" {
-							hops = append(hops, h.Hosts[0].IP)
-						}
-					}
-					if hopSetJaccard(parseHopPath(pri.BaselineRoutePath), hops) < routeEcmpSimilarityThreshold {
-						ts := rows[i].CreatedAt
-						pri.RouteChangedAt = &ts
-						break
-					}
-				}
-			}
-			if len(latestPayload.Report.Hops) > 0 {
-				lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
-				pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
-				pri.AvgEndHopLoss = parseLossPct(lastHop.LossPct)
-			}
-			hopCount := len(latestPayload.Report.Hops)
-			if hopCount > 1 {
-				for i := 0; i < hopCount-1; i++ {
-					hop := latestPayload.Report.Hops[i]
-					if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
-						continue
-					}
-					pri.IntermediateHops = append(pri.IntermediateHops, HopMetric{
-						IP:       hop.Hosts[0].IP,
-						Loss:     parseLossPct(hop.LossPct),
-						Latency:  parseLatency(hop.Avg),
-						HopIndex: i,
-					})
-				}
-			}
-		}
-
-		// Index hops for shared-hop computation (now includes the final
-		// hop so shared destinations surface in shared_hops too).
-		if len(pri.LatestHops) >= 1 {
-			for idx, ip := range pri.LatestHops {
-				if ip == "" || ip == "*" {
-					continue
-				}
-				if hopIndex[ip] == nil {
-					hopIndex[ip] = make(map[uint]HopMetrics)
-				}
-				metrics := HopMetrics{Count: 1}
-				matched := false
-				for _, ih := range pri.IntermediateHops {
-					if ih.IP == ip {
-						metrics.TotalLoss += ih.Loss
-						metrics.TotalLatency += ih.Latency
-						if ih.Loss > 0 || ih.Latency > 100 {
-							metrics.HasIssues = true
-						}
-						matched = true
-						break
-					}
-				}
-				if !matched && idx == len(pri.LatestHops)-1 {
-					metrics.TotalLoss += pri.AvgEndHopLoss
-					metrics.TotalLatency += pri.AvgEndHopLatency
-					if pri.AvgEndHopLoss > 0 || pri.AvgEndHopLatency > 100 {
-						metrics.HasIssues = true
-					}
-				}
-				hopIndex[ip][pathKey.agentID] = metrics
-			}
-		}
-
-		// Aggregate per-target stats for cross-agent views.
-		if target != "" {
-			key2 := commonTargetKey(target)
-			ds, ok := destAgg[key2]
-			if !ok {
-				ds = &destStats{agents: make(map[uint]bool), displayName: target}
-				destAgg[key2] = ds
-			}
-			if !ds.agents[pathKey.agentID] {
-				ds.agents[pathKey.agentID] = true
-			}
-			ds.probeCount++
-			if pri.AvgEndHopLatency > 0 {
-				ds.totalLat += pri.AvgEndHopLatency
-				ds.latSamples++
-			}
-			if pri.AvgEndHopLoss > 0 {
-				ds.totalLoss += pri.AvgEndHopLoss
-				ds.lossSamples++
-			}
-			if pri.HasRouteChange {
-				ds.hasIssues = true
-			}
-			if ds.targetIP == "" {
-				if targetIP != "" {
-					ds.targetIP = targetIP
-				} else if len(pri.LatestHops) > 0 {
-					ds.targetIP = pri.LatestHops[len(pri.LatestHops)-1]
-				}
-			}
-		}
-
-		// Route-change incident.
-		if pri.HasRouteChange {
-			evidence := []string{
-				fmt.Sprintf("Current signature: %s", pri.LatestSignature),
-			}
-			if pri.BaselineFingerprint != "" {
-				evidence = append(evidence, fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint))
-			}
-			evidence = append(evidence, fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount))
-			routeIncidents = append(routeIncidents, RouteIncident{
-				ID:        fmt.Sprintf("route_change_%d_%d", pathKey.agentID, pathKey.probeID),
-				Type:      "route_change",
-				Severity:  "warning",
-				AgentID:   pathKey.agentID,
-				AgentName: ari.AgentName,
-				ProbeID:   pathKey.probeID,
-				Target:    target,
-				Message:   fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", ari.AgentName, target, pri.RouteStabilityPct),
-				Evidence:  evidence,
-			})
-		}
+		agg.process(pathKey, rows, &routeIncidents)
 	}
 
 	allRoutes := make([]*ProbeRouteInfo, 0, len(routeByKey))
@@ -3649,8 +3470,10 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 			continue
 		}
 		ari.Routes = append(ari.Routes, *pri)
-		totalRoutes++
 	}
+	// totalRoutes counts unique probes (not (probe, direction) tuples) so a
+	// single bidirectional AGENT probe contributes 1, not 2.
+	totalRoutes = len(seenProbeIDs)
 
 	// 5. Build shared hops list
 	sharedHops := make([]SharedHopInfo, 0)
@@ -3869,10 +3692,329 @@ func hopSetJaccard(a, b []string) float64 {
 // MTR rows. The (probe_id, agent_id) pair identifies the trace, target_agent
 // distinguishes the destination for AGENT (bidirectional) probes (0 for
 // non-agent targets like 8.8.8.8).
+//
+// probeAgentID is the OWNER of the probe. For a bidirectional AGENT probe it
+// is the same value across forward and reverse rows; for a standalone MTR
+// probe it equals agentID. Callers that aggregate across agents (hopIndex,
+// sharedHops, commonTargets, totalRoutes, incidents) must key on
+// probeAgentID — never on agentID — so a single probe doesn't inflate
+// counts via its reverse direction.
 type mtrPathKey struct {
+	probeID      uint
+	agentID      uint
+	targetAgent  uint
+	probeAgentID uint
+}
+
+// ownerAgent returns the canonical source agent for this MTR row — the
+// probe OWNER (probe_agent_id), not the reporter (agent_id). Every
+// cross-probe aggregation in ComputeWorkspaceRouteAnalysis must key on
+// this so a single bidirectional AGENT probe (forward A→B + reverse B→A)
+// contributes one row of attribution, not two.
+//
+// Falls back to the reporter when probeAgentID is 0 (legacy rows where
+// the column wasn't populated).
+func (k mtrPathKey) ownerAgent() uint {
+	if k.probeAgentID != 0 {
+		return k.probeAgentID
+	}
+	return k.agentID
+}
+
+// isReverse reports whether this row is the reverse direction of a
+// bidirectional AGENT probe — i.e. the reporter is NOT the probe owner.
+// Used by tests and by any caller that needs to distinguish the two
+// directions of a single probe.
+func (k mtrPathKey) isReverse() bool {
+	return k.probeAgentID != 0 && k.probeAgentID != k.agentID
+}
+
+// routeKey uniquely identifies a (probe, agent, target) tuple for grouping
+// ProbeRouteInfo entries. Both forward and reverse directions of the same
+// bidirectional AGENT probe share the probeID but differ on agentID, so
+// each direction gets its own routeKey — the UI can render both, while
+// cross-probe aggregates (hopIndex, incidents, totalRoutes, commonTargets)
+// dedupe by probeID at the call site.
+type routeKey struct {
 	probeID     uint
 	agentID     uint
-	targetAgent uint
+	targetAgent uint // 0 for non-AGENT targets
+}
+
+// destStats is the per-target cross-agent aggregation bucket used to
+// build CommonTargets / SharedDestinations. probeIDs dedupes
+// per-probe contributions so a single bidirectional AGENT probe
+// (forward A→B + reverse B→A stored as two (probe, agent, target)
+// groups) counts as 1 in probeCount.
+type destStats struct {
+	agents      map[uint]bool
+	probeCount  int
+	probeIDs    map[uint]struct{}
+	totalLat    float64
+	totalLoss   float64
+	latSamples  int
+	lossSamples int
+	hasIssues   bool
+	targetIP    string
+	displayName string
+}
+
+// mtrPathAggConfig wires the per-pathKey aggregation step to the shared
+// state held by ComputeWorkspaceRouteAnalysis. Extracting this out of the
+// main function lets the inflation-fix logic be unit-tested without
+// standing up ClickHouse + Postgres.
+type mtrPathAggConfig struct {
+	ARIByAgent         map[uint]*AgentRouteInfo
+	AgentByID          map[uint]agentInfo
+	AgentIPToID        map[string]uint
+	CommonTargetKey    func(string) string
+	RouteByKey         map[routeKey]*ProbeRouteInfo
+	HopIndex           map[string]map[uint]HopMetrics
+	DestAgg            map[string]*destStats
+	SeenProbeIDs       map[uint]struct{}
+	IncidentProbeIDs   map[uint]struct{}
+	LoadBaselineForDir func(probeID, reportingAgentID uint) (routeBaseline, bool)
+}
+
+type mtrPathAgg struct {
+	cfg mtrPathAggConfig
+}
+
+func newMTRPathAgg(cfg mtrPathAggConfig) *mtrPathAgg {
+	return &mtrPathAgg{cfg: cfg}
+}
+
+// process is the body of the per-pathKey loop in ComputeWorkspaceRouteAnalysis.
+//
+// Attribution invariant: hops, destinations, incidents, and route counts
+// are all attributed to the probe OWNER (pathKey.ownerAgent()), never the
+// reporter. This is what stops a single bidirectional AGENT probe from
+// inflating route counts via its reverse direction.
+func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncidents *[]RouteIncident) {
+	cfg := &a.cfg
+
+	ownerID := pathKey.ownerAgent()
+	// Skip if the probe owner isn't in this workspace (the query already
+	// filters by reporter IN (workspace agents), but a probe owned by an
+	// agent outside the workspace would otherwise attach to nil).
+	ari, ok := cfg.ARIByAgent[ownerID]
+	if !ok {
+		return
+	}
+
+	cfg.SeenProbeIDs[pathKey.probeID] = struct{}{}
+
+	// Resolve target: for AGENT probes target_agent is set; otherwise
+	// fall back to the resolved target IP / hostname from the payload.
+	target, targetIP, targetAgentName := resolveMTRTarget(cfg.AgentByID, rows, pathKey.targetAgent)
+
+	rk := routeKey{probeID: pathKey.probeID, agentID: pathKey.agentID, targetAgent: pathKey.targetAgent}
+	pri, exists := cfg.RouteByKey[rk]
+	if !exists {
+		pri = &ProbeRouteInfo{
+			ProbeID: pathKey.probeID,
+			// AgentID is the probe owner (canonical source for the UI's
+			// per-agent route list). Both forward and reverse directions
+			// of one bidirectional AGENT probe attach to the owner's
+			// AgentRouteInfo.
+			AgentID:       ownerID,
+			Target:        target,
+			TargetAgentID: pathKey.targetAgent,
+		}
+		if targetAgentName != "" {
+			pri.TargetAgentName = targetAgentName
+		}
+		if b, ok := cfg.LoadBaselineForDir(pathKey.probeID, pathKey.agentID); ok {
+			pri.BaselineFingerprint = b.Fingerprint
+			pri.BaselineHopCount = b.HopCount
+			pri.BaselineRoutePath = b.RoutePath
+		}
+		cfg.RouteByKey[rk] = pri
+	}
+
+	// Process the MTR rows for this (probe, agent, target) tuple.
+	sigs := make(map[string]int)
+	var latestPayload *MtrPayload
+	for i := range rows {
+		var mp MtrPayload
+		if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
+			continue
+		}
+		sig := getMtrRouteSignature(mp.Report.Hops)
+		sigs[sig]++
+		if latestPayload == nil {
+			latestPayload = &mp
+			pri.LatestSignature = sig
+			for _, hop := range mp.Report.Hops {
+				if len(hop.Hosts) > 0 && hop.Hosts[0].IP != "" {
+					pri.LatestHops = append(pri.LatestHops, hop.Hosts[0].IP)
+				}
+			}
+			pri.LatestHopsDetail = buildHopDetails(latestPayload, cfg.AgentIPToID, cfg.AgentByID)
+		}
+	}
+	if latestPayload != nil {
+		pri.TraceCount = len(rows)
+		pri.HasRouteChange, pri.RouteStabilityPct = decideRouteChangeStatus(pri.LatestSignature, pri.BaselineRoutePath, sigs, len(rows))
+		// When the route has changed, find the first (newest) MTR row
+		// whose signature differs from the baseline so the UI can show
+		// how long the route has been changed. Rows are sorted
+		// newest-first, so the first match gives us the upper bound
+		// on the change duration.
+		if pri.HasRouteChange && pri.BaselineRoutePath != "" {
+			for i := range rows {
+				var mp MtrPayload
+				if err := json.Unmarshal(rows[i].Payload, &mp); err != nil {
+					continue
+				}
+				hops := make([]string, 0, len(mp.Report.Hops))
+				for _, h := range mp.Report.Hops {
+					if len(h.Hosts) > 0 && h.Hosts[0].IP != "" {
+						hops = append(hops, h.Hosts[0].IP)
+					}
+				}
+				if hopSetJaccard(parseHopPath(pri.BaselineRoutePath), hops) < routeEcmpSimilarityThreshold {
+					ts := rows[i].CreatedAt
+					pri.RouteChangedAt = &ts
+					break
+				}
+			}
+		}
+		if len(latestPayload.Report.Hops) > 0 {
+			lastHop := latestPayload.Report.Hops[len(latestPayload.Report.Hops)-1]
+			pri.AvgEndHopLatency = parseLatency(lastHop.Avg)
+			pri.AvgEndHopLoss = parseLossPct(lastHop.LossPct)
+		}
+		hopCount := len(latestPayload.Report.Hops)
+		if hopCount > 1 {
+			for i := 0; i < hopCount-1; i++ {
+				hop := latestPayload.Report.Hops[i]
+				if len(hop.Hosts) == 0 || hop.Hosts[0].IP == "" || hop.Hosts[0].IP == "*" {
+					continue
+				}
+				pri.IntermediateHops = append(pri.IntermediateHops, HopMetric{
+					IP:       hop.Hosts[0].IP,
+					Loss:     parseLossPct(hop.LossPct),
+					Latency:  parseLatency(hop.Avg),
+					HopIndex: i,
+				})
+			}
+		}
+	}
+
+	// Index hops for shared-hop computation (now includes the final
+	// hop so shared destinations surface in shared_hops too).
+	//
+	// Attribution: hop is attributed to the probe OWNER (not the
+	// reporter). Without this, a single bidirectional AGENT probe
+	// (forward=A→B, reverse=B→A) would attribute one set of hops to A
+	// and the other to B, making the shared-hop math think A and B
+	// independently reach the same transit hop when really it's the
+	// SAME probe.
+	if len(pri.LatestHops) >= 1 {
+		for idx, ip := range pri.LatestHops {
+			if ip == "" || ip == "*" {
+				continue
+			}
+			if cfg.HopIndex[ip] == nil {
+				cfg.HopIndex[ip] = make(map[uint]HopMetrics)
+			}
+			metrics := HopMetrics{Count: 1}
+			matched := false
+			for _, ih := range pri.IntermediateHops {
+				if ih.IP == ip {
+					metrics.TotalLoss += ih.Loss
+					metrics.TotalLatency += ih.Latency
+					if ih.Loss > 0 || ih.Latency > 100 {
+						metrics.HasIssues = true
+					}
+					matched = true
+					break
+				}
+			}
+			if !matched && idx == len(pri.LatestHops)-1 {
+				metrics.TotalLoss += pri.AvgEndHopLoss
+				metrics.TotalLatency += pri.AvgEndHopLatency
+				if pri.AvgEndHopLoss > 0 || pri.AvgEndHopLatency > 100 {
+					metrics.HasIssues = true
+				}
+			}
+			cfg.HopIndex[ip][ownerID] = metrics
+		}
+	}
+
+	// Aggregate per-target stats for cross-agent views. Attribute to
+	// the probe OWNER so a single AGENT probe doesn't double-count as
+	// "two agents reaching this target".
+	if target != "" {
+		key2 := cfg.CommonTargetKey(target)
+		ds, ok := cfg.DestAgg[key2]
+		if !ok {
+			ds = &destStats{
+				agents:      make(map[uint]bool),
+				displayName: target,
+				probeIDs:    make(map[uint]struct{}),
+			}
+			cfg.DestAgg[key2] = ds
+		}
+		if !ds.agents[ownerID] {
+			ds.agents[ownerID] = true
+		}
+		// probeCount is the number of distinct probes reaching this
+		// target. Keying on probe_id collapses forward/reverse of the
+		// same AGENT probe into one.
+		if _, dup := ds.probeIDs[pathKey.probeID]; !dup {
+			ds.probeIDs[pathKey.probeID] = struct{}{}
+			ds.probeCount++
+		}
+		if pri.AvgEndHopLatency > 0 {
+			ds.totalLat += pri.AvgEndHopLatency
+			ds.latSamples++
+		}
+		if pri.AvgEndHopLoss > 0 {
+			ds.totalLoss += pri.AvgEndHopLoss
+			ds.lossSamples++
+		}
+		if pri.HasRouteChange {
+			ds.hasIssues = true
+		}
+		if ds.targetIP == "" {
+			if targetIP != "" {
+				ds.targetIP = targetIP
+			} else if len(pri.LatestHops) > 0 {
+				ds.targetIP = pri.LatestHops[len(pri.LatestHops)-1]
+			}
+		}
+	}
+
+	// Route-change incident — emit at most one per probe_id so the
+	// forward and reverse directions of a single AGENT probe don't
+	// produce duplicate incidents.
+	if !pri.HasRouteChange {
+		return
+	}
+	if _, alreadyEmitted := cfg.IncidentProbeIDs[pathKey.probeID]; alreadyEmitted {
+		return
+	}
+	cfg.IncidentProbeIDs[pathKey.probeID] = struct{}{}
+	evidence := []string{
+		fmt.Sprintf("Current signature: %s", pri.LatestSignature),
+	}
+	if pri.BaselineFingerprint != "" {
+		evidence = append(evidence, fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint))
+	}
+	evidence = append(evidence, fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount))
+	*routeIncidents = append(*routeIncidents, RouteIncident{
+		ID:        fmt.Sprintf("route_change_%d_%d", ownerID, pathKey.probeID),
+		Type:      "route_change",
+		Severity:  "warning",
+		AgentID:   ownerID,
+		AgentName: ari.AgentName,
+		ProbeID:   pathKey.probeID,
+		Target:    target,
+		Message:   fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", ari.AgentName, target, pri.RouteStabilityPct),
+		Evidence:  evidence,
+	})
 }
 
 // getWorkspaceMTRByPath fetches all MTR rows for the given agents in a single
@@ -3899,11 +4041,18 @@ func getWorkspaceMTRByPath(ctx context.Context, ch *sql.DB, agentIDs []uint, fro
 	// Pull enough rows per (probe, agent, target) group to compute stable
 	// signatures. We OVER-fetch and dedupe in Go to avoid fragile
 	// window-function queries. 200 rows per group is plenty for stability %.
+	//
+	// probe_agent_id is the OWNER of the probe (== agent_id for standalone
+	// probes). It's read here so the downstream route analysis can attribute
+	// hops / counts / incidents to the owner instead of the reporter, which
+	// would otherwise inflate aggregates for bidirectional AGENT probes
+	// (one probe → two reporters → false "shared" between them).
 	q := fmt.Sprintf(`
 SELECT
     created_at,
     probe_id,
     agent_id,
+    probe_agent_id,
     target_agent,
     payload_raw
 FROM probe_data
@@ -3922,26 +4071,35 @@ LIMIT 5000
 
 	for rows.Next() {
 		var createdAt time.Time
-		var probeID, agentID, targetAgent uint64
+		var probeID, agentID, probeAgentID, targetAgent uint64
 		var payloadRaw string
-		if err := rows.Scan(&createdAt, &probeID, &agentID, &targetAgent, &payloadRaw); err != nil {
+		if err := rows.Scan(&createdAt, &probeID, &agentID, &probeAgentID, &targetAgent, &payloadRaw); err != nil {
 			continue
 		}
+		// Legacy rows may have probe_agent_id == 0. Fall back to agent_id so
+		// the owner is always non-zero in the key (callers use 0 to mean
+		// "unknown", which would otherwise fall through to reporter-only
+		// attribution and re-introduce the inflation bug).
+		if probeAgentID == 0 {
+			probeAgentID = agentID
+		}
 		key := mtrPathKey{
-			probeID:     uint(probeID),
-			agentID:     uint(agentID),
-			targetAgent: uint(targetAgent),
+			probeID:      uint(probeID),
+			agentID:      uint(agentID),
+			targetAgent:  uint(targetAgent),
+			probeAgentID: uint(probeAgentID),
 		}
 		if perGroupLimit > 0 && len(out[key]) >= perGroupLimit {
 			continue
 		}
 		out[key] = append(out[key], ProbeData{
-			CreatedAt:   createdAt,
-			Type:        TypeMTR,
-			ProbeID:     uint(probeID),
-			AgentID:     uint(agentID),
-			TargetAgent: uint(targetAgent),
-			Payload:     []byte(payloadRaw),
+			CreatedAt:    createdAt,
+			Type:         TypeMTR,
+			ProbeID:      uint(probeID),
+			ProbeAgentID: uint(probeAgentID),
+			AgentID:      uint(agentID),
+			TargetAgent:  uint(targetAgent),
+			Payload:      []byte(payloadRaw),
 		})
 	}
 	return out, rows.Err()

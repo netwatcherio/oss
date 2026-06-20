@@ -349,11 +349,12 @@ func panelAgents(api fiber.Router, db *gorm.DB, ch *sql.DB, deletionStore *delet
 		return c.JSON(fiber.Map{"pin": pin, "initialized": false})
 	})
 
-	// GET /workspaces/{id}/available-global-agents — global agents from other workspaces
-	// Returns agents that this workspace can target with cross-workspace probes
+	// GET /workspaces/{id}/available-global-agents — all global agents visible
+	// to this workspace (own workspace + cross-workspace). The panel deduplicates
+	// against the local agent list and labels every entry with a "[Global]"
+	// prefix in the probe-create target dropdown.
 	as.Get("/global", func(c *fiber.Ctx) error {
-		wsID := uintParam(c, "id")
-		globals, err := agent.ListGlobalAgentsExcludingWorkspace(c.UserContext(), db, wsID)
+		globals, err := agent.ListGlobalAgentsForWorkspace(c.UserContext(), db)
 		if err != nil {
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
