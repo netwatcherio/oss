@@ -3432,9 +3432,12 @@ func ComputeWorkspaceRouteAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB,
 	// materialise as separate ProbeRouteInfo entries.
 	seenProbeIDs := make(map[uint]struct{})
 
-	// Track which probes have already emitted a route_change incident so
-	// forward and reverse directions of the same probe collapse into one
-	// incident. Keyed on probe_id (not (probe, agent)) for the same reason.
+	// Track which (probe_id, attribution_id) pairs have already
+	// emitted a route_change incident. Keyed on probeID<<32 | agentID
+	// so the forward and reverse directions of a single bidirectional
+	// AGENT probe — which have different attribution IDs (owner vs.
+	// reporter) — collapse into one incident per direction instead of
+	// one per probe.
 	incidentProbeIDs := make(map[uint]struct{})
 
 	agg := newMTRPathAgg(mtrPathAggConfig{
@@ -3764,14 +3767,18 @@ type destStats struct {
 // main function lets the inflation-fix logic be unit-tested without
 // standing up ClickHouse + Postgres.
 type mtrPathAggConfig struct {
-	ARIByAgent         map[uint]*AgentRouteInfo
-	AgentByID          map[uint]agentInfo
-	AgentIPToID        map[string]uint
-	CommonTargetKey    func(string) string
-	RouteByKey         map[routeKey]*ProbeRouteInfo
-	HopIndex           map[string]map[uint]HopMetrics
-	DestAgg            map[string]*destStats
-	SeenProbeIDs       map[uint]struct{}
+	ARIByAgent      map[uint]*AgentRouteInfo
+	AgentByID       map[uint]agentInfo
+	AgentIPToID     map[string]uint
+	CommonTargetKey func(string) string
+	RouteByKey      map[routeKey]*ProbeRouteInfo
+	HopIndex        map[string]map[uint]HopMetrics
+	DestAgg         map[string]*destStats
+	SeenProbeIDs    map[uint]struct{}
+	// IncidentProbeIDs dedupes route_change incidents per
+	// (probe_id, attribution_id) so the forward and reverse directions
+	// of a bidirectional AGENT probe can each surface their own
+	// incident. Keyed on probeID<<32 | agentID.
 	IncidentProbeIDs   map[uint]struct{}
 	LoadBaselineForDir func(probeID, reportingAgentID uint) (routeBaseline, bool)
 }
@@ -3786,18 +3793,43 @@ func newMTRPathAgg(cfg mtrPathAggConfig) *mtrPathAgg {
 
 // process is the body of the per-pathKey loop in ComputeWorkspaceRouteAnalysis.
 //
-// Attribution invariant: hops, destinations, incidents, and route counts
-// are all attributed to the probe OWNER (pathKey.ownerAgent()), never the
-// reporter. This is what stops a single bidirectional AGENT probe from
-// inflating route counts via its reverse direction.
+// Attribution model:
+//
+//   - Forward direction (or standalone MTR): attribution = probe OWNER
+//     (pathKey.ownerAgent()), which is also the reporter (agent_id ==
+//     probe_agent_id).
+//   - Reverse direction of a bidirectional AGENT probe: attribution = the
+//     REPORTER (pathKey.agentID), which is the target agent running the
+//     return-path MTR. The reverse is a separate test from that agent's
+//     perspective and must NOT be folded into the owner's route / hop /
+//     destination aggregates — doing so shows the owner a route they are
+//     not actually traversing, and triggers false-positive route_change
+//     incidents when the reverse path's ECMP signatures differ from the
+//     forward's stable signature.
+//
+// Forward and reverse of the same probe share the same probe_id, so
+// totalRoutes still counts one probe (not two). Incident dedupe is keyed
+// on (probe_id, attribution_id) so each direction can surface its own
+// incident when appropriate.
 func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncidents *[]RouteIncident) {
 	cfg := &a.cfg
 
 	ownerID := pathKey.ownerAgent()
-	// Skip if the probe owner isn't in this workspace (the query already
-	// filters by reporter IN (workspace agents), but a probe owned by an
-	// agent outside the workspace would otherwise attach to nil).
-	ari, ok := cfg.ARIByAgent[ownerID]
+	// Attribution: reverse direction is attributed to the reporter (the
+	// agent running the return-path MTR), not the probe owner. Forward
+	// direction and standalone MTR keep owner attribution (reporter ==
+	// owner for those).
+	attributionID := ownerID
+	if pathKey.isReverse() {
+		attributionID = pathKey.agentID
+	}
+
+	// Skip if the attribution agent isn't in this workspace. For reverse
+	// rows this also covers the case where the probe owner is in the
+	// workspace but the reverse reporter is not — the MTR query already
+	// filters by reporter IN (workspace agents), so a missing reverse
+	// reporter would mean the row shouldn't be in the result set at all.
+	ari, ok := cfg.ARIByAgent[attributionID]
 	if !ok {
 		return
 	}
@@ -3813,11 +3845,11 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 	if !exists {
 		pri = &ProbeRouteInfo{
 			ProbeID: pathKey.probeID,
-			// AgentID is the probe owner (canonical source for the UI's
-			// per-agent route list). Both forward and reverse directions
-			// of one bidirectional AGENT probe attach to the owner's
-			// AgentRouteInfo.
-			AgentID:       ownerID,
+			// AgentID is the attribution agent. For the forward
+			// direction this is the owner; for the reverse direction
+			// this is the reporter (target agent) so the return path
+			// shows up under the agent actually running the test.
+			AgentID:       attributionID,
 			Target:        target,
 			TargetAgentID: pathKey.targetAgent,
 		}
@@ -3905,12 +3937,12 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 	// Index hops for shared-hop computation (now includes the final
 	// hop so shared destinations surface in shared_hops too).
 	//
-	// Attribution: hop is attributed to the probe OWNER (not the
-	// reporter). Without this, a single bidirectional AGENT probe
-	// (forward=A→B, reverse=B→A) would attribute one set of hops to A
-	// and the other to B, making the shared-hop math think A and B
-	// independently reach the same transit hop when really it's the
-	// SAME probe.
+	// Attribution: hop is attributed to the agent running the trace
+	// (the REPORTER), which for forward direction is the owner and for
+	// reverse direction is the target agent. Without this, a single
+	// bidirectional AGENT probe would attach the reverse's hops to the
+	// owner's profile and surface them as if the owner had reached
+	// them — the owner never ran that trace.
 	if len(pri.LatestHops) >= 1 {
 		for idx, ip := range pri.LatestHops {
 			if ip == "" || ip == "*" {
@@ -3939,13 +3971,17 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 					metrics.HasIssues = true
 				}
 			}
-			cfg.HopIndex[ip][ownerID] = metrics
+			cfg.HopIndex[ip][attributionID] = metrics
 		}
 	}
 
 	// Aggregate per-target stats for cross-agent views. Attribute to
-	// the probe OWNER so a single AGENT probe doesn't double-count as
-	// "two agents reaching this target".
+	// the agent running the trace (REPORTER). For the forward
+	// direction this is the owner; for the reverse direction this is
+	// the target agent. A single AGENT probe no longer "double counts"
+	// the owner reaching the target via the reverse row, and the
+	// reverse's destination (the owner, from B's perspective) is
+	// correctly attributed to B.
 	if target != "" {
 		key2 := cfg.CommonTargetKey(target)
 		ds, ok := cfg.DestAgg[key2]
@@ -3957,12 +3993,13 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 			}
 			cfg.DestAgg[key2] = ds
 		}
-		if !ds.agents[ownerID] {
-			ds.agents[ownerID] = true
+		if !ds.agents[attributionID] {
+			ds.agents[attributionID] = true
 		}
 		// probeCount is the number of distinct probes reaching this
-		// target. Keying on probe_id collapses forward/reverse of the
-		// same AGENT probe into one.
+		// target. Keying on probe_id still collapses forward/reverse of
+		// the same AGENT probe into one (both directions share the
+		// probe's view of the destination).
 		if _, dup := ds.probeIDs[pathKey.probeID]; !dup {
 			ds.probeIDs[pathKey.probeID] = struct{}{}
 			ds.probeCount++
@@ -3987,16 +4024,20 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 		}
 	}
 
-	// Route-change incident — emit at most one per probe_id so the
-	// forward and reverse directions of a single AGENT probe don't
-	// produce duplicate incidents.
+	// Route-change incident — emit at most one per (probe_id,
+	// attribution_id). Forward and reverse of the same probe have
+	// different attribution IDs (owner vs. reporter), so each
+	// direction can surface its own incident. Within a single
+	// direction the (probe_id, attribution_id) key prevents duplicate
+	// incidents when the same probe has multiple targets.
 	if !pri.HasRouteChange {
 		return
 	}
-	if _, alreadyEmitted := cfg.IncidentProbeIDs[pathKey.probeID]; alreadyEmitted {
+	incidentKey := pathKey.probeID<<32 | attributionID
+	if _, alreadyEmitted := cfg.IncidentProbeIDs[incidentKey]; alreadyEmitted {
 		return
 	}
-	cfg.IncidentProbeIDs[pathKey.probeID] = struct{}{}
+	cfg.IncidentProbeIDs[incidentKey] = struct{}{}
 	evidence := []string{
 		fmt.Sprintf("Current signature: %s", pri.LatestSignature),
 	}
@@ -4005,10 +4046,10 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 	}
 	evidence = append(evidence, fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount))
 	*routeIncidents = append(*routeIncidents, RouteIncident{
-		ID:        fmt.Sprintf("route_change_%d_%d", ownerID, pathKey.probeID),
+		ID:        fmt.Sprintf("route_change_%d_%d", attributionID, pathKey.probeID),
 		Type:      "route_change",
 		Severity:  "warning",
-		AgentID:   ownerID,
+		AgentID:   attributionID,
 		AgentName: ari.AgentName,
 		ProbeID:   pathKey.probeID,
 		Target:    target,
