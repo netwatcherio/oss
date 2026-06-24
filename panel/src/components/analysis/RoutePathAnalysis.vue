@@ -479,11 +479,75 @@ onUnmounted(() => {
                     <span v-if="incident.detected_at" class="meta-badge time">
                       {{ timeAgo(incident.detected_at) }}
                     </span>
+                    <span v-if="incident.type === 'route_change' && incident.stability_pct != null" class="meta-badge" :class="stabilityClass(incident.stability_pct)" :title="`Route stability: ${Math.round(incident.stability_pct)}% of recent traces share the dominant signature`">
+                      <i class="bi bi-activity"></i> {{ Math.round(incident.stability_pct) }}% stable
+                    </span>
+                    <span v-if="incident.type === 'route_change' && incident.jaccard != null" class="meta-badge" :title="`Hop-set similarity between baseline and current path (Jaccard)`">
+                      <i class="bi bi-bezier2"></i> {{ Math.round(incident.jaccard * 100) }}% overlap
+                    </span>
                   </div>
                 </div>
                 <i :class="['bi', expandedIncidents.has(incident.id) ? 'bi-chevron-up' : 'bi-chevron-down', 'expand-icon']"></i>
               </div>
               <div v-if="expandedIncidents.has(incident.id)" class="incident-details">
+                <!-- route_change: render a side-by-side before/after diff using the actual IP paths. -->
+                <div v-if="incident.type === 'route_change' && (incident.baseline_path || incident.current_path)" class="route-change-view">
+                  <div v-if="incident.baseline_path" class="route-change-column baseline">
+                    <div class="route-change-column-header">
+                      <i class="bi bi-bookmark-fill"></i> Baseline
+                      <span v-if="incident.baseline_hop_count != null" class="hop-count-pill">{{ incident.baseline_hop_count }} hops</span>
+                    </div>
+                    <div class="route-change-path">
+                      <template v-for="(ip, idx) in parseBaselineHops(incident.baseline_path)" :key="`b-${idx}`">
+                        <span v-if="idx > 0" class="hop-arrow">→</span>
+                        <code class="route-change-hop"
+                              :class="incident.removed_hops?.includes(ip) ? 'removed' : 'unchanged'"
+                              :title="incident.removed_hops?.includes(ip) ? 'No longer in current path' : 'Still in current path'">{{ ip }}</code>
+                      </template>
+                    </div>
+                    <div v-if="incident.baseline_fingerprint" class="fingerprint-line" :title="`Route baseline fingerprint: ${incident.baseline_fingerprint}`">
+                      <i class="bi bi-fingerprint"></i> <code>{{ incident.baseline_fingerprint.slice(0, 12) }}…</code>
+                    </div>
+                  </div>
+                  <div class="route-change-arrow">
+                    <i class="bi bi-arrow-right"></i>
+                  </div>
+                  <div class="route-change-column current">
+                    <div class="route-change-column-header">
+                      <i class="bi bi-broadcast"></i> Current
+                      <span v-if="incident.current_hop_count != null" class="hop-count-pill">{{ incident.current_hop_count }} hops</span>
+                    </div>
+                    <div class="route-change-path">
+                      <template v-for="(ip, idx) in parseBaselineHops(incident.current_path)" :key="`c-${idx}`">
+                        <span v-if="idx > 0" class="hop-arrow">→</span>
+                        <code class="route-change-hop"
+                              :class="incident.added_hops?.includes(ip) ? 'added' : 'unchanged'"
+                              :title="incident.added_hops?.includes(ip) ? 'New hop not in baseline' : 'Unchanged from baseline'">{{ ip }}</code>
+                      </template>
+                    </div>
+                    <div v-if="incident.current_fingerprint" class="fingerprint-line" :title="`Current signature: ${incident.current_fingerprint}`">
+                      <i class="bi bi-fingerprint"></i> <code>{{ incident.current_fingerprint.slice(0, 12) }}…</code>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Summary stats line — only shown when we have structured change data. -->
+                <div v-if="incident.type === 'route_change' && (incident.added_hops?.length || incident.removed_hops?.length || incident.trace_count)" class="route-change-stats">
+                  <span v-if="incident.added_hops?.length" class="stat-pill added">
+                    <i class="bi bi-plus-circle"></i> {{ incident.added_hops.length }} added
+                  </span>
+                  <span v-if="incident.removed_hops?.length" class="stat-pill removed">
+                    <i class="bi bi-dash-circle"></i> {{ incident.removed_hops.length }} removed
+                  </span>
+                  <span v-if="incident.trace_count" class="stat-pill" :title="`${incident.trace_count} traces considered for this change detection`">
+                    <i class="bi bi-list-ol"></i> {{ incident.trace_count }} traces
+                  </span>
+                  <span v-if="incident.detected_at" class="stat-pill" :title="`Route change first observed at ${incident.detected_at}`">
+                    <i class="bi bi-clock-history"></i> changed for {{ durationLabel(incident.detected_at) }}
+                  </span>
+                </div>
+
+                <!-- Fallback evidence list — only when structured data isn't available (e.g. ip_change, isp_change, or older backends). -->
                 <div v-if="incident.evidence?.length" class="evidence-list">
                   <div v-for="(e, i) in incident.evidence" :key="i" class="evidence-item">
                     <i class="bi bi-check-circle"></i>{{ e }}
@@ -1608,6 +1672,170 @@ onUnmounted(() => {
   text-decoration: line-through;
   text-decoration-thickness: 1px;
   font-weight: 600;
+}
+
+/* Route change view inside the incidents list (route_change type).
+   Renders a side-by-side baseline/current comparison using the
+   actual IP paths so the user can see the change at a glance. */
+.route-change-view {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 4px 6px;
+  flex-wrap: wrap;
+}
+
+.route-change-column {
+  flex: 1 1 240px;
+  min-width: 0;
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.route-change-column.baseline {
+  border-left: 3px solid var(--bs-secondary);
+}
+
+.route-change-column.current {
+  border-left: 3px solid var(--bs-warning);
+}
+
+.route-change-column-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--bs-secondary-color);
+  margin-bottom: 6px;
+}
+
+.route-change-column-header i {
+  font-size: 12px;
+}
+
+.hop-count-pill {
+  margin-left: auto;
+  background: var(--bs-body-bg);
+  color: var(--bs-secondary-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.route-change-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.route-change-hop {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  color: var(--bs-body-color);
+}
+
+.route-change-hop.unchanged {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.route-change-hop.added {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.4);
+  font-weight: 600;
+}
+
+.route-change-hop.removed {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  font-weight: 600;
+}
+
+.fingerprint-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--bs-secondary-color);
+}
+
+.fingerprint-line code {
+  font-size: 10px;
+  color: var(--bs-secondary-color);
+  background: transparent;
+  padding: 0;
+}
+
+.route-change-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bs-secondary-color);
+  font-size: 16px;
+  padding: 0 2px;
+  align-self: center;
+}
+
+.route-change-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0 4px 6px;
+}
+
+.stat-pill {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--bs-border-color);
+}
+
+.stat-pill.added {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.stat-pill.removed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.stat-pill i {
+  font-size: 11px;
+}
+
+.meta-badge i {
+  font-size: 10px;
 }
 
 /* Hop chain */

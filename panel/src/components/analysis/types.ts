@@ -247,6 +247,21 @@ export interface RouteIncident {
     message: string
     evidence?: string[]
     detected_at?: string
+
+    // Structured change data for route_change incidents. Optional on
+    // other incident types. Lets the UI render a "before / after" view
+    // of the actual IP paths, not just fingerprint hashes.
+    baseline_fingerprint?: string
+    current_fingerprint?: string
+    baseline_path?: string          // Human-readable baseline hop list ("1.2.3.4 -> 5.6.7.8")
+    current_path?: string           // Human-readable current hop list
+    baseline_hop_count?: number
+    current_hop_count?: number
+    added_hops?: string[]           // IPs that appear in current but not baseline
+    removed_hops?: string[]         // IPs that appear in baseline but not current
+    jaccard?: number                // 0..1 similarity between baseline and current hop sets
+    stability_pct?: number          // Dominant signature's share of recent traces
+    trace_count?: number            // Traces considered for this change detection
 }
 
 export interface WorkspaceRouteAnalysis {

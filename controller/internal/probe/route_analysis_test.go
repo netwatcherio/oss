@@ -582,12 +582,149 @@ func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
 		t.Errorf("forward incident = {ProbeID: %d, AgentID: %d}, want {ProbeID: %d, AgentID: %d}",
 			incidents[0].ProbeID, incidents[0].AgentID, probeID, ownerA)
 	}
+	// Forward has a baseline: structured change data should be populated.
+	if incidents[0].BaselineFingerprint != mismatchBaseline.Fingerprint {
+		t.Errorf("forward incident BaselineFingerprint = %q, want %q",
+			incidents[0].BaselineFingerprint, mismatchBaseline.Fingerprint)
+	}
+	if incidents[0].BaselinePath != mismatchBaseline.RoutePath {
+		t.Errorf("forward incident BaselinePath = %q, want %q",
+			incidents[0].BaselinePath, mismatchBaseline.RoutePath)
+	}
+	if incidents[0].CurrentPath == "" {
+		t.Errorf("forward incident CurrentPath should be populated, got empty")
+	}
+	if incidents[0].BaselineHopCount != mismatchBaseline.HopCount {
+		t.Errorf("forward incident BaselineHopCount = %d, want %d",
+			incidents[0].BaselineHopCount, mismatchBaseline.HopCount)
+	}
+	// The test's baseline is deliberately disjoint from the current
+	// path, so Jaccard == 0 is the correct value (no hop overlap). The
+	// important contract is that the field is populated, not that it's
+	// non-zero. A separate test below covers the partial-overlap case.
+	if incidents[0].Jaccard != 0 {
+		t.Errorf("forward incident Jaccard = %v, want 0 (test baseline is disjoint from current path)", incidents[0].Jaccard)
+	}
+	if len(incidents[0].AddedHops) == 0 || len(incidents[0].RemovedHops) == 0 {
+		t.Errorf("forward incident should have both AddedHops and RemovedHops, got added=%v removed=%v",
+			incidents[0].AddedHops, incidents[0].RemovedHops)
+	}
+	if incidents[0].StabilityPct <= 0 {
+		t.Errorf("forward incident StabilityPct = %v, want > 0", incidents[0].StabilityPct)
+	}
+	if incidents[0].TraceCount == 0 {
+		t.Errorf("forward incident TraceCount should be > 0, got 0")
+	}
+
 	// Incident 2: reverse direction, attributed to B (the reporter
 	// running the return-path MTR), not to the probe owner A.
 	if incidents[1].ProbeID != probeID || incidents[1].AgentID != ownerB {
 		t.Errorf("reverse incident = {ProbeID: %d, AgentID: %d}, want {ProbeID: %d, AgentID: %d} (reverse attributed to the reporter, not the owner)",
 			incidents[1].ProbeID, incidents[1].AgentID, probeID, ownerB)
 	}
+	// Reverse has NO baseline: BaselinePath / BaselineFingerprint are
+	// empty, but the structured current-path data should still be
+	// populated so the UI can show the actual route IPs the reporter
+	// observed.
+	if incidents[1].BaselinePath != "" {
+		t.Errorf("reverse incident BaselinePath should be empty (no baseline for reverse), got %q",
+			incidents[1].BaselinePath)
+	}
+	if incidents[1].CurrentPath == "" {
+		t.Errorf("reverse incident CurrentPath should be populated, got empty")
+	}
+	if incidents[1].CurrentFingerprint == "" {
+		t.Errorf("reverse incident CurrentFingerprint should be populated, got empty")
+	}
+	if incidents[1].StabilityPct <= 0 {
+		t.Errorf("reverse incident StabilityPct = %v, want > 0 (dominant signature share over multiple traces)",
+			incidents[1].StabilityPct)
+	}
+	if incidents[1].TraceCount != 2 {
+		t.Errorf("reverse incident TraceCount = %d, want 2 (two reverse rows were ingested)",
+			incidents[1].TraceCount)
+	}
+}
+
+// diffHopsOrdered returns IPs only in current (added) and only in
+// baseline (removed) while preserving first-seen order. This is the
+// ordered-difference helper the aggregator uses to populate the
+// RouteIncident.AddedHops / RemovedHops fields.
+func TestDiffHopsOrdered(t *testing.T) {
+	cases := []struct {
+		name              string
+		baseline, current []string
+		wantAdded         []string
+		wantRemoved       []string
+	}{
+		{
+			name:     "no change",
+			baseline: []string{"1.1.1.1", "2.2.2.2"},
+			current:  []string{"1.1.1.1", "2.2.2.2"},
+		},
+		{
+			name:        "ECMP swap on a middle hop",
+			baseline:    []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"},
+			current:     []string{"1.1.1.1", "9.9.9.9", "3.3.3.3"},
+			wantAdded:   []string{"9.9.9.9"},
+			wantRemoved: []string{"2.2.2.2"},
+		},
+		{
+			name:        "extra transit hop added",
+			baseline:    []string{"1.1.1.1", "3.3.3.3"},
+			current:     []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"},
+			wantAdded:   []string{"2.2.2.2"},
+			wantRemoved: nil,
+		},
+		{
+			name:        "destination swapped",
+			baseline:    []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"},
+			current:     []string{"1.1.1.1", "2.2.2.2", "9.9.9.9"},
+			wantAdded:   []string{"9.9.9.9"},
+			wantRemoved: []string{"3.3.3.3"},
+		},
+		{
+			name:      "no baseline (empty) — everything is added",
+			baseline:  nil,
+			current:   []string{"1.1.1.1", "2.2.2.2"},
+			wantAdded: []string{"1.1.1.1", "2.2.2.2"},
+		},
+		{
+			name:        "no current (empty) — everything is removed",
+			baseline:    []string{"1.1.1.1", "2.2.2.2"},
+			current:     nil,
+			wantRemoved: []string{"1.1.1.1", "2.2.2.2"},
+		},
+		{
+			name:      "wildcards and empty entries ignored",
+			baseline:  []string{"1.1.1.1", "*", ""},
+			current:   []string{"1.1.1.1", "2.2.2.2", ""},
+			wantAdded: []string{"2.2.2.2"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			added, removed := diffHopsOrdered(tc.baseline, tc.current)
+			if !slicesEqual(added, tc.wantAdded) {
+				t.Errorf("added = %v, want %v", added, tc.wantAdded)
+			}
+			if !slicesEqual(removed, tc.wantRemoved) {
+				t.Errorf("removed = %v, want %v", removed, tc.wantRemoved)
+			}
+		})
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // User-reported bug: when the OWNER's forward path is stable (baseline

@@ -3165,6 +3165,21 @@ type RouteIncident struct {
 	Message    string   `json:"message"`
 	Evidence   []string `json:"evidence,omitempty"`
 	DetectedAt string   `json:"detected_at,omitempty"`
+
+	// Structured change data for route_change incidents. Lets the UI
+	// render a "before / after" diff without re-parsing the legacy
+	// Evidence string list. Optional on other incident types.
+	BaselineFingerprint string   `json:"baseline_fingerprint,omitempty"`
+	CurrentFingerprint  string   `json:"current_fingerprint,omitempty"`
+	BaselinePath        string   `json:"baseline_path,omitempty"` // Human-readable baseline hop list ("1.2.3.4 -> 5.6.7.8")
+	CurrentPath         string   `json:"current_path,omitempty"`  // Human-readable current hop list
+	BaselineHopCount    int      `json:"baseline_hop_count,omitempty"`
+	CurrentHopCount     int      `json:"current_hop_count,omitempty"`
+	AddedHops           []string `json:"added_hops,omitempty"`    // IPs that appear in current but not baseline (preserves order)
+	RemovedHops         []string `json:"removed_hops,omitempty"`  // IPs that appear in baseline but not current
+	Jaccard             float64  `json:"jaccard,omitempty"`       // 0..1 similarity between baseline and current hop sets
+	StabilityPct        float64  `json:"stability_pct,omitempty"` // Dominant signature's share of recent traces
+	TraceCount          int      `json:"trace_count,omitempty"`   // Traces considered for this change detection
 }
 
 // WorkspaceRouteAnalysis is the top-level response for route/path visualization.
@@ -4038,6 +4053,17 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 		return
 	}
 	cfg.IncidentProbeIDs[incidentKey] = struct{}{}
+
+	// Build a structured diff so the UI can render a "before / after"
+	// view of the actual IP paths, not just fingerprint hashes.
+	// baselineHops preserves the order in which the baseline was first
+	// observed; latestHops is the order of the most recent trace.
+	baselineHops := parseHopPath(pri.BaselineRoutePath)
+	latestHops := filterProbeRouteHops(pri.LatestHops)
+	addedHops, removedHops := diffHopsOrdered(baselineHops, latestHops)
+	jaccard := hopSetJaccard(baselineHops, latestHops)
+	currentFingerprint := pri.LatestSignature
+
 	evidence := []string{
 		fmt.Sprintf("Current signature: %s", pri.LatestSignature),
 	}
@@ -4045,17 +4071,86 @@ func (a *mtrPathAgg) process(pathKey mtrPathKey, rows []ProbeData, routeIncident
 		evidence = append(evidence, fmt.Sprintf("Baseline fingerprint: %s", pri.BaselineFingerprint))
 	}
 	evidence = append(evidence, fmt.Sprintf("Route stability: %.0f%% over %d traces", pri.RouteStabilityPct, pri.TraceCount))
-	*routeIncidents = append(*routeIncidents, RouteIncident{
-		ID:        fmt.Sprintf("route_change_%d_%d", attributionID, pathKey.probeID),
-		Type:      "route_change",
-		Severity:  "warning",
-		AgentID:   attributionID,
-		AgentName: ari.AgentName,
-		ProbeID:   pathKey.probeID,
-		Target:    target,
-		Message:   fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", ari.AgentName, target, pri.RouteStabilityPct),
-		Evidence:  evidence,
-	})
+
+	incident := RouteIncident{
+		ID:                  fmt.Sprintf("route_change_%d_%d", attributionID, pathKey.probeID),
+		Type:                "route_change",
+		Severity:            "warning",
+		AgentID:             attributionID,
+		AgentName:           ari.AgentName,
+		ProbeID:             pathKey.probeID,
+		Target:              target,
+		Message:             fmt.Sprintf("Route changed for %s → %s (stability %.0f%%)", ari.AgentName, target, pri.RouteStabilityPct),
+		Evidence:            evidence,
+		BaselineFingerprint: pri.BaselineFingerprint,
+		CurrentFingerprint:  currentFingerprint,
+		BaselinePath:        pri.BaselineRoutePath,
+		CurrentPath:         strings.Join(latestHops, " -> "),
+		BaselineHopCount:    pri.BaselineHopCount,
+		CurrentHopCount:     len(latestHops),
+		AddedHops:           addedHops,
+		RemovedHops:         removedHops,
+		Jaccard:             jaccard,
+		StabilityPct:        pri.RouteStabilityPct,
+		TraceCount:          pri.TraceCount,
+	}
+	if pri.RouteChangedAt != nil {
+		incident.DetectedAt = pri.RouteChangedAt.UTC().Format(time.RFC3339)
+	}
+	*routeIncidents = append(*routeIncidents, incident)
+}
+
+// filterProbeRouteHops strips "no response" placeholders so the diff
+// stays readable. ProbeRouteInfo.LatestHops already filters "*" in the
+// writer, but the baseline path may contain "-> *" segments, so we also
+// skip those here for symmetry.
+func filterProbeRouteHops(hops []string) []string {
+	out := make([]string, 0, len(hops))
+	for _, h := range hops {
+		if h == "" || h == "*" {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// diffHopsOrdered returns the IPs that appear only in current (added) and
+// only in baseline (removed), preserving first-seen order so the UI can
+// show "hop 4 swapped for a new one" rather than two unsorted lists.
+// Empty strings and "*" placeholders are skipped on both sides.
+func diffHopsOrdered(baseline, current []string) (added, removed []string) {
+	baseSet := make(map[string]struct{}, len(baseline))
+	for _, h := range baseline {
+		if h == "" || h == "*" {
+			continue
+		}
+		baseSet[h] = struct{}{}
+	}
+	currSet := make(map[string]struct{}, len(current))
+	for _, h := range current {
+		if h == "" || h == "*" {
+			continue
+		}
+		currSet[h] = struct{}{}
+	}
+	for _, h := range current {
+		if h == "" || h == "*" {
+			continue
+		}
+		if _, ok := baseSet[h]; !ok {
+			added = append(added, h)
+		}
+	}
+	for _, h := range baseline {
+		if h == "" || h == "*" {
+			continue
+		}
+		if _, ok := currSet[h]; !ok {
+			removed = append(removed, h)
+		}
+	}
+	return added, removed
 }
 
 // getWorkspaceMTRByPath fetches all MTR rows for the given agents in a single
