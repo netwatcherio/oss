@@ -1417,7 +1417,7 @@ watch(
                                 <i class="bi" :class="state.loadingTrafficSim ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                             </button>
                         </div>
-                        <div v-if="loading && activeTrafficSimData.length === 0" class="loading-state">
+                        <div v-if="(loading || state.loadingTrafficSim) && activeTrafficSimData.length === 0" class="loading-state">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
@@ -1506,7 +1506,7 @@ watch(
                                     <span class="visually-hidden">Refreshing traceroute data…</span>
                                 </div>
                             </div>
-                            <div v-if="loading && activeMtrData.length === 0" class="loading-state">
+                            <div v-if="(loading || state.loadingMtr) && activeMtrData.length === 0" class="loading-state">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>

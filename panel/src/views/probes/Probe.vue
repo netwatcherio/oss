@@ -1781,7 +1781,7 @@ const { connected: wsConnected } = useProbeSubscription(
               </div>
 
               <!-- No data message when none of the probe types have data -->
-              <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length === 0 && pair.pingData.length === 0 && !state.loading">
+              <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length === 0 && pair.pingData.length === 0 && !state.loading && !state.loadingTrafficSim && !state.loadingPing && !state.loadingMtr">
                 <div class="card h-100">
                   <div class="card-body text-center py-5">
                     <i class="bi bi-inbox fs-1 text-muted mb-3"></i>
@@ -1814,7 +1814,7 @@ const { connected: wsConnected } = useProbeSubscription(
                       <span class="visually-hidden">Refreshing traceroute data…</span>
                     </div>
                   </div>
-                  <div v-if="state.loading && pair.mtrData.length === 0" class="text-center py-4">
+                  <div v-if="(state.loading || state.loadingMtr) && pair.mtrData.length === 0" class="text-center py-4">
                     <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                     <span class="text-muted">Loading traceroute data...</span>
                   </div>
@@ -1944,14 +1944,14 @@ const { connected: wsConnected } = useProbeSubscription(
               </div>
             </div>
 
-            <div v-if="state.loading && state.mtrData.length === 0" class="text-center py-5">
+            <div v-if="(state.loading || state.loadingMtr) && state.mtrData.length === 0" class="text-center py-5">
               <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
               </div>
               <h3 class="mt-3 text-muted">Loading traceroute data...</h3>
               <p class="text-muted">Please wait while we fetch the data</p>
             </div>
-            <div v-else-if="!state.loading && state.mtrData.length === 0" class="text-center py-5">
+            <div v-else-if="state.mtrData.length === 0" class="text-center py-5">
               <i class="bi bi-diagram-3 fs-1 text-muted mb-3"></i>
               <h5 class="text-muted">No Traceroute Data Available</h5>
               <p class="text-muted">No MTR data found for the selected time range</p>
@@ -2073,7 +2073,7 @@ const { connected: wsConnected } = useProbeSubscription(
   to   { opacity: 1; }
 }
 
-:global([data-theme="dark"]) .graph-loading-overlay {
+[data-theme="dark"] .graph-loading-overlay {
   background: rgba(15, 23, 42, 0.55);
 }
 
