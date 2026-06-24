@@ -200,13 +200,17 @@ func TestDecideRouteChangeStatus_NoBaselineSingleSignature(t *testing.T) {
 }
 
 func TestDecideRouteChangeStatus_NoBaselineMultipleSignatures(t *testing.T) {
+	// A "change" is undefined without a baseline to compare against —
+	// multiple signatures alone do not constitute a route change. We
+	// surface stability so the UI can still render "X% stable" but we
+	// do NOT conclude a route change.
 	hasChange, stability := decideRouteChangeStatus(
 		"sig-A", "",
 		map[string]int{"sig-A": 8, "sig-B": 2},
 		10,
 	)
-	if !hasChange {
-		t.Errorf("Expected route change fallback when multiple signatures and no baseline")
+	if hasChange {
+		t.Errorf("Expected NO route change when there is no baseline to compare against, got hasChange=true")
 	}
 	if stability != 80 {
 		t.Errorf("Expected stability 80 (8/10) from dominant signature, got %v", stability)
@@ -510,11 +514,90 @@ func TestMTRPathAgg_AGENTBidirectionalDoesNotInflate(t *testing.T) {
 	}
 }
 
+// A route change is only meaningful when there is a baseline to compare
+// against. The reverse direction of a bidirectional AGENT probe has no
+// baseline (the baseline is owner-only), so even with multiple signatures
+// (ECMP) it must NOT surface a route_change incident — only the forward
+// direction (which has a baseline to compare against) can.
+func TestMTRPathAgg_AGENTBidirectionalOnlyForwardEmitsIncident(t *testing.T) {
+	const (
+		probeID uint = 793
+		ownerA  uint = 10
+		ownerB  uint = 20
+	)
+	ariByAgent := map[uint]*AgentRouteInfo{
+		ownerA: {AgentID: ownerA, AgentName: "agent-A"},
+		ownerB: {AgentID: ownerB, AgentName: "agent-B"},
+	}
+	agentByID := map[uint]agentInfo{
+		ownerA: newAgentInfo(ownerA, "agent-A"),
+		ownerB: newAgentInfo(ownerB, "agent-B"),
+	}
+
+	// Only the forward direction (reporter == owner) has a baseline.
+	// Mismatches the forward trace so a real route change fires.
+	mismatchBaseline := routeBaseline{
+		Fingerprint: "different-fingerprint",
+		RoutePath:   "99.99.99.99->88.88.88.88",
+		HopCount:    2,
+	}
+	loadBaseline := func(pID, reporterID uint) (routeBaseline, bool) {
+		if pID == probeID && reporterID == ownerA {
+			return mismatchBaseline, true
+		}
+		return routeBaseline{}, false
+	}
+
+	agg := newMTRPathAgg(mtrPathAggConfig{
+		ARIByAgent:         ariByAgent,
+		AgentByID:          agentByID,
+		AgentIPToID:        map[string]uint{},
+		CommonTargetKey:    func(s string) string { return strings.ToLower(strings.TrimSpace(s)) },
+		RouteByKey:         make(map[routeKey]*ProbeRouteInfo),
+		HopIndex:           make(map[string]map[uint]HopMetrics),
+		DestAgg:            make(map[string]*destStats),
+		SeenProbeIDs:       make(map[uint]struct{}),
+		IncidentProbeIDs:   make(map[uint]struct{}),
+		LoadBaselineForDir: loadBaseline,
+	})
+
+	var incidents []RouteIncident
+	forwardKey := mtrPathKey{probeID: probeID, agentID: ownerA, targetAgent: ownerB, probeAgentID: ownerA}
+	reverseKey := mtrPathKey{probeID: probeID, agentID: ownerB, targetAgent: ownerA, probeAgentID: ownerA}
+
+	// Forward has a baseline mismatch (real route change).
+	agg.process(forwardKey, []ProbeData{
+		fixtureMTRRow(probeID, ownerA, ownerA, ownerB, []string{"10.0.0.1", "10.0.0.2"}),
+	}, &incidents)
+	// Reverse has multiple signatures (ECMP) and NO baseline. With the
+	// old "no baseline + multiple sigs → change" fallback this used to
+	// emit a route_change incident attributed to B, with only the
+	// current path populated. Now: no incident.
+	agg.process(reverseKey, []ProbeData{
+		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", "10.0.0.1"}),
+		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", "10.0.0.99"}),
+	}, &incidents)
+
+	if len(incidents) != 1 {
+		t.Fatalf("got %d route_change incidents, want 1 (only the forward direction has a baseline, so only it can conclude a change): %+v",
+			len(incidents), incidents)
+	}
+	if incidents[0].ProbeID != probeID || incidents[0].AgentID != ownerA {
+		t.Errorf("incident = {ProbeID: %d, AgentID: %d}, want {ProbeID: %d, AgentID: %d}",
+			incidents[0].ProbeID, incidents[0].AgentID, probeID, ownerA)
+	}
+}
+
 // Per-direction incident attribution: each direction of a bidirectional
 // AGENT probe emits its own route_change incident (when warranted) and
 // attributes it to the agent that actually ran the trace. The dedupe
-// key is (probe_id, attribution_id), not probe_id.
-func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
+// key is (probe_id, attribution_id), not probe_id. NOTE: only the
+// forward direction has a baseline and so can conclude a "change" —
+// see TestMTRPathAgg_AGENTBidirectionalOnlyForwardEmitsIncident for
+// the canonical case. This test exercises the structured change data
+// on the forward incident and verifies the reverse route entry is
+// still created (for UI display) but is NOT flagged as a change.
+func TestMTRPathAgg_AGENTBidirectionalForwardIncidentFields(t *testing.T) {
 	const (
 		probeID uint = 793
 		ownerA  uint = 10
@@ -530,9 +613,9 @@ func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
 	}
 
 	// Mirror production semantics: only the forward direction (where
-	// reporter == owner) has a baseline. The reverse direction gets
-	// no baseline, so a single-signature trace is stable but a
-	// multi-signature trace (ECMP) flags as a change.
+	// reporter == owner) has a baseline. The reverse direction has no
+	// baseline, so even with multiple signatures it does NOT conclude a
+	// route change — only the forward can.
 	mismatchBaseline := routeBaseline{
 		Fingerprint: "different-fingerprint",
 		RoutePath:   "99.99.99.99->88.88.88.88",
@@ -566,23 +649,25 @@ func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
 	agg.process(forwardKey, []ProbeData{
 		fixtureMTRRow(probeID, ownerA, ownerA, ownerB, []string{"10.0.0.1", "10.0.0.2"}),
 	}, &incidents)
-	// Reverse has multiple signatures (ECMP) and no baseline.
+	// Reverse has multiple signatures (ECMP) and no baseline — must
+	// NOT emit a route_change incident.
 	agg.process(reverseKey, []ProbeData{
 		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", "10.0.0.1"}),
 		fixtureMTRRow(probeID, ownerB, ownerA, ownerA, []string{"10.0.0.2", "10.0.0.99"}),
 	}, &incidents)
 
-	if len(incidents) != 2 {
-		t.Fatalf("got %d route_change incidents, want 2 (one per direction, each attributed to its own reporter): %+v",
+	// Exactly one incident: the forward direction. The reverse has no
+	// baseline, so it cannot conclude a change.
+	if len(incidents) != 1 {
+		t.Fatalf("got %d route_change incidents, want 1 (only forward has a baseline): %+v",
 			len(incidents), incidents)
 	}
 
-	// Incident 1: forward direction, attributed to A.
+	// Forward has a baseline: structured change data should be populated.
 	if incidents[0].ProbeID != probeID || incidents[0].AgentID != ownerA {
 		t.Errorf("forward incident = {ProbeID: %d, AgentID: %d}, want {ProbeID: %d, AgentID: %d}",
 			incidents[0].ProbeID, incidents[0].AgentID, probeID, ownerA)
 	}
-	// Forward has a baseline: structured change data should be populated.
 	if incidents[0].BaselineFingerprint != mismatchBaseline.Fingerprint {
 		t.Errorf("forward incident BaselineFingerprint = %q, want %q",
 			incidents[0].BaselineFingerprint, mismatchBaseline.Fingerprint)
@@ -599,9 +684,7 @@ func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
 			incidents[0].BaselineHopCount, mismatchBaseline.HopCount)
 	}
 	// The test's baseline is deliberately disjoint from the current
-	// path, so Jaccard == 0 is the correct value (no hop overlap). The
-	// important contract is that the field is populated, not that it's
-	// non-zero. A separate test below covers the partial-overlap case.
+	// path, so Jaccard == 0 is the correct value (no hop overlap).
 	if incidents[0].Jaccard != 0 {
 		t.Errorf("forward incident Jaccard = %v, want 0 (test baseline is disjoint from current path)", incidents[0].Jaccard)
 	}
@@ -616,33 +699,20 @@ func TestMTRPathAgg_AGENTBidirectionalPerDirectionIncidents(t *testing.T) {
 		t.Errorf("forward incident TraceCount should be > 0, got 0")
 	}
 
-	// Incident 2: reverse direction, attributed to B (the reporter
-	// running the return-path MTR), not to the probe owner A.
-	if incidents[1].ProbeID != probeID || incidents[1].AgentID != ownerB {
-		t.Errorf("reverse incident = {ProbeID: %d, AgentID: %d}, want {ProbeID: %d, AgentID: %d} (reverse attributed to the reporter, not the owner)",
-			incidents[1].ProbeID, incidents[1].AgentID, probeID, ownerB)
-	}
-	// Reverse has NO baseline: BaselinePath / BaselineFingerprint are
-	// empty, but the structured current-path data should still be
-	// populated so the UI can show the actual route IPs the reporter
-	// observed.
-	if incidents[1].BaselinePath != "" {
-		t.Errorf("reverse incident BaselinePath should be empty (no baseline for reverse), got %q",
-			incidents[1].BaselinePath)
-	}
-	if incidents[1].CurrentPath == "" {
-		t.Errorf("reverse incident CurrentPath should be populated, got empty")
-	}
-	if incidents[1].CurrentFingerprint == "" {
-		t.Errorf("reverse incident CurrentFingerprint should be populated, got empty")
-	}
-	if incidents[1].StabilityPct <= 0 {
-		t.Errorf("reverse incident StabilityPct = %v, want > 0 (dominant signature share over multiple traces)",
-			incidents[1].StabilityPct)
-	}
-	if incidents[1].TraceCount != 2 {
-		t.Errorf("reverse incident TraceCount = %d, want 2 (two reverse rows were ingested)",
-			incidents[1].TraceCount)
+	// The reverse direction's route entry is still created and indexed
+	// (so the UI can render the return path under the reporter), but
+	// it is NOT flagged as a route change.
+	reverseRouteKey := routeKey{probeID: probeID, agentID: ownerB, targetAgent: ownerA}
+	reversePRI, ok := agg.cfg.RouteByKey[reverseRouteKey]
+	if !ok {
+		t.Errorf("reverse route entry should still be created (so UI can show the return path), got missing")
+	} else {
+		if reversePRI.HasRouteChange {
+			t.Errorf("reverse route entry HasRouteChange should be false (no baseline to compare against), got true")
+		}
+		if reversePRI.LatestHops == nil {
+			t.Errorf("reverse route entry LatestHops should still be populated for display, got nil")
+		}
 	}
 }
 

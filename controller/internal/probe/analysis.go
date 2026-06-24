@@ -3632,17 +3632,38 @@ const routeEcmpSimilarityThreshold = 0.7
 // and stop emitting route_change alerts indefinitely.
 const routeBaselineStaleThreshold = 7 * 24 * time.Hour
 
+// decideRouteChangeStatus reports whether the latest observed route
+// differs from the stored baseline. Returns (hasChange, stabilityPct).
+//
+// "Route change" is defined as: the current path differs from a known
+// prior state. The known prior state is the baseline. Without a baseline
+// there is nothing to compare against, so no "change" can be concluded
+// — the path is simply observed-as-is, and any signature diversity is
+// shown via the stability percentage rather than flagged as a change.
+//
+// Previously this function fell through to a "no baseline + multiple
+// signatures → change" fallback. That fallback fired on the reverse
+// direction of every bidirectional AGENT probe (which intentionally
+// has no baseline) and on freshly-observed standalone probes, surfacing
+// a route-change incident that named the current path but had no
+// baseline to diff against. The UI showed those incidents as
+// "current-only" with the route-change banner lit, even though no
+// actual change had been observed.
 func decideRouteChangeStatus(latestHops, baselineHops string, sigs map[string]int, traceCount int) (bool, float64) {
-	if baselineHops != "" {
-		if hopSetJaccard(parseHopPath(baselineHops), parseHopPath(latestHops)) >= routeEcmpSimilarityThreshold {
+	if baselineHops == "" {
+		// No baseline → nothing to compare against. Surface stability
+		// (how often the dominant signature appears) so the UI can
+		// still show how consistent the path is, but don't claim a
+		// "change" we cannot substantiate.
+		if traceCount <= 0 {
 			return false, 100
 		}
-		return true, dominantSignatureStabilityPct(sigs, traceCount)
+		return false, dominantSignatureStabilityPct(sigs, traceCount)
 	}
-	if len(sigs) > 1 {
-		return true, dominantSignatureStabilityPct(sigs, traceCount)
+	if hopSetJaccard(parseHopPath(baselineHops), parseHopPath(latestHops)) >= routeEcmpSimilarityThreshold {
+		return false, 100
 	}
-	return false, 100
+	return true, dominantSignatureStabilityPct(sigs, traceCount)
 }
 
 func dominantSignatureStabilityPct(sigs map[string]int, traceCount int) float64 {
