@@ -786,6 +786,38 @@ async function reloadData() {
 // only live in the trafficsim graph, and the live websocket already keeps
 // those arrays fresh. If the user ever wires a PING-range picker, the same
 // pattern applies.
+// Pick an aggregation bucket that targets ~500 points across the [from, to]
+// window. 0 means "no aggregation" (raw rows). Shared by loadProbeData (full
+// load) and the loadMissing*Data helpers (incremental per-gap loads).
+function computeAggregationBucketSec(from: Date, to: Date): number {
+  const rangeSec = Math.max(0, (to.getTime() - from.getTime()) / 1000);
+  if (rangeSec <= 60) return 0;
+  const targetPoints = 500;
+  const idealBucket = Math.ceil(rangeSec / targetPoints);
+  if (idealBucket <= 10) return 10;
+  if (idealBucket <= 30) return 30;
+  if (idealBucket <= 60) return 60;
+  if (idealBucket <= 120) return 120;
+  if (idealBucket <= 300) return 300;
+  if (idealBucket <= 600) return 600;
+  if (idealBucket <= 1800) return 1800;
+  if (idealBucket <= 3600) return 3600;
+  if (idealBucket <= 7200) return 7200;     // 2-hour buckets (~7d range)
+  if (idealBucket <= 14400) return 14400;   // 4-hour buckets (~14d range)
+  if (idealBucket <= 21600) return 21600;   // 6-hour buckets (~21d range)
+  return Math.ceil(idealBucket / 21600) * 21600;
+}
+
+// Pick an aggregation bucket for a gap, capping it to the gap size so a
+// 30-minute gap doesn't get a 1-hour bucket. Returns 0 if the gap is small
+// enough that raw rows fit comfortably.
+function computeGapAggregationSec(gapFrom: Date, gapTo: Date): number {
+  const rangeSec = Math.max(1, (gapTo.getTime() - gapFrom.getTime()) / 1000);
+  const full = computeAggregationBucketSec(gapFrom, gapTo);
+  if (full > 0 && rangeSec < full * 4) return 0;
+  return full;
+}
+
 function dataRangeMs(arr: { created_at?: string }[]): [number, number] | null {
   if (arr.length === 0) return null;
   let lo = Infinity;
@@ -800,50 +832,35 @@ function dataRangeMs(arr: { created_at?: string }[]): [number, number] | null {
   return [lo, hi];
 }
 
+// Build the gap list for an incremental load. Returns the new (from, to)
+// ranges we don't already have data for.
+function computeGapsForRange(
+  arr: { created_at?: string }[],
+  from: Date,
+  to: Date
+): Array<{ from: Date; to: Date }> {
+  const existing = dataRangeMs(arr);
+  if (!existing) return [{ from, to }];
+  const [lo, hi] = existing;
+  const gaps: Array<{ from: Date; to: Date }> = [];
+  if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
+  if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
+  return gaps;
+}
+
 async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
   if (!workspaceID || !state.probes?.length) return;
   state.loadingTrafficSim = true;
   try {
-    const existing = dataRangeMs(state.trafficSimData as any);
-    // If we have no data at all, fall back to a single full-range fetch.
-    const gaps: Array<{ from: Date; to: Date }> = [];
-    if (!existing) {
-      gaps.push({ from, to });
-    } else {
-      const [lo, hi] = existing;
-      if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
-      if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
-    }
+    const gaps = computeGapsForRange(state.trafficSimData as any, from, to);
     if (gaps.length === 0) {
       console.log('[Probe] No missing trafficsim data; skipping fetch');
       return;
     }
 
-    // Pick an aggregation bucket that targets ~500 points per gap, capped to
-    // the gap size (so a 30-minute gap doesn't use a 1-hour bucket).
-    const targetPoints = 500;
     const tasks: Promise<void>[] = [];
     for (const gap of gaps) {
-      const rangeMs = gap.to.getTime() - gap.from.getTime();
-      const rangeSec = Math.max(1, rangeMs / 1000);
-      let aggregateSec = 0;
-      if (rangeSec > 60) {
-        let idealBucket = Math.ceil(rangeSec / targetPoints);
-        if (idealBucket <= 10) aggregateSec = 10;
-        else if (idealBucket <= 30) aggregateSec = 30;
-        else if (idealBucket <= 60) aggregateSec = 60;
-        else if (idealBucket <= 120) aggregateSec = 120;
-        else if (idealBucket <= 300) aggregateSec = 300;
-        else if (idealBucket <= 600) aggregateSec = 600;
-        else if (idealBucket <= 1800) aggregateSec = 1800;
-        else if (idealBucket <= 3600) aggregateSec = 3600;
-        else if (idealBucket <= 7200) aggregateSec = 7200;
-        else if (idealBucket <= 14400) aggregateSec = 14400;
-        else if (idealBucket <= 21600) aggregateSec = 21600;
-        else aggregateSec = Math.ceil(idealBucket / 21600) * 21600;
-        // Don't aggregate a small gap into fewer points than fit naturally
-        if (rangeSec < aggregateSec * 4) aggregateSec = 0;
-      }
+      const aggregateSec = computeGapAggregationSec(gap.from, gap.to);
       const useAgg = aggregateSec > 0;
       for (const p of state.probes) {
         const probeType = p.type as string;
@@ -877,6 +894,101 @@ async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
     rebuildAgentPairData();
   } finally {
     state.loadingTrafficSim = false;
+  }
+}
+
+async function loadMissingPingData(from: Date, to: Date): Promise<void> {
+  if (!workspaceID || !state.probes?.length) return;
+  state.loadingPing = true;
+  try {
+    const gaps = computeGapsForRange(state.pingData as any, from, to);
+    if (gaps.length === 0) {
+      console.log('[Probe] No missing ping data; skipping fetch');
+      return;
+    }
+
+    const tasks: Promise<void>[] = [];
+    for (const gap of gaps) {
+      const aggregateSec = computeGapAggregationSec(gap.from, gap.to);
+      const useAgg = aggregateSec > 0;
+      for (const p of state.probes) {
+        const probeType = p.type as string;
+        const fetchAndMerge = async (subType: string) => {
+          try {
+            const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+              from: toRFC3339(gap.from),
+              to: toRFC3339(gap.to),
+              limit: useAgg ? undefined : 300,
+              asc: false,
+              aggregate: useAgg ? aggregateSec : undefined,
+              type: subType,
+            });
+            for (const d of rows) {
+              addProbeDataUnique(state.probeData, d);
+              addProbeDataUnique(state.pingData, d);
+            }
+            console.log(`[Probe ${p.id}] Incremental ${subType} gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+          } catch (err) {
+            console.warn(`[Probe ${p.id}] Incremental ${subType} fetch failed:`, err);
+          }
+        };
+        if (probeType === 'AGENT') {
+          tasks.push(fetchAndMerge('PING'));
+        } else if (probeType === 'PING') {
+          tasks.push(fetchAndMerge('PING'));
+        }
+      }
+    }
+    await Promise.allSettled(tasks);
+    rebuildAgentPairData();
+  } finally {
+    state.loadingPing = false;
+  }
+}
+
+async function loadMissingMtrData(from: Date, to: Date): Promise<void> {
+  if (!workspaceID || !state.probes?.length) return;
+  state.loadingMtr = true;
+  try {
+    const gaps = computeGapsForRange(state.mtrData as any, from, to);
+    if (gaps.length === 0) {
+      console.log('[Probe] No missing mtr data; skipping fetch');
+      return;
+    }
+
+    const tasks: Promise<void>[] = [];
+    for (const gap of gaps) {
+      for (const p of state.probes) {
+        const probeType = p.type as string;
+        const fetchAndMerge = async (subType: string) => {
+          try {
+            const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
+              from: toRFC3339(gap.from),
+              to: toRFC3339(gap.to),
+              limit: 500,
+              asc: false,
+              type: subType,
+            });
+            for (const d of rows) {
+              addProbeDataUnique(state.probeData, d);
+              addProbeDataUnique(state.mtrData, d);
+            }
+            console.log(`[Probe ${p.id}] Incremental ${subType} gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+          } catch (err) {
+            console.warn(`[Probe ${p.id}] Incremental ${subType} fetch failed:`, err);
+          }
+        };
+        if (probeType === 'AGENT') {
+          tasks.push(fetchAndMerge('MTR'));
+        } else if (probeType === 'MTR') {
+          tasks.push(fetchAndMerge('MTR'));
+        }
+      }
+    }
+    await Promise.allSettled(tasks);
+    rebuildAgentPairData();
+  } finally {
+    state.loadingMtr = false;
   }
 }
 
@@ -952,59 +1064,18 @@ function containsProbeType(type: ProbeType): boolean {
 
 async function loadProbeData(): Promise<void> {
   const [from, to] = state.timeRange;
-  
-  // Calculate aggregation bucket size based on time range
-  // Goal: aim for ~500 data points regardless of time range
   const fromDate = new Date(from);
   const toDate = new Date(to);
-  const rangeMs = toDate.getTime() - fromDate.getTime();
-  const rangeSec = rangeMs / 1000;
+  const rangeSec = (toDate.getTime() - fromDate.getTime()) / 1000;
   const rangeHours = rangeSec / 3600;
   const rangeDays = rangeHours / 24;
-  
-  // Calculate bucket size to get ~500 points
-  // bucketSec = rangeInSeconds / targetPoints
-  const targetPoints = 500;
-  let aggregateSec = 0;
-  
-  if (rangeSec > 60) { // Only aggregate if range > 1 minute
-    // Calculate ideal bucket size
-    let idealBucket = Math.ceil(rangeSec / targetPoints);
-    
-    // Round to nice intervals for cleaner data
-    // Extended to support very large time ranges (weeks/months)
-    if (idealBucket <= 10) {
-      aggregateSec = 10;        // 10 second buckets
-    } else if (idealBucket <= 30) {
-      aggregateSec = 30;        // 30 second buckets
-    } else if (idealBucket <= 60) {
-      aggregateSec = 60;        // 1 minute buckets
-    } else if (idealBucket <= 120) {
-      aggregateSec = 120;       // 2 minute buckets
-    } else if (idealBucket <= 300) {
-      aggregateSec = 300;       // 5 minute buckets
-    } else if (idealBucket <= 600) {
-      aggregateSec = 600;       // 10 minute buckets
-    } else if (idealBucket <= 1800) {
-      aggregateSec = 1800;      // 30 minute buckets
-    } else if (idealBucket <= 3600) {
-      aggregateSec = 3600;      // 1 hour buckets
-    } else if (idealBucket <= 7200) {
-      aggregateSec = 7200;      // 2 hour buckets (~7 days range)
-    } else if (idealBucket <= 14400) {
-      aggregateSec = 14400;     // 4 hour buckets (~14 days range)
-    } else if (idealBucket <= 21600) {
-      aggregateSec = 21600;     // 6 hour buckets (~21 days range)
-    } else {
-      // For 30+ day ranges, use larger buckets (round to 6 hours)
-      aggregateSec = Math.ceil(idealBucket / 21600) * 21600;
-    }
-  }
 
-  // Store aggregation bucket size in state for graph components
+  // Bucket size shared across the three sub-loads. computeAggregationBucketSec
+  // aims for ~500 points regardless of range. 0 = no aggregation (raw rows).
+  const aggregateSec = computeAggregationBucketSec(fromDate, toDate);
   state.aggregationBucketSec = aggregateSec;
 
-  console.log(`[Probe] Loading data: range=${rangeDays.toFixed(1)}d (${rangeHours.toFixed(1)}h), idealBucket=${Math.ceil(rangeSec/targetPoints)}s, aggregate=${aggregateSec}s`);
+  console.log(`[Probe] Loading data: range=${rangeDays.toFixed(1)}d (${rangeHours.toFixed(1)}h), aggregate=${aggregateSec}s`);
 
   const tasks = state.probes.map(async (p) => {
     try {
@@ -1151,27 +1222,12 @@ function submit() {}
 async function reloadPingData() {
   state.loadingPing = true;
   const [from, to] = state.timeRange;
-  const rangeMs = new Date(to).getTime() - new Date(from).getTime();
-  const rangeSec = rangeMs / 1000;
-  const targetPoints = 500;
-  let aggregateSec = 0;
-  
-  if (rangeSec > 60) {
-    const idealBucket = Math.ceil(rangeSec / targetPoints);
-    if (idealBucket <= 10) aggregateSec = 10;
-    else if (idealBucket <= 30) aggregateSec = 30;
-    else if (idealBucket <= 60) aggregateSec = 60;
-    else if (idealBucket <= 120) aggregateSec = 120;
-    else if (idealBucket <= 300) aggregateSec = 300;
-    else if (idealBucket <= 600) aggregateSec = 600;
-    else if (idealBucket <= 1800) aggregateSec = 1800;
-    else aggregateSec = 3600;
-  }
-  
+  const aggregateSec = computeAggregationBucketSec(new Date(from), new Date(to));
+
   try {
     const pingAgg = aggregateSec > 0;
     const newPingData: ProbeData[] = [];
-    
+
     for (const p of state.probes) {
       try {
         const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
@@ -1182,8 +1238,12 @@ async function reloadPingData() {
         newPingData.push(...rows);
       } catch (err) { console.warn(`[Reload] PING probe ${p.id} failed:`, err); }
     }
-    
+
     state.pingData = newPingData;
+    state.aggregationBucketSec = aggregateSec;
+    // Mirror the new data into agentPairData so views bound to pair.pingData
+    // pick up the manual refresh too.
+    rebuildAgentPairData();
     console.log(`[Reload] PING: ${newPingData.length} rows`);
   } catch (e) {
     console.error('[Reload] PING failed:', e);
@@ -1195,10 +1255,10 @@ async function reloadPingData() {
 async function reloadMtrData() {
   state.loadingMtr = true;
   const [from, to] = state.timeRange;
-  
+
   try {
     const newMtrData: ProbeData[] = [];
-    
+
     for (const p of state.probes) {
       try {
         const rows = await ProbeDataService.byProbe(workspaceID, p.id, {
@@ -1208,8 +1268,9 @@ async function reloadMtrData() {
         newMtrData.push(...rows);
       } catch (err) { console.warn(`[Reload] MTR probe ${p.id} failed:`, err); }
     }
-    
+
     state.mtrData = newMtrData;
+    rebuildAgentPairData();
     console.log(`[Reload] MTR: ${newMtrData.length} rows`);
   } catch (e) {
     console.error('[Reload] MTR failed:', e);
@@ -1221,6 +1282,35 @@ async function reloadMtrData() {
 // Theme subscription for date picker
 let themeUnsubscribe: (() => void) | null = null;
 
+// Template ref to the date picker. Used by applyPickerRange to read the
+// picker's internalModelValue on events that don't update v-model
+// (preset clicks fire `auto-apply`, the "Select" button fires `select-date`).
+const datePickerRef = ref<any>(null);
+
+// Bridge for events the picker fires but which don't update v-model
+// (auto-apply on preset clicks, select-date on the "Select" button). We
+// read the picker's own internal state and re-use onTimeRangeUpdate so URL
+// sync + watcher firing stay in one place.
+const applyPickerRange = () => {
+  const picker = datePickerRef.value;
+  if (!picker) return;
+  const v = picker.internalModelValue ?? picker.modelValue;
+  if (!Array.isArray(v) || v.length !== 2 || !v[0] || !v[1]) return;
+  onTimeRangeUpdate([new Date(v[0]), new Date(v[1])]);
+};
+
+// "Is anything refreshing right now?" — drives the picker disable, the
+// header spinner, and feeds into the per-card overlays alongside the
+// per-card loading flags. true on initial load (state.loading) and on any
+// time-range-driven refresh while at least one loadMissing*Data / reloadData
+// is in flight.
+const isRefreshing = computed(() =>
+  state.loading ||
+  state.loadingTrafficSim ||
+  state.loadingPing ||
+  state.loadingMtr
+);
+
 // Handler for explicit time range updates from date picker or graph zoom
 const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
   if (!newRange || newRange.length !== 2 || !newRange[0] || !newRange[1]) {
@@ -1228,17 +1318,17 @@ const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
     return;
   }
   console.log('[Probe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
-  
+
   // Handle 'all' range signal (from TrafficSimGraph)
   const isResetAll = newRange[0].getTime() === 0 && newRange[1].getTime() === 0;
-  
+
   if (isResetAll) {
     // Reset to default: last 3 hours (or let parent decide full range)
     state.timeRange = [new Date(Date.now() - 3 * 60 * 60 * 1000), new Date()];
   } else {
     state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
   }
-  
+
   // Sync to URL so time range is shareable/bookmarkable
   router.push({
     query: {
@@ -1275,10 +1365,12 @@ onUnmounted(() => {
 // Debounced watch on timeRange. Two paths:
 //   1) First load (no data yet) — full reloadData() so we get metadata, probes,
 //      and a baseline dataset in one go.
-//   2) Subsequent range changes (e.g. user clicks a time-range button in the
-//      trafficsim graph) — incremental load for trafficsim only. Existing
-//      data is preserved; only the gap between the new range and what we
-//      already hold is fetched.
+//   2) Subsequent range changes (e.g. user clicks a preset or the Select
+//      button in the date picker, or zooms inside a graph) — incremental
+//      fetch for ALL types we display (trafficsim, ping, mtr). Existing data
+//      is preserved; only the gap between the new range and what we already
+//      hold is fetched. Each loader sets its own loadingX flag for the
+//      per-card overlay; isRefreshing() is the OR of all of them.
 let timeRangeDebounceTimer: number | null = null;
 watch(
   () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
@@ -1296,12 +1388,29 @@ watch(
       const [fromMs, toMs] = newVal as [number, number];
       const from = new Date(fromMs);
       const to = new Date(toMs);
-      if (state.trafficSimData.length === 0) {
+      // Update aggregation bucket for the new range so the LatencyGraph's
+      // gap detection matches the new sampling density — otherwise lines
+      // break after a zoom-out from "Last Hour" to "Last 7 Days".
+      state.aggregationBucketSec = computeAggregationBucketSec(from, to);
+      const hasAnyData =
+        state.trafficSimData.length > 0 ||
+        state.pingData.length > 0 ||
+        state.mtrData.length > 0;
+      if (!hasAnyData) {
         console.log('[Probe] No data yet — full reloadData()');
         reloadData();
       } else {
-        console.log(`[Probe] Incremental trafficsim fetch for [${from.toISOString()}..${to.toISOString()}]`);
-        loadMissingTrafficSimData(from, to);
+        console.log(`[Probe] Incremental fetch for [${from.toISOString()}..${to.toISOString()}]`);
+        Promise.allSettled([
+          loadMissingTrafficSimData(from, to),
+          loadMissingPingData(from, to),
+          loadMissingMtrData(from, to),
+        ]).finally(() => {
+          // Final rebuild guarantees pair.*Data reflects the union of all
+          // three loaders' contributions (each loader calls rebuildAgentPairData
+          // on its own completion; this is the safety-net pass).
+          rebuildAgentPairData();
+        });
       }
       timeRangeDebounceTimer = null;
     }, 500);
@@ -1503,8 +1612,12 @@ const { connected: wsConnected } = useProbeSubscription(
           </template>
         </ProbeHealthPopup>
         <VueDatePicker
+          ref="datePickerRef"
           v-model="state.timeRange"
           @update:model-value="onTimeRangeUpdate"
+          @auto-apply="applyPickerRange"
+          @select-date="applyPickerRange"
+          :disabled="isRefreshing"
           :partial-range="false"
           range
           :dark="isDark"
@@ -1524,6 +1637,14 @@ const { connected: wsConnected } = useProbeSubscription(
           menu-class-name="date-picker-menu"
           calendar-class-name="date-picker-calendar"
         />
+        <div
+          v-if="isRefreshing"
+          class="spinner-border spinner-border-sm text-primary refresh-spinner"
+          role="status"
+          title="Refreshing data…"
+        >
+          <span class="visually-hidden">Refreshing…</span>
+        </div>
       </div>
     </Title>
     
@@ -1595,12 +1716,17 @@ const { connected: wsConnected } = useProbeSubscription(
                       Simulated Traffic ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                     </h6>
                   </div>
-                  <div class="card-body">
+                  <div class="card-body position-relative">
+                    <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                      <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Refreshing traffic data…</span>
+                      </div>
+                    </div>
                     <TrafficSimGraph :traffic-results="transformToTrafficSimResult(pair.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                   </div>
                 </div>
               </div>
-              
+
               <!-- Combined MOS Score Graph (derived from TrafficSim) -->
               <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length > 0">
                 <div class="card h-100">
@@ -1610,17 +1736,22 @@ const { connected: wsConnected } = useProbeSubscription(
                       Voice Quality Score ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                     </h6>
                   </div>
-                  <div class="card-body">
-                    <MosGraph 
+                  <div class="card-body position-relative">
+                    <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                      <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Refreshing voice quality data…</span>
+                      </div>
+                    </div>
+                    <MosGraph
                       :traffic-sim-results="transformToTrafficSimResult(pair.trafficSimData)"
                       :intervalSec="state.probe?.interval_sec || 60"
                       :currentTimeRange="state.timeRange"
-                      @time-range-change="onTimeRangeUpdate" 
+                      @time-range-change="onTimeRangeUpdate"
                     />
                   </div>
                 </div>
               </div>
-              
+
               <!-- Ping/Latency Data (only if PING data available) -->
               <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0">
                 <div class="card h-100">
@@ -1629,21 +1760,26 @@ const { connected: wsConnected } = useProbeSubscription(
                       <i class="bi bi-speedometer2 me-2"></i>
                       Latency ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                     </h6>
-                    <button 
-                      class="btn btn-sm btn-outline-primary" 
-                      @click="reloadPingData" 
+                    <button
+                      class="btn btn-sm btn-outline-primary"
+                      @click="reloadPingData"
                       :disabled="state.loadingPing"
                       title="Reload latency data"
                     >
                       <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                     </button>
                   </div>
-                  <div class="card-body">
+                  <div class="card-body position-relative">
+                    <div v-if="state.loadingPing" class="graph-loading-overlay" aria-live="polite">
+                      <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Refreshing latency data…</span>
+                      </div>
+                    </div>
                     <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                   </div>
                 </div>
               </div>
-              
+
               <!-- No data message when none of the probe types have data -->
               <div class="col-lg-12 mb-3" v-if="pair.trafficSimData.length === 0 && pair.pingData.length === 0 && !state.loading">
                 <div class="card h-100">
@@ -1654,7 +1790,7 @@ const { connected: wsConnected } = useProbeSubscription(
                   </div>
                 </div>
               </div>
-              
+
               <!-- MTR Data -->
               <div class="col-12 mb-3">
                 <div class="card">
@@ -1663,16 +1799,21 @@ const { connected: wsConnected } = useProbeSubscription(
                     <i class="bi bi-diagram-3 me-2"></i>
                     Traceroutes ({{ pair.sourceAgentName }} → {{ pair.targetAgentName }})
                   </h6>
-                  <button 
-                    class="btn btn-sm btn-outline-primary" 
-                    @click="reloadMtrData" 
+                  <button
+                    class="btn btn-sm btn-outline-primary"
+                    @click="reloadMtrData"
                     :disabled="state.loadingMtr"
                     title="Reload traceroute data"
                   >
                     <i class="bi" :class="state.loadingMtr ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                   </button>
                 </div>
-                <div class="card-body">
+                <div class="card-body position-relative">
+                  <div v-if="state.loadingMtr" class="graph-loading-overlay" aria-live="polite">
+                    <div class="spinner-border text-primary" role="status">
+                      <span class="visually-hidden">Refreshing traceroute data…</span>
+                    </div>
+                  </div>
                   <div v-if="state.loading && pair.mtrData.length === 0" class="text-center py-4">
                     <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                     <span class="text-muted">Loading traceroute data...</span>
@@ -1683,7 +1824,7 @@ const { connected: wsConnected } = useProbeSubscription(
                   </div>
                   <template v-else>
                     <!-- Key to force re-render on tab change -->
-                    <NetworkMap 
+                    <NetworkMap
                       :key="`mtr-map-${index}-${activeTabIndex}`"
                       :mtrResults="transformMtrDataMulti(pair.mtrData)"
                       @node-select="(node: any) => { state.selectedMtrData = pair.mtrData; onNodeSelect(node); }"
@@ -1691,10 +1832,10 @@ const { connected: wsConnected } = useProbeSubscription(
                     <div class="mtr-help-text">
                       <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
                     </div>
-                    
+
                     <!-- MTR Summary with route aggregation for AGENT probes -->
-                    <MtrSummary 
-                      :mtr-data="pair.mtrData" 
+                    <MtrSummary
+                      :mtr-data="pair.mtrData"
                       @show-all-traces="showMtrModal = true; state.selectedMtrData = pair.mtrData"
                     />
 </template>
@@ -1727,7 +1868,12 @@ const { connected: wsConnected } = useProbeSubscription(
                 <h5 class="card-title mb-0">Simulated Traffic</h5>
                 <small class="text-muted">displays the stats for simulated traffic</small>
               </div>
-              <div class="card-body">
+              <div class="card-body position-relative">
+                <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Refreshing traffic data…</span>
+                  </div>
+                </div>
                 <TrafficSimGraph :traffic-results="transformToTrafficSimResult(state.trafficSimData)" :intervalSec="state.probe?.interval_sec || 60" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
               </div>
             </div>
@@ -1736,10 +1882,15 @@ const { connected: wsConnected } = useProbeSubscription(
           <!-- Combined MOS Score Graph (derived from TrafficSim) -->
           <div class="col-sm-12" v-if="containsProbeType('TRAFFICSIM') && state.trafficSimData.length > 0">
             <div class="card mb-3">
-              <div class="card-body">
+              <div class="card-body position-relative">
+                <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Refreshing voice quality data…</span>
+                  </div>
+                </div>
                 <h5 class="card-title">Voice Quality Score (MOS)</h5>
                 <p class="card-text">aggregated voice quality scoring from available data sources</p>
-                <MosGraph 
+                <MosGraph
                   :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"
                   :intervalSec="state.probe?.interval_sec || 60"
                   :currentTimeRange="state.timeRange"
@@ -1757,16 +1908,21 @@ const { connected: wsConnected } = useProbeSubscription(
                   <h5 class="card-title mb-0">Latency</h5>
                   <small class="text-muted">displays the stats associated with latency</small>
                 </div>
-                <button 
-                  class="btn btn-sm btn-outline-primary" 
-                  @click="reloadPingData" 
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  @click="reloadPingData"
                   :disabled="state.loadingPing"
                   title="Reload latency data"
                 >
                   <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                 </button>
               </div>
-              <div class="card-body">
+              <div class="card-body position-relative">
+                <div v-if="state.loadingPing" class="graph-loading-overlay" aria-live="polite">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Refreshing latency data…</span>
+                  </div>
+                </div>
                 <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
               </div>
             </div>
@@ -1775,14 +1931,19 @@ const { connected: wsConnected } = useProbeSubscription(
       <!-- MTR Map and Table -->
       <div class="col-sm-12" v-if="containsProbeType('MTR')">
         <div class="card mb-3">
-          <div class="card-body">
+          <div class="card-body position-relative">
+            <div v-if="state.loadingMtr" class="graph-loading-overlay" aria-live="polite">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Refreshing traceroute data…</span>
+              </div>
+            </div>
             <div class="d-flex justify-content-between align-items-start mb-3">
               <div>
                 <h5 class="card-title mb-0">Traceroutes</h5>
                 <p class="card-text text-muted mb-0">view the recent trace routes for the selected period of time</p>
               </div>
             </div>
-            
+
             <div v-if="state.loading && state.mtrData.length === 0" class="text-center py-5">
               <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -1800,10 +1961,10 @@ const { connected: wsConnected } = useProbeSubscription(
               <div class="mtr-help-text">
                 <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
               </div>
-              
+
               <!-- MTR Summary with route aggregation -->
-              <MtrSummary 
-                :mtr-data="state.mtrData" 
+              <MtrSummary
+                :mtr-data="state.mtrData"
                 @show-all-traces="showMtrModal = true"
               />
             </div>
@@ -1882,6 +2043,38 @@ const { connected: wsConnected } = useProbeSubscription(
 /* Loading spinner animation */
 .spinner-border {
   animation: spinner-border .75s linear infinite;
+}
+
+/* Small header spinner shown next to the date picker while data refreshes. */
+.refresh-spinner {
+  flex-shrink: 0;
+}
+
+/* Overlay placed on top of a card body while its underlying data is being
+   refreshed. pointer-events: none so tooltips / hover still work; the
+   semi-transparent background makes it obvious the graph is stale without
+   fully hiding it. */
+.graph-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 0 0 0.5rem 0.5rem;
+  z-index: 5;
+  pointer-events: none;
+  backdrop-filter: blur(1px);
+  animation: fade-in 120ms ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+:global([data-theme="dark"]) .graph-loading-overlay {
+  background: rgba(15, 23, 42, 0.55);
 }
 
 /* Bootstrap Icons support (if not already included) */

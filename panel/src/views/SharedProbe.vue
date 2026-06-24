@@ -729,19 +729,36 @@ function dataRangeMs(arr: { created_at?: string }[]): [number, number] | null {
     return [lo, hi];
 }
 
+// Build the gap list for an incremental load. Returns the new (from, to)
+// ranges we don't already have data for.
+function computeGapsForRange(
+    arr: { created_at?: string }[],
+    from: Date,
+    to: Date
+): Array<{ from: Date; to: Date }> {
+    const existing = dataRangeMs(arr);
+    if (!existing) return [{ from, to }];
+    const [lo, hi] = existing;
+    const gaps: Array<{ from: Date; to: Date }> = [];
+    if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
+    if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
+    return gaps;
+}
+
+// Cap an aggregation bucket to the gap size so a 30-minute gap doesn't get
+// a 1-hour bucket. Returns 0 if the gap is small enough that raw rows fit.
+function computeGapAggregateSec(gapFrom: Date, gapTo: Date): number {
+    const full = calculateAggregateBucket(gapFrom, gapTo);
+    const gapSec = Math.max(1, (gapTo.getTime() - gapFrom.getTime()) / 1000);
+    if (full > 0 && gapSec < full * 4) return 0;
+    return full;
+}
+
 async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
     if (!probeId.value || !token.value) return;
     state.loadingTrafficSim = true;
     try {
-        const existing = dataRangeMs(state.trafficSimData);
-        const gaps: Array<{ from: Date; to: Date }> = [];
-        if (!existing) {
-            gaps.push({ from, to });
-        } else {
-            const [lo, hi] = existing;
-            if (from.getTime() < lo) gaps.push({ from, to: new Date(lo) });
-            if (to.getTime() > hi) gaps.push({ from: new Date(hi), to });
-        }
+        const gaps = computeGapsForRange(state.trafficSimData, from, to);
         if (gaps.length === 0) {
             console.log('[SharedProbe] No missing trafficsim data; skipping fetch');
             return;
@@ -749,19 +766,9 @@ async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
 
         const tasks: Promise<void>[] = [];
         for (const gap of gaps) {
-            // Reuse the same bucketing logic the initial load uses, but cap
-            // to the gap size so a 30-minute gap doesn't ask for 1-hour buckets.
-            const fullAggregateSec = calculateAggregateBucket(gap.from, gap.to);
-            const gapSec = Math.max(1, (gap.to.getTime() - gap.from.getTime()) / 1000);
-            const aggregateSec = fullAggregateSec > 0 && gapSec > fullAggregateSec * 4
-                ? fullAggregateSec
-                : (fullAggregateSec > 0 ? 0 : 0);
+            const aggregateSec = computeGapAggregateSec(gap.from, gap.to);
             const useAgg = aggregateSec > 0;
-
-            // Determine the probe id to query. For AGENT probes the data is
-            // stored against the AGENT probe id and the sub-type 'TRAFFICSIM'.
-            // For standalone TRAFFICSIM probes it's the probe itself.
-            const queryProbeId = state.isAgentProbe ? probeId.value : probeId.value;
+            const queryProbeId = probeId.value;
             tasks.push((async () => {
                 try {
                     const resp = await PublicShareService.getProbeData(
@@ -791,6 +798,97 @@ async function loadMissingTrafficSimData(from: Date, to: Date): Promise<void> {
         rebuildAgentPairData();
     } finally {
         state.loadingTrafficSim = false;
+    }
+}
+
+async function loadMissingPingData(from: Date, to: Date): Promise<void> {
+    if (!probeId.value || !token.value) return;
+    state.loadingPing = true;
+    try {
+        const gaps = computeGapsForRange(state.pingData, from, to);
+        if (gaps.length === 0) {
+            console.log('[SharedProbe] No missing ping data; skipping fetch');
+            return;
+        }
+
+        const tasks: Promise<void>[] = [];
+        for (const gap of gaps) {
+            const aggregateSec = computeGapAggregateSec(gap.from, gap.to);
+            const useAgg = aggregateSec > 0;
+            const queryProbeId = probeId.value;
+            tasks.push((async () => {
+                try {
+                    const resp = await PublicShareService.getProbeData(
+                        token.value,
+                        queryProbeId,
+                        {
+                            from: toRFC3339(gap.from),
+                            to: toRFC3339(gap.to),
+                            type: 'PING',
+                            aggregate: useAgg ? aggregateSec : undefined,
+                            limit: useAgg ? undefined : 300,
+                            password: authenticatedPassword.value || undefined,
+                        }
+                    );
+                    const rows = parseDataResult(resp, queryProbeId);
+                    for (const d of rows) {
+                        addProbeDataUnique(state.probeData, d);
+                        addProbeDataUnique(state.pingData, d);
+                    }
+                    console.log(`[SharedProbe] Incremental PING gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+                } catch (err) {
+                    console.warn('[SharedProbe] Incremental PING fetch failed:', err);
+                }
+            })());
+        }
+        await Promise.allSettled(tasks);
+        rebuildAgentPairData();
+    } finally {
+        state.loadingPing = false;
+    }
+}
+
+async function loadMissingMtrData(from: Date, to: Date): Promise<void> {
+    if (!probeId.value || !token.value) return;
+    state.loadingMtr = true;
+    try {
+        const gaps = computeGapsForRange(state.mtrData, from, to);
+        if (gaps.length === 0) {
+            console.log('[SharedProbe] No missing mtr data; skipping fetch');
+            return;
+        }
+
+        const tasks: Promise<void>[] = [];
+        for (const gap of gaps) {
+            const queryProbeId = probeId.value;
+            tasks.push((async () => {
+                try {
+                    const resp = await PublicShareService.getProbeData(
+                        token.value,
+                        queryProbeId,
+                        {
+                            from: toRFC3339(gap.from),
+                            to: toRFC3339(gap.to),
+                            type: 'MTR',
+                            limit: 500,
+                            password: authenticatedPassword.value || undefined,
+                        }
+                    );
+                    const rows = parseDataResult(resp, queryProbeId);
+                    for (const d of rows) {
+                        addProbeDataUnique(state.probeData, d);
+                        addProbeDataUnique(state.mtrData, d);
+                    }
+                    console.log(`[SharedProbe] Incremental MTR gap [${gap.from.toISOString()}..${gap.to.toISOString()}]: +${rows.length} rows`);
+                } catch (err) {
+                    console.warn('[SharedProbe] Incremental MTR fetch failed:', err);
+                }
+            })());
+        }
+        await Promise.allSettled(tasks);
+        rebuildAgentPairData();
+    } finally {
+        state.loadingMtr = false;
     }
 }
 
@@ -937,49 +1035,60 @@ const onTimeRangeUpdate = (newRange: [Date, Date] | null) => {
         return;
     }
     console.log('[SharedProbe] Time range updated:', newRange[0].toISOString(), 'to', newRange[1].toISOString());
-    
+
     // Handle 'all' range signal (from TrafficSimGraph)
     const isResetAll = newRange[0].getTime() === 0 && newRange[1].getTime() === 0;
-    
+
     if (isResetAll) {
         // Reset to default: last 3 hours
         state.timeRange = [new Date(Date.now() - 3 * 60 * 60 * 1000), new Date()];
     } else {
         state.timeRange = [new Date(newRange[0]), new Date(newRange[1])];
     }
-    
+
     // Sync to URL so time range is shareable/bookmarkable
     router.push({
         query: {
-            ...router.currentRoute.value.query,
+            ...route.query,
             from: state.timeRange[0].toISOString(),
             to: state.timeRange[1].toISOString()
         }
     });
 };
 
+// Template ref to the date picker. Used by applyPickerRange to read the
+// picker's internalModelValue on events that don't update v-model
+// (preset clicks fire `auto-apply`, the "Select" button fires `select-date`).
+const datePickerRef = ref<any>(null);
+
+// Bridge for events the picker fires but which don't update v-model
+// (auto-apply on preset clicks, select-date on the "Select" button). We
+// read the picker's own internal state and re-use onTimeRangeUpdate so URL
+// sync + watcher firing stay in one place.
+const applyPickerRange = () => {
+    const picker = datePickerRef.value;
+    if (!picker) return;
+    const v = picker.internalModelValue ?? picker.modelValue;
+    if (!Array.isArray(v) || v.length !== 2 || !v[0] || !v[1]) return;
+    onTimeRangeUpdate([new Date(v[0]), new Date(v[1])]);
+};
+
+// "Is anything refreshing right now?" — drives the picker disable and the
+// header spinner. Per-card overlays use the individual loadingX flags.
+const isRefreshing = computed(() =>
+    loading.value ||
+    state.loadingTrafficSim ||
+    state.loadingPing ||
+    state.loadingMtr
+);
+
 // ---------- Per-type reload functions for independent graph refresh ----------
 async function reloadPingData() {
     state.loadingPing = true;
     try {
         const [from, to] = state.timeRange;
-        const rangeMs = to.getTime() - from.getTime();
-        const rangeSec = rangeMs / 1000;
-        const targetPoints = 500;
-        let aggregateSec = 0;
-        
-        if (rangeSec > 60) {
-            const idealBucket = Math.ceil(rangeSec / targetPoints);
-            if (idealBucket <= 10) aggregateSec = 10;
-            else if (idealBucket <= 30) aggregateSec = 30;
-            else if (idealBucket <= 60) aggregateSec = 60;
-            else if (idealBucket <= 120) aggregateSec = 120;
-            else if (idealBucket <= 300) aggregateSec = 300;
-            else if (idealBucket <= 600) aggregateSec = 600;
-            else if (idealBucket <= 1800) aggregateSec = 1800;
-            else aggregateSec = 3600;
-        }
-        
+        const aggregateSec = calculateAggregateBucket(new Date(from), new Date(to));
+
         const result = await PublicShareService.getProbeData(token.value, probeId.value, {
             from: from.toISOString(),
             to: to.toISOString(),
@@ -987,8 +1096,10 @@ async function reloadPingData() {
             aggregate: aggregateSec > 0 ? aggregateSec : undefined,
             limit: aggregateSec > 0 ? undefined : 300,
         });
-        
+
         state.pingData = parseDataResult(result, probeId.value);
+        state.aggregationBucketSec = aggregateSec;
+        rebuildAgentPairData();
         console.log(`[SharedProbe Reload] PING: ${state.pingData.length} rows`);
     } catch (e) {
         console.error('[SharedProbe Reload] PING failed:', e);
@@ -1001,15 +1112,16 @@ async function reloadMtrData() {
     state.loadingMtr = true;
     try {
         const [from, to] = state.timeRange;
-        
+
         const result = await PublicShareService.getProbeData(token.value, probeId.value, {
             from: from.toISOString(),
             to: to.toISOString(),
             type: 'MTR',
             limit: 500,
         });
-        
+
         state.mtrData = parseDataResult(result, probeId.value);
+        rebuildAgentPairData();
         console.log(`[SharedProbe Reload] MTR: ${state.mtrData.length} rows`);
     } catch (e) {
         console.error('[SharedProbe Reload] MTR failed:', e);
@@ -1022,23 +1134,8 @@ async function reloadTrafficSimData() {
     state.loadingTrafficSim = true;
     try {
         const [from, to] = state.timeRange;
-        const rangeMs = to.getTime() - from.getTime();
-        const rangeSec = rangeMs / 1000;
-        const targetPoints = 500;
-        let aggregateSec = 0;
-        
-        if (rangeSec > 60) {
-            const idealBucket = Math.ceil(rangeSec / targetPoints);
-            if (idealBucket <= 10) aggregateSec = 10;
-            else if (idealBucket <= 30) aggregateSec = 30;
-            else if (idealBucket <= 60) aggregateSec = 60;
-            else if (idealBucket <= 120) aggregateSec = 120;
-            else if (idealBucket <= 300) aggregateSec = 300;
-            else if (idealBucket <= 600) aggregateSec = 600;
-            else if (idealBucket <= 1800) aggregateSec = 1800;
-            else aggregateSec = 3600;
-        }
-        
+        const aggregateSec = calculateAggregateBucket(new Date(from), new Date(to));
+
         const result = await PublicShareService.getProbeData(token.value, probeId.value, {
             from: from.toISOString(),
             to: to.toISOString(),
@@ -1046,8 +1143,10 @@ async function reloadTrafficSimData() {
             aggregate: aggregateSec > 0 ? aggregateSec : undefined,
             limit: aggregateSec > 0 ? undefined : 300,
         });
-        
+
         state.trafficSimData = parseDataResult(result, probeId.value);
+        state.aggregationBucketSec = aggregateSec;
+        rebuildAgentPairData();
         console.log(`[SharedProbe Reload] TRAFFICSIM: ${state.trafficSimData.length} rows`);
     } catch (e) {
         console.error('[SharedProbe Reload] TRAFFICSIM failed:', e);
@@ -1083,9 +1182,10 @@ onUnmounted(() => {
 
 // Debounced watch on timeRange. Same pattern as Probe.vue: first load does
 // the full loadProbeData() (which also loads metadata); subsequent range
-// changes (e.g. user clicks a 1H/6H/24H/7D/All button in the trafficsim
-// graph) do an incremental load for trafficsim only, preserving the data
-// already in state.trafficSimData.
+// changes (e.g. user clicks a preset or the Select button in the date picker,
+// or zooms inside a graph) do an incremental fetch for ALL types we display
+// (trafficsim, ping, mtr) in parallel. Existing data is preserved; only the
+// gap between the new range and what we already hold is fetched.
 let timeRangeDebounceTimer: number | null = null;
 watch(
     () => [state.timeRange[0]?.getTime(), state.timeRange[1]?.getTime()],
@@ -1103,13 +1203,28 @@ watch(
             const [fromMs, toMs] = newVal as [number, number];
             const from = new Date(fromMs);
             const to = new Date(toMs);
-            if (state.trafficSimData.length === 0) {
+            // Update aggregation bucket for the new range so the LatencyGraph's
+            // gap detection matches the new sampling density.
+            state.aggregationBucketSec = calculateAggregateBucket(from, to);
+            const hasAnyData =
+                state.trafficSimData.length > 0 ||
+                state.pingData.length > 0 ||
+                state.mtrData.length > 0;
+            if (!hasAnyData) {
                 console.log('[SharedProbe] No data yet — full loadProbeData()');
                 PublicShareService.clearCache(token.value);
                 loadProbeData();
             } else {
-                console.log(`[SharedProbe] Incremental trafficsim fetch for [${from.toISOString()}..${to.toISOString()}]`);
-                loadMissingTrafficSimData(from, to);
+                console.log(`[SharedProbe] Incremental fetch for [${from.toISOString()}..${to.toISOString()}]`);
+                Promise.allSettled([
+                    loadMissingTrafficSimData(from, to),
+                    loadMissingPingData(from, to),
+                    loadMissingMtrData(from, to),
+                ]).finally(() => {
+                    // Safety-net rebuild — each loader calls rebuildAgentPairData
+                    // on its own completion; this is the union pass.
+                    rebuildAgentPairData();
+                });
             }
             timeRangeDebounceTimer = null;
         }, 500);
@@ -1219,10 +1334,14 @@ watch(
                     
                     <!-- Date Range Picker -->
                     <div class="date-picker-wrapper">
-                        <VueDatePicker 
+                        <VueDatePicker
+                            ref="datePickerRef"
                             v-model="state.timeRange"
                             @update:model-value="onTimeRangeUpdate"
-                            :partial-range="false" 
+                            @auto-apply="applyPickerRange"
+                            @select-date="applyPickerRange"
+                            :disabled="isRefreshing"
+                            :partial-range="false"
                             range
                             :dark="isDark"
                             :enable-time-picker="true"
@@ -1241,6 +1360,14 @@ watch(
                             menu-class-name="date-picker-menu"
                             calendar-class-name="date-picker-calendar"
                         />
+                        <div
+                            v-if="isRefreshing"
+                            class="spinner-border spinner-border-sm text-primary refresh-spinner"
+                            role="status"
+                            title="Refreshing data…"
+                        >
+                            <span class="visually-hidden">Refreshing…</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -1281,9 +1408,9 @@ watch(
                     <div v-if="containsProbeType('TRAFFICSIM') || state.isAgentProbe" class="data-section">
                         <div class="section-header">
                             <h2><i class="bi bi-speedometer"></i> Traffic Simulation</h2>
-                            <button 
-                                class="reload-btn" 
-                                @click="reloadTrafficSimData" 
+                            <button
+                                class="reload-btn"
+                                @click="reloadTrafficSimData"
                                 :disabled="state.loadingTrafficSim"
                                 title="Reload traffic simulation data"
                             >
@@ -1300,20 +1427,30 @@ watch(
                             <i class="bi bi-broadcast"></i>
                             <p>No traffic simulation data available for this time range</p>
                         </div>
-                        <div v-else class="graph-container">
-                            <TrafficSimGraph 
+                        <div v-else class="graph-container position-relative">
+                            <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Refreshing traffic data…</span>
+                                </div>
+                            </div>
+                            <TrafficSimGraph
                                 :trafficResults="transformToTrafficSimResult(activeTrafficSimData)"
                                 :currentTimeRange="state.timeRange"
                                 @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
                     </div>
-                    
+
                     <!-- MOS Graph (Voice Quality - derived from TrafficSim) -->
                     <div v-if="activeTrafficSimData.length > 0" class="data-section">
                         <h2><i class="bi bi-telephone"></i> Voice Quality (MOS)</h2>
-                        <div class="graph-container">
-                            <MosGraph 
+                        <div class="graph-container position-relative">
+                            <div v-if="state.loadingTrafficSim" class="graph-loading-overlay" aria-live="polite">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Refreshing voice quality data…</span>
+                                </div>
+                            </div>
+                            <MosGraph
                                 :trafficSimResults="transformToTrafficSimResult(activeTrafficSimData)"
                                 :intervalSec="state.aggregationBucketSec || 60"
                                 :currentTimeRange="state.timeRange"
@@ -1321,113 +1458,125 @@ watch(
                             />
                         </div>
                     </div>
-                    
+
                     <!-- PING/Latency Data (only if PING data available) -->
                     <div v-if="(containsProbeType('PING') || state.isAgentProbe) && activePingData.length > 0" class="data-section">
                         <div class="section-header">
                             <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
-                            <button 
-                                class="reload-btn" 
-                                @click="reloadPingData" 
+                            <button
+                                class="reload-btn"
+                                @click="reloadPingData"
                                 :disabled="state.loadingPing"
                                 title="Reload latency data"
                             >
                                 <i class="bi" :class="state.loadingPing ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                             </button>
                         </div>
-                        <div class="graph-container">
-                            <LatencyGraph 
-                                :pingResults="transformPingDataMulti(activePingData)" 
+                        <div class="graph-container position-relative">
+                            <div v-if="state.loadingPing" class="graph-loading-overlay" aria-live="polite">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Refreshing latency data…</span>
+                                </div>
+                            </div>
+                            <LatencyGraph
+                                :pingResults="transformPingDataMulti(activePingData)"
                                 :aggregationBucketSec="state.aggregationBucketSec"
                                 :currentTimeRange="state.timeRange"
                                 @time-range-change="onTimeRangeUpdate"
                             />
                         </div>
                     </div>
-                    
+
                     <!-- MTR Data -->
                     <div v-if="containsProbeType('MTR') || state.isAgentProbe" class="data-section">
                         <div class="section-header">
                             <h2><i class="bi bi-diagram-2"></i> Route Trace</h2>
-                            <button 
-                                class="reload-btn" 
-                                @click="reloadMtrData" 
+                            <button
+                                class="reload-btn"
+                                @click="reloadMtrData"
                                 :disabled="state.loadingMtr"
                                 title="Reload traceroute data"
                             >
                                 <i class="bi" :class="state.loadingMtr ? 'bi-arrow-repeat spin' : 'bi-arrow-clockwise'"></i>
                             </button>
                         </div>
-                        <div v-if="loading && activeMtrData.length === 0" class="loading-state">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <span>Loading traceroute data...</span>
-                        </div>
-                        <div v-else-if="activeMtrData.length === 0" class="empty-state">
-                            <i class="bi bi-diagram-3"></i>
-                            <p>No traceroute data available for this time range</p>
-                        </div>
-                        <template v-else>
-                            <!-- Network Map Visualization -->
-                            <div class="network-map-container">
-                                <h3 class="subsection-title"><i class="bi bi-bezier2"></i> Network Path</h3>
-                                <NetworkMap 
-                                    :mtrResults="transformMtrDataMulti(activeMtrData)" 
-                                    @node-select="onNodeSelect"
-                                />
-                                <div class="mtr-help-text">
-                                    <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
+                        <div class="graph-container position-relative">
+                            <div v-if="state.loadingMtr" class="graph-loading-overlay" aria-live="polite">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Refreshing traceroute data…</span>
                                 </div>
                             </div>
-                            
-                            <!-- MTR Summary with @show-all-traces handler -->
-                            <MtrSummary 
-                                :mtrData="activeMtrData" 
-                                @show-all-traces="onShowAllTraces"
-                            />
-                            
-                            <!-- Paginated MTR Results -->
-                            <div class="mtr-results">
-                                <div class="mtr-results-header">
-                                    <h3>Recent Traces</h3>
-                                    <span class="mtr-count">{{ getPaginatedMtrResults(activeMtrData, mtrPage).total }} total</span>
+                            <div v-if="loading && activeMtrData.length === 0" class="loading-state">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
                                 </div>
-                                
-                                <div v-for="(mtr, idx) in getPaginatedMtrResults(activeMtrData, mtrPage).items" :key="idx" class="mtr-item">
-                                    <div class="mtr-header">
-                                        <span class="mtr-time">
-                                            {{ new Date(mtr.created_at).toLocaleString() }}
-                                        </span>
+                                <span>Loading traceroute data...</span>
+                            </div>
+                            <div v-else-if="activeMtrData.length === 0" class="empty-state">
+                                <i class="bi bi-diagram-3"></i>
+                                <p>No traceroute data available for this time range</p>
+                            </div>
+                            <template v-else>
+                                <!-- Network Map Visualization -->
+                                <div class="network-map-container">
+                                    <h3 class="subsection-title"><i class="bi bi-bezier2"></i> Network Path</h3>
+                                    <NetworkMap
+                                        :mtrResults="transformMtrDataMulti(activeMtrData)"
+                                        @node-select="onNodeSelect"
+                                    />
+                                    <div class="mtr-help-text">
+                                        <i class="bi bi-info-circle"></i> Click on any node in the map to view detailed traceroute data
                                     </div>
-                                    <MtrTable :probeData="mtr" />
                                 </div>
-                                
-                                <!-- Pagination Controls -->
-                                <div v-if="getPaginatedMtrResults(activeMtrData, mtrPage).totalPages > 1" class="mtr-pagination">
-                                    <button 
-                                        class="pagination-btn"
-                                        :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasPrev"
-                                        @click="goToMtrPage(mtrPage - 1)"
-                                    >
-                                        <i class="bi bi-chevron-left"></i> Previous
-                                    </button>
-                                    <span class="pagination-info">
-                                        Page {{ getPaginatedMtrResults(activeMtrData, mtrPage).currentPage }} 
-                                        of {{ getPaginatedMtrResults(activeMtrData, mtrPage).totalPages }}
-                                    </span>
-                                    <button 
-                                        class="pagination-btn"
-                                        :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasNext"
-                                        @click="goToMtrPage(mtrPage + 1)"
-                                    >
-                                        Next <i class="bi bi-chevron-right"></i>
-                                    </button>
+
+                                <!-- MTR Summary with @show-all-traces handler -->
+                                <MtrSummary
+                                    :mtrData="activeMtrData"
+                                    @show-all-traces="onShowAllTraces"
+                                />
+
+                                <!-- Paginated MTR Results -->
+                                <div class="mtr-results">
+                                    <div class="mtr-results-header">
+                                        <h3>Recent Traces</h3>
+                                        <span class="mtr-count">{{ getPaginatedMtrResults(activeMtrData, mtrPage).total }} total</span>
+                                    </div>
+
+                                    <div v-for="(mtr, idx) in getPaginatedMtrResults(activeMtrData, mtrPage).items" :key="idx" class="mtr-item">
+                                        <div class="mtr-header">
+                                            <span class="mtr-time">
+                                                {{ new Date(mtr.created_at).toLocaleString() }}
+                                            </span>
+                                        </div>
+                                        <MtrTable :probeData="mtr" />
+                                    </div>
+
+                                    <!-- Pagination Controls -->
+                                    <div v-if="getPaginatedMtrResults(activeMtrData, mtrPage).totalPages > 1" class="mtr-pagination">
+                                        <button
+                                            class="pagination-btn"
+                                            :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasPrev"
+                                            @click="goToMtrPage(mtrPage - 1)"
+                                        >
+                                            <i class="bi bi-chevron-left"></i> Previous
+                                        </button>
+                                        <span class="pagination-info">
+                                            Page {{ getPaginatedMtrResults(activeMtrData, mtrPage).currentPage }}
+                                            of {{ getPaginatedMtrResults(activeMtrData, mtrPage).totalPages }}
+                                        </span>
+                                        <button
+                                            class="pagination-btn"
+                                            :disabled="!getPaginatedMtrResults(activeMtrData, mtrPage).hasNext"
+                                            @click="goToMtrPage(mtrPage + 1)"
+                                        >
+                                            Next <i class="bi bi-chevron-right"></i>
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </template>
+                            </template>
+                        </div>
                     </div>
-                    
+
                     <!-- No Data -->
                     <div v-if="!loading && !containsProbeType('PING') && !containsProbeType('MTR') && !containsProbeType('TRAFFICSIM') && !state.isAgentProbe" class="no-data">
                         <i class="bi bi-inbox"></i>
@@ -1862,6 +2011,36 @@ watch(
     border-radius: 8px;
     padding: 1rem;
     min-height: 300px;
+}
+
+/* Small header spinner shown next to the date picker while data refreshes. */
+.refresh-spinner {
+    flex-shrink: 0;
+}
+
+/* Overlay placed on top of a graph container while its underlying data is
+   being refreshed. pointer-events: none so tooltips / hover still work. */
+.graph-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.55);
+    border-radius: 8px;
+    z-index: 5;
+    pointer-events: none;
+    backdrop-filter: blur(1px);
+    animation: fade-in 120ms ease-out;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+[data-theme="light"] .graph-loading-overlay {
+    background: rgba(255, 255, 255, 0.55);
 }
 
 .stats-summary {
