@@ -76,6 +76,11 @@ const state = reactive({
         mtrData: ProbeData[];
         trafficSimData: ProbeData[];
     }>,
+    // Data from the reciprocal probe (a different probe_id, owned by the
+    // target agent). Stored separately because rebuildAgentPairData filters
+    // by mainProbeId — reciprocal data would otherwise be dropped. Merged
+    // into the reverse pair by buildAgentPairData.
+    reciprocalData: { pingData: [] as ProbeData[], mtrData: [] as ProbeData[], trafficSimData: [] as ProbeData[] },
     // Per-type loading states for independent reload
     loadingPing: false,
     loadingMtr: false,
@@ -607,31 +612,16 @@ async function loadProbeData() {
         
         // For AGENT probes, also load reverse direction and build agentPairData
         if (state.isAgentProbe && firstTarget?.agent_id) {
-            const sourceAgentId = probe.value.agent_id || agent.value?.id || 0;
-            const targetAgentId = firstTarget.agent_id;
-            const sourceAgentName = agent.value?.name || `Agent ${sourceAgentId}`;
-            const targetAgentName = probeAgent.value?.name || `Agent ${targetAgentId}`;
-            
-            // Forward direction (this probe: source → target)
-            state.agentPairData.push({
-                direction: 'forward',
-                probeId: probe.value.id,
-                sourceAgentId,
-                targetAgentId,
-                sourceAgentName,
-                targetAgentName,
-                pingData: state.pingData,
-                mtrData: state.mtrData,
-                trafficSimData: state.trafficSimData,
-            });
-            
+            // Reset reciprocal data; loadProbeData repopulates it below.
+            state.reciprocalData = { pingData: [], mtrData: [], trafficSimData: [] };
+
             // If reciprocal probe exists, load its data IN PARALLEL (reverse: target → source)
             if (state.reciprocalProbe) {
                 try {
                     const recipProbeId = state.reciprocalProbe.id;
                     const pingAgg = aggregateSec > 0;
                     const trafficAgg = aggregateSec > 0;
-                    
+
                     // Fetch all three types in parallel
                     const [pingResult, mtrResult, trafficResult] = await Promise.allSettled([
                         PublicShareService.getProbeData(token.value, recipProbeId, {
@@ -652,15 +642,15 @@ async function loadProbeData() {
                             limit: trafficAgg ? undefined : 300,
                         }),
                     ]);
-                    
+
                     // Process results
-                    const recipPing = pingResult.status === 'fulfilled' 
+                    const recipPing = pingResult.status === 'fulfilled'
                         ? parseDataResult(pingResult.value, recipProbeId) : [];
-                    const recipMtr = mtrResult.status === 'fulfilled' 
+                    const recipMtr = mtrResult.status === 'fulfilled'
                         ? parseDataResult(mtrResult.value, recipProbeId) : [];
-                    const recipTraffic = trafficResult.status === 'fulfilled' 
+                    const recipTraffic = trafficResult.status === 'fulfilled'
                         ? parseDataResult(trafficResult.value, recipProbeId) : [];
-                    
+
                     if (pingResult.status === 'fulfilled') {
                         console.log(`[SharedProbe] Reverse PING: ${recipPing.length} ${pingAgg ? 'aggregated' : 'raw'} rows`);
                     }
@@ -670,22 +660,26 @@ async function loadProbeData() {
                     if (trafficResult.status === 'fulfilled') {
                         console.log(`[SharedProbe] Reverse TRAFFICSIM: ${recipTraffic.length} ${trafficAgg ? 'aggregated' : 'raw'} rows`);
                     }
-                    
-                    state.agentPairData.push({
-                        direction: 'reverse',
-                        probeId: recipProbeId,
-                        sourceAgentId: targetAgentId,
-                        targetAgentId: sourceAgentId,
-                        sourceAgentName: targetAgentName,
-                        targetAgentName: sourceAgentName,
+
+                    // Store reciprocal data separately so it survives rebuildAgentPairData
+                    // (which filters by mainProbeId and would otherwise drop it).
+                    state.reciprocalData = {
                         pingData: recipPing,
                         mtrData: recipMtr,
                         trafficSimData: recipTraffic,
-                    });
+                    };
                     console.log('[SharedProbe] Loaded reverse direction data');
                 } catch (err) {
                     console.warn('[SharedProbe] Failed to load reciprocal probe data:', err);
                 }
+            }
+
+            // Build agentPairData with bidirectional detection (forward/reverse
+            // split by agent_id) and merge reciprocal probe data into reverse.
+            // Single source of truth — same helper rebuildAgentPairData uses.
+            state.agentPairData = buildAgentPairData();
+            if (state.selectedDirection >= state.agentPairData.length) {
+                state.selectedDirection = 0;
             }
         }
         
@@ -895,15 +889,23 @@ async function loadMissingMtrData(from: Date, to: Date): Promise<void> {
 // Re-derive state.agentPairData from the current state.trafficSimData /
 // pingData / mtrData. Called after incremental loads so any view bound to
 // pair.trafficSimData sees the new data.
-function rebuildAgentPairData(): void {
-    if (!state.isAgentProbe) return;
+//
+// For AGENT probes, this also performs the bidirectional forward/reverse
+// split (by agent_id within the main probe_id) and merges any reciprocal
+// probe data from state.reciprocalData into the reverse pair.
+//
+// Single source of truth — loadProbeData() also calls this so the initial
+// render of the direction toggle reflects real data, not just whether a
+// reciprocal probe exists.
+function buildAgentPairData(): typeof state.agentPairData {
+    if (!state.isAgentProbe) return [];
     const firstTarget = probe.value?.targets?.[0];
-    if (!firstTarget?.agent_id) return;
+    if (!firstTarget?.agent_id) return [];
     const targetAgentId = firstTarget.agent_id;
     const sourceAgentId = probe.value.agent_id || agent.value?.id;
-    if (sourceAgentId == null) return;
+    if (sourceAgentId == null) return [];
     const mainProbeId = probeId.value;
-    if (mainProbeId == null) return;
+    if (mainProbeId == null) return [];
 
     const sourceAgentName = agent.value?.name || `Agent ${sourceAgentId}`;
     const targetAgentName = probeAgent.value?.name || `Agent ${targetAgentId}`;
@@ -917,9 +919,16 @@ function rebuildAgentPairData(): void {
     const allMtrData = state.mtrData.filter(d => d.probe_id === mainProbeId);
     const forwardMtrData = allMtrData.filter(d => d.agent_id === sourceAgentId);
     const reverseMtrData = allMtrData.filter(d => d.agent_id === targetAgentId);
-    const hasBidirectional = reverseTrafficSimData.length > 0 || reversePingData.length > 0 || reverseMtrData.length > 0;
 
-    state.agentPairData = [{
+    // Reciprocal probe data lives on a different probe_id; the filters above
+    // exclude it. Merge it into the reverse pair so the direction toggle and
+    // reverse-direction charts see it.
+    const mergedReversePingData = [...reversePingData, ...state.reciprocalData.pingData];
+    const mergedReverseMtrData = [...reverseMtrData, ...state.reciprocalData.mtrData];
+    const mergedReverseTrafficSimData = [...reverseTrafficSimData, ...state.reciprocalData.trafficSimData];
+    const hasReverse = mergedReversePingData.length > 0 || mergedReverseMtrData.length > 0 || mergedReverseTrafficSimData.length > 0;
+
+    const result: typeof state.agentPairData = [{
         direction: 'forward' as const,
         probeId: mainProbeId,
         sourceAgentId,
@@ -931,19 +940,27 @@ function rebuildAgentPairData(): void {
         trafficSimData: forwardTrafficSimData,
         rperfData: [],
     }];
-    if (hasBidirectional) {
-        state.agentPairData.push({
+    if (hasReverse) {
+        result.push({
             direction: 'reverse' as const,
             probeId: mainProbeId,
             sourceAgentId: targetAgentId,
             targetAgentId: sourceAgentId,
             sourceAgentName: targetAgentName,
             targetAgentName: sourceAgentName,
-            pingData: reversePingData,
-            mtrData: reverseMtrData,
-            trafficSimData: reverseTrafficSimData,
+            pingData: mergedReversePingData,
+            mtrData: mergedReverseMtrData,
+            trafficSimData: mergedReverseTrafficSimData,
             rperfData: [],
         });
+    }
+    return result;
+}
+
+function rebuildAgentPairData(): void {
+    state.agentPairData = buildAgentPairData();
+    if (state.selectedDirection >= state.agentPairData.length) {
+        state.selectedDirection = 0;
     }
 }
 
@@ -1459,8 +1476,8 @@ watch(
                         </div>
                     </div>
 
-                    <!-- PING/Latency Data (only if PING data available) -->
-                    <div v-if="(containsProbeType('PING') || state.isAgentProbe) && activePingData.length > 0" class="data-section">
+                    <!-- PING/Latency Data (shown when configured and either loading or has data) -->
+                    <div v-if="(containsProbeType('PING') || state.isAgentProbe) && (activePingData.length > 0 || loading || state.loadingPing)" class="data-section">
                         <div class="section-header">
                             <h2><i class="bi bi-broadcast-pin"></i> Latency</h2>
                             <button
@@ -1478,7 +1495,18 @@ watch(
                                     <span class="visually-hidden">Refreshing latency data…</span>
                                 </div>
                             </div>
+                            <div v-if="(loading || state.loadingPing) && activePingData.length === 0" class="loading-state">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading…</span>
+                                </div>
+                                <span>Waiting for latency data…</span>
+                            </div>
+                            <div v-else-if="activePingData.length === 0" class="empty-state">
+                                <i class="bi bi-broadcast-pin"></i>
+                                <p>No latency data available for this time range</p>
+                            </div>
                             <LatencyGraph
+                                v-else
                                 :pingResults="transformPingDataMulti(activePingData)"
                                 :aggregationBucketSec="state.aggregationBucketSec"
                                 :currentTimeRange="state.timeRange"

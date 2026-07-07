@@ -1,8 +1,48 @@
 <clickhouse>
+  <!-- ============================================================
+       System log tables: cap retention (default is unbounded).
+       TTLs are applied when ClickHouse (re)creates the table on
+       startup. Existing log tables with a different definition get
+       renamed to e.g. query_log_0 — drop those after restart.
+       ============================================================ -->
+
+  <query_log>
+    <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+  </query_log>
+
+  <trace_log>
+    <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+  </trace_log>
+
+  <part_log>
+    <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+  </part_log>
+
+  <query_thread_log>
+    <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+  </query_thread_log>
+
+  <text_log>
+    <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+  </text_log>
+
+  <!-- Metric logs are the usual worst offenders (a row every second).
+       Disable entirely; delete these two blocks if you use them for
+       monitoring dashboards, and give them a TTL instead. -->
+  <metric_log remove="1"/>
+  <asynchronous_metric_log remove="1"/>
+
+  <!-- ============================================================
+       MergeTree defaults
+       ============================================================ -->
   <merge_tree>
-    <!-- Raise from default 100 to 500. Broken parts accumulate from
+    <!-- Raise from default 100. Broken parts accumulate from
          ungraceful shutdowns; the default is too conservative for
          high-frequency INSERT workloads like probe_data. -->
     <max_suspicious_broken_parts>500</max_suspicious_broken_parts>
+
+    <!-- Companion byte limit (default 1GB) can still block startup
+         even when the count limit passes. -->
+    <max_suspicious_broken_parts_bytes>10737418240</max_suspicious_broken_parts_bytes>
   </merge_tree>
 </clickhouse>

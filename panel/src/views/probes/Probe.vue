@@ -1752,8 +1752,8 @@ const { connected: wsConnected } = useProbeSubscription(
                 </div>
               </div>
 
-              <!-- Ping/Latency Data (only if PING data available) -->
-              <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0">
+              <!-- Ping/Latency Data (shown when configured and either loading or has data) -->
+              <div class="col-lg-12 mb-3" v-if="pair.pingData.length > 0 || state.loading || state.loadingPing">
                 <div class="card h-100">
                   <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">
@@ -1775,7 +1775,15 @@ const { connected: wsConnected } = useProbeSubscription(
                         <span class="visually-hidden">Refreshing latency data…</span>
                       </div>
                     </div>
-                    <LatencyGraph :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+                    <div v-if="(state.loading || state.loadingPing) && pair.pingData.length === 0" class="text-center py-4">
+                      <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                      <span class="text-muted">Waiting for latency data…</span>
+                    </div>
+                    <div v-else-if="pair.pingData.length === 0" class="text-center py-4 text-muted">
+                      <i class="bi bi-broadcast-pin fs-1 mb-2 d-block"></i>
+                      <p class="mb-0">No latency data available for this direction</p>
+                    </div>
+                    <LatencyGraph v-else :pingResults="transformPingDataMulti(pair.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
                   </div>
                 </div>
               </div>
@@ -1900,8 +1908,8 @@ const { connected: wsConnected } = useProbeSubscription(
             </div>
           </div>
 
-          <!-- Ping/Latency Graph (only if PING data available) -->
-          <div class="col-sm-12" v-if="containsProbeType('PING') && state.pingData.length > 0">
+          <!-- Ping/Latency Graph (shown when configured and either loading or has data) -->
+          <div class="col-sm-12" v-if="containsProbeType('PING') && (state.pingData.length > 0 || state.loading || state.loadingPing)">
             <div class="card mb-3">
               <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
@@ -1923,7 +1931,19 @@ const { connected: wsConnected } = useProbeSubscription(
                     <span class="visually-hidden">Refreshing latency data…</span>
                   </div>
                 </div>
-                <LatencyGraph :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
+                <div v-if="(state.loading || state.loadingPing) && state.pingData.length === 0" class="text-center py-5">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading…</span>
+                  </div>
+                  <h3 class="mt-3 text-muted">Waiting for latency data…</h3>
+                  <p class="text-muted">The probe is configured but no data has been collected yet</p>
+                </div>
+                <div v-else-if="state.pingData.length === 0" class="text-center py-5">
+                  <i class="bi bi-broadcast-pin fs-1 text-muted mb-3"></i>
+                  <h5 class="text-muted">No Latency Data Available</h5>
+                  <p class="text-muted">No PING data found for the selected time range</p>
+                </div>
+                <LatencyGraph v-else :pingResults="transformPingDataMulti(state.pingData)" :intervalSec="state.probe?.interval_sec || 60" :aggregationBucketSec="state.aggregationBucketSec" :currentTimeRange="state.timeRange" @time-range-change="onTimeRangeUpdate" />
               </div>
             </div>
           </div>
