@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Quality Report — netwatcher.io</title>
+<style>
+  :root {
+    --nw-primary: #3b82f6;
+    --nw-secondary: #10b981;
+    --nw-dark: #0a0e17;
+    --nw-slate-900: #111827;
+    --nw-slate-700: #334155;
+    --nw-slate-500: #64748b;
+    --nw-slate-400: #94a3b8;
+    --nw-slate-100: #f0f4f8;
+    --nw-success: #22c55e;
+    --nw-warning: #f59e0b;
+    --nw-danger: #ef4444;
+    --nw-gradient: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
+    --page-w: 8.5in;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--nw-slate-900);
+    background: #e2e8f0;
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+
+  .mono { font-family: "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace; }
+
+  /* ---------- Page chrome (screen preview) ---------- */
+  .page {
+    width: var(--page-w);
+    min-height: 11in;
+    margin: 0.35in auto;
+    background: #fff;
+    padding: 0.5in 0.55in;
+    box-shadow: 0 2px 14px rgba(10,14,23,.18);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .toolbar {
+    max-width: var(--page-w);
+    margin: 14px auto 0;
+    text-align: right;
+  }
+  .toolbar button {
+    background: var(--nw-gradient);
+    color: #fff; border: none; border-radius: 8px;
+    padding: 10px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+
+  @media print {
+    body { background: #fff; font-size: 9.5pt; }
+    .toolbar { display: none; }
+    .page {
+      width: auto; min-height: 0; margin: 0; padding: 0;
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    @page { size: letter; margin: 0.5in 0.55in; }
+  }
+
+  /* ---------- Header ---------- */
+  .report-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 3px solid transparent;
+    border-image: linear-gradient(90deg, #3b82f6, #10b981) 1;
+    padding-bottom: 12px; margin-bottom: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: var(--nw-gradient);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-mark svg { width: 20px; height: 20px; }
+  .brand-name { font-size: 15pt; font-weight: 700; letter-spacing: -.02em; }
+  .brand-name .tld { color: var(--nw-primary); }
+  .brand-sub { font-size: 7.5pt; color: var(--nw-slate-500); text-transform: uppercase; letter-spacing: .12em; }
+  .report-title { text-align: right; }
+  .report-title h1 { font-size: 14pt; font-weight: 700; letter-spacing: -.01em; }
+  .report-title .rid { font-size: 8pt; color: var(--nw-slate-500); }
+
+  .mini-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--nw-slate-100);
+    padding-bottom: 6px; margin-bottom: 14px;
+    font-size: 8pt; color: var(--nw-slate-500);
+  }
+  .mini-header b { color: var(--nw-slate-900); font-size: 9.5pt; }
+
+  /* ---------- Meta grid ---------- */
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-bottom: 16px;
+  }
+  .meta-cell {
+    background: var(--nw-slate-100); border-radius: 6px; padding: 7px 10px;
+  }
+  .meta-cell .k { font-size: 6.8pt; text-transform: uppercase; letter-spacing: .08em; color: var(--nw-slate-500); }
+  .meta-cell .v { font-size: 9pt; font-weight: 600; word-break: break-all; }
+
+  /* ---------- Verdict banner ---------- */
+  .verdict {
+    display: flex; align-items: center; gap: 18px;
+    border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;
+    color: #fff; background: var(--nw-dark);
+  }
+  .mos-ring { position: relative; width: 86px; height: 86px; flex: none; }
+  .mos-ring svg { width: 86px; height: 86px; transform: rotate(-90deg); }
+  .mos-ring .val {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .mos-ring .val b { font-size: 15pt; line-height: 1; }
+  .mos-ring .val span { font-size: 6.4pt; opacity: .75; text-transform: uppercase; letter-spacing: .1em; margin-top: 2px; }
+  .verdict-body { flex: 1; }
+  .verdict-body h2 { font-size: 12pt; margin-bottom: 2px; }
+  .verdict-body p { font-size: 8.5pt; opacity: .85; max-width: 46em; }
+  .grade-chip {
+    flex: none; text-align: center; border-radius: 8px; padding: 8px 16px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+  }
+  .grade-chip b { font-size: 17pt; display: block; line-height: 1.1; }
+  .grade-chip span { font-size: 6.6pt; text-transform: uppercase; letter-spacing: .1em; opacity: .7; }
+
+  /* ---------- KPI cards ---------- */
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .kpi {
+    border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px 9px;
+    border-top: 3px solid var(--nw-slate-400);
+  }
+  .kpi.ok   { border-top-color: var(--nw-success); }
+  .kpi.warn { border-top-color: var(--nw-warning); }
+  .kpi.crit { border-top-color: var(--nw-danger); }
+  .kpi .label { font-size: 7.2pt; text-transform: uppercase; letter-spacing: .08em; color: var(--nw-slate-500); display: flex; justify-content: space-between; }
+  .kpi .value { font-size: 15pt; font-weight: 700; letter-spacing: -.02em; margin: 1px 0 0; }
+  .kpi .value small { font-size: 8.5pt; font-weight: 600; color: var(--nw-slate-500); }
+  .kpi .sub { font-size: 7.4pt; color: var(--nw-slate-500); }
+  .badge {
+    display: inline-block; font-size: 6.6pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; border-radius: 20px; padding: 1.5px 8px; color: #fff;
+  }
+  .badge.ok   { background: var(--nw-success); }
+  .badge.warn { background: var(--nw-warning); }
+  .badge.crit { background: var(--nw-danger); }
+
+  /* ---------- Sections ---------- */
+  .section { margin-bottom: 16px; }
+  .section-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10.5pt; font-weight: 700; margin-bottom: 8px;
+  }
+  .section-title::before {
+    content: ""; width: 4px; height: 14px; border-radius: 2px;
+    background: var(--nw-gradient); display: inline-block;
+  }
+  .section-note { font-size: 7.6pt; color: var(--nw-slate-500); margin-top: 5px; }
+
+  /* ---------- Tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 8.4pt; }
+  thead th {
+    background: var(--nw-slate-900); color: #fff; text-align: left;
+    font-size: 7pt; text-transform: uppercase; letter-spacing: .07em;
+    padding: 6px 8px; font-weight: 600;
+  }
+  thead th.num, td.num { text-align: right; }
+  tbody td { padding: 5.5px 8px; border-bottom: 1px solid #eef2f7; }
+  tbody tr:nth-child(even) td { background: #f8fafc; }
+  td .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .dot-ok { background: var(--nw-success); } .dot-warn { background: var(--nw-warning); } .dot-crit { background: var(--nw-danger); }
+  tr.row-warn td { background: #fffbeb !important; }
+  tr.row-crit td { background: #fef2f2 !important; }
+
+  /* ---------- Charts ---------- */
+  .chart-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px 6px; }
+  .chart-box + .chart-box { margin-top: 10px; }
+  .chart-head { display: flex; justify-content: space-between; font-size: 7.6pt; color: var(--nw-slate-500); margin-bottom: 4px; }
+  .chart-head b { color: var(--nw-slate-900); font-size: 8.4pt; }
+  .legend { display: flex; gap: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  /* ---------- Loss bar / hop bars ---------- */
+  .bar-track { background: #eef2f7; border-radius: 3px; height: 8px; width: 60px; display: inline-block; vertical-align: middle; }
+  .bar-fill { height: 8px; border-radius: 3px; display: block; }
+
+  /* ---------- Legend / thresholds ---------- */
+  .threshold-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .threshold-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 7.8pt; }
+  .threshold-card b { display: block; font-size: 8.4pt; margin-bottom: 3px; }
+  .threshold-card .rng { display: flex; justify-content: space-between; padding: 1.5px 0; color: var(--nw-slate-700); }
+
+  /* ---------- Footer ---------- */
+  .page-footer {
+    margin-top: auto; padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+    display: flex; justify-content: space-between;
+    font-size: 7pt; color: var(--nw-slate-400);
+  }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+</style>
+</head>
+<body>
+
+<div class="toolbar"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>
+
+<!-- ================= PAGE 1 : SUMMARY ================= -->
+<div class="page" id="page1">
+  <header class="report-header">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="2 12 6 12 9 5 13 19 16 12 22 12"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">netwatcher<span class="tld">.io</span></div>
+        <div class="brand-sub">Open Source Network Monitoring</div>
+      </div>
+    </div>
+    <div class="report-title">
+      <h1>Voice Quality Report</h1>
+      <div class="rid mono" id="hdr-rid"></div>
+      <div class="rid" id="hdr-date"></div>
+    </div>
+  </header>
+
+  <div class="meta-grid" id="meta-grid"></div>
+
+  <div class="verdict" id="verdict">
+    <div class="mos-ring">
+      <svg viewBox="0 0 86 86">
+        <circle cx="43" cy="43" r="37" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="7"/>
+        <circle id="mos-arc" cx="43" cy="43" r="37" fill="none" stroke="#22c55e" stroke-width="7"
+                stroke-linecap="round" stroke-dasharray="232.5" stroke-dashoffset="232.5"/>
+      </svg>
+      <div class="val"><b id="mos-val">–</b><span>MOS</span></div>
+    </div>
+    <div class="verdict-body">
+      <h2 id="verdict-title"></h2>
+      <p id="verdict-text"></p>
+    </div>
+    <div class="grade-chip"><b id="rfactor-val">–</b><span>R-Factor</span></div>
+    <div class="grade-chip"><b id="grade-val">–</b><span>Grade</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Key Metrics</div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Latency &amp; Jitter Over Test Duration</div>
+    <div class="chart-box">
+      <div class="chart-head">
+        <b>Round-trip time &amp; jitter (ms)</b>
+        <div class="legend">
+          <span><i style="background:#3b82f6"></i>RTT</span>
+          <span><i style="background:#10b981"></i>Jitter</span>
+          <span><i style="background:#ef4444;height:1px;border-top:1px dashed #ef4444;background:none"></i>Threshold</span>
+        </div>
+      </div>
+      <div id="chart-latency"></div>
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>Generated by netwatcher.io — Voice / VoIP traffic simulation</span>
+    <span>Page 1 of 3</span>
+  </footer>
+</div>
+
+<!-- ================= PAGE 2 : DETAILED METRICS ================= -->
+<div class="page" id="page2">
+  <div class="mini-header"><b>Voice Quality Report — Detailed Metrics</b><span id="mini-rid-2" class="mono"></span></div>
+
+  <div class="section">
+    <div class="section-title">Delay &amp; Jitter Statistics</div>
+    <table id="tbl-stats">
+      <thead><tr>
+        <th>Metric</th><th class="num">Min</th><th class="num">Avg</th><th class="num">Max</th>
+        <th class="num">Std Dev</th><th class="num">Threshold</th><th>Status</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="section-note">Latency figures are round-trip (RTT) unless noted. Jitter is computed per RFC 3550 (interarrival jitter).</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Packet Delivery Analysis</div>
+    <div class="two-col">
+      <table id="tbl-packets">
+        <thead><tr><th>Counter</th><th class="num">Count</th><th class="num">% of Sent</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="chart-box">
+        <div class="chart-head"><b>Packet loss per interval (%)</b></div>
+        <div id="chart-loss"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Quality Score Breakdown</div>
+    <table id="tbl-quality">
+      <thead><tr><th>Component</th><th class="num">Value</th><th>Interpretation</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Reference Thresholds (ITU-T G.114 / G.107)</div>
+    <div class="threshold-grid">
+      <div class="threshold-card"><b>Latency (RTT)</b>
+        <div class="rng"><span>Good</span><span>&lt; 150 ms</span></div>
+        <div class="rng"><span>Degraded</span><span>150 – 300 ms</span></div>
+        <div class="rng"><span>Poor</span><span>&gt; 300 ms</span></div>
+      </div>
+      <div class="threshold-card"><b>Jitter</b>
+        <div class="rng"><span>Good</span><span>&lt; 20 ms</span></div>
+        <div class="rng"><span>Degraded</span><span>20 – 30 ms</span></div>
+        <div class="rng"><span>Poor</span><span>&gt; 30 ms</span></div>
+      </div>
+      <div class="threshold-card"><b>Packet Loss</b>
+        <div class="rng"><span>Good</span><span>&lt; 1%</span></div>
+        <div class="rng"><span>Degraded</span><span>1 – 3%</span></div>
+        <div class="rng"><span>Poor</span><span>&gt; 3%</span></div>
+      </div>
+      <div class="threshold-card"><b>MOS (G.107 E-model)</b>
+        <div class="rng"><span>Excellent</span><span>4.3 – 5.0</span></div>
+        <div class="rng"><span>Good</span><span>4.0 – 4.3</span></div>
+        <div class="rng"><span>Fair / Poor</span><span>&lt; 4.0</span></div>
+      </div>
+      <div class="threshold-card"><b>Duplicates</b>
+        <div class="rng"><span>Good</span><span>&lt; 0.1%</span></div>
+        <div class="rng"><span>Degraded</span><span>0.1 – 0.5%</span></div>
+        <div class="rng"><span>Poor</span><span>&gt; 0.5%</span></div>
+      </div>
+      <div class="threshold-card"><b>Out-of-Order</b>
+        <div class="rng"><span>Good</span><span>&lt; 0.5%</span></div>
+        <div class="rng"><span>Degraded</span><span>0.5 – 2%</span></div>
+        <div class="rng"><span>Poor</span><span>&gt; 2%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>Generated by netwatcher.io — Voice / VoIP traffic simulation</span>
+    <span>Page 2 of 3</span>
+  </footer>
+</div>
+
+<!-- ================= PAGE 3 : TRACEROUTE ================= -->
+<div class="page" id="page3">
+  <div class="mini-header"><b>Voice Quality Report — Path Analysis (MTR)</b><span id="mini-rid-3" class="mono"></span></div>
+
+  <div class="section">
+    <div class="section-title">Traceroute / MTR to <span class="mono" id="trace-target"></span></div>
+    <table id="tbl-trace">
+      <thead><tr>
+        <th style="width:26px">#</th><th>Host</th><th>IP / ASN</th>
+        <th class="num">Loss</th><th style="width:64px"></th><th class="num">Sent</th>
+        <th class="num">Last</th><th class="num">Avg</th><th class="num">Best</th><th class="num">Worst</th><th class="num">StDev</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="section-note" id="trace-note"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Per-Hop Average Latency (ms)</div>
+    <div class="chart-box"><div id="chart-hops"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Test Configuration</div>
+    <table id="tbl-config"><tbody></tbody></table>
+  </div>
+
+  <footer class="page-footer">
+    <span>Generated by netwatcher.io — Voice / VoIP traffic simulation</span>
+    <span>Page 3 of 3</span>
+  </footer>
+</div>
+
+<script>
+/* =====================================================================
+   REPORT_DATA — replace this object with real simulation output.
+   Everything on the page renders from it.
+   ===================================================================== */
+const REPORT_DATA = {
+  meta: {
+    reportId: "VQR-2026-0707-8842",
+    generatedAt: "2026-07-07T14:32:08Z",
+    agent:  { name: "agent-nyc-01", location: "New York, US", ip: "203.0.113.24" },
+    target: { host: "sip.example-pbx.com", ip: "198.51.100.7", port: 5060 },
+    test: {
+      type: "VoIP UDP simulation (RTP-like)",
+      codec: "G.711u (64 kbps, 20 ms ptime)",
+      duration: "120 s",
+      interval: "20 ms",
+      packetsSent: 6000,
+      dscp: "EF (46)",
+      payloadSize: "160 B"
+    }
+  },
+  summary: {
+    mos: 4.21,          // 1.0 – 5.0
+    rFactor: 86.4,      // 0 – 100
+    grade: "B+",
+    verdictTitle: "Good — suitable for business voice",
+    verdictText: "The path supports high-quality voice. Average latency and loss are within ITU-T targets; a brief jitter excursion at ~01:12 (28.4 ms peak) coincided with elevated queueing at hop 6 and slightly reduced the score."
+  },
+  thresholds: { latencyMs: 150, jitterMs: 30, lossPct: 1.0, dupPct: 0.1, oooPct: 0.5 },
+  metrics: {
+    latency:   { min: 22.1, avg: 34.6, max: 61.8, stddev: 6.2, unit: "ms" },
+    jitter:    { min: 0.4,  avg: 3.8,  max: 28.4, stddev: 2.9, unit: "ms" },
+    oneWayUp:  { min: 10.8, avg: 16.9, max: 30.2, stddev: 3.1, unit: "ms" },
+    oneWayDown:{ min: 10.5, avg: 17.7, max: 33.0, stddev: 3.4, unit: "ms" },
+    packets: {
+      sent: 6000, received: 5987,
+      lost: 13, lossPct: 0.22,
+      duplicates: 2, dupPct: 0.03,
+      outOfOrder: 9, oooPct: 0.15,
+      discardedJitterBuffer: 4, discardPct: 0.07
+    }
+  },
+  quality: [
+    { component: "R-Factor (E-model, G.107)", value: "86.4", note: "≥ 80 = satisfied users" },
+    { component: "MOS-CQE (estimated conversational)", value: "4.21", note: "4.0 – 4.3 = good" },
+    { component: "Effective latency (RTT + 2×jitter + 10)", value: "52.2 ms", note: "Well under 160 ms budget" },
+    { component: "Burst loss density", value: "0.9%", note: "Loss is dispersed, not bursty" },
+    { component: "Longest loss burst", value: "2 packets (40 ms)", note: "Concealable by PLC" }
+  ],
+  // Sampled once per second (values in ms / %)
+  timeseries: {
+    rtt:    [31,32,30,33,35,34,33,36,38,35,34,33,32,34,36,37,35,34,33,35,38,41,44,39,36,35,34,33,35,34,33,32,34,35,36,35,34,36,35,34,33,35,37,36,35,34,33,32,34,35,36,38,37,35,34,33,35,36,34,33,35,37,39,42,47,55,61,58,49,43,39,37,36,35,34,35,34,33,34,35,36,35,34,33,32,34,35,34,33,35,36,35,34,33,34,35,36,35,34,33,32,33,35,34,33,34,35,36,34,33,34,35,34,33,32,34,35,34,33,34],
+    jitter: [2,3,2,3,4,3,3,4,5,4,3,3,2,3,4,4,3,3,3,4,5,6,7,5,4,3,3,3,4,3,3,2,3,4,4,3,3,4,4,3,3,4,5,4,3,3,3,2,3,4,4,5,5,4,3,3,4,4,3,3,4,6,9,14,21,28,26,18,11,7,5,4,4,3,3,4,3,3,3,4,4,3,3,3,2,3,4,3,3,4,4,3,3,3,3,4,4,3,3,3,2,3,4,3,3,3,4,4,3,3,3,4,3,3,2,3,4,3,3,3],
+    lossPerInterval: [0,0,0,0.5,0,0,0,0,0,0,0.5,0,0,0,0,0,0,0,0,0,0,0.5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1.0,1.5,2.0,1.5,1.0,0.5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,0,0,0,0]
+  },
+  traceroute: {
+    protocol: "ICMP, 100 probes/hop, MTR mode",
+    hops: [
+      { hop: 1,  host: "gw.office.local",              ip: "192.168.1.1",    asn: "—",        loss: 0.0, sent: 100, last: 0.5,  avg: 0.6,  best: 0.4,  worst: 2.1,  stdev: 0.2 },
+      { hop: 2,  host: "10.20.0.1",                    ip: "10.20.0.1",      asn: "—",        loss: 0.0, sent: 100, last: 1.8,  avg: 2.0,  best: 1.5,  worst: 6.3,  stdev: 0.6 },
+      { hop: 3,  host: "ae-4.cr1.nyc.isp.net",         ip: "68.86.12.44",    asn: "AS7922",   loss: 0.0, sent: 100, last: 8.9,  avg: 9.4,  best: 8.1,  worst: 15.7, stdev: 1.2 },
+      { hop: 4,  host: "be-201.agg1.nwrk.isp.net",     ip: "68.86.90.12",    asn: "AS7922",   loss: 0.0, sent: 100, last: 11.2, avg: 11.9, best: 10.4, worst: 19.8, stdev: 1.5 },
+      { hop: 5,  host: "eqix-ny.peer.transit.net",     ip: "206.126.236.18", asn: "AS3356",   loss: 0.0, sent: 100, last: 12.4, avg: 13.1, best: 11.6, worst: 22.5, stdev: 1.8 },
+      { hop: 6,  host: "ae-9.edge2.ewr.transit.net",   ip: "4.69.140.77",    asn: "AS3356",   loss: 2.0, sent: 100, last: 18.7, avg: 21.4, best: 15.2, worst: 48.9, stdev: 6.7 },
+      { hop: 7,  host: "cust-gw.pbxhost.net",          ip: "198.51.100.1",   asn: "AS64512",  loss: 0.0, sent: 100, last: 29.8, avg: 31.2, best: 27.9, worst: 44.1, stdev: 2.9 },
+      { hop: 8,  host: "sip.example-pbx.com",          ip: "198.51.100.7",   asn: "AS64512",  loss: 0.0, sent: 100, last: 33.9, avg: 34.6, best: 30.8, worst: 61.8, stdev: 3.4 }
+    ],
+    note: "Hop 6 (transit edge, AS3356) shows 2% probe loss and elevated variance — consistent with the jitter excursion observed during the simulation. Loss at intermediate hops does not necessarily impact end-to-end traffic (ICMP de-prioritization), but end-to-end loss was also recorded in the same window."
+  }
+};
+
+/* ===================== rendering ===================== */
+const $ = (s) => document.querySelector(s);
+const D = REPORT_DATA;
+
+function statusFor(value, warnAt, critAt) {
+  if (value >= critAt) return "crit";
+  if (value >= warnAt) return "warn";
+  return "ok";
+}
+const STATUS_LABEL = { ok: "Pass", warn: "Degraded", crit: "Fail" };
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+}
+
+/* ---- header & meta ---- */
+$("#hdr-rid").textContent = D.meta.reportId;
+$("#hdr-date").textContent = fmtDate(D.meta.generatedAt);
+$("#mini-rid-2").textContent = D.meta.reportId;
+$("#mini-rid-3").textContent = D.meta.reportId;
+$("#trace-target").textContent = `${D.meta.target.host} (${D.meta.target.ip})`;
+$("#trace-note").textContent = D.traceroute.note;
+
+$("#meta-grid").innerHTML = [
+  ["Source Agent", `${D.meta.agent.name} · ${D.meta.agent.location}`],
+  ["Target", `${D.meta.target.host}:${D.meta.target.port}`],
+  ["Test Type", D.meta.test.type],
+  ["Codec Profile", D.meta.test.codec],
+  ["Duration", D.meta.test.duration],
+  ["Packet Interval", D.meta.test.interval],
+  ["Packets Sent", D.meta.test.packetsSent.toLocaleString()],
+  ["DSCP Marking", D.meta.test.dscp]
+].map(([k, v]) => `<div class="meta-cell"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+/* ---- verdict / MOS ring ---- */
+(function () {
+  const mos = D.summary.mos;
+  const pct = Math.max(0, Math.min(1, (mos - 1) / 4));
+  const C = 2 * Math.PI * 37;
+  const color = mos >= 4.0 ? "#22c55e" : mos >= 3.6 ? "#f59e0b" : "#ef4444";
+  const arc = $("#mos-arc");
+  arc.setAttribute("stroke-dasharray", C.toFixed(1));
+  arc.setAttribute("stroke-dashoffset", (C * (1 - pct)).toFixed(1));
+  arc.setAttribute("stroke", color);
+  $("#mos-val").textContent = mos.toFixed(2);
+  $("#rfactor-val").textContent = D.summary.rFactor.toFixed(1);
+  $("#grade-val").textContent = D.summary.grade;
+  $("#verdict-title").textContent = D.summary.verdictTitle;
+  $("#verdict-text").textContent = D.summary.verdictText;
+})();
+
+/* ---- KPI cards ---- */
+(function () {
+  const m = D.metrics, t = D.thresholds, p = m.packets;
+  const cards = [
+    { label: "Avg Latency (RTT)", value: m.latency.avg, unit: "ms", sub: `min ${m.latency.min} / max ${m.latency.max} ms`,
+      st: statusFor(m.latency.avg, t.latencyMs * 0.66, t.latencyMs) },
+    { label: "Avg Jitter", value: m.jitter.avg, unit: "ms", sub: `peak ${m.jitter.max} ms`,
+      st: statusFor(m.jitter.max, t.jitterMs * 0.66, t.jitterMs) },
+    { label: "Packet Loss", value: p.lossPct, unit: "%", sub: `${p.lost} of ${p.sent.toLocaleString()} packets`,
+      st: statusFor(p.lossPct, t.lossPct * 0.5, t.lossPct) },
+    { label: "Duplicate Packets", value: p.dupPct, unit: "%", sub: `${p.duplicates} duplicates`,
+      st: statusFor(p.dupPct, t.dupPct, t.dupPct * 5) },
+    { label: "Out-of-Order", value: p.oooPct, unit: "%", sub: `${p.outOfOrder} reordered`,
+      st: statusFor(p.oooPct, t.oooPct, t.oooPct * 4) },
+    { label: "Jitter-Buffer Discards", value: p.discardPct, unit: "%", sub: `${p.discardedJitterBuffer} discarded (60 ms buffer)`,
+      st: statusFor(p.discardPct, 0.5, 2) }
+  ];
+  $("#kpi-grid").innerHTML = cards.map(c => `
+    <div class="kpi ${c.st}">
+      <div class="label"><span>${c.label}</span><span class="badge ${c.st}">${STATUS_LABEL[c.st]}</span></div>
+      <div class="value">${c.value}<small> ${c.unit}</small></div>
+      <div class="sub">${c.sub}</div>
+    </div>`).join("");
+})();
+
+/* ---- stats table (page 2) ---- */
+(function () {
+  const m = D.metrics, t = D.thresholds;
+  const rows = [
+    ["Round-trip latency", m.latency, `${t.latencyMs} ms`, statusFor(m.latency.avg, t.latencyMs * 0.66, t.latencyMs)],
+    ["One-way delay (agent → target)", m.oneWayUp, `${t.latencyMs / 2} ms`, statusFor(m.oneWayUp.avg, t.latencyMs * 0.33, t.latencyMs / 2)],
+    ["One-way delay (target → agent)", m.oneWayDown, `${t.latencyMs / 2} ms`, statusFor(m.oneWayDown.avg, t.latencyMs * 0.33, t.latencyMs / 2)],
+    ["Interarrival jitter (RFC 3550)", m.jitter, `${t.jitterMs} ms`, statusFor(m.jitter.max, t.jitterMs * 0.66, t.jitterMs)]
+  ];
+  $("#tbl-stats tbody").innerHTML = rows.map(([name, s, thr, st]) => `
+    <tr class="${st === 'ok' ? '' : 'row-' + st}">
+      <td>${name}</td>
+      <td class="num mono">${s.min.toFixed(1)}</td>
+      <td class="num mono"><b>${s.avg.toFixed(1)}</b></td>
+      <td class="num mono">${s.max.toFixed(1)}</td>
+      <td class="num mono">${s.stddev.toFixed(1)}</td>
+      <td class="num mono">${thr}</td>
+      <td><span class="status-dot dot-${st}"></span>${STATUS_LABEL[st]}</td>
+    </tr>`).join("");
+})();
+
+/* ---- packet table (page 2) ---- */
+(function () {
+  const p = D.metrics.packets, t = D.thresholds;
+  const rows = [
+    ["Packets sent", p.sent, 100, "ok"],
+    ["Packets received", p.received, (p.received / p.sent) * 100, "ok"],
+    ["Lost", p.lost, p.lossPct, statusFor(p.lossPct, t.lossPct * 0.5, t.lossPct)],
+    ["Duplicates", p.duplicates, p.dupPct, statusFor(p.dupPct, t.dupPct, t.dupPct * 5)],
+    ["Out-of-order", p.outOfOrder, p.oooPct, statusFor(p.oooPct, t.oooPct, t.oooPct * 4)],
+    ["Jitter-buffer discards", p.discardedJitterBuffer, p.discardPct, statusFor(p.discardPct, 0.5, 2)]
+  ];
+  $("#tbl-packets tbody").innerHTML = rows.map(([name, count, pct, st]) => `
+    <tr>
+      <td>${name}</td>
+      <td class="num mono">${count.toLocaleString()}</td>
+      <td class="num mono">${typeof pct === "number" ? pct.toFixed(2) + "%" : pct}</td>
+      <td><span class="status-dot dot-${st}"></span>${STATUS_LABEL[st]}</td>
+    </tr>`).join("");
+})();
+
+/* ---- quality table ---- */
+$("#tbl-quality tbody").innerHTML = D.quality.map(q => `
+  <tr><td>${q.component}</td><td class="num mono"><b>${q.value}</b></td><td>${q.note}</td></tr>`).join("");
+
+/* ---- config table (page 3) ---- */
+$("#tbl-config tbody").innerHTML = [
+  ["Report ID", D.meta.reportId], ["Generated", fmtDate(D.meta.generatedAt)],
+  ["Agent", `${D.meta.agent.name} (${D.meta.agent.ip}) — ${D.meta.agent.location}`],
+  ["Target", `${D.meta.target.host} (${D.meta.target.ip}) : ${D.meta.target.port}/udp`],
+  ["Simulation profile", `${D.meta.test.type} — ${D.meta.test.codec}`],
+  ["Payload / interval", `${D.meta.test.payloadSize} every ${D.meta.test.interval} (${D.meta.test.packetsSent.toLocaleString()} packets over ${D.meta.test.duration})`],
+  ["QoS marking", D.meta.test.dscp],
+  ["Traceroute method", D.traceroute.protocol]
+].map(([k, v]) => `<tr><td style="width:170px;color:var(--nw-slate-500)">${k}</td><td class="mono">${v}</td></tr>`).join("");
+
+/* ---- traceroute table + hop bars ---- */
+(function () {
+  const hops = D.traceroute.hops;
+  const maxAvg = Math.max(...hops.map(h => h.avg));
+  $("#tbl-trace tbody").innerHTML = hops.map(h => {
+    const st = h.loss >= 5 ? "crit" : h.loss > 0 ? "warn" : "ok";
+    const barColor = st === "ok" ? "#10b981" : st === "warn" ? "#f59e0b" : "#ef4444";
+    return `<tr class="${st === 'ok' ? '' : 'row-' + st}">
+      <td class="mono">${h.hop}</td>
+      <td class="mono">${h.host}</td>
+      <td class="mono" style="color:var(--nw-slate-500)">${h.ip}${h.asn !== "—" ? " · " + h.asn : ""}</td>
+      <td class="num mono">${h.loss.toFixed(1)}%</td>
+      <td><span class="bar-track"><span class="bar-fill" style="width:${Math.min(100, (h.avg / maxAvg) * 100)}%;background:${barColor}"></span></span></td>
+      <td class="num mono">${h.sent}</td>
+      <td class="num mono">${h.last.toFixed(1)}</td>
+      <td class="num mono"><b>${h.avg.toFixed(1)}</b></td>
+      <td class="num mono">${h.best.toFixed(1)}</td>
+      <td class="num mono">${h.worst.toFixed(1)}</td>
+      <td class="num mono">${h.stdev.toFixed(1)}</td>
+    </tr>`;
+  }).join("");
+})();
+
+/* ===================== SVG charts (print-safe, no libs) ===================== */
+function lineChart(el, series, opts) {
+  const W = 660, H = opts.height || 130, PL = 34, PB = 16, PT = 6, PR = 6;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const all = series.flatMap(s => s.data).concat(opts.hline ? [opts.hline] : []);
+  const yMax = Math.ceil(Math.max(...all) * 1.15 / 10) * 10 || 10;
+  const n = series[0].data.length;
+  const x = i => PL + (i / (n - 1)) * iw;
+  const y = v => PT + ih - (v / yMax) * ih;
+  let g = "";
+  // gridlines
+  for (let t = 0; t <= 4; t++) {
+    const v = (yMax / 4) * t, yy = y(v);
+    g += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="#eef2f7" stroke-width="1"/>` +
+         `<text x="${PL - 5}" y="${yy + 3}" font-size="7" fill="#94a3b8" text-anchor="end">${v}</text>`;
+  }
+  // x labels
+  const dur = opts.durationSec || n;
+  [0, .25, .5, .75, 1].forEach(f => {
+    const sec = Math.round(dur * f), mm = String(Math.floor(sec / 60)).padStart(2, "0"), ss = String(sec % 60).padStart(2, "0");
+    g += `<text x="${PL + iw * f}" y="${H - 3}" font-size="7" fill="#94a3b8" text-anchor="middle">${mm}:${ss}</text>`;
+  });
+  if (opts.hline) g += `<line x1="${PL}" y1="${y(opts.hline)}" x2="${W - PR}" y2="${y(opts.hline)}" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 3"/>`;
+  series.forEach(s => {
+    const pts = s.data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    if (s.fill) g += `<polygon points="${PL},${y(0)} ${pts} ${W - PR},${y(0)}" fill="${s.color}" opacity="0.08"/>`;
+    g += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="1.6" stroke-linejoin="round"/>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+
+function barChart(el, data, opts) {
+  const W = 660, H = opts.height || 130, PL = 34, PB = 26, PT = 6, PR = 6;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const yMax = Math.max(...data.map(d => d.v)) * 1.2 || 1;
+  const bw = iw / data.length * 0.62;
+  let g = "";
+  for (let t = 0; t <= 3; t++) {
+    const v = (yMax / 3) * t, yy = PT + ih - (v / yMax) * ih;
+    g += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="#eef2f7"/>` +
+         `<text x="${PL - 5}" y="${yy + 3}" font-size="7" fill="#94a3b8" text-anchor="end">${v.toFixed(0)}</text>`;
+  }
+  data.forEach((d, i) => {
+    const cx = PL + (i + 0.5) * (iw / data.length);
+    const h = (d.v / yMax) * ih;
+    g += `<rect x="${cx - bw / 2}" y="${PT + ih - h}" width="${bw}" height="${h}" rx="2" fill="${d.color || '#3b82f6'}"/>` +
+         `<text x="${cx}" y="${H - 14}" font-size="6.6" fill="#64748b" text-anchor="middle">${d.label}</text>` +
+         `<text x="${cx}" y="${PT + ih - h - 3}" font-size="6.6" fill="#334155" text-anchor="middle">${d.v.toFixed(1)}</text>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+
+lineChart($("#chart-latency"), [
+  { data: D.timeseries.rtt, color: "#3b82f6", fill: true },
+  { data: D.timeseries.jitter, color: "#10b981" }
+], { hline: D.thresholds.latencyMs > Math.max(...D.timeseries.rtt) * 1.4 ? null : D.thresholds.latencyMs, durationSec: 120, height: 150 });
+
+lineChart($("#chart-loss"), [
+  { data: D.timeseries.lossPerInterval, color: "#ef4444", fill: true }
+], { durationSec: 120, height: 118 });
+
+barChart($("#chart-hops"), D.traceroute.hops.map(h => ({
+  label: `hop ${h.hop}`, v: h.avg,
+  color: h.loss >= 5 ? "#ef4444" : h.loss > 0 ? "#f59e0b" : "#3b82f6"
+})), { height: 130 });
+</script>
+</body>
+</html>

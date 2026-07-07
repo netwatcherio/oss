@@ -9,6 +9,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'close'): void;
     (e: 'generate', timeRange: number | { from: Date; to: Date }, sections: string): void;
+    (e: 'view'): void;
 }>();
 
 const rangeMode = ref<'preset' | 'custom'>('preset');
@@ -284,7 +285,15 @@ const enabledSectionCount = computed(() =>
                 <button class="btn btn-outline-secondary" @click="emit('close')">
                     Cancel
                 </button>
-                <button 
+                <button
+                    class="btn btn-outline-primary"
+                    @click="emit('view')"
+                    :disabled="rangeMode === 'custom' && !customRangeValid"
+                >
+                    <i class="bi bi-eye"></i>
+                    View Live Report
+                </button>
+                <button
                     class="btn btn-primary generate-btn"
                     @click="handleGenerate"
                     :disabled="rangeMode === 'custom' && !customRangeValid"

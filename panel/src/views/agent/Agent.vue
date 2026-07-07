@@ -702,6 +702,17 @@ async function downloadAgentReport(
   }
 }
 
+// Open the live voice report view in the panel. Same modal's "View"
+// button routes here so users can preview without triggering a PDF
+// download.
+function viewLiveAgentReport() {
+  showVoiceReportModal.value = false;
+  router.push({
+    name: 'agentVoiceReport',
+    params: { wID: state.workspace.id, aID: state.agent.id },
+  });
+}
+
 // Get workspace/agent IDs as refs for the WebSocket composable
 const workspaceIdRef = computed(() => state.workspace.id);
 
@@ -1151,12 +1162,13 @@ onMounted(async () => {
   />
 
   <!-- Voice Report Modal -->
-  <VoiceReportModal
+<VoiceReportModal
       v-if="showVoiceReportModal"
       :agent-id="state.agent.id"
-      :agent-name="state.agent.name || 'Agent'"
+      :agent-name="state.agent.name"
       @close="showVoiceReportModal = false"
       @generate="downloadAgentReport"
+      @view="viewLiveAgentReport"
   />
 </template>
 

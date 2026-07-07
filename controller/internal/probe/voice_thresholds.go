@@ -50,9 +50,9 @@ type VoiceThresholds struct {
 
 	// Latency-only degradation: latency >= LatencyOnlyMinMs with loss
 	// < LatencyOnlyMaxLossPct and MOS < LatencyOnlyMaxMos.
-	LatencyOnlyMinMs     float64 `json:"latency_only_min_ms"`
+	LatencyOnlyMinMs      float64 `json:"latency_only_min_ms"`
 	LatencyOnlyMaxLossPct float64 `json:"latency_only_max_loss_pct"`
-	LatencyOnlyMaxMos    float64 `json:"latency_only_max_mos"`
+	LatencyOnlyMaxMos     float64 `json:"latency_only_max_mos"`
 
 	// Out-of-sequence packet reordering (% of packets).
 	OutOfSequencePct float64 `json:"out_of_sequence_pct"`
@@ -65,14 +65,21 @@ type VoiceThresholds struct {
 	PoorMos      float64 `json:"poor_mos"`
 
 	// Congestion classification.
-	CongestionJitterMs   float64 `json:"congestion_jitter_ms"`
-	CongestionLossPct    float64 `json:"congestion_loss_pct"`
-	CongestionLatencyMs  float64 `json:"congestion_latency_ms"`
+	CongestionJitterMs  float64 `json:"congestion_jitter_ms"`
+	CongestionLossPct   float64 `json:"congestion_loss_pct"`
+	CongestionLatencyMs float64 `json:"congestion_latency_ms"`
 
 	// Codec label for the LLM narrative (e.g., "G.711", "G.729", "Opus").
 	// Affects the recommendation text ("G.711 needs 64kbps" vs
 	// "Opus tolerates higher loss"); does not change the MOS calc.
 	Codec string `json:"codec"`
+
+	// CodecTolerances, when non-empty, overrides the built-in
+	// codec-aware scaling table in voice_codec.go. Keys are codec
+	// names ("G.711", "G.729", "Opus", ...). Admin global and
+	// per-workspace threshold overlays can set this to tune loss /
+	// jitter tolerance per codec without forking the defaults.
+	CodecTolerances map[string]CodecTolerance `json:"codec_tolerances,omitempty"`
 }
 
 // VoiceDefaultThresholds are the built-in defaults. They assume a
@@ -251,7 +258,8 @@ func SetAdminVoiceThresholds(db *gorm.DB, t *VoiceThresholds) error {
 
 // ResolveVoiceThresholds builds the effective VoiceThresholds for a
 // workspace by layering (lowest to highest priority):
-//   defaults → admin global override → workspace override
+//
+//	defaults → admin global override → workspace override
 //
 // `workspaceSettingsJSON` is the raw `Workspace.Settings` blob. The
 // caller doesn't need to parse it; we look for a `voice_thresholds`

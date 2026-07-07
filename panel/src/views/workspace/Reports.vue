@@ -51,6 +51,14 @@ async function downloadReport(url: string, filename: string) {
 }
 
 async function runReport(report: ReportConfig) {
+  // Voice-quality reports route to the live on-screen view rather
+  // than triggering a PDF download — the live view's "Print / Save
+  // as PDF" button produces the same artifact, and operators usually
+  // want to read the report before exporting.
+  if (report.report_type === "workspace_voice") {
+    router.push(`/workspaces/${state.workspace?.id}/reports/voice`);
+    return;
+  }
   const endpoint = getControllerEndpoint();
   const url = `${endpoint}/workspaces/${state.workspace?.id}/reports/${report.id}/run`;
   await downloadReport(url, `${report.name.replace(/[^a-z0-9]/gi, "_")}.pdf`);

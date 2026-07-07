@@ -218,8 +218,8 @@ func panelReports(api fiber.Router, pg *gorm.DB, ch *sql.DB, emailStore *email.Q
 func agentReports(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	generator := reports.NewGenerator(pg, ch)
 
-	api.Get("/agents/:id/reports/agent_detail/run", func(c *fiber.Ctx) error {		agentID := uintParam(c, "id")
-
+	api.Get("/agents/:id/reports/agent_detail/run", func(c *fiber.Ctx) error {
+		agentID := uintParam(c, "id")
 		var days int64 = 7
 		var from, to *time.Time
 
@@ -262,14 +262,84 @@ func agentReports(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=agent-%d-voice-quality.pdf", agentID))
 		return c.Send(pdfData)
 	})
+
+	// Live JSON endpoint that the panel's voice report view consumes.
+	// Returns the same `VoiceReportData` shape used by the static
+	// templates, so the panel can render the multi.html / single.html
+	// layout from real data without going through the PDF path.
+	api.Get("/agents/:id/reports/agent_detail/data", func(c *fiber.Ctx) error {
+		agentID := uintParam(c, "id")
+		from, to := parseVoiceReportRange(c)
+		workspaceID := uintParam(c, "wid")
+
+		payload, err := reports.BuildAgentReportData(c.UserContext(), pg, ch, reports.AgentReportDataOpts{
+			AgentID:     agentID,
+			From:        from,
+			To:          to,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(payload)
+	})
+
+	// Per-probe JSON endpoint. Used by the probe-level voice report
+	// view at /workspaces/:wID/probes/:pID/voice-report.
+	api.Get("/probes/:id/reports/voice/data", func(c *fiber.Ctx) error {
+		probeID := uintParam(c, "id")
+		from, to := parseVoiceReportRange(c)
+		workspaceID := uintParam(c, "wid")
+
+		// The probe → owning-agent mapping comes from the probe table.
+		var agentID uint
+		if err := pg.WithContext(c.UserContext()).
+			Table("probes").Select("agent_id").Where("id = ?", probeID).Scan(&agentID).Error; err != nil {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "probe not found"})
+		}
+		if agentID == 0 {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "probe has no owning agent"})
+		}
+
+		payload, err := reports.BuildAgentReportData(c.UserContext(), pg, ch, reports.AgentReportDataOpts{
+			AgentID:     agentID,
+			ProbeID:     probeID,
+			From:        from,
+			To:          to,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(payload)
+	})
 }
 
-// workspaceVoiceReport wires the workspace-wide voice report PDF
-// endpoint. The endpoint accepts either a time range in days
-// (`time_range_days=`) or a custom range (`from=` + `to=` in
-// RFC3339). It is the workspace-level analog of the per-agent
-// agent_detail/run endpoint, useful for daily/weekly digests
-// delivered via the existing scheduled-report infrastructure.
+// parseVoiceReportRange resolves the time-range query params shared
+// by the JSON report endpoints. Either accepts a custom range
+// (from/to in RFC3339) or a time_range_days integer (default 7).
+func parseVoiceReportRange(c *fiber.Ctx) (time.Time, time.Time) {
+	now := time.Now().UTC()
+	from := now.Add(-7 * 24 * time.Hour)
+	to := now
+	if c.Query("from") != "" && c.Query("to") != "" {
+		if fromTime, err1 := time.Parse(time.RFC3339, c.Query("from")); err1 == nil {
+			from = fromTime
+		}
+		if toTime, err2 := time.Parse(time.RFC3339, c.Query("to")); err2 == nil {
+			to = toTime
+		}
+		return from, to
+	}
+	if tr := c.Query("time_range_days"); tr != "" {
+		var days int64
+		fmt.Sscanf(tr, "%d", &days)
+		if days > 0 {
+			from = now.Add(-time.Duration(days) * 24 * time.Hour)
+		}
+	}
+	return from, to
+}
 func workspaceVoiceReport(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 	generator := reports.NewGenerator(pg, ch)
 
@@ -313,6 +383,20 @@ func workspaceVoiceReport(api fiber.Router, pg *gorm.DB, ch *sql.DB) {
 		c.Set("Content-Type", "application/pdf")
 		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=workspace-%d-voice-quality.pdf", wsID))
 		return c.Send(pdfData)
+	})
+
+	// Per-workspace JSON endpoint for the live voice report view.
+	// Returns the same `VoiceReportData` shape used by the multi.html
+	// template, with `view_mode: "workspace"` so the panel renders
+	// the heatmap + rollup variant.
+	api.Get("/workspaces/:id/reports/voice/data", func(c *fiber.Ctx) error {
+		wsID := uintParam(c, "id")
+		from, to := parseVoiceReportRange(c)
+		payload, err := reports.BuildWorkspaceReportData(c.UserContext(), pg, ch, wsID, from, to)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(payload)
 	})
 }
 

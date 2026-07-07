@@ -105,25 +105,32 @@ type VoiceIssueSummary struct {
 	TimePattern     string
 	MosDegradation  float64
 	Recommendations []string
+	// Heuristic enrichment surfaced from the per-probe detector
+	// pass. LossPattern is "burst", "steady", or "mixed"; LikelyHop
+	// is the MTR hop number most strongly correlated with this issue
+	// (0 when no hop correlation is available).
+	LossPattern string
+	LikelyHop   int
+	HopEvidence string
 }
 
 type AgentVoiceReportSummary struct {
-	Name            string
-	AgentID         uint
-	ReportPeriod    string
-	GeneratedAt     time.Time
-	OverallMos      float64
-	OverallGrade    string
-	LatencyScore    float64
-	JitterScore     float64
-	PacketLossScore float64
-	ForwardPath     *VoicePathSummary
-	ReturnPath      *VoicePathSummary
+	Name             string
+	AgentID          uint
+	ReportPeriod     string
+	GeneratedAt      time.Time
+	OverallMos       float64
+	OverallGrade     string
+	LatencyScore     float64
+	JitterScore      float64
+	PacketLossScore  float64
+	ForwardPath      *VoicePathSummary
+	ReturnPath       *VoicePathSummary
 	AggregateForward *VoicePathSummary
 	AggregateReturn  *VoicePathSummary
-	Probes          []VoicePathSummary
-	Issues          []VoiceIssueSummary
-	Recommendation  string
+	Probes           []VoicePathSummary
+	Issues           []VoiceIssueSummary
+	Recommendation   string
 
 	// New (Phase 1) fields — populated when the analysis engine
 	// provides them. Used by the executive snapshot, timeline, and
@@ -140,16 +147,16 @@ type AgentVoiceReportSummary struct {
 // from the live struct so the report module doesn't import the
 // probe package (which would create a cycle through generator.go).
 type BaselineDeltaSummary struct {
-	From             string
-	To               string
-	MosDelta         float64
-	LatencyDeltaMs   float64
-	JitterDeltaMs    float64
-	LossDeltaPct     float64
-	SampleCount      int
-	BaselineSamples  int
-	Trend            string
-	PercentChange    float64
+	From            string
+	To              string
+	MosDelta        float64
+	LatencyDeltaMs  float64
+	JitterDeltaMs   float64
+	LossDeltaPct    float64
+	SampleCount     int
+	BaselineSamples int
+	Trend           string
+	PercentChange   float64
 }
 
 // VoiceTrendsSummary is the PDF view of the per-bucket MOS series.
@@ -182,9 +189,9 @@ type WorkspaceIncidentSummary struct {
 
 // WorkspaceIncidentEntry is one workspace incident, PDF-shaped.
 type WorkspaceIncidentEntry struct {
-	Title         string
-	Severity      string
-	Scope         string
+	Title          string
+	Severity       string
+	Scope          string
 	SuggestedCause string
 }
 
@@ -490,6 +497,9 @@ func (g *Generator) fetchAgentVoiceReportSummaryWithOptions(ctx context.Context,
 				TimePattern:     issue.TimePattern,
 				MosDegradation:  issue.MosDegradation,
 				Recommendations: issue.Recommendations,
+				LossPattern:     issue.LossPattern,
+				LikelyHop:       issue.LikelyHop,
+				HopEvidence:     issue.HopEvidence,
 			})
 		}
 
@@ -1027,7 +1037,7 @@ func (g *Generator) renderVoiceIssues(pdf *gofpdf.Fpdf, summary *AgentVoiceRepor
 
 	// Stable category order so the same report looks the same.
 	categoryOrder := []string{
-		"jitter_spike", "packet_loss", "latency_degradation",
+		"jitter_spike", "packet_loss", "burst_loss", "latency_degradation",
 		"asymmetry", "out_of_order", "other",
 	}
 	seen := make(map[string]bool)
@@ -1080,6 +1090,16 @@ func renderIssueCategory(pdf *gofpdf.Fpdf, category string, issues []VoiceIssueS
 		if issue.MosDegradation != 0 {
 			pdf.Cell(4, 5, "")
 			pdf.Cell(0, 5, fmt.Sprintf("MOS impact: %+.2f (negative = worse)", issue.MosDegradation))
+			pdf.Ln(5)
+		}
+		if issue.LossPattern != "" {
+			pdf.Cell(4, 5, "")
+			pdf.Cell(0, 5, fmt.Sprintf("Loss pattern: %s", issue.LossPattern))
+			pdf.Ln(5)
+		}
+		if issue.LikelyHop > 0 {
+			pdf.Cell(4, 5, "")
+			pdf.Cell(0, 5, fmt.Sprintf("Likely hop: %d — %s", issue.LikelyHop, issue.HopEvidence))
 			pdf.Ln(5)
 		}
 		if len(issue.Recommendations) > 0 {

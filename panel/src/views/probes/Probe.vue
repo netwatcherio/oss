@@ -1896,7 +1896,18 @@ const { connected: wsConnected } = useProbeSubscription(
                     <span class="visually-hidden">Refreshing voice quality data…</span>
                   </div>
                 </div>
-                <h5 class="card-title">Voice Quality Score (MOS)</h5>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                <h5 class="card-title mb-0">Voice Quality Score (MOS)</h5>
+                <router-link
+                  v-if="state.probe?.id"
+                  :to="`/workspaces/${state.workspace?.id || currentWorkspaceId()}/probes/${state.probe.id}/voice-report`"
+                  class="btn btn-sm btn-outline-primary"
+                  title="Open the live voice quality report for this probe"
+                >
+                  <i class="bi bi-file-earmark-text"></i>
+                  View Report
+                </router-link>
+              </div>
                 <p class="card-text">aggregated voice quality scoring from available data sources</p>
                 <MosGraph
                   :traffic-sim-results="transformToTrafficSimResult(state.trafficSimData)"

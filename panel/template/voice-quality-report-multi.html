@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Quality Report — netwatcher.io</title>
+<style>
+  :root {
+    --nw-primary: #3b82f6;
+    --nw-secondary: #10b981;
+    --nw-purple: #8b5cf6;
+    --nw-dark: #0a0e17;
+    --nw-slate-900: #111827;
+    --nw-slate-700: #334155;
+    --nw-slate-500: #64748b;
+    --nw-slate-400: #94a3b8;
+    --nw-slate-100: #f0f4f8;
+    --nw-success: #22c55e;
+    --nw-warning: #f59e0b;
+    --nw-danger: #ef4444;
+    --nw-gradient: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
+    --page-w: 8.5in;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--nw-slate-900);
+    background: #e2e8f0;
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+  .mono { font-family: "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace; }
+
+  .page {
+    width: var(--page-w);
+    min-height: 11in;
+    margin: 0.35in auto;
+    background: #fff;
+    padding: 0.5in 0.55in;
+    box-shadow: 0 2px 14px rgba(10,14,23,.18);
+    display: flex; flex-direction: column;
+  }
+  .toolbar { max-width: var(--page-w); margin: 14px auto 0; text-align: right; }
+  .toolbar button {
+    background: var(--nw-gradient); color: #fff; border: none; border-radius: 8px;
+    padding: 10px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  @media print {
+    body { background: #fff; font-size: 9.5pt; }
+    .toolbar { display: none; }
+    .page { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    @page { size: letter; margin: 0.5in 0.55in; }
+  }
+
+  /* Header */
+  .report-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 3px solid transparent;
+    border-image: linear-gradient(90deg, #3b82f6, #10b981) 1;
+    padding-bottom: 12px; margin-bottom: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 8px; background: var(--nw-gradient);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-mark svg { width: 20px; height: 20px; }
+  .brand-name { font-size: 15pt; font-weight: 700; letter-spacing: -.02em; }
+  .brand-name .tld { color: var(--nw-primary); }
+  .brand-sub { font-size: 7.5pt; color: var(--nw-slate-500); text-transform: uppercase; letter-spacing: .12em; }
+  .report-title { text-align: right; }
+  .report-title h1 { font-size: 14pt; font-weight: 700; }
+  .report-title .rid { font-size: 8pt; color: var(--nw-slate-500); }
+
+  .mini-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--nw-slate-100);
+    padding-bottom: 6px; margin-bottom: 14px;
+    font-size: 8pt; color: var(--nw-slate-500);
+  }
+  .mini-header b { color: var(--nw-slate-900); font-size: 9.5pt; }
+
+  /* Meta */
+  .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+  .meta-cell { background: var(--nw-slate-100); border-radius: 6px; padding: 7px 10px; }
+  .meta-cell .k { font-size: 6.8pt; text-transform: uppercase; letter-spacing: .08em; color: var(--nw-slate-500); }
+  .meta-cell .v { font-size: 9pt; font-weight: 600; word-break: break-word; }
+
+  /* Verdict */
+  .verdict {
+    display: flex; align-items: center; gap: 18px;
+    border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;
+    color: #fff; background: var(--nw-dark);
+  }
+  .mos-ring { position: relative; width: 86px; height: 86px; flex: none; }
+  .mos-ring svg { width: 86px; height: 86px; transform: rotate(-90deg); }
+  .mos-ring .val { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .mos-ring .val b { font-size: 15pt; line-height: 1; }
+  .mos-ring .val span { font-size: 6.4pt; opacity: .75; text-transform: uppercase; letter-spacing: .1em; margin-top: 2px; }
+  .verdict-body { flex: 1; }
+  .verdict-body h2 { font-size: 12pt; margin-bottom: 2px; }
+  .verdict-body p { font-size: 8.5pt; opacity: .85; max-width: 46em; }
+  .grade-chip {
+    flex: none; text-align: center; border-radius: 8px; padding: 8px 16px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+  }
+  .grade-chip b { font-size: 17pt; display: block; line-height: 1.1; }
+  .grade-chip span { font-size: 6.6pt; text-transform: uppercase; letter-spacing: .1em; opacity: .7; }
+
+  /* KPI */
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .kpi { border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 12px 8px; border-top: 3px solid var(--nw-slate-400); }
+  .kpi.ok { border-top-color: var(--nw-success); }
+  .kpi.warn { border-top-color: var(--nw-warning); }
+  .kpi.crit { border-top-color: var(--nw-danger); }
+  .kpi .label { font-size: 7.2pt; text-transform: uppercase; letter-spacing: .08em; color: var(--nw-slate-500); display: flex; justify-content: space-between; }
+  .kpi .value { font-size: 14pt; font-weight: 700; letter-spacing: -.02em; }
+  .kpi .value small { font-size: 8.5pt; font-weight: 600; color: var(--nw-slate-500); }
+  .kpi .sub { font-size: 7.4pt; color: var(--nw-slate-500); }
+  .badge {
+    display: inline-block; font-size: 6.6pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; border-radius: 20px; padding: 1.5px 8px; color: #fff;
+  }
+  .badge.ok { background: var(--nw-success); }
+  .badge.warn { background: var(--nw-warning); }
+  .badge.crit { background: var(--nw-danger); }
+  .badge.na { background: var(--nw-slate-400); }
+
+  /* Sections */
+  .section { margin-bottom: 15px; }
+  .section-title { display: flex; align-items: center; gap: 8px; font-size: 10.5pt; font-weight: 700; margin-bottom: 8px; }
+  .section-title::before { content: ""; width: 4px; height: 14px; border-radius: 2px; background: var(--nw-gradient); }
+  .section-note { font-size: 7.6pt; color: var(--nw-slate-500); margin-top: 5px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 8.2pt; }
+  thead th {
+    background: var(--nw-slate-900); color: #fff; text-align: left;
+    font-size: 6.8pt; text-transform: uppercase; letter-spacing: .06em;
+    padding: 5.5px 7px; font-weight: 600;
+  }
+  thead th.num, td.num { text-align: right; }
+  tbody td { padding: 5px 7px; border-bottom: 1px solid #eef2f7; }
+  tbody tr:nth-child(even) td { background: #f8fafc; }
+  td .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .dot-ok { background: var(--nw-success); } .dot-warn { background: var(--nw-warning); } .dot-crit { background: var(--nw-danger); }
+  tr.row-warn td { background: #fffbeb !important; }
+  tr.row-crit td { background: #fef2f2 !important; }
+  tr.group-row td {
+    background: var(--nw-slate-100) !important; font-weight: 700; font-size: 7.4pt;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--nw-slate-700);
+    border-bottom: 1px solid #dbe4ee;
+  }
+  .dir-arrow { font-weight: 700; color: var(--nw-primary); }
+  .dir-arrow.rev { color: var(--nw-purple); }
+
+  /* Charts */
+  .chart-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px 6px; }
+  .chart-head { display: flex; justify-content: space-between; font-size: 7.6pt; color: var(--nw-slate-500); margin-bottom: 4px; }
+  .chart-head b { color: var(--nw-slate-900); font-size: 8.4pt; }
+  .legend { display: flex; gap: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  .bar-track { background: #eef2f7; border-radius: 3px; height: 8px; width: 54px; display: inline-block; vertical-align: middle; }
+  .bar-fill { height: 8px; border-radius: 3px; display: block; }
+
+  .threshold-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .threshold-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 7.8pt; }
+  .threshold-card b { display: block; font-size: 8.4pt; margin-bottom: 3px; }
+  .threshold-card .rng { display: flex; justify-content: space-between; padding: 1.5px 0; color: var(--nw-slate-700); }
+
+  .page-footer {
+    margin-top: auto; padding-top: 10px; border-top: 1px solid #e2e8f0;
+    display: flex; justify-content: space-between;
+    font-size: 7pt; color: var(--nw-slate-400);
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* target banner on detail pages */
+  .target-banner {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--nw-slate-100); border-left: 4px solid var(--nw-primary);
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 14px;
+  }
+  .target-banner .t-name { font-weight: 700; font-size: 10.5pt; }
+  .target-banner .t-sub { font-size: 7.6pt; color: var(--nw-slate-500); }
+  .target-banner .t-mos { text-align: right; }
+  .target-banner .t-mos b { font-size: 13pt; }
+  .target-banner .t-mos span { display: block; font-size: 6.6pt; color: var(--nw-slate-500); text-transform: uppercase; letter-spacing: .08em; }
+</style>
+</head>
+<body>
+
+<div class="toolbar"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>
+<div id="report-root"></div>
+
+<script>
+/* =====================================================================
+   REPORT_DATA — multi-target, bidirectional.
+   Each pair = one probe agent ↔ one target. `reverse` is optional
+   (omit when the far end has no agent to send the return stream).
+   ===================================================================== */
+const REPORT_DATA = {
+  meta: {
+    reportId: "VQR-2026-0707-8842",
+    generatedAt: "2026-07-07T14:32:08Z",
+    window: "2026-07-07 14:20 – 14:32 UTC",
+    profile: "VoIP UDP simulation (RTP-like) — G.711u, 64 kbps, 20 ms ptime, DSCP EF(46)",
+    duration: "120 s per stream", packetsPerStream: 6000
+  },
+  thresholds: { latencyMs: 150, jitterMs: 30, lossPct: 1.0, dupPct: 0.1, oooPct: 0.5 },
+  pairs: [
+    {
+      id: "pair-1",
+      agent:  { name: "agent-nyc-01", location: "New York, US", ip: "203.0.113.24" },
+      target: { name: "HQ PBX", host: "sip.example-pbx.com", ip: "198.51.100.7", port: 5060, agent: "agent-pbx-01" },
+      directions: {
+        forward: {
+          mos: 4.21, rFactor: 86.4,
+          latency: { min: 22.1, avg: 34.6, max: 61.8, stddev: 6.2 },
+          jitter:  { min: 0.4,  avg: 3.8,  max: 28.4, stddev: 2.9 },
+          packets: { sent: 6000, received: 5987, lost: 13, lossPct: 0.22, duplicates: 2, dupPct: 0.03, outOfOrder: 9, oooPct: 0.15, discards: 4, discardPct: 0.07 },
+          timeseries: {
+            rtt:    [31,32,30,33,35,34,33,36,38,35,34,33,32,34,36,37,35,34,33,35,38,41,44,39,36,35,34,33,35,34,33,32,34,35,36,35,34,36,35,34,33,35,37,36,35,34,33,32,34,35,36,38,37,35,34,33,35,36,34,33,35,37,39,42,47,55,61,58,49,43,39,37,36,35,34,35,34,33,34,35,36,35,34,33,32,34,35,34,33,35,36,35,34,33,34,35,36,35,34,33,32,33,35,34,33,34,35,36,34,33,34,35,34,33,32,34,35,34,33,34],
+            jitter: [2,3,2,3,4,3,3,4,5,4,3,3,2,3,4,4,3,3,3,4,5,6,7,5,4,3,3,3,4,3,3,2,3,4,4,3,3,4,4,3,3,4,5,4,3,3,3,2,3,4,4,5,5,4,3,3,4,4,3,3,4,6,9,14,21,28,26,18,11,7,5,4,4,3,3,4,3,3,3,4,4,3,3,3,2,3,4,3,3,4,4,3,3,3,3,4,4,3,3,3,2,3,4,3,3,3,4,4,3,3,3,4,3,3,2,3,4,3,3,3]
+          },
+          traceroute: {
+            protocol: "ICMP, 100 probes/hop",
+            note: "Hop 6 (AS3356 transit edge) shows 2% probe loss and elevated variance — matches the jitter excursion at ~01:05.",
+            hops: [
+              { hop: 1, host: "gw.office.local",            ip: "192.168.1.1",    asn: "—",       loss: 0.0, sent: 100, last: 0.5,  avg: 0.6,  best: 0.4,  worst: 2.1,  stdev: 0.2 },
+              { hop: 2, host: "10.20.0.1",                  ip: "10.20.0.1",      asn: "—",       loss: 0.0, sent: 100, last: 1.8,  avg: 2.0,  best: 1.5,  worst: 6.3,  stdev: 0.6 },
+              { hop: 3, host: "ae-4.cr1.nyc.isp.net",       ip: "68.86.12.44",    asn: "AS7922",  loss: 0.0, sent: 100, last: 8.9,  avg: 9.4,  best: 8.1,  worst: 15.7, stdev: 1.2 },
+              { hop: 4, host: "be-201.agg1.nwrk.isp.net",   ip: "68.86.90.12",    asn: "AS7922",  loss: 0.0, sent: 100, last: 11.2, avg: 11.9, best: 10.4, worst: 19.8, stdev: 1.5 },
+              { hop: 5, host: "eqix-ny.peer.transit.net",   ip: "206.126.236.18", asn: "AS3356",  loss: 0.0, sent: 100, last: 12.4, avg: 13.1, best: 11.6, worst: 22.5, stdev: 1.8 },
+              { hop: 6, host: "ae-9.edge2.ewr.transit.net", ip: "4.69.140.77",    asn: "AS3356",  loss: 2.0, sent: 100, last: 18.7, avg: 21.4, best: 15.2, worst: 48.9, stdev: 6.7 },
+              { hop: 7, host: "cust-gw.pbxhost.net",        ip: "198.51.100.1",   asn: "AS64512", loss: 0.0, sent: 100, last: 29.8, avg: 31.2, best: 27.9, worst: 44.1, stdev: 2.9 },
+              { hop: 8, host: "sip.example-pbx.com",        ip: "198.51.100.7",   asn: "AS64512", loss: 0.0, sent: 100, last: 33.9, avg: 34.6, best: 30.8, worst: 61.8, stdev: 3.4 }
+            ]
+          }
+        },
+        reverse: {
+          mos: 4.28, rFactor: 88.1,
+          latency: { min: 21.8, avg: 33.9, max: 55.2, stddev: 5.4 },
+          jitter:  { min: 0.3,  avg: 3.1,  max: 19.6, stddev: 2.2 },
+          packets: { sent: 6000, received: 5992, lost: 8, lossPct: 0.13, duplicates: 0, dupPct: 0.0, outOfOrder: 5, oooPct: 0.08, discards: 2, discardPct: 0.03 },
+          timeseries: {
+            rtt:    [30,31,31,32,34,33,32,34,36,34,33,32,31,33,35,35,34,33,32,34,36,38,40,37,35,34,33,32,34,33,32,31,33,34,35,34,33,35,34,33,32,34,36,35,34,33,32,31,33,34,35,36,35,34,33,32,34,35,33,32,34,35,37,39,42,46,50,47,42,39,37,35,34,34,33,34,33,32,33,34,35,34,33,32,31,33,34,33,32,34,35,34,33,32,33,34,35,34,33,32,31,32,34,33,32,33,34,35,33,32,33,34,33,32,31,33,34,33,32,33],
+            jitter: [2,2,2,3,3,3,2,3,4,3,3,2,2,3,3,3,3,2,2,3,4,5,5,4,3,3,2,2,3,3,2,2,3,3,3,3,2,3,3,3,2,3,4,3,3,2,2,2,3,3,3,4,4,3,3,2,3,3,3,2,3,4,6,9,13,17,19,15,10,6,4,3,3,3,2,3,3,2,2,3,3,3,2,2,2,3,3,3,2,3,3,3,2,2,3,3,3,3,2,2,2,3,3,3,2,3,3,3,3,2,2,3,3,2,2,3,3,3,2,3]
+          },
+          traceroute: {
+            protocol: "ICMP, 100 probes/hop (from agent-pbx-01)",
+            note: "Return path is symmetric through AS3356; no anomalies observed.",
+            hops: [
+              { hop: 1, host: "cust-gw.pbxhost.net",        ip: "198.51.100.1",   asn: "AS64512", loss: 0.0, sent: 100, last: 0.7,  avg: 0.8,  best: 0.5,  worst: 3.0,  stdev: 0.3 },
+              { hop: 2, host: "ae-9.edge2.ewr.transit.net", ip: "4.69.140.78",    asn: "AS3356",  loss: 0.0, sent: 100, last: 4.1,  avg: 4.6,  best: 3.8,  worst: 12.2, stdev: 1.1 },
+              { hop: 3, host: "eqix-ny.peer.transit.net",   ip: "206.126.236.17", asn: "AS3356",  loss: 0.0, sent: 100, last: 9.8,  avg: 10.3, best: 9.1,  worst: 18.4, stdev: 1.4 },
+              { hop: 4, host: "be-202.agg1.nwrk.isp.net",   ip: "68.86.90.13",    asn: "AS7922",  loss: 0.0, sent: 100, last: 21.6, avg: 22.4, best: 20.1, worst: 31.0, stdev: 1.9 },
+              { hop: 5, host: "ae-5.cr1.nyc.isp.net",       ip: "68.86.12.45",    asn: "AS7922",  loss: 0.0, sent: 100, last: 27.9, avg: 28.8, best: 26.2, worst: 39.7, stdev: 2.2 },
+              { hop: 6, host: "gw.office.local",            ip: "203.0.113.24",   asn: "—",       loss: 0.0, sent: 100, last: 33.5, avg: 33.9, best: 30.9, worst: 55.2, stdev: 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      id: "pair-2",
+      agent:  { name: "agent-nyc-01", location: "New York, US", ip: "203.0.113.24" },
+      target: { name: "SIP Trunk (Carrier A)", host: "trunk.carrier-a.net", ip: "192.0.2.50", port: 5060, agent: "agent-carrier-poc" },
+      directions: {
+        forward: {
+          mos: 3.82, rFactor: 74.9,
+          latency: { min: 48.3, avg: 72.5, max: 158.9, stddev: 18.4 },
+          jitter:  { min: 1.1,  avg: 9.6,  max: 41.2, stddev: 7.8 },
+          packets: { sent: 6000, received: 5904, lost: 96, lossPct: 1.60, duplicates: 11, dupPct: 0.18, outOfOrder: 44, oooPct: 0.73, discards: 21, discardPct: 0.35 },
+          timeseries: {
+            rtt:    [62,64,61,66,70,68,66,71,75,70,68,66,64,68,72,74,70,68,66,70,76,82,88,78,72,70,68,66,70,68,66,64,68,70,72,70,68,72,70,68,66,70,74,72,70,68,66,64,68,70,72,76,74,70,68,66,70,72,68,66,70,78,88,102,118,138,159,148,124,104,90,82,76,72,70,72,70,68,70,72,74,72,70,68,66,70,72,70,68,72,74,72,70,68,70,72,74,72,70,68,66,68,72,70,68,70,72,74,70,68,70,72,70,68,66,70,72,70,68,70],
+            jitter: [5,6,5,7,8,7,6,8,10,8,7,6,5,7,9,9,8,7,6,8,10,12,14,11,9,8,7,6,8,7,6,5,7,8,9,8,7,9,8,7,6,8,10,9,8,7,6,5,7,8,9,11,10,8,7,6,8,9,7,6,8,12,17,24,31,38,41,35,26,18,13,11,9,8,8,9,8,7,8,9,9,8,7,6,6,8,9,8,7,9,9,8,7,6,8,9,9,8,7,6,5,7,9,8,7,8,9,9,8,7,8,9,8,7,6,8,9,8,7,8]
+          },
+          traceroute: {
+            protocol: "ICMP, 100 probes/hop",
+            note: "Sustained loss and jitter growth begins at hop 7 (carrier ingress). Recommend raising with Carrier A — the degradation window (01:00–01:20) exceeded the jitter threshold and briefly breached the 150 ms latency target.",
+            hops: [
+              { hop: 1, host: "gw.office.local",            ip: "192.168.1.1",  asn: "—",       loss: 0.0, sent: 100, last: 0.5,  avg: 0.6,  best: 0.4,  worst: 1.9,   stdev: 0.2 },
+              { hop: 2, host: "ae-4.cr1.nyc.isp.net",       ip: "68.86.12.44",  asn: "AS7922",  loss: 0.0, sent: 100, last: 9.1,  avg: 9.6,  best: 8.2,  worst: 16.3,  stdev: 1.3 },
+              { hop: 3, host: "be-11.core3.chi.isp.net",    ip: "68.86.85.10",  asn: "AS7922",  loss: 0.0, sent: 100, last: 28.4, avg: 29.7, best: 26.8, worst: 41.2,  stdev: 2.4 },
+              { hop: 4, host: "xe-0.peer.chi.tier1.net",    ip: "89.149.180.4", asn: "AS3257",  loss: 0.0, sent: 100, last: 30.2, avg: 31.5, best: 28.4, worst: 45.8,  stdev: 2.8 },
+              { hop: 5, host: "ae-2.core1.dal.tier1.net",   ip: "89.149.183.9", asn: "AS3257",  loss: 1.0, sent: 100, last: 48.7, avg: 50.3, best: 45.9, worst: 72.4,  stdev: 4.6 },
+              { hop: 6, host: "??? (no response)",          ip: "*",            asn: "—",       loss: 100, sent: 100, last: 0,    avg: 0,    best: 0,    worst: 0,     stdev: 0 },
+              { hop: 7, host: "ingress1.carrier-a.net",     ip: "192.0.2.1",    asn: "AS65001", loss: 4.0, sent: 100, last: 66.8, avg: 69.9, best: 58.1, worst: 132.6, stdev: 12.8 },
+              { hop: 8, host: "sbc2.carrier-a.net",         ip: "192.0.2.44",   asn: "AS65001", loss: 2.0, sent: 100, last: 70.4, avg: 71.8, best: 60.9, worst: 148.7, stdev: 13.5 },
+              { hop: 9, host: "trunk.carrier-a.net",        ip: "192.0.2.50",   asn: "AS65001", loss: 2.0, sent: 100, last: 71.9, avg: 72.5, best: 62.3, worst: 158.9, stdev: 14.1 }
+            ]
+          }
+        },
+        reverse: {
+          mos: 3.96, rFactor: 78.3,
+          latency: { min: 47.9, avg: 69.8, max: 141.3, stddev: 15.2 },
+          jitter:  { min: 0.9,  avg: 7.9,  max: 33.8, stddev: 6.1 },
+          packets: { sent: 6000, received: 5931, lost: 69, lossPct: 1.15, duplicates: 4, dupPct: 0.07, outOfOrder: 28, oooPct: 0.47, discards: 12, discardPct: 0.20 },
+          timeseries: {
+            rtt:    [60,62,60,64,67,65,64,68,72,67,65,64,62,65,69,71,67,65,64,67,72,78,83,74,69,67,65,64,67,65,64,62,65,67,69,67,65,69,67,65,64,67,71,69,67,65,64,62,65,67,69,72,71,67,65,64,67,69,65,64,67,74,82,93,106,122,141,131,111,95,84,77,72,69,67,69,67,65,67,69,71,69,67,65,64,67,69,67,65,69,71,69,67,65,67,69,71,69,67,65,64,65,69,67,65,67,69,71,67,65,67,69,67,65,64,67,69,67,65,67],
+            jitter: [4,5,4,6,7,6,5,7,8,7,6,5,4,6,7,7,7,6,5,7,8,10,11,9,7,7,6,5,7,6,5,4,6,7,7,7,6,7,7,6,5,7,8,7,7,6,5,4,6,7,7,9,8,7,6,5,7,7,6,5,7,10,14,19,25,30,34,29,21,15,11,9,8,7,7,7,7,6,7,7,8,7,6,5,5,7,7,7,6,7,8,7,6,5,7,7,8,7,6,5,4,6,7,7,6,7,7,8,7,6,7,7,7,6,5,7,7,7,6,7]
+          },
+          traceroute: {
+            protocol: "ICMP, 100 probes/hop (from agent-carrier-poc)",
+            note: "Return path re-enters via AS3257 Dallas; mild loss at carrier egress mirrors the forward direction.",
+            hops: [
+              { hop: 1, host: "sbc2.carrier-a.net",         ip: "192.0.2.44",   asn: "AS65001", loss: 0.0, sent: 100, last: 0.6,  avg: 0.7,  best: 0.4,  worst: 2.4,   stdev: 0.3 },
+              { hop: 2, host: "egress1.carrier-a.net",      ip: "192.0.2.2",    asn: "AS65001", loss: 1.0, sent: 100, last: 2.3,  avg: 2.9,  best: 1.9,  worst: 14.6,  stdev: 1.8 },
+              { hop: 3, host: "ae-2.core1.dal.tier1.net",   ip: "89.149.183.9", asn: "AS3257",  loss: 0.0, sent: 100, last: 19.4, avg: 20.6, best: 18.2, worst: 33.9,  stdev: 2.3 },
+              { hop: 4, host: "xe-0.peer.chi.tier1.net",    ip: "89.149.180.4", asn: "AS3257",  loss: 0.0, sent: 100, last: 39.8, avg: 41.2, best: 37.6, worst: 58.4,  stdev: 3.1 },
+              { hop: 5, host: "be-11.core3.chi.isp.net",    ip: "68.86.85.10",  asn: "AS7922",  loss: 0.0, sent: 100, last: 41.2, avg: 42.8, best: 38.9, worst: 62.1,  stdev: 3.4 },
+              { hop: 6, host: "ae-5.cr1.nyc.isp.net",       ip: "68.86.12.45",  asn: "AS7922",  loss: 0.0, sent: 100, last: 62.4, avg: 63.9, best: 58.7, worst: 89.2,  stdev: 4.2 },
+              { hop: 7, host: "gw.office.local",            ip: "203.0.113.24", asn: "—",       loss: 0.0, sent: 100, last: 68.9, avg: 69.8, best: 62.4, worst: 141.3, stdev: 5.1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      id: "pair-3",
+      agent:  { name: "agent-lon-02", location: "London, UK", ip: "203.0.113.88" },
+      target: { name: "HQ PBX (transatlantic)", host: "sip.example-pbx.com", ip: "198.51.100.7", port: 5060, agent: null },
+      directions: {
+        forward: {
+          mos: 4.08, rFactor: 82.7,
+          latency: { min: 71.2, avg: 79.4, max: 96.1, stddev: 4.1 },
+          jitter:  { min: 0.5,  avg: 2.4,  max: 11.3, stddev: 1.6 },
+          packets: { sent: 6000, received: 5996, lost: 4, lossPct: 0.07, duplicates: 0, dupPct: 0.0, outOfOrder: 2, oooPct: 0.03, discards: 1, discardPct: 0.02 },
+          timeseries: {
+            rtt:    [78,79,78,80,81,80,79,81,82,80,79,79,78,80,81,82,80,79,79,80,82,83,84,82,80,80,79,79,80,79,79,78,80,80,81,80,79,81,80,80,79,80,82,81,80,79,79,78,80,80,81,82,81,80,79,79,80,81,79,79,80,82,83,85,88,92,96,93,88,84,82,81,80,80,79,80,79,79,80,80,81,80,79,79,78,80,80,80,79,80,81,80,79,79,80,80,81,80,79,79,78,79,81,80,79,80,80,81,80,79,80,80,80,79,78,80,80,80,79,80],
+            jitter: [2,2,1,2,2,2,2,2,3,2,2,2,1,2,2,2,2,2,2,2,3,3,3,3,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,2,2,3,2,2,2,2,1,2,2,2,3,2,2,2,2,2,2,2,2,2,3,4,5,7,9,11,9,6,4,3,3,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,2,2,2]
+          },
+          traceroute: {
+            protocol: "ICMP, 100 probes/hop",
+            note: "Clean transatlantic path via AS1299. No return-direction agent at this site — reverse stats unavailable; consider deploying an agent at HQ for London↔HQ bidirectional coverage.",
+            hops: [
+              { hop: 1, host: "gw.lon-office.local",        ip: "192.168.10.1",  asn: "—",       loss: 0.0, sent: 100, last: 0.4,  avg: 0.5,  best: 0.3,  worst: 1.6,  stdev: 0.2 },
+              { hop: 2, host: "lag-1.lon1.uk-isp.net",      ip: "81.139.52.1",   asn: "AS2856",  loss: 0.0, sent: 100, last: 3.2,  avg: 3.6,  best: 2.9,  worst: 8.8,  stdev: 0.8 },
+              { hop: 3, host: "peer1.ldn.telia.net",        ip: "62.115.120.9",  asn: "AS1299",  loss: 0.0, sent: 100, last: 4.8,  avg: 5.2,  best: 4.4,  worst: 10.2, stdev: 0.9 },
+              { hop: 4, host: "nyk-bb2.telia.net",          ip: "62.115.113.20", asn: "AS1299",  loss: 0.0, sent: 100, last: 71.9, avg: 72.6, best: 70.8, worst: 79.4, stdev: 1.3 },
+              { hop: 5, host: "nyk-b3.telia.net",           ip: "62.115.140.55", asn: "AS1299",  loss: 0.0, sent: 100, last: 73.1, avg: 73.9, best: 71.6, worst: 82.0, stdev: 1.5 },
+              { hop: 6, host: "cust-gw.pbxhost.net",        ip: "198.51.100.1",  asn: "AS64512", loss: 0.0, sent: 100, last: 77.8, avg: 78.4, best: 75.9, worst: 90.3, stdev: 1.9 },
+              { hop: 7, host: "sip.example-pbx.com",        ip: "198.51.100.7",  asn: "AS64512", loss: 0.0, sent: 100, last: 79.0, avg: 79.4, best: 76.8, worst: 96.1, stdev: 2.0 }
+            ]
+          }
+        },
+        reverse: null
+      }
+    }
+  ]
+};
+
+/* ===================== helpers ===================== */
+const T = REPORT_DATA.thresholds;
+const STATUS_LABEL = { ok: "Pass", warn: "Degraded", crit: "Fail" };
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
+function statusFor(v, warnAt, critAt) { return v >= critAt ? "crit" : v >= warnAt ? "warn" : "ok"; }
+function mosStatus(mos) { return mos >= 4.0 ? "ok" : mos >= 3.6 ? "warn" : "crit"; }
+function mosColor(mos)  { return mos >= 4.0 ? "#22c55e" : mos >= 3.6 ? "#f59e0b" : "#ef4444"; }
+function worstStatus(list) { return list.includes("crit") ? "crit" : list.includes("warn") ? "warn" : "ok"; }
+function fmtDate(iso) { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC"; }
+
+function dirStatus(d) {
+  return worstStatus([
+    statusFor(d.latency.avg, T.latencyMs * 0.66, T.latencyMs),
+    statusFor(d.jitter.max,  T.jitterMs * 0.66,  T.jitterMs),
+    statusFor(d.packets.lossPct, T.lossPct * 0.5, T.lossPct),
+    statusFor(d.packets.dupPct,  T.dupPct,  T.dupPct * 5),
+    statusFor(d.packets.oooPct,  T.oooPct,  T.oooPct * 4),
+    mosStatus(d.mos)
+  ]);
+}
+
+/* ---------- shared SVG chart builders (print-safe, no libs) ---------- */
+function lineChartSVG(series, opts) {
+  const W = 660, H = opts.height || 130, PL = 34, PB = 16, PT = 6, PR = 6;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const all = series.flatMap(s => s.data).concat(opts.hline ? [opts.hline] : []);
+  const yMax = Math.ceil(Math.max(...all) * 1.15 / 10) * 10 || 10;
+  const n = Math.max(...series.map(s => s.data.length));
+  const x = i => PL + (i / (n - 1)) * iw;
+  const y = v => PT + ih - (v / yMax) * ih;
+  let g = "";
+  for (let t = 0; t <= 4; t++) {
+    const v = (yMax / 4) * t, yy = y(v);
+    g += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="#eef2f7"/>` +
+         `<text x="${PL - 5}" y="${yy + 3}" font-size="7" fill="#94a3b8" text-anchor="end">${v}</text>`;
+  }
+  const dur = opts.durationSec || n;
+  [0, .25, .5, .75, 1].forEach(f => {
+    const sec = Math.round(dur * f), mm = String(Math.floor(sec / 60)).padStart(2, "0"), ss = String(sec % 60).padStart(2, "0");
+    g += `<text x="${PL + iw * f}" y="${H - 3}" font-size="7" fill="#94a3b8" text-anchor="middle">${mm}:${ss}</text>`;
+  });
+  if (opts.hline) g += `<line x1="${PL}" y1="${y(opts.hline)}" x2="${W - PR}" y2="${y(opts.hline)}" stroke="#ef4444" stroke-dasharray="4 3"/>`;
+  series.forEach(s => {
+    const pts = s.data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    if (s.fill) g += `<polygon points="${PL},${y(0)} ${pts} ${x(s.data.length - 1)},${y(0)}" fill="${s.color}" opacity="0.08"/>`;
+    g += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="1.6" stroke-linejoin="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""}/>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+
+function barChartSVG(data, opts) {
+  const W = 660, H = opts.height || 130, PL = 34, PB = 30, PT = 8, PR = 6;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const yMax = (opts.yMax || Math.max(...data.map(d => d.v)) * 1.2) || 1;
+  const bw = Math.min(38, iw / data.length * 0.6);
+  let g = "";
+  for (let t = 0; t <= 3; t++) {
+    const v = (yMax / 3) * t, yy = PT + ih - (v / yMax) * ih;
+    g += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="#eef2f7"/>` +
+         `<text x="${PL - 5}" y="${yy + 3}" font-size="7" fill="#94a3b8" text-anchor="end">${v.toFixed(opts.dec ?? 0)}</text>`;
+  }
+  data.forEach((d, i) => {
+    const cx = PL + (i + 0.5) * (iw / data.length);
+    const h = Math.max(0, (d.v / yMax) * ih);
+    g += `<rect x="${cx - bw / 2}" y="${PT + ih - h}" width="${bw}" height="${h}" rx="2" fill="${d.color || '#3b82f6'}"/>` +
+         `<text x="${cx}" y="${PT + ih - h - 3}" font-size="6.6" fill="#334155" text-anchor="middle">${d.v.toFixed(opts.valDec ?? 1)}</text>`;
+    const lines = String(d.label).split("\n");
+    lines.forEach((ln, li) => {
+      g += `<text x="${cx}" y="${PT + ih + 9 + li * 8}" font-size="6.4" fill="#64748b" text-anchor="middle">${esc(ln)}</text>`;
+    });
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+
+/* ---------- HTML fragment builders ---------- */
+const brandHeader = () => `
+  <header class="report-header">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="2 12 6 12 9 5 13 19 16 12 22 12"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">netwatcher<span class="tld">.io</span></div>
+        <div class="brand-sub">Open Source Network Monitoring</div>
+      </div>
+    </div>
+    <div class="report-title">
+      <h1>Voice Quality Report</h1>
+      <div class="rid mono">${REPORT_DATA.meta.reportId}</div>
+      <div class="rid">${fmtDate(REPORT_DATA.meta.generatedAt)}</div>
+    </div>
+  </header>`;
+
+const miniHeader = title => `
+  <div class="mini-header"><b>${esc(title)}</b><span class="mono">${REPORT_DATA.meta.reportId}</span></div>`;
+
+const footer = () => `
+  <footer class="page-footer">
+    <span>Generated by netwatcher.io — Voice / VoIP traffic simulation</span>
+    <span class="pageno"></span>
+  </footer>`;
+
+function mosRing(mos, size) {
+  const r = 37, C = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(1, (mos - 1) / 4));
+  return `
+    <div class="mos-ring">
+      <svg viewBox="0 0 86 86">
+        <circle cx="43" cy="43" r="${r}" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="7"/>
+        <circle cx="43" cy="43" r="${r}" fill="none" stroke="${mosColor(mos)}" stroke-width="7" stroke-linecap="round"
+                stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct)).toFixed(1)}"/>
+      </svg>
+      <div class="val"><b>${mos.toFixed(2)}</b><span>MOS</span></div>
+    </div>`;
+}
+
+function dirLabel(pair, dir) {
+  return dir === "forward"
+    ? `<span class="dir-arrow">→</span> ${esc(pair.agent.name)} → ${esc(pair.target.host)}`
+    : `<span class="dir-arrow rev">←</span> ${esc(pair.target.host)} → ${esc(pair.agent.name)}`;
+}
+
+/* ---------- overview page ---------- */
+function overviewPage() {
+  const M = REPORT_DATA.meta;
+  const dirs = [];
+  REPORT_DATA.pairs.forEach(p => {
+    ["forward", "reverse"].forEach(k => { if (p.directions[k]) dirs.push({ pair: p, key: k, d: p.directions[k] }); });
+  });
+  const avgMos = dirs.reduce((a, x) => a + x.d.mos, 0) / dirs.length;
+  const worst = dirs.reduce((a, x) => x.d.mos < a.d.mos ? x : a, dirs[0]);
+  const counts = { ok: 0, warn: 0, crit: 0 };
+  dirs.forEach(x => counts[dirStatus(x.d)]++);
+  const overall = worstStatus(dirs.map(x => dirStatus(x.d)));
+  const verdictTitle = overall === "ok" ? "All monitored paths within voice-quality targets"
+    : overall === "warn" ? "Voice quality acceptable — one or more paths degraded"
+    : "Voice quality impaired on one or more paths";
+  const verdictText = `Across ${REPORT_DATA.pairs.length} probe/target pairs (${dirs.length} directional streams), mean MOS is ${avgMos.toFixed(2)}. ` +
+    `${counts.ok} stream(s) pass, ${counts.warn} degraded, ${counts.crit} failing. Worst stream: ` +
+    `${worst.pair.target.name} (${worst.key}) at MOS ${worst.d.mos.toFixed(2)}.`;
+
+  const meta = [
+    ["Test Window", M.window],
+    ["Simulation Profile", M.profile],
+    ["Streams Measured", `${dirs.length} (across ${REPORT_DATA.pairs.length} pairs)`],
+    ["Per-Stream Volume", `${M.packetsPerStream.toLocaleString()} pkts / ${M.duration}`]
+  ].map(([k, v]) => `<div class="meta-cell"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
+
+  const rows = REPORT_DATA.pairs.map(p => {
+    const inner = ["forward", "reverse"].map(k => {
+      const d = p.directions[k];
+      if (!d) return `
+        <tr>
+          <td>${dirLabel(p, k)}</td>
+          <td class="num mono" colspan="6" style="color:var(--nw-slate-400)">no return-path agent — not measured</td>
+          <td><span class="badge na">N/A</span></td>
+        </tr>`;
+      const st = dirStatus(d);
+      return `
+        <tr class="${st === 'ok' ? '' : 'row-' + st}">
+          <td>${dirLabel(p, k)}</td>
+          <td class="num mono"><b style="color:${mosColor(d.mos)}">${d.mos.toFixed(2)}</b></td>
+          <td class="num mono">${d.rFactor.toFixed(1)}</td>
+          <td class="num mono">${d.latency.avg.toFixed(1)}</td>
+          <td class="num mono">${d.jitter.avg.toFixed(1)} / ${d.jitter.max.toFixed(1)}</td>
+          <td class="num mono">${d.packets.lossPct.toFixed(2)}%</td>
+          <td class="num mono">${d.packets.dupPct.toFixed(2)}% · ${d.packets.oooPct.toFixed(2)}%</td>
+          <td><span class="badge ${st}">${STATUS_LABEL[st]}</span></td>
+        </tr>`;
+    }).join("");
+    return `
+      <tr class="group-row"><td colspan="8">${esc(p.target.name)} — ${esc(p.agent.name)} (${esc(p.agent.location)}) ↔ ${esc(p.target.host)}</td></tr>
+      ${inner}`;
+  }).join("");
+
+  const mosBars = dirs.map(x => ({
+    label: `${x.pair.target.name}\n${x.key === "forward" ? "fwd →" : "← rev"}`,
+    v: x.d.mos, color: mosColor(x.d.mos)
+  }));
+
+  return `
+  <div class="page">
+    ${brandHeader()}
+    <div class="meta-grid">${meta}</div>
+    <div class="verdict">
+      ${mosRing(avgMos)}
+      <div class="verdict-body"><h2>${verdictTitle}</h2><p>${verdictText}</p></div>
+      <div class="grade-chip"><b>${counts.ok}/${dirs.length}</b><span>Streams Pass</span></div>
+      <div class="grade-chip"><b style="color:${mosColor(worst.d.mos)}">${worst.d.mos.toFixed(2)}</b><span>Worst MOS</span></div>
+    </div>
+    <div class="section">
+      <div class="section-title">All Streams — Combined Summary</div>
+      <table>
+        <thead><tr>
+          <th>Stream (direction)</th><th class="num">MOS</th><th class="num">R</th>
+          <th class="num">Avg RTT (ms)</th><th class="num">Jitter avg/max (ms)</th>
+          <th class="num">Loss</th><th class="num">Dup · OoO</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="section-note">→ forward = probe agent toward target · ← reverse = return stream measured by the far-end agent. Detail pages for each pair follow.</div>
+    </div>
+    <div class="section">
+      <div class="section-title">MOS by Stream</div>
+      <div class="chart-box">
+        <div class="chart-head"><b>Mean Opinion Score (1.0 – 5.0)</b>
+          <div class="legend"><span><i style="background:#22c55e"></i>≥ 4.0 good</span><span><i style="background:#f59e0b"></i>3.6 – 4.0 fair</span><span><i style="background:#ef4444"></i>&lt; 3.6 poor</span></div>
+        </div>
+        ${barChartSVG(mosBars, { height: 148, yMax: 5, dec: 1, valDec: 2 })}
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Reference Thresholds (ITU-T G.114 / G.107)</div>
+      <div class="threshold-grid">
+        <div class="threshold-card"><b>Latency (RTT)</b><div class="rng"><span>Good</span><span>&lt; 150 ms</span></div><div class="rng"><span>Degraded</span><span>150–300 ms</span></div><div class="rng"><span>Poor</span><span>&gt; 300 ms</span></div></div>
+        <div class="threshold-card"><b>Jitter</b><div class="rng"><span>Good</span><span>&lt; 20 ms</span></div><div class="rng"><span>Degraded</span><span>20–30 ms</span></div><div class="rng"><span>Poor</span><span>&gt; 30 ms</span></div></div>
+        <div class="threshold-card"><b>Packet Loss</b><div class="rng"><span>Good</span><span>&lt; 1%</span></div><div class="rng"><span>Degraded</span><span>1–3%</span></div><div class="rng"><span>Poor</span><span>&gt; 3%</span></div></div>
+      </div>
+    </div>
+    ${footer()}
+  </div>`;
+}
+
+/* ---------- per-pair metric page ---------- */
+function pairMetricsPage(p, idx) {
+  const dirs = ["forward", "reverse"].filter(k => p.directions[k]);
+  const banner = `
+    <div class="target-banner">
+      <div>
+        <div class="t-name">${idx + 1}. ${esc(p.target.name)} <span class="mono" style="font-weight:400;font-size:8pt;color:var(--nw-slate-500)">${esc(p.target.host)} (${esc(p.target.ip)}):${p.target.port}/udp</span></div>
+        <div class="t-sub">Probe: ${esc(p.agent.name)} — ${esc(p.agent.location)}${p.target.agent ? ` · Return agent: ${esc(p.target.agent)}` : " · No return agent (forward only)"}</div>
+      </div>
+      <div style="display:flex;gap:18px">
+        ${dirs.map(k => {
+          const d = p.directions[k];
+          return `<div class="t-mos"><b style="color:${mosColor(d.mos)}">${d.mos.toFixed(2)}</b><span>MOS ${k === "forward" ? "fwd →" : "← rev"}</span></div>`;
+        }).join("")}
+      </div>
+    </div>`;
+
+  const statRows = dirs.map(k => {
+    const d = p.directions[k];
+    const mk = (name, s, thr, st) => `
+      <tr class="${st === 'ok' ? '' : 'row-' + st}">
+        <td>${name}</td>
+        <td class="num mono">${s.min.toFixed(1)}</td>
+        <td class="num mono"><b>${s.avg.toFixed(1)}</b></td>
+        <td class="num mono">${s.max.toFixed(1)}</td>
+        <td class="num mono">${s.stddev.toFixed(1)}</td>
+        <td class="num mono">${thr}</td>
+        <td><span class="status-dot dot-${st}"></span>${STATUS_LABEL[st]}</td>
+      </tr>`;
+    return `
+      <tr class="group-row"><td colspan="7">${dirLabel(p, k)}</td></tr>
+      ${mk("Latency (RTT)", d.latency, T.latencyMs + " ms", statusFor(d.latency.avg, T.latencyMs * 0.66, T.latencyMs))}
+      ${mk("Interarrival jitter (RFC 3550)", d.jitter, T.jitterMs + " ms", statusFor(d.jitter.max, T.jitterMs * 0.66, T.jitterMs))}`;
+  }).join("");
+
+  const pktRows = dirs.map(k => {
+    const d = p.directions[k], pk = d.packets;
+    const row = (name, count, pct, st) => `
+      <tr>
+        <td>${name}</td>
+        <td class="num mono">${count.toLocaleString()}</td>
+        <td class="num mono">${pct.toFixed(2)}%</td>
+        <td><span class="status-dot dot-${st}"></span>${STATUS_LABEL[st]}</td>
+      </tr>`;
+    return `
+      <tr class="group-row"><td colspan="4">${dirLabel(p, k)} — ${pk.received.toLocaleString()} / ${pk.sent.toLocaleString()} received</td></tr>
+      ${row("Lost", pk.lost, pk.lossPct, statusFor(pk.lossPct, T.lossPct * 0.5, T.lossPct))}
+      ${row("Duplicates", pk.duplicates, pk.dupPct, statusFor(pk.dupPct, T.dupPct, T.dupPct * 5))}
+      ${row("Out-of-order", pk.outOfOrder, pk.oooPct, statusFor(pk.oooPct, T.oooPct, T.oooPct * 4))}
+      ${row("Jitter-buffer discards", pk.discards, pk.discardPct, statusFor(pk.discardPct, 0.5, 2))}`;
+  }).join("");
+
+  const rttSeries = [], jitSeries = [];
+  if (p.directions.forward) {
+    rttSeries.push({ data: p.directions.forward.timeseries.rtt, color: "#3b82f6", fill: true });
+    jitSeries.push({ data: p.directions.forward.timeseries.jitter, color: "#3b82f6" });
+  }
+  if (p.directions.reverse) {
+    rttSeries.push({ data: p.directions.reverse.timeseries.rtt, color: "#8b5cf6", dash: "5 3" });
+    jitSeries.push({ data: p.directions.reverse.timeseries.jitter, color: "#8b5cf6", dash: "5 3" });
+  }
+  const maxRtt = Math.max(...rttSeries.flatMap(s => s.data));
+  const legend = `
+    <div class="legend">
+      <span><i style="background:#3b82f6"></i>forward →</span>
+      ${p.directions.reverse ? '<span><i style="background:#8b5cf6"></i>← reverse</span>' : ""}
+    </div>`;
+
+  return `
+  <div class="page">
+    ${miniHeader("Target Detail — " + p.target.name)}
+    ${banner}
+    <div class="section">
+      <div class="section-title">Delay &amp; Jitter — Both Directions</div>
+      <table>
+        <thead><tr><th>Metric</th><th class="num">Min</th><th class="num">Avg</th><th class="num">Max</th><th class="num">Std Dev</th><th class="num">Threshold</th><th>Status</th></tr></thead>
+        <tbody>${statRows}</tbody>
+      </table>
+    </div>
+    <div class="section">
+      <div class="section-title">Packet Delivery — Both Directions</div>
+      <table>
+        <thead><tr><th>Counter</th><th class="num">Count</th><th class="num">% of Sent</th><th>Status</th></tr></thead>
+        <tbody>${pktRows}</tbody>
+      </table>
+    </div>
+    <div class="section">
+      <div class="section-title">Latency &amp; Jitter Over Test Duration</div>
+      <div class="chart-box">
+        <div class="chart-head"><b>Round-trip time (ms)</b>${legend}</div>
+        ${lineChartSVG(rttSeries, { durationSec: 120, height: 128, hline: T.latencyMs <= maxRtt * 1.4 ? T.latencyMs : null })}
+      </div>
+      <div class="chart-box" style="margin-top:10px">
+        <div class="chart-head"><b>Interarrival jitter (ms)</b>${legend}</div>
+        ${lineChartSVG(jitSeries, { durationSec: 120, height: 110 })}
+      </div>
+    </div>
+    ${footer()}
+  </div>`;
+}
+
+/* ---------- per-pair path page ---------- */
+function pairPathPage(p, idx) {
+  const dirs = ["forward", "reverse"].filter(k => p.directions[k] && p.directions[k].traceroute);
+  const sections = dirs.map(k => {
+    const tr = p.directions[k].traceroute;
+    const maxAvg = Math.max(...tr.hops.map(h => h.avg)) || 1;
+    const rows = tr.hops.map(h => {
+      const unreachable = h.loss >= 100;
+      const st = unreachable ? "warn" : h.loss >= 5 ? "crit" : h.loss > 0 ? "warn" : "ok";
+      const barColor = st === "ok" ? "#10b981" : st === "warn" ? "#f59e0b" : "#ef4444";
+      const num = v => unreachable ? "—" : v.toFixed(1);
+      return `<tr class="${st === 'ok' ? '' : 'row-' + st}">
+        <td class="mono">${h.hop}</td>
+        <td class="mono">${esc(h.host)}</td>
+        <td class="mono" style="color:var(--nw-slate-500)">${esc(h.ip)}${h.asn !== "—" ? " · " + esc(h.asn) : ""}</td>
+        <td class="num mono">${h.loss.toFixed(1)}%</td>
+        <td><span class="bar-track"><span class="bar-fill" style="width:${Math.min(100, (h.avg / maxAvg) * 100)}%;background:${barColor}"></span></span></td>
+        <td class="num mono">${h.sent}</td>
+        <td class="num mono">${num(h.last)}</td>
+        <td class="num mono"><b>${num(h.avg)}</b></td>
+        <td class="num mono">${num(h.best)}</td>
+        <td class="num mono">${num(h.worst)}</td>
+        <td class="num mono">${num(h.stdev)}</td>
+      </tr>`;
+    }).join("");
+    return `
+      <div class="section">
+        <div class="section-title">Path ${dirLabel(p, k)}</div>
+        <table>
+          <thead><tr>
+            <th style="width:24px">#</th><th>Host</th><th>IP / ASN</th>
+            <th class="num">Loss</th><th style="width:58px"></th><th class="num">Sent</th>
+            <th class="num">Last</th><th class="num">Avg</th><th class="num">Best</th><th class="num">Worst</th><th class="num">StDev</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="section-note">${esc(tr.protocol)} — ${esc(tr.note)}</div>
+      </div>`;
+  }).join("");
+
+  const fwdTr = p.directions.forward && p.directions.forward.traceroute;
+  const hopChart = fwdTr ? `
+    <div class="section">
+      <div class="section-title">Per-Hop Average Latency — forward path (ms)</div>
+      <div class="chart-box">${barChartSVG(
+        fwdTr.hops.filter(h => h.loss < 100).map(h => ({
+          label: "hop " + h.hop, v: h.avg,
+          color: h.loss >= 5 ? "#ef4444" : h.loss > 0 ? "#f59e0b" : "#3b82f6"
+        })), { height: 126 })}
+      </div>
+    </div>` : "";
+
+  return `
+  <div class="page">
+    ${miniHeader("Path Analysis (MTR) — " + p.target.name)}
+    ${sections}
+    ${hopChart}
+    ${footer()}
+  </div>`;
+}
+
+/* ---------- assemble ---------- */
+(function render() {
+  let html = overviewPage();
+  REPORT_DATA.pairs.forEach((p, i) => {
+    html += pairMetricsPage(p, i);
+    html += pairPathPage(p, i);
+  });
+  document.getElementById("report-root").innerHTML = html;
+  const pages = document.querySelectorAll(".page");
+  pages.forEach((pg, i) => {
+    const n = pg.querySelector(".pageno");
+    if (n) n.textContent = `Page ${i + 1} of ${pages.length}`;
+  });
+})();
+</script>
+</body>
+</html>

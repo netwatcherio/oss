@@ -98,6 +98,27 @@ export const WorkspaceService = {
         return data;
     },
 
+    /**
+     * Fetch the live workspace-wide voice-quality report as a JSON
+     * payload shaped like the multi.html template's `REPORT_DATA`.
+     * The panel renders this via the workspace voice report view.
+     */
+    async fetchVoiceReportData(
+        workspaceId: number | string,
+        options: number | { from: Date; to: Date } = 7
+    ): Promise<import('@/components/voice-report/types').VoiceReportData> {
+        const params: string[] = [];
+        if (typeof options === 'number') {
+            params.push(`time_range_days=${options}`);
+        } else {
+            params.push(`from=${options.from.toISOString()}`);
+            params.push(`to=${options.to.toISOString()}`);
+        }
+        const url = `/workspaces/${workspaceId}/reports/voice/data?${params.join('&')}`;
+        const { data } = await request.get<import('@/components/voice-report/types').VoiceReportData>(url);
+        return data;
+    },
+
     // ---- Members ----
     async listMembers(workspaceId: number | string) {
         const { data } = await request.get<ListResponse<Member>>(`/workspaces/${workspaceId}/members`);
@@ -251,6 +272,28 @@ export const AgentService = {
         }
         url += `?${params.join('&')}`;
         const { data } = await request.get<Blob>(url, { responseType: 'blob' });
+        return data;
+    },
+
+    /**
+     * Fetch the live voice-quality report data for a specific agent as
+     * a JSON payload shaped like the templates'
+     * `REPORT_DATA`. The panel renders this directly via the new
+     * `voice-report` view components.
+     */
+    async fetchAgentReportData(
+        agentId: number | string,
+        options: number | { from: Date; to: Date } = 7
+    ): Promise<import('@/components/voice-report/types').VoiceReportData> {
+        const params: string[] = [];
+        if (typeof options === 'number') {
+            params.push(`time_range_days=${options}`);
+        } else {
+            params.push(`from=${options.from.toISOString()}`);
+            params.push(`to=${options.to.toISOString()}`);
+        }
+        const url = `/agents/${agentId}/reports/agent_detail/data?${params.join('&')}`;
+        const { data } = await request.get<import('@/components/voice-report/types').VoiceReportData>(url);
         return data;
     },
 };
@@ -648,6 +691,27 @@ export const ProbeService = {
                 error?: string;
             }>;
         }>(`/workspaces/${workspaceId}/probes/copy`, input);
+        return data;
+    },
+
+    /**
+     * Fetch the live voice-quality report data for a single probe as
+     * a JSON payload shaped like the templates' `REPORT_DATA`. The
+     * panel renders this via the per-probe voice report view.
+     */
+    async fetchProbeReportData(
+        probeId: number | string,
+        options: number | { from: Date; to: Date } = 7
+    ): Promise<import('@/components/voice-report/types').VoiceReportData> {
+        const params: string[] = [];
+        if (typeof options === 'number') {
+            params.push(`time_range_days=${options}`);
+        } else {
+            params.push(`from=${options.from.toISOString()}`);
+            params.push(`to=${options.to.toISOString()}`);
+        }
+        const url = `/probes/${probeId}/reports/voice/data?${params.join('&')}`;
+        const { data } = await request.get<import('@/components/voice-report/types').VoiceReportData>(url);
         return data;
     },
 };

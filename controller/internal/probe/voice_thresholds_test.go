@@ -11,8 +11,10 @@ import (
 func TestVoiceThresholdsMergeOverlayNoNil(t *testing.T) {
 	base := VoiceDefaultThresholds
 	out := base.MergeOverlay(nil)
-	if out != base {
-		t.Errorf("nil overlay should return base; got %+v", out)
+	// Compare key scalar fields (the struct now contains a map and
+	// is therefore uncomparable with ==).
+	if out.WarningJitterMs != base.WarningJitterMs || out.Codec != base.Codec {
+		t.Errorf("nil overlay should return base; got %+v vs %+v", out, base)
 	}
 }
 
@@ -139,10 +141,10 @@ func TestDetectJitterAnomaliesUsesThresholds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := &VoicePathMetrics{
-				Direction:  VoicePathForward,
-				ProbeID:    1,
-				JitterAvg:  tc.jitter,
-				MosScore:   4.0,
+				Direction:   VoicePathForward,
+				ProbeID:     1,
+				JitterAvg:   tc.jitter,
+				MosScore:    4.0,
 				SampleCount: 100,
 			}
 			issues := detectJitterAnomalies(path, nil, VoicePathForward, "test", tc.thresholds)
@@ -179,10 +181,10 @@ func TestDetectPacketLossAnomaliesUsesThresholds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := &VoicePathMetrics{
-				Direction:  VoicePathForward,
-				ProbeID:    1,
-				PacketLoss: tc.loss,
-				MosScore:   4.0,
+				Direction:   VoicePathForward,
+				ProbeID:     1,
+				PacketLoss:  tc.loss,
+				MosScore:    4.0,
 				SampleCount: 100,
 			}
 			issues := detectPacketLossAnomalies(path, nil, VoicePathForward, "test", tc.thresholds)

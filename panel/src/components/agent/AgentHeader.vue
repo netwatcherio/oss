@@ -66,17 +66,23 @@ const agentStatus = useAgentStatus();
       </div>
 
       <!-- Voice Quality Report Button -->
+      <router-link
+        v-if="agent.id && workspace.id"
+        :to="`/workspaces/${agent.workspace_id}/agents/${agent.id}/voice-report`"
+        class="btn btn-outline-info"
+        title="Open the live Voice Quality Report"
+      >
+        <i class="bi bi-file-earmark-text"></i>
+        <span class="d-none d-sm-inline">&nbsp;View Report</span>
+      </router-link>
       <button
         v-if="agent.id && workspace.id"
-        class="btn btn-outline-info"
-        :class="{ 'generating': isGeneratingReport }"
-        :disabled="isGeneratingReport"
+        class="btn btn-outline-secondary"
         @click="emit('voiceReport')"
         title="Download Voice Quality Report (PDF)"
       >
-        <i v-if="isGeneratingReport" class="bi bi-arrow-repeat spin-animation"></i>
-        <i v-else class="bi bi-file-earmark-pdf"></i>
-        <span class="d-none d-sm-inline">&nbsp;{{ isGeneratingReport ? 'Generating...' : 'Voice Report' }}</span>
+        <i class="bi bi-file-earmark-pdf"></i>
+        <span class="d-none d-sm-inline">&nbsp;PDF</span>
       </button>
 
       <!-- Share Button -->

@@ -4482,6 +4482,53 @@ type VoicePathMetrics struct {
 	SampleCount     int                `json:"sample_count"`
 	MosContributors []string           `json:"mos_contributing_factors"` // e.g., "latency>150ms", "jitter>20ms"
 	CongestionLevel CongestionLevel    `json:"congestion_level"`
+
+	// Burst-loss metrics captured from the agent's TrafficSim cycle
+	// (max consecutive loss packets, total bursts in window). Surfaced
+	// in the report and consumed by the burst-loss heuristic.
+	MaxConsecutiveLoss int `json:"max_consecutive_loss,omitempty"`
+	TotalBursts        int `json:"total_bursts,omitempty"`
+}
+
+// VoicePairSummary is the voice-quality report view of a single
+// source-agent ↔ target pair. It is the per-pair shape that the panel
+// renders in `voice-quality-report-multi.html`. One pair = one probe
+// with optional forward/reverse directions.
+type VoicePairSummary struct {
+	ID             string              `json:"id"`
+	Agent          AgentRef            `json:"agent"`
+	Target         TargetRef           `json:"target"`
+	Forward        *VoicePathMetrics   `json:"forward,omitempty"`
+	Reverse        *VoicePathMetrics   `json:"reverse,omitempty"`
+	Issues         []VoiceQualityIssue `json:"issues"`
+	Baseline       *BaselineDelta      `json:"baseline,omitempty"`
+	Trends         *VoiceTrends        `json:"trends,omitempty"`
+	RouteSignals   []RouteSignal       `json:"route_signals,omitempty"`
+	Thresholds     VoiceThresholds     `json:"thresholds"`
+	OverallMos     float64             `json:"overall_mos"`
+	OverallGrade   string              `json:"overall_grade"`
+	Recommendation string              `json:"recommendation,omitempty"`
+	TimePattern    string              `json:"time_pattern,omitempty"`
+}
+
+// AgentRef is a minimal agent reference embedded in VoicePairSummary.
+// Avoids pulling the full agent row into the JSON payload.
+type AgentRef struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	IP       string `json:"ip,omitempty"`
+	Location string `json:"location,omitempty"`
+}
+
+// TargetRef describes the remote end of a voice pair. Either AgentID
+// is set (when the target is a known netwatcher agent) or Host/IP are
+// set (when it's an arbitrary SIP/VoIP endpoint).
+type TargetRef struct {
+	Name      string `json:"name"`
+	Host      string `json:"host,omitempty"`
+	IP        string `json:"ip,omitempty"`
+	AgentID   uint   `json:"agent_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 // VoiceBucket is one time-bucketed series sample used for the
@@ -4552,9 +4599,9 @@ type RouteSignal struct {
 // VoiceQualityIssue is a detected voice quality abnormality
 type VoiceQualityIssue struct {
 	ID              string             `json:"id"`
-	Severity        string             `json:"severity"` // warning, critical
+	Severity        string             `json:"severity"` // info, warning, critical
 	Title           string             `json:"title"`
-	Category        string             `json:"category"` // jitter_spike, packet_loss, latency_degradation, asymmetry, out_of_order
+	Category        string             `json:"category"` // jitter_spike, packet_loss, latency_degradation, asymmetry, out_of_order, burst_loss
 	AffectedPath    VoicePathDirection `json:"affected_path"`
 	TargetAgentName string             `json:"target_agent_name"`
 	SuspectedCause  string             `json:"suspected_cause"`
@@ -4566,6 +4613,28 @@ type VoiceQualityIssue struct {
 	MosBefore       float64            `json:"mos_before"`
 	MosAfter        float64            `json:"mos_after"`
 	Recommendations []string           `json:"recommendations"`
+
+	// Heuristic enrichment (populated by the new detectors):
+	//
+	// LossPattern classifies the temporal shape of packet-loss issues
+	// once we have enough time-series samples: "burst", "steady", or
+	// "mixed". Empty when the burst detector didn't run.
+	LossPattern string `json:"loss_pattern,omitempty"`
+	// LikelyHop is the MTR hop index most strongly correlated with this
+	// issue (0 when no hop correlation is available). Populated by
+	// correlateWithRoute.
+	LikelyHop int `json:"likely_hop,omitempty"`
+	// HopEvidence is a human-readable summary of what the correlated
+	// hop showed during the issue's window.
+	HopEvidence string `json:"hop_evidence,omitempty"`
+	// DurationBuckets is how many of the time-series buckets in the
+	// analysis window the issue was present in. Used by the severity
+	// scorer to factor in "how persistent" the issue was.
+	DurationBuckets int `json:"duration_buckets,omitempty"`
+	// TotalBuckets is the size of the bucket series the duration is
+	// computed against, so the panel can render "issue present in N/M
+	// buckets" without a second pass.
+	TotalBuckets int `json:"total_buckets,omitempty"`
 }
 
 // VoiceQualitySummary is the complete voice quality assessment for an agent.
@@ -4611,6 +4680,13 @@ type VoiceQualitySummary struct {
 	// point the operator at workspace-wide issues (e.g., a peering
 	// problem affecting multiple agents).
 	WorkspaceContext *WorkspaceIncidentContext `json:"workspace_context,omitempty"`
+
+	// Per-probe / per-pair rollup. One entry per (source-agent, target)
+	// tuple, with both forward and reverse directions and the per-pair
+	// issue list. This is the shape the multi-target voice report
+	// template renders against; for single-target agents it has one
+	// entry.
+	Pairs []VoicePairSummary `json:"pairs,omitempty"`
 
 	Issues         []VoiceQualityIssue `json:"issues"`
 	TimePattern    string              `json:"time_pattern"` // "constant", "mixed", "periodic", "unknown"
@@ -4715,97 +4791,166 @@ func congestionLevelFromMetrics(jitter, loss, avgLat float64) CongestionLevel {
 // shared baseline) means multi-target agents get correct baselines
 // for each destination. `thresholds` controls the numeric cutoffs; if
 // nil, VoiceDefaultThresholds is used.
+//
+// Single-pair wrapper kept for backward compat with callers that
+// already have a specific forward/return pair in hand. New code that
+// has the full map of probe-level metrics should call
+// `detectVoiceQualityIssuesPerPair` directly so that the per-pair
+// issue list is preserved (rather than collapsed onto the
+// worst-offender).
 func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics, targetAgentName string, thresholds *VoiceThresholds) []VoiceQualityIssue {
 	t := VoiceDefaultThresholds
 	if thresholds != nil {
 		t = *thresholds
 	}
-	var issues []VoiceQualityIssue
+	// Apply codec-aware scaling before running the detectors so each
+	// metric is judged against the codec's tolerance envelope.
+	t = EffectiveThresholds(t)
 
 	baselineFwd := baselineFor(forward, baselineByProbeID)
 	baselineRet := baselineFor(returnPath, baselineByProbeID)
 
-	// 1. Jitter spike detection (forward)
+	var issues []VoiceQualityIssue
 	if forward != nil {
-		issues = append(issues, detectJitterAnomalies(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
-	}
-
-	// 2. Jitter spike detection (return)
-	if returnPath != nil {
-		issues = append(issues, detectJitterAnomalies(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
-	}
-
-	// 3. Packet loss burst detection
-	if forward != nil {
-		issues = append(issues, detectPacketLossAnomalies(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
+		issues = append(issues, detectVoiceQualityIssuesForDirection(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
 	}
 	if returnPath != nil {
-		issues = append(issues, detectPacketLossAnomalies(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
+		issues = append(issues, detectVoiceQualityIssuesForDirection(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
 	}
 
-	// 4. Latency-only degradation (high latency but no packet loss — route issue)
+	// Burst loss: needs the forward and return path objects to
+	// read maxConsecutiveLoss / totalBursts. Fires independently of
+	// the per-direction suite when those values cross the burst
+	// thresholds.
 	if forward != nil {
-		issues = append(issues, detectLatencyOnlyDegradation(forward, baselineFwd, VoicePathForward, targetAgentName, t)...)
+		issues = append(issues, detectBurstLoss(forward, VoicePathForward, targetAgentName)...)
 	}
 	if returnPath != nil {
-		issues = append(issues, detectLatencyOnlyDegradation(returnPath, baselineRet, VoicePathReturn, targetAgentName, t)...)
+		issues = append(issues, detectBurstLoss(returnPath, VoicePathReturn, targetAgentName)...)
 	}
 
-	// 5. Out of sequence / packet reordering
-	if forward != nil && forward.OutOfSequence > t.OutOfSequencePct {
-		issues = append(issues, VoiceQualityIssue{
-			ID:              fmt.Sprintf("out_of_sequence_%d_forward", forward.ProbeID),
-			Severity:        "warning",
-			Title:           fmt.Sprintf("Packet reordering detected on forward path to %s", targetAgentName),
-			Category:        "out_of_order",
-			AffectedPath:    VoicePathForward,
-			TargetAgentName: targetAgentName,
-			SuspectedCause:  "Packet reordering can indicate ECMP load balancing, suboptimal routing, or a problematic middlebox",
-			Evidence: []string{
-				fmt.Sprintf("Out of sequence: %.2f%%", forward.OutOfSequence),
-				fmt.Sprintf("Duplicates: %.2f%%", forward.Duplicates),
-				fmt.Sprintf("Jitter: %.1fms", forward.JitterAvg),
-			},
-			Recommendations: []string{
-				"Run MTR with TCP mode (mtr -T) to check for ECMP hashing issues",
-				"Compare route at different times to identify unstable hops",
-			},
-		})
-	}
-	if returnPath != nil && returnPath.OutOfSequence > t.OutOfSequencePct {
-		issues = append(issues, VoiceQualityIssue{
-			ID:              fmt.Sprintf("out_of_sequence_%d_return", returnPath.ProbeID),
-			Severity:        "warning",
-			Title:           fmt.Sprintf("Packet reordering detected on return path from %s", targetAgentName),
-			Category:        "out_of_order",
-			AffectedPath:    VoicePathReturn,
-			TargetAgentName: targetAgentName,
-			SuspectedCause:  "Asymmetric return routing may cause packet reordering",
-			Evidence: []string{
-				fmt.Sprintf("Out of sequence: %.2f%%", returnPath.OutOfSequence),
-				fmt.Sprintf("Duplicates: %.2f%%", returnPath.Duplicates),
-			},
-			Recommendations: []string{
-				"Check if return path uses different ISP or routing path",
-			},
-		})
-	}
-
-	// 6. Asymmetric path degradation (forward good, return bad — or vice versa)
+	// Asymmetry needs both directions in hand; only fires when both are present.
 	if forward != nil && returnPath != nil {
 		issues = append(issues, detectAsymmetricVoiceDegradation(forward, returnPath, targetAgentName, t)...)
 	}
 
-	// 7. Loss-pattern classification (burst vs steady) — fires only when
-	// there is at least one loss-related issue and time-bucketed data is
-	// available. Done after the main loss detection so we can decorate
-	// existing issues rather than emit a new one (operators read the
-	// pattern alongside the threshold breach).
-	if len(issues) > 0 {
-		annotateLossPatterns(issues, forward, returnPath)
+	return issues
+}
+
+// detectVoiceQualityIssuesPerPair runs the full voice-issue heuristic
+// suite against every probe in `forwardMap` and `reverseMap`,
+// returning one issue slice per probe ID. The detector set is the same
+// as the single-pair version; the per-probe shape lets the multi-target
+// report show issues per destination without collapsing onto the
+// worst-offender.
+//
+// `targetByProbeID` is the human-readable target name for each probe
+// (most probes point at a single target; if absent the probe ID is
+// used in the issue titles).
+//
+// The function is the new canonical entry point — the single-pair
+// version above is now a thin wrapper that calls
+// detectVoiceQualityIssuesForDirection per direction.
+func detectVoiceQualityIssuesPerPair(forwardMap, reverseMap map[uint]*VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics, targetByProbeID map[uint]string, thresholds *VoiceThresholds) map[uint][]VoiceQualityIssue {
+	t := VoiceDefaultThresholds
+	if thresholds != nil {
+		t = *thresholds
+	}
+	t = EffectiveThresholds(t)
+	out := make(map[uint][]VoiceQualityIssue)
+
+	for probeID, fwd := range forwardMap {
+		if fwd == nil {
+			continue
+		}
+		fwd.Direction = VoicePathForward
+		targetName := targetNameFor(probeID, targetByProbeID, fwd)
+		base := baselineFor(fwd, baselineByProbeID)
+		out[probeID] = append(out[probeID], detectVoiceQualityIssuesForDirection(fwd, base, VoicePathForward, targetName, t)...)
+		out[probeID] = append(out[probeID], detectBurstLoss(fwd, VoicePathForward, targetName)...)
+	}
+
+	for probeID, rev := range reverseMap {
+		if rev == nil {
+			continue
+		}
+		rev.Direction = VoicePathReturn
+		targetName := targetNameFor(probeID, targetByProbeID, rev)
+		base := baselineFor(rev, baselineByProbeID)
+		// Asymmetry detection pairs the return path with its matching
+		// forward path on the same probe, when one exists.
+		if fwd, ok := forwardMap[probeID]; ok && fwd != nil {
+			fwdBase := baselineFor(fwd, baselineByProbeID)
+			out[probeID] = append(out[probeID], detectAsymmetricVoiceDegradation(fwd, rev, targetName, t)...)
+			_ = fwdBase
+		}
+		out[probeID] = append(out[probeID], detectVoiceQualityIssuesForDirection(rev, base, VoicePathReturn, targetName, t)...)
+		out[probeID] = append(out[probeID], detectBurstLoss(rev, VoicePathReturn, targetName)...)
+	}
+
+	return out
+}
+
+// detectVoiceQualityIssuesForDirection runs the single-direction
+// suite (jitter, loss, latency-only, OOO) and is shared between the
+// single-pair and per-pair entry points.
+func detectVoiceQualityIssuesForDirection(path, baseline *VoicePathMetrics, direction VoicePathDirection, targetAgentName string, t VoiceThresholds) []VoiceQualityIssue {
+	var issues []VoiceQualityIssue
+	if path == nil {
+		return issues
+	}
+
+	issues = append(issues, detectJitterAnomalies(path, baseline, direction, targetAgentName, t)...)
+	issues = append(issues, detectPacketLossAnomalies(path, baseline, direction, targetAgentName, t)...)
+	issues = append(issues, detectLatencyOnlyDegradation(path, baseline, direction, targetAgentName, t)...)
+
+	// Out of sequence / packet reordering
+	if path.OutOfSequence > t.OutOfSequencePct {
+		dir := "forward"
+		cause := "Packet reordering can indicate ECMP load balancing, suboptimal routing, or a problematic middlebox"
+		recs := []string{
+			"Run MTR with TCP mode (mtr -T) to check for ECMP hashing issues",
+			"Compare route at different times to identify unstable hops",
+		}
+		if direction == VoicePathReturn {
+			dir = "return"
+			cause = "Asymmetric return routing may cause packet reordering"
+			recs = []string{"Check if return path uses different ISP or routing path"}
+		}
+		issues = append(issues, VoiceQualityIssue{
+			ID:              fmt.Sprintf("out_of_sequence_%d_%s", path.ProbeID, direction),
+			Severity:        "warning",
+			Title:           fmt.Sprintf("Packet reordering detected on %s path to %s", dir, targetAgentName),
+			Category:        "out_of_order",
+			AffectedPath:    direction,
+			TargetAgentName: targetAgentName,
+			SuspectedCause:  cause,
+			Evidence: []string{
+				fmt.Sprintf("Out of sequence: %.2f%%", path.OutOfSequence),
+				fmt.Sprintf("Duplicates: %.2f%%", path.Duplicates),
+				fmt.Sprintf("Jitter: %.1fms", path.JitterAvg),
+			},
+			Recommendations: recs,
+		})
 	}
 
 	return issues
+}
+
+// targetNameFor resolves a probe ID to a target name, falling back to
+// the metrics' own TargetAgentName when the per-probe name map is
+// silent. Used by detectVoiceQualityIssuesPerPair so the issue
+// titles always read against a real destination.
+func targetNameFor(probeID uint, byProbeID map[uint]string, m *VoicePathMetrics) string {
+	if byProbeID != nil {
+		if name, ok := byProbeID[probeID]; ok && name != "" {
+			return name
+		}
+	}
+	if m != nil && m.TargetAgentName != "" {
+		return m.TargetAgentName
+	}
+	return fmt.Sprintf("probe-%d", probeID)
 }
 
 // baselineFor returns the matching baseline for a path from the
@@ -4819,19 +4964,78 @@ func baselineFor(path *VoicePathMetrics, byProbeID map[uint]*VoicePathMetrics) *
 
 // annotateLossPatterns inspects the per-direction time series (if
 // present in the path's MosContributors or a separate channel) and
-// tags existing loss issues with burst vs steady. Today this is a
-// placeholder for the time-series signal that
-// fetchVoicePathSeries will provide; we mark the issue with a
-// recommendation modifier so the report text reflects that we
-// looked. Real burst detection happens in detectBurstLossPattern.
+// tags existing loss issues with burst vs steady. The actual
+// classification lives in detectBurstLossPattern in voice_burst.go;
+// this is the wiring point so the call site stays stable when the
+// burst detector is upgraded.
 func annotateLossPatterns(issues []VoiceQualityIssue, forward, returnPath *VoicePathMetrics) {
-	// No-op stub — burst detection runs in detectBurstLossPattern
-	// when time series data is available. We keep this hook so the
-	// call site doesn't have to change when the burst detector is
-	// wired through the series channel.
-	_ = issues
-	_ = forward
-	_ = returnPath
+	if len(issues) == 0 {
+		return
+	}
+	pattern := classifyLossPattern(forward, returnPath)
+	if pattern == "" {
+		return
+	}
+	for i := range issues {
+		if issues[i].Category != "packet_loss" && issues[i].Category != "burst_loss" {
+			continue
+		}
+		if issues[i].LossPattern == "" {
+			issues[i].LossPattern = pattern
+		}
+	}
+}
+
+// classifyLossPattern returns "burst", "steady", or "mixed" based on
+// the per-direction loss values. Empty when neither direction has
+// data. Real burst-vs-steady classification is the responsibility of
+// detectBurstLossPattern in voice_burst.go; this is a quick
+// categorical hint for the issue annotation.
+//
+// For two values (forward + return), the coefficient-of-variation is
+// bounded at 1.0 — so a 5× ratio between fwd and rev is the practical
+// "burst" marker. We combine a max/min ratio check with the CV for
+// richer cases.
+func classifyLossPattern(forward, returnPath *VoicePathMetrics) string {
+	var samples []float64
+	if forward != nil && forward.SampleCount > 0 {
+		samples = append(samples, forward.PacketLoss)
+	}
+	if returnPath != nil && returnPath.SampleCount > 0 {
+		samples = append(samples, returnPath.PacketLoss)
+	}
+	if len(samples) < 2 {
+		return ""
+	}
+	mean, stddev := meanStddev(samples)
+	if mean <= 0 {
+		return ""
+	}
+	cv := stddev / mean
+
+	// Max/min ratio is the more intuitive burst signal for small
+	// samples. Two values can never have a CV > 1, but a 5x ratio
+	// between fwd and rev clearly indicates one direction is the
+	// outlier.
+	max, min := samples[0], samples[0]
+	for _, v := range samples {
+		if v > max {
+			max = v
+		}
+		if v < min {
+			min = v
+		}
+	}
+	ratio := max / min
+
+	switch {
+	case ratio >= 5 || cv >= 0.9:
+		return "burst"
+	case ratio < 1.5 && cv < 0.25:
+		return "steady"
+	default:
+		return "mixed"
+	}
 }
 
 // detectJitterAnomalies identifies jitter spikes above voice quality thresholds
@@ -5404,8 +5608,14 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		log.Warnf("[voice] failed to find reverse agent probes for agent %d: %v", agentID, err)
 	}
 
-	// Build reverse probe metrics map keyed by source agent ID
+	// Build reverse probe metrics map keyed by probe ID. Pair matching
+	// for the per-pair summary uses probe ID (the same probe handles
+	// both directions when the agent pair is bidirectional).
 	reverseMetrics := make(map[uint]*VoicePathMetrics)
+	// reverseBySourceAgent keeps the legacy key (source agent ID) for
+	// the worst-offender selection, which has historically operated on
+	// "remote source agent" rather than probe.
+	reverseBySourceAgent := make(map[uint]*VoicePathMetrics)
 	for _, rap := range reverseAgentProbes {
 		if rap.ID == 0 {
 			continue
@@ -5428,7 +5638,10 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 				metrics.ProbeID = rap.ID
 				metrics.ProbeType = string(rap.Type)
 				metrics.Direction = VoicePathReturn
-				reverseMetrics[sourceAgentID] = metrics
+				reverseMetrics[rap.ID] = metrics
+				if _, exists := reverseBySourceAgent[sourceAgentID]; !exists {
+					reverseBySourceAgent[sourceAgentID] = metrics
+				}
 			}
 		}
 	}
@@ -5443,7 +5656,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 			worstForward = m
 		}
 	}
-	for _, m := range reverseMetrics {
+	for _, m := range reverseBySourceAgent {
 		if worstReturn == nil || m.MosScore < worstReturn.MosScore {
 			worstReturn = m
 		}
@@ -5472,6 +5685,28 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// Detect voice quality issues (now with per-probe baselines and
 	// configurable thresholds).
 	issues := detectVoiceQualityIssues(worstForward, worstReturn, baselineByProbeID, targetName, &thresholds)
+
+	// Per-probe / per-pair detection. Runs the same suite against every
+	// probe in the agent's metric maps, so the multi-target voice report
+	// can show issues per destination rather than collapsed onto the
+	// worst-offender. Built off `forwardMetrics` (key = probe ID) and
+	// `reverseMetrics` (also key = probe ID, post-refactor).
+	targetByProbeID := buildTargetNameByProbeID(trafficSimProbes, agentObj.Name)
+	perProbeIssues := detectVoiceQualityIssuesPerPair(forwardMetrics, reverseMetrics, baselineByProbeID, targetByProbeID, &thresholds)
+
+	// MTR hop correlation: fetch the MTR trace for the worst-offender
+	// forward probe and tag issues with the most-degraded hop in the
+	// same time window. Failure here is non-fatal — the report just
+	// doesn't get the hop evidence line.
+	if worstForward != nil {
+		if hopSummaries := fetchMtrHopSummariesForVoice(ctx, ch, agentID, worstForward, from); len(hopSummaries) > 0 {
+			correlateWithRoute(issues, hopSummaries)
+			for probeID, list := range perProbeIssues {
+				correlateWithRoute(list, hopSummaries)
+				perProbeIssues[probeID] = list
+			}
+		}
+	}
 
 	// Sample-weighted aggregate metrics (the "honest" average across
 	// all probes, not just the worst one).
@@ -5547,6 +5782,12 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// Compute per-probe baseline deltas for the trend arrow.
 	baselineComparison := computeBaselineComparison(allProbes, baselineByProbeID)
 
+	// Build per-pair summaries (the multi-target report view). One
+	// entry per forward probe, with the matching reverse probe (if
+	// any) attached. Pair-level issues are taken from perProbeIssues;
+	// for the typical single-pair case this is just one entry.
+	pairs := buildVoicePairSummaries(forwardMetrics, reverseMetrics, perProbeIssues, baselineByProbeID, trafficSimProbes, agentObj, agentID, thresholds)
+
 	// Pull workspace-level incidents for context. We re-use the helper
 	// from analysis.go that returns the full WorkspaceAnalysis and
 	// filter down to incidents touching this agent.
@@ -5568,6 +5809,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		AggregateForward:   aggForward,
 		AggregateReturn:    aggReturn,
 		Probes:             probeList,
+		Pairs:              pairs,
 		Trends:             trends,
 		BaselineComparison: baselineComparison,
 		WorkspaceContext:   workspaceContext,
@@ -5577,6 +5819,184 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		ThresholdsUsed:     &thresholds,
 		GeneratedAt:        time.Now().UTC(),
 	}, nil
+}
+
+// buildTargetNameByProbeID resolves each forward probe's target to a
+// human-readable name. Used by detectVoiceQualityIssuesPerPair to
+// populate issue titles per destination.
+//
+// Note: target agent name resolution is best-effort. When the target
+// is an arbitrary SIP endpoint (no remote agent), the probe's own
+// Target field (IP/host) is used. When both exist, the agent name
+// wins for readability.
+func buildTargetNameByProbeID(probes []Probe, fallbackSourceName string) map[uint]string {
+	out := make(map[uint]string, len(probes))
+	for _, p := range probes {
+		if p.ID == 0 {
+			continue
+		}
+		if len(p.Targets) == 0 {
+			continue
+		}
+		t := p.Targets[0]
+		name := ""
+		if t.AgentID != nil && *t.AgentID != 0 {
+			if ta, err := agent.GetAgentByID(context.Background(), nil, *t.AgentID); err == nil && ta != nil {
+				name = ta.Name
+			}
+		}
+		if name == "" {
+			name = t.Target
+		}
+		if name == "" {
+			name = fallbackSourceName
+		}
+		out[p.ID] = name
+	}
+	return out
+}
+
+// buildVoicePairSummaries assembles the per-pair rollup for the
+// multi-target voice report. One VoicePairSummary per forward probe;
+// the matching reverse probe (same probe ID) is attached when present.
+//
+// Pair-level issues are the union of the per-probe detection runs
+// (jitter/loss/latency/OOO + asymmetry). The overall MOS per pair is
+// the worse of forward vs reverse, weighted slightly toward forward
+// (consistent with the existing ComputeAgentVoiceQuality weighting).
+func buildVoicePairSummaries(
+	forwardMetrics map[uint]*VoicePathMetrics,
+	reverseMetrics map[uint]*VoicePathMetrics,
+	perProbeIssues map[uint][]VoiceQualityIssue,
+	baselineByProbeID map[uint]*VoicePathMetrics,
+	probes []Probe,
+	sourceAgent *agent.Agent,
+	sourceAgentID uint,
+	thresholds VoiceThresholds,
+) []VoicePairSummary {
+	out := make([]VoicePairSummary, 0, len(forwardMetrics))
+
+	// Index probes by ID for target lookup.
+	probeByID := make(map[uint]Probe, len(probes))
+	for _, p := range probes {
+		if p.ID == 0 {
+			continue
+		}
+		probeByID[p.ID] = p
+	}
+
+	for probeID, fwd := range forwardMetrics {
+		if fwd == nil {
+			continue
+		}
+		probe, ok := probeByID[probeID]
+		if !ok {
+			continue
+		}
+
+		pair := VoicePairSummary{
+			ID:         fmt.Sprintf("pair-%d-%d", sourceAgentID, probeID),
+			Forward:    fwd,
+			Reverse:    reverseMetrics[probeID],
+			Issues:     perProbeIssues[probeID],
+			Thresholds: thresholds,
+		}
+		pair.Agent = AgentRef{
+			ID:       sourceAgent.ID,
+			Name:     sourceAgent.Name,
+			IP:       sourceAgent.PublicIPOverride,
+			Location: sourceAgent.Location,
+		}
+		// Resolve target
+		pair.Target = resolveProbeTarget(probe, sourceAgent.Name)
+
+		// Pair-level MOS: weighted fwd+rev (0.5/0.5; we keep the
+		// forward preference from the per-agent rollup but at the
+		// pair level it matters less).
+		var mos, weight float64
+		if fwd != nil && fwd.SampleCount > 0 {
+			mos += fwd.MosScore
+			weight++
+		}
+		if pair.Reverse != nil && pair.Reverse.SampleCount > 0 {
+			mos += pair.Reverse.MosScore
+			weight++
+		}
+		if weight > 0 {
+			pair.OverallMos = mos / weight
+		}
+		pair.OverallGrade = voiceGradeFromMos(pair.OverallMos)
+
+		// Per-pair baseline delta (forward direction is the typical
+		// primary; pair-level uses forward when available, falls back
+		// to reverse).
+		basePath := fwd
+		if pair.Reverse != nil && basePath == nil {
+			basePath = pair.Reverse
+		}
+		if basePath != nil {
+			if base, ok := baselineByProbeID[basePath.ProbeID]; ok && base != nil {
+				pair.Baseline = &BaselineDelta{
+					From:            time.Now().UTC().Add(-7 * 24 * time.Hour),
+					To:              time.Now().UTC(),
+					MosDelta:        basePath.MosScore - base.MosScore,
+					LatencyDeltaMs:  basePath.AvgLatency - base.AvgLatency,
+					JitterDeltaMs:   basePath.JitterAvg - base.JitterAvg,
+					LossDeltaPct:    basePath.PacketLoss - base.PacketLoss,
+					SampleCount:     basePath.SampleCount,
+					BaselineSamples: base.SampleCount,
+				}
+				switch {
+				case pair.Baseline.MosDelta > 0.1:
+					pair.Baseline.Trend = "improving"
+				case pair.Baseline.MosDelta < -0.1:
+					pair.Baseline.Trend = "worsening"
+				default:
+					pair.Baseline.Trend = "stable"
+				}
+			}
+		}
+
+		out = append(out, pair)
+	}
+
+	// Stable order: sort by descending MOS (worst first) so the report
+	// shows the most degraded pair at the top.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].OverallMos < out[j].OverallMos
+	})
+
+	return out
+}
+
+// resolveProbeTarget converts a probe's target into a TargetRef. When
+// the target is a known netwatcher agent, both host and agent info
+// are populated; otherwise only the SIP endpoint (host/IP/port).
+func resolveProbeTarget(p Probe, fallback string) TargetRef {
+	out := TargetRef{}
+	if len(p.Targets) == 0 {
+		out.Name = fallback
+		return out
+	}
+	t := p.Targets[0]
+	out.Host = t.Target
+	if t.AgentID != nil && *t.AgentID != 0 {
+		out.AgentID = *t.AgentID
+		if ta, err := agent.GetAgentByID(context.Background(), nil, *t.AgentID); err == nil && ta != nil {
+			out.AgentName = ta.Name
+			if out.Name == "" {
+				out.Name = ta.Name
+			}
+		}
+	}
+	if out.Name == "" {
+		if t.Target != "" {
+			out.Name = t.Target
+		} else {
+			out.Name = fallback
+		}
+	}
+	return out
 }
 
 // forwardSlice / reverseSlice are tiny helpers to drop the map keys
@@ -5793,6 +6213,87 @@ func workspaceSettingsFor(ctx context.Context, db *gorm.DB, agentID uint) []byte
 	return settings
 }
 
+// fetchMtrHopSummariesForVoice looks up the MTR hop data for the
+// probe the worst-offender voice path is running over, and converts
+// it to the small `MtrHopSummary` shape the voice hop correlator
+// needs.
+//
+// Returns nil when MTR data is unavailable (no row, query failure,
+// or no enriched hop details) — the voice report degrades cleanly
+// without hop evidence rather than failing the whole report.
+func fetchMtrHopSummariesForVoice(ctx context.Context, ch *sql.DB, agentID uint, path *VoicePathMetrics, from time.Time) []MtrHopSummary {
+	if path == nil || path.ProbeID == 0 {
+		return nil
+	}
+	// Best-effort fetch; failure logs and returns nil.
+	defer func() {
+		// MTR analysis can panic on malformed payloads (it reads
+		// untrusted JSON). Recover to keep the voice report
+		// resilient — the report is more valuable than missing hop
+		// evidence.
+		if r := recover(); r != nil {
+			log.Warnf("[voice] MTR hop correlation panicked: %v", r)
+		}
+	}()
+
+	agentIPToID, agentByID := buildAgentMaps(ctx, ch, []uint{agentID})
+	pathAnalysis, _, err := analyzeMtrForProbe(ctx, ch, []uint{agentID}, path.ProbeID, from, agentIPToID, agentByID)
+	if err != nil || pathAnalysis == nil {
+		return nil
+	}
+	out := make([]MtrHopSummary, 0, len(pathAnalysis.LatestHopsDetail))
+	for i, h := range pathAnalysis.LatestHopsDetail {
+		if h.IP == "" {
+			continue
+		}
+		out = append(out, MtrHopSummary{
+			HopNumber:    i + 1,
+			IP:           h.IP,
+			Hostname:     h.Hostname,
+			LossPct:      h.Loss,
+			AvgLatencyMs: h.Latency,
+		})
+	}
+	return out
+}
+
+// buildAgentMaps produces the agentIPToID and agentByID maps that
+// analyzeMtrForProbe expects. Walks the agent table once and
+// returns empty maps on failure (the MTR analyzer tolerates empty
+// maps).
+func buildAgentMaps(ctx context.Context, ch *sql.DB, agentIDs []uint) (map[string]uint, map[uint]agentInfo) {
+	ipToID := make(map[string]uint)
+	idToInfo := make(map[uint]agentInfo)
+	if ch == nil {
+		return ipToID, idToInfo
+	}
+	// Walk the agents table by id (best-effort — agentInfo is just
+	// used to label hops with human names).
+	idList := make([]string, 0, len(agentIDs))
+	for _, id := range agentIDs {
+		idList = append(idList, fmt.Sprintf("%d", id))
+	}
+	q := fmt.Sprintf(`
+SELECT id, name
+FROM agents
+WHERE id IN (%s)
+`, strings.Join(idList, ","))
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		return ipToID, idToInfo
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uint
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			continue
+		}
+		idToInfo[id] = agentInfo{ID: id, Name: name}
+	}
+	return ipToID, idToInfo
+}
+
 // fetchVoicePathMetrics fetches voice path metrics from ClickHouse for a given probe
 func fetchVoicePathMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*VoicePathMetrics, error) {
 	if len(agentIDs) == 0 {
@@ -5809,7 +6310,8 @@ SELECT
     avg_rtt, median_rtt, p95_rtt, p99_rtt,
     jitter_avg, jitter_median, jitter_p95,
     loss_pct, out_of_seq_pct, duplicate_pct,
-    mos_score, sample_count
+    mos_score, sample_count,
+    max_consecutive_loss, total_bursts
 FROM (
     SELECT 
         avg(average_rtt) as avg_rtt,
@@ -5823,7 +6325,9 @@ FROM (
         avg(out_of_seq_pct) as out_of_seq_pct,
         avg(duplicate_pct) as duplicate_pct,
         avg(mos_score) as mos_score,
-        count(*) as sample_count
+        count(*) as sample_count,
+        max(max_consecutive_loss) as max_consecutive_loss,
+        sum(total_bursts) as total_bursts
     FROM traffic_metrics
     WHERE agent_id IN (%s)
       AND probe_id = %d
@@ -5845,8 +6349,9 @@ FROM (
 	var m VoicePathMetrics
 	var avgRtt, medianRtt, p95Rtt, p99Rtt, jitterAvg, jitterMedian, jitterP95, lossPct, outOfSeqPct, duplicatePct, mosScore float64
 	var sampleCount int
+	var maxConsecutiveLoss, totalBursts uint64
 
-	if err := rows.Scan(&avgRtt, &medianRtt, &p95Rtt, &p99Rtt, &jitterAvg, &jitterMedian, &jitterP95, &lossPct, &outOfSeqPct, &duplicatePct, &mosScore, &sampleCount); err != nil {
+	if err := rows.Scan(&avgRtt, &medianRtt, &p95Rtt, &p99Rtt, &jitterAvg, &jitterMedian, &jitterP95, &lossPct, &outOfSeqPct, &duplicatePct, &mosScore, &sampleCount, &maxConsecutiveLoss, &totalBursts); err != nil {
 		return nil, err
 	}
 
@@ -5862,6 +6367,8 @@ FROM (
 	m.Duplicates = duplicatePct
 	m.MosScore = mosScore
 	m.SampleCount = sampleCount
+	m.MaxConsecutiveLoss = int(maxConsecutiveLoss)
+	m.TotalBursts = int(totalBursts)
 	m.MosContributors = mosContributingFactors(m.AvgLatency, m.P95Latency, m.JitterAvg, m.PacketLoss)
 	m.CongestionLevel = congestionLevelFromMetrics(m.JitterAvg, m.PacketLoss, m.AvgLatency)
 

@@ -1,0 +1,588 @@
+/* panel/src/components/voice-report/print.css
+ *
+ * Print stylesheet for the live voice report view. Mirrors the page
+ * chrome from `panel/template/voice-quality-report.html` and the
+ * `…-multi.html` so the on-screen view prints identically to the
+ * static templates. Imported once from VoiceReportView.vue.
+ */
+
+.vr-root {
+  --nw-primary: #3b82f6;
+  --nw-secondary: #10b981;
+  --nw-dark: #0a0e17;
+  --nw-slate-900: #111827;
+  --nw-slate-700: #334155;
+  --nw-slate-500: #64748b;
+  --nw-slate-400: #94a3b8;
+  --nw-slate-100: #f0f4f8;
+  --nw-success: #22c55e;
+  --nw-warning: #f59e0b;
+  --nw-danger: #ef4444;
+  --nw-gradient: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
+  --nw-purple: #8b5cf6;
+  --page-w: 8.5in;
+  color: var(--nw-slate-900);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 10pt;
+  line-height: 1.45;
+}
+
+.vr-root *,
+.vr-root *::before,
+.vr-root *::after {
+  box-sizing: border-box;
+}
+
+.vr-mono {
+  font-family: "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace;
+}
+
+.vr-page {
+  width: var(--page-w);
+  min-height: 11in;
+  margin: 0.35in auto;
+  background: #fff;
+  padding: 0.5in 0.55in;
+  box-shadow: 0 2px 14px rgba(10, 14, 23, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+
+.vr-page + .vr-page {
+  margin-top: 0.5in;
+}
+
+.vr-toolbar {
+  max-width: var(--page-w);
+  margin: 14px auto 0;
+  text-align: right;
+}
+
+.vr-toolbar button {
+  background: var(--nw-gradient);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vr-toolbar button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ---------- Header ---------- */
+.vr-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(90deg, #3b82f6, #10b981) 1;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.vr-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vr-brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--nw-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+
+.vr-brand-name {
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.vr-brand-name .tld {
+  color: var(--nw-primary);
+}
+
+.vr-brand-sub {
+  font-size: 7.5pt;
+  color: var(--nw-slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.vr-report-title {
+  text-align: right;
+}
+
+.vr-report-title h1 {
+  font-size: 14pt;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.vr-report-title .rid {
+  font-size: 8pt;
+  color: var(--nw-slate-500);
+}
+
+.vr-mini-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 2px solid var(--nw-slate-100);
+  padding-bottom: 6px;
+  margin-bottom: 14px;
+  font-size: 8pt;
+  color: var(--nw-slate-500);
+}
+
+.vr-mini-header b {
+  color: var(--nw-slate-900);
+  font-size: 9.5pt;
+}
+
+/* ---------- Meta grid ---------- */
+.vr-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.vr-meta-cell {
+  background: var(--nw-slate-100);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+.vr-meta-cell .k {
+  font-size: 6.8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--nw-slate-500);
+}
+
+.vr-meta-cell .v {
+  font-size: 9pt;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* ---------- Verdict banner ---------- */
+.vr-verdict {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  color: #fff;
+  background: var(--nw-dark);
+}
+
+.vr-mos-ring {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  flex: none;
+}
+
+.vr-mos-ring svg {
+  width: 86px;
+  height: 86px;
+  transform: rotate(-90deg);
+}
+
+.vr-mos-ring .val {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.vr-mos-ring .val b {
+  font-size: 15pt;
+  line-height: 1;
+}
+
+.vr-mos-ring .val span {
+  font-size: 6.4pt;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 2px;
+}
+
+.vr-verdict-body {
+  flex: 1;
+}
+
+.vr-verdict-body h2 {
+  font-size: 12pt;
+  margin: 0 0 2px 0;
+}
+
+.vr-verdict-body p {
+  font-size: 8.5pt;
+  opacity: 0.85;
+  max-width: 46em;
+  margin: 0;
+}
+
+.vr-grade-chip {
+  flex: none;
+  text-align: center;
+  border-radius: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.vr-grade-chip b {
+  font-size: 17pt;
+  display: block;
+  line-height: 1.1;
+}
+
+.vr-grade-chip span {
+  font-size: 6.6pt;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}
+
+/* ---------- KPI cards ---------- */
+.vr-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.vr-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px 9px;
+  border-top: 3px solid var(--nw-slate-400);
+}
+
+.vr-kpi.ok { border-top-color: var(--nw-success); }
+.vr-kpi.warn { border-top-color: var(--nw-warning); }
+.vr-kpi.crit { border-top-color: var(--nw-danger); }
+
+.vr-kpi .label {
+  font-size: 7.2pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--nw-slate-500);
+  display: flex;
+  justify-content: space-between;
+}
+
+.vr-kpi .value {
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 1px 0 0 0;
+}
+
+.vr-kpi .value small {
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: var(--nw-slate-500);
+}
+
+.vr-kpi .sub {
+  font-size: 7.4pt;
+  color: var(--nw-slate-500);
+}
+
+.vr-badge {
+  display: inline-block;
+  font-size: 6.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 20px;
+  padding: 1.5px 8px;
+  color: #fff;
+}
+
+.vr-badge.ok { background: var(--nw-success); }
+.vr-badge.warn { background: var(--nw-warning); }
+.vr-badge.crit { background: var(--nw-danger); }
+.vr-badge.info { background: var(--nw-slate-400); }
+
+/* ---------- Sections ---------- */
+.vr-section {
+  margin-bottom: 16px;
+}
+
+.vr-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5pt;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.vr-section-title::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--nw-gradient);
+  display: inline-block;
+}
+
+.vr-section-note {
+  font-size: 7.6pt;
+  color: var(--nw-slate-500);
+  margin-top: 5px;
+}
+
+/* ---------- Tables ---------- */
+.vr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.4pt;
+}
+
+.vr-table thead th {
+  background: var(--nw-slate-900);
+  color: #fff;
+  text-align: left;
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 6px 8px;
+  font-weight: 600;
+}
+
+.vr-table thead th.num,
+.vr-table td.num {
+  text-align: right;
+}
+
+.vr-table tbody td {
+  padding: 5.5px 8px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.vr-table tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.vr-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.vr-dot-ok { background: var(--nw-success); }
+.vr-dot-warn { background: var(--nw-warning); }
+.vr-dot-crit { background: var(--nw-danger); }
+
+.vr-row-warn td { background: #fffbeb !important; }
+.vr-row-crit td { background: #fef2f2 !important; }
+.vr-row-info td { background: #f8fafc !important; }
+
+/* ---------- Charts ---------- */
+.vr-chart-box {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px 6px;
+}
+
+.vr-chart-box + .vr-chart-box {
+  margin-top: 10px;
+}
+
+.vr-chart-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 7.6pt;
+  color: var(--nw-slate-500);
+  margin-bottom: 4px;
+}
+
+.vr-chart-head b {
+  color: var(--nw-slate-900);
+  font-size: 8.4pt;
+}
+
+.vr-legend {
+  display: flex;
+  gap: 12px;
+}
+
+.vr-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* ---------- Loss bar / hop bars ---------- */
+.vr-bar-track {
+  background: #eef2f7;
+  border-radius: 3px;
+  height: 8px;
+  width: 60px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.vr-bar-fill {
+  height: 8px;
+  border-radius: 3px;
+  display: block;
+}
+
+/* ---------- Thresholds reference ---------- */
+.vr-threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.vr-threshold-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 7.8pt;
+}
+
+.vr-threshold-card b {
+  display: block;
+  font-size: 8.4pt;
+  margin-bottom: 3px;
+}
+
+.vr-threshold-card .rng {
+  display: flex;
+  justify-content: space-between;
+  padding: 1.5px 0;
+  color: var(--nw-slate-700);
+}
+
+/* ---------- Page footer ---------- */
+.vr-page-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  font-size: 7pt;
+  color: var(--nw-slate-400);
+}
+
+/* ---------- Group / multi-target rows ---------- */
+.vr-table .vr-group-row td {
+  background: var(--nw-slate-100) !important;
+  font-weight: 700;
+  font-size: 7.4pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--nw-slate-700);
+  border-bottom: 1px solid #dbe4ee;
+}
+
+.vr-dir-arrow {
+  font-weight: 700;
+  color: var(--nw-primary);
+}
+
+.vr-dir-arrow.rev {
+  color: var(--nw-purple);
+}
+
+.vr-target-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--nw-slate-100);
+  border-left: 4px solid var(--nw-primary);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.vr-target-banner .t-name {
+  font-weight: 700;
+  font-size: 10.5pt;
+}
+
+.vr-target-banner .t-sub {
+  font-size: 7.6pt;
+  color: var(--nw-slate-500);
+}
+
+.vr-target-banner .t-mos {
+  text-align: right;
+}
+
+.vr-target-banner .t-mos b {
+  font-size: 13pt;
+}
+
+.vr-target-banner .t-mos span {
+  display: block;
+  font-size: 6.6pt;
+  color: var(--nw-slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.vr-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ---------- Print rules ---------- */
+@media print {
+  @page {
+    size: letter;
+    margin: 0.5in 0.55in;
+  }
+  html, body {
+    background: #fff !important;
+    font-size: 9.5pt !important;
+  }
+  .vr-root {
+    background: #fff !important;
+  }
+  .vr-toolbar {
+    display: none !important;
+  }
+  .vr-page {
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always;
+  }
+  .vr-page:last-child {
+    page-break-after: auto;
+  }
+}

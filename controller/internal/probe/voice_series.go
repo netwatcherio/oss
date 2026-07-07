@@ -11,6 +11,86 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// buildVoiceTrends assembles the VoiceTrends struct for the voice
+// report. Returns nil if there are no probes or no bucket data so the
+// JSON output stays clean.
+//
+// The Forward and Return series are now populated independently —
+// Forward from the agent's own TrafficSim rows, Return from rows the
+// remote source agent reports for the matching probe. The Combined
+// field is preserved for backward compat (it's the union of both,
+// bucketed together).
+func buildVoiceTrends(ctx context.Context, ch *sql.DB, agentID uint, probes []Probe, from, to time.Time, thresholds VoiceThresholds) *VoiceTrends {
+	// 1h buckets for windows up to 7 days, 4h buckets for longer.
+	bucketMin := 60
+	if to.Sub(from) > 7*24*time.Hour {
+		bucketMin = 240
+	}
+	forward, reverse := fetchVoicePathSeriesSplit(ctx, ch, agentID, probes, from, to, bucketMin)
+	if len(forward) == 0 && len(reverse) == 0 {
+		return nil
+	}
+
+	// Combined series = union by bucket (used by the legacy single-line
+	// chart and as a fallback for callers that don't care about
+	// direction).
+	combined := mergeBuckets(forward, reverse)
+
+	// Issue markers: the timestamps whose MOS is below
+	// (PoorMos - 0.1) — useful for the timeline chart overlay.
+	issueCutoff := thresholds.PoorMos - 0.1
+	issueBuckets := make([]string, 0, len(combined))
+	for _, b := range combined {
+		if b.Forward > 0 && b.Forward < issueCutoff {
+			issueBuckets = append(issueBuckets, b.Timestamp)
+		}
+	}
+
+	return &VoiceTrends{
+		BucketMinutes: bucketMin,
+		Forward:       forward,
+		Return:        reverse,
+		Combined:      combined,
+		IssueBuckets:  issueBuckets,
+	}
+}
+
+// mergeBuckets unions two parallel bucket series into one, averaging
+// the Forward field across both directions at matching timestamps.
+// Used by buildVoiceTrends to produce the Combined series.
+func mergeBuckets(forward, reverse []VoiceBucket) []VoiceBucket {
+	if len(forward) == 0 {
+		return reverse
+	}
+	if len(reverse) == 0 {
+		return forward
+	}
+	byKey := make(map[string]VoiceBucket, len(forward)+len(reverse))
+	for _, b := range forward {
+		byKey[b.Timestamp] = b
+	}
+	for _, b := range reverse {
+		if existing, ok := byKey[b.Timestamp]; ok {
+			merged := existing
+			if existing.Forward == 0 {
+				merged.Forward = b.Forward
+			} else if b.Forward != 0 {
+				merged.Forward = (existing.Forward + b.Forward) / 2
+			}
+			merged.Return = b.Forward
+			byKey[b.Timestamp] = merged
+		} else {
+			byKey[b.Timestamp] = b
+		}
+	}
+	out := make([]VoiceBucket, 0, len(byKey))
+	for _, b := range byKey {
+		out = append(out, b)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+	return out
+}
+
 // fetchVoicePathSeriesPatterns returns a one-word time pattern
 // classification derived from the per-bucket series ("business_hours",
 // "off_hours", "periodic_30min", "constant", "improving", "worsening",
@@ -27,39 +107,6 @@ func fetchVoicePathSeriesPatterns(ctx context.Context, ch *sql.DB, agentID uint,
 	return classifyTimePattern(buckets)
 }
 
-// buildVoiceTrends assembles the VoiceTrends struct for the voice
-// report. Returns nil if there are no probes or no bucket data so the
-// JSON output stays clean.
-func buildVoiceTrends(ctx context.Context, ch *sql.DB, agentID uint, probes []Probe, from, to time.Time, thresholds VoiceThresholds) *VoiceTrends {
-	// 1h buckets for windows up to 7 days, 4h buckets for longer.
-	bucketMin := 60
-	if to.Sub(from) > 7*24*time.Hour {
-		bucketMin = 240
-	}
-	buckets := fetchVoicePathSeries(ctx, ch, agentID, probes, from, to, bucketMin)
-	if len(buckets) == 0 {
-		return nil
-	}
-
-	// Issue markers: the timestamps whose MOS is below
-	// (PoorMos - 0.1) — useful for the timeline chart overlay.
-	issueCutoff := thresholds.PoorMos - 0.1
-	issueBuckets := make([]string, 0, len(buckets))
-	for _, b := range buckets {
-		if b.Forward > 0 && b.Forward < issueCutoff {
-			issueBuckets = append(issueBuckets, b.Timestamp)
-		}
-	}
-
-	return &VoiceTrends{
-		BucketMinutes: bucketMin,
-		Forward:       buckets,
-		Return:        buckets, // single series today; phase 2 returns will re-split
-		Combined:      buckets,
-		IssueBuckets:  issueBuckets,
-	}
-}
-
 // fetchVoicePathSeries pulls a 1-bucket-per-interval MOS time series
 // for the agent's voice-relevant probes. Used by the report timeline
 // chart and the time-of-day pattern detector.
@@ -67,11 +114,26 @@ func buildVoiceTrends(ctx context.Context, ch *sql.DB, agentID uint, probes []Pr
 // Returns an empty slice (not nil error) when there is no data so
 // callers can degrade gracefully.
 func fetchVoicePathSeries(ctx context.Context, ch *sql.DB, agentID uint, probes []Probe, from, to time.Time, bucketMinutes int) []VoiceBucket {
+	forward, _ := fetchVoicePathSeriesSplit(ctx, ch, agentID, probes, from, to, bucketMinutes)
+	return forward
+}
+
+// fetchVoicePathSeriesSplit pulls per-direction MOS series. Forward
+// rows are reported by the agent itself; reverse rows are reported by
+// a remote source agent for a probe whose target is `agentID`.
+//
+// Used by buildVoiceTrends to populate VoiceTrends.Forward and
+// VoiceTrends.Return independently. Returns empty slices (not errors)
+// when no data is available so callers can degrade gracefully.
+//
+// Direction is inferred from the row's `target_agent_id` column:
+// rows where `target_agent_id = agentID` are reverse (a remote agent
+// is reporting about our agent); the rest are forward.
+func fetchVoicePathSeriesSplit(ctx context.Context, ch *sql.DB, agentID uint, probes []Probe, from, to time.Time, bucketMinutes int) (forward, reverse []VoiceBucket) {
 	if len(probes) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	// Build a list of probe IDs to query.
 	probeIDs := make([]uint, 0, len(probes))
 	for _, p := range probes {
 		if p.ID != 0 {
@@ -79,7 +141,7 @@ func fetchVoicePathSeries(ctx context.Context, ch *sql.DB, agentID uint, probes 
 		}
 	}
 	if len(probeIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	pidList := make([]string, len(probeIDs))
 	for i, id := range probeIDs {
@@ -89,6 +151,7 @@ func fetchVoicePathSeries(ctx context.Context, ch *sql.DB, agentID uint, probes 
 	q := fmt.Sprintf(`
 SELECT 
     toStartOfInterval(created_at, INTERVAL %d MINUTE) as bucket,
+    target_agent_id,
     avg(mos_score) as mos_avg,
     avg(average_rtt)/2.0 as lat_avg,
     avg(jitter_avg) as jit_avg,
@@ -98,41 +161,64 @@ WHERE agent_id = %d
   AND probe_id IN (%s)
   AND created_at >= %s
   AND created_at <= %s
-GROUP BY bucket
+GROUP BY bucket, target_agent_id
 ORDER BY bucket ASC
 `, bucketMinutes, agentID, strings.Join(pidList, ","), chQuoteTime(from), chQuoteTime(to))
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
 		log.Warnf("[voice] series query failed: %v", err)
-		return nil
+		return nil, nil
 	}
 	defer rows.Close()
 
-	var out []VoiceBucket
+	forwardByBucket := make(map[string]VoiceBucket)
+	reverseByBucket := make(map[string]VoiceBucket)
+
 	for rows.Next() {
 		var (
-			bucket time.Time
-			mos    sql.NullFloat64
-			lat    sql.NullFloat64
-			jit    sql.NullFloat64
-			loss   sql.NullFloat64
+			bucket    time.Time
+			targetAID uint64
+			mos       sql.NullFloat64
+			lat       sql.NullFloat64
+			jit       sql.NullFloat64
+			loss      sql.NullFloat64
 		)
-		_ = lat // column present in SELECT for future per-direction split
-		if err := rows.Scan(&bucket, &mos, &lat, &jit, &loss); err != nil {
+		if err := rows.Scan(&bucket, &targetAID, &mos, &lat, &jit, &loss); err != nil {
 			continue
 		}
 		if !mos.Valid {
 			continue
 		}
-		out = append(out, VoiceBucket{
+		b := VoiceBucket{
 			Timestamp: bucket.UTC().Format("2006-01-02T15:04:05Z"),
 			Forward:   mos.Float64,
-			Return:    mos.Float64, // symmetric for now; future phase: split by direction
+			Return:    mos.Float64,
 			LatencyMs: lat.Float64,
 			JitterMs:  jit.Float64,
 			LossPct:   loss.Float64,
-		})
+		}
+		if uint(targetAID) == agentID {
+			// Remote agent is reporting on a probe whose target is
+			// us — that's the return direction.
+			reverseByBucket[b.Timestamp] = b
+		} else {
+			forwardByBucket[b.Timestamp] = b
+		}
+	}
+
+	forward = bucketMapToSlice(forwardByBucket)
+	reverse = bucketMapToSlice(reverseByBucket)
+	return forward, reverse
+}
+
+func bucketMapToSlice(m map[string]VoiceBucket) []VoiceBucket {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]VoiceBucket, 0, len(m))
+	for _, b := range m {
+		out = append(out, b)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
 	return out

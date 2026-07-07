@@ -42,6 +42,9 @@ import Alerts from '@/views/Alerts.vue'
 import Reports from '@/views/workspace/Reports.vue'
 import NewReport from '@/views/workspace/NewReport.vue'
 import EditReport from '@/views/workspace/EditReport.vue'
+import AgentVoiceReport from '@/views/voice-report/AgentVoiceReport.vue'
+import ProbeVoiceReport from '@/views/voice-report/ProbeVoiceReport.vue'
+import WorkspaceVoiceReport from '@/views/voice-report/WorkspaceVoiceReport.vue'
 
 // admin views
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
@@ -206,6 +209,8 @@ const routes: RouteRecordRaw[] = [
                         props: true,
                         children: [
                             { path: '', name: 'workspaceReports', component: Reports, props: true },
+                            // Workspace-wide live voice report (heatmap view)
+                            { path: 'voice', name: 'workspaceVoiceReport', component: WorkspaceVoiceReport, props: true },
                             {
                                 path: 'new',
                                 name: 'reportNew',
@@ -247,6 +252,9 @@ const routes: RouteRecordRaw[] = [
                                     // agent overview (any member)
                                     { path: '', name: 'agent', component: Agent, props: true },
 
+                                    // agent live voice report (per-agent live view)
+                                    { path: 'voice-report', name: 'agentVoiceReport', component: AgentVoiceReport, props: true },
+
                                     // agent setup (USER+ — shown after creation)
                                     { path: 'setup', name: 'agentSetup', component: AgentSetup, props: true, meta: { requiresRole: 'USER' } },
 
@@ -285,6 +293,8 @@ const routes: RouteRecordRaw[] = [
                                     },
                                     // probes - view (any member)
                                     { path: 'probes/:pID(\\d+)', name: 'agentProbe', component: Probe, props: true },
+                                    // probes - voice report (per-probe live view)
+                                    { path: 'probes/:pID(\\d+)/voice-report', name: 'probeVoiceReport', component: ProbeVoiceReport, props: true },
                                     // probes - edit (USER+)
                                     {
                                         path: 'probes/edit',
