@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // panel/src/components/voice-report/VoiceReportWorkspace.vue
 // Per-workspace voice report: heatmap of agents by direction, top
-// issues list, and overall rollup. Built off `view_mode: "workspace"`.
+// issues list, recurring-failure callouts, and overall rollup.
+// Built off `view_mode: "workspace"`.
 
 import { computed } from 'vue'
-import type { MosGrade, VoiceReportData } from './types'
+import type { MosGrade, VoiceCommonFailure, VoiceReportData } from './types'
 import VoiceReportHeader from './VoiceReportHeader.vue'
 
 const props = defineProps<{
@@ -14,6 +15,7 @@ const props = defineProps<{
 const heatmap = computed(() => props.data.heatmap ?? [])
 const topIssues = computed(() => props.data.top_issues ?? [])
 const allIssues = computed(() => props.data.issues ?? [])
+const commonFailures = computed<VoiceCommonFailure[]>(() => props.data.common_failures ?? [])
 
 const meanMos = computed(() => {
   const hm = heatmap.value
@@ -40,6 +42,15 @@ function gradeClass(grade?: MosGrade): string {
       return 'vr-row-crit'
     default:
       return ''
+  }
+}
+
+function severityChipClass(severity: string): string {
+  switch (severity) {
+    case 'critical': return 'vr-badge crit'
+    case 'warning': return 'vr-badge warn'
+    case 'info': return 'vr-badge info'
+    default: return 'vr-badge info'
   }
 }
 </script>
@@ -110,6 +121,49 @@ function gradeClass(grade?: MosGrade): string {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="commonFailures.length > 0" class="vr-section" data-testid="common-failures">
+      <div class="vr-section-title">Recurring Voice Quality Issues Across Agents</div>
+      <p class="vr-section-note">
+        Top patterns detected across all {{ heatmap.length }} agents in this workspace in the selected window.
+        Sorted by occurrence count; affected agents listed underneath each.
+      </p>
+      <div v-for="cf in commonFailures" :key="cf.category" class="vr-common-failure-card">
+        <div class="vr-common-failure-head">
+          <div class="vr-common-failure-title">
+            <span class="vr-badge" :class="cf.critical_count > 0 ? 'crit' : 'warn'">
+              {{ cf.count }}
+            </span>
+            <strong>{{ cf.title }}</strong>
+            <span class="vr-common-failure-tag">{{ cf.category }}</span>
+          </div>
+          <div class="vr-common-failure-counts">
+            <span v-if="cf.critical_count > 0" :class="severityChipClass('critical')">
+              {{ cf.critical_count }} critical
+            </span>
+            <span v-if="cf.warning_count > 0" :class="severityChipClass('warning')">
+              {{ cf.warning_count }} warning
+            </span>
+          </div>
+        </div>
+        <div v-if="cf.affected_agents.length > 0" class="vr-common-failure-agents">
+          <span class="vr-common-failure-label">Affected agents:</span>
+          <span
+            v-for="agent in cf.affected_agents"
+            :key="agent.agent_id"
+            class="vr-common-failure-agent"
+            :class="severityChipClass(agent.severity)"
+            :title="`${agent.agent_name}${agent.target_name ? ' → ' + agent.target_name : ''}: MOS impact ${agent.mos_impact.toFixed(2)}`"
+          >
+            {{ agent.agent_name }}<span v-if="agent.target_name" class="vr-target-suffix"> → {{ agent.target_name }}</span>
+          </span>
+        </div>
+        <div v-if="cf.sample_issue" class="vr-common-failure-evidence">
+          <span class="vr-section-note">Sample evidence:</span>
+          {{ cf.sample_issue.suspected_cause }}<span v-if="cf.sample_issue.recommendations?.length"> · Recommended: {{ cf.sample_issue.recommendations[0] }}</span>
+        </div>
+      </div>
     </div>
 
     <div v-if="topIssues.length > 0" class="vr-section">

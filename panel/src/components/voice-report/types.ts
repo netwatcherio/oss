@@ -175,10 +175,14 @@ export interface VoicePairSummary {
 
 // ---- Top-level report shapes (per the HTML templates) ----
 
+// Probe → panel wire format. The panel consumes this shape from
+//   GET /agents/{id}/reports/agent_detail/data
+//   GET /probes/{id}/reports/voice/data
+//   GET /workspaces/{id}/reports/voice/data
 export interface VoiceReportMeta {
   report_id: string;
   generated_at: string;
-  view_mode: 'probe' | 'agent' | 'workspace';
+  view_mode: 'probe' | 'agent' | 'workspace' | 'multi' | 'empty';
   agent?: AgentRef;
   target?: TargetRef;
   workspace?: {
@@ -195,6 +199,44 @@ export interface VoiceReportMeta {
     payload_size: string;
   };
   window?: string;
+}
+
+// VoiceCommonFailure is one row in the workspace "common failures"
+// block. Each entry is one issue category (jitter_spike,
+// packet_loss, etc.) ranked by occurrence count across all
+// agents in the window. The "X of N agents are seeing this
+// pattern" framing is the operationally useful one — operators
+// don't need to scan every agent's issue list to know whether
+// jitter is broadly elevated.
+export interface VoiceCommonFailure {
+  category: string;
+  title: string;
+  count: number;
+  critical_count: number;
+  warning_count: number;
+  affected_agents: VoiceCommonFailureAgent[];
+  sample_issue?: VoiceQualityIssue;
+}
+
+export interface VoiceCommonFailureAgent {
+  agent_id: number;
+  agent_name: string;
+  pair_id?: string;
+  target_name?: string;
+  probe_id?: number;
+  severity: string;
+  mos_impact: number;
+}
+
+// VoiceReportHeatmapRow is one agent's row in the workspace
+// heatmap (forward + reverse MOS / grade).
+export interface VoiceReportHeatmapRow {
+  agent_id: number;
+  agent_name: string;
+  forward_mos?: number;
+  reverse_mos?: number;
+  forward_grade?: MosGrade;
+  reverse_grade?: MosGrade;
 }
 
 export interface VoiceReportSummary {
@@ -248,7 +290,7 @@ export interface VoiceReportData {
   meta: VoiceReportMeta;
   summary: VoiceReportSummary;
   thresholds: VoiceThresholds;
-  metrics: VoiceReportMetrics;
+  metrics?: VoiceReportMetrics;
   quality?: VoiceReportQualityRow[];
   pairs?: VoicePairSummary[];
   timeseries?: {
@@ -265,13 +307,8 @@ export interface VoiceReportData {
   };
   // Workspace-level rollup fields (only set on per-workspace reports):
   top_issues?: VoiceQualityIssue[];
-  heatmap?: Array<{
-    agent_id: number;
-    agent_name: string;
-    forward_mos?: number;
-    reverse_mos?: number;
-    forward_grade?: MosGrade;
-    reverse_grade?: MosGrade;
-  }>;
+  heatmap?: VoiceReportHeatmapRow[];
   issues?: VoiceQualityIssue[];
+  // Recurring failure patterns across all agents in the window.
+  common_failures?: VoiceCommonFailure[];
 }

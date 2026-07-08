@@ -119,6 +119,21 @@ func BuildAgentReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, opts Agen
 		// Multi-pair: don't synthesize a single metrics block; the
 		// panel renders per-pair detail pages instead.
 		out.Meta.ViewMode = "multi"
+	} else {
+		// Empty case — no voice data in this window. Hand the panel a
+		// meaningful verdict instead of fake "excellent" defaults.
+		// view_mode = "empty" triggers a clean empty-state UI.
+		out.Meta.ViewMode = "empty"
+		out.Summary.MOS = 0
+		out.Summary.RFactor = 0
+		out.Summary.Grade = "unknown"
+		out.Summary.VerdictTitle = "No voice data in this window"
+		out.Summary.VerdictText = fmt.Sprintf(
+			"Agent %s has no voice-quality probes with data in the %s window. "+
+				"This typically means no TrafficSim / bidirectional PING probes have produced "+
+				"samples yet — wait for the next cycle or check the probe configuration.",
+			summary.AgentName, opts.From.Format("2006-01-02"),
+		)
 	}
 
 	return out, nil
@@ -224,7 +239,224 @@ func BuildWorkspaceReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, works
 	out.TopIssues = ToVoiceQualityIssueJSONList(topIssues)
 	out.Issues = ToVoiceQualityIssueJSONList(allIssues)
 
+	// Common failures: surface top recurring patterns across
+	// every agent in the workspace. Operators want to see
+	// "jitter spike on 8/12 agents" at a glance, not by scrolling
+	// a flat issue list. Empty when there's nothing to report.
+	out.CommonFailures = aggregateCommonFailures(allIssues, allPairs)
+
+	// Empty-state UI: when no agent produced any voice data,
+	// override view_mode so the panel renders a clean
+	// "no voice data" verdict instead of fake "excellent" zeros.
+	if len(agents) == 0 || len(allPairs) == 0 {
+		out.Meta.ViewMode = "empty"
+		out.Summary.MOS = 0
+		out.Summary.RFactor = 0
+		out.Summary.Grade = "unknown"
+		out.Summary.VerdictTitle = "No voice data in this workspace"
+		if len(agents) == 0 {
+			out.Summary.VerdictText = "Workspace has no agents."
+		} else {
+			out.Summary.VerdictText = fmt.Sprintf(
+				"%d agents in the workspace have no voice-quality data in this window. "+
+					"Wait for the next probe cycle, or check that TrafficSim / bidirectional PING probes are configured.",
+				len(agents),
+			)
+		}
+	}
+
 	return out, nil
+}
+
+// aggregateCommonFailures groups the workspace's voice-quality issues
+// by category, ranks by occurrence count, and surfaces the top
+// recurring patterns across all agents. Each entry includes a sample
+// issue so the panel can render a representative title, plus up to
+// 5 affected agents sorted by severity then MOS impact.
+//
+// The view this feeds is the workspace "common failures" callout —
+// operators looking at a workspace report want to know "is jitter
+// spiking on 8/12 of my agents right now?" at a glance, not by
+// scanning the full issue list.
+func aggregateCommonFailures(allIssues []probe.VoiceQualityIssue, pairs []probe.VoicePairSummary) []VoiceCommonFailureJSON {
+	type bucket struct {
+		category   string
+		title      string
+		sample     *probe.VoiceQualityIssue
+		critical   int
+		warning    int
+		affected   []VoiceCommonFailureAgent
+		seenAgents map[uint]struct{}
+	}
+
+	if len(allIssues) == 0 {
+		return nil
+	}
+
+	buckets := make(map[string]*bucket)
+	ordered := []string{}
+
+	for i := range allIssues {
+		issue := &allIssues[i]
+		if issue.Category == "" {
+			continue
+		}
+		b, ok := buckets[issue.Category]
+		if !ok {
+			b = &bucket{
+				category:   issue.Category,
+				title:      commonFailureTitle(issue.Category),
+				seenAgents: make(map[uint]struct{}),
+			}
+			buckets[issue.Category] = b
+			ordered = append(ordered, issue.Category)
+		}
+		// Capture the first issue as the sample (keeps the
+		// representative title for the panel render).
+		if b.sample == nil {
+			cp := *issue
+			b.sample = &cp
+		}
+		switch issue.Severity {
+		case "critical":
+			b.critical++
+		case "warning":
+			b.warning++
+		}
+	}
+
+	// Pair affected agents onto issues by walking the per-pair
+	// rollup. Each pair carries issues; we emit at most one entry
+	// per agent per category, sorted by severity then MOS impact.
+	for i := range pairs {
+		p := &pairs[i]
+		for j := range p.Issues {
+			iss := &p.Issues[j]
+			if iss.Category == "" {
+				continue
+			}
+			b, ok := buckets[iss.Category]
+			if !ok {
+				continue
+			}
+			// One entry per (category, agent) pair — avoid
+			// listing the same agent N times when it has 3
+			// jitter spikes.
+			key := p.Agent.ID
+			if _, dup := b.seenAgents[key]; dup {
+				continue
+			}
+			b.seenAgents[key] = struct{}{}
+			var probeID uint
+			if p.Forward != nil {
+				probeID = p.Forward.ProbeID
+			}
+			b.affected = append(b.affected, VoiceCommonFailureAgent{
+				AgentID:    p.Agent.ID,
+				AgentName:  p.Agent.Name,
+				PairID:     p.ID,
+				TargetName: p.Target.Name,
+				ProbeID:    probeID,
+				Severity:   iss.Severity,
+				MOSImpact:  iss.MosDegradation,
+			})
+		}
+	}
+
+	// Sort affected agents within each bucket by severity (critical
+	// first), then by MOS impact (most negative first).
+	for _, b := range buckets {
+		sort.SliceStable(b.affected, func(i, j int) bool {
+			if sevRank(b.affected[i].Severity) != sevRank(b.affected[j].Severity) {
+				return sevRank(b.affected[i].Severity) > sevRank(b.affected[j].Severity)
+			}
+			return b.affected[i].MOSImpact < b.affected[j].MOSImpact
+		})
+	}
+
+	// Sort buckets by total count desc, criticals first.
+	sort.SliceStable(ordered, func(i, j int) bool {
+		bi, bj := buckets[ordered[i]], buckets[ordered[j]]
+		iTotal := bi.critical + bi.warning
+		jTotal := bj.critical + bj.warning
+		if iTotal != jTotal {
+			return iTotal > jTotal
+		}
+		if bi.critical != bj.critical {
+			return bi.critical > bj.critical
+		}
+		return bi.category < bj.category
+	})
+
+	out := make([]VoiceCommonFailureJSON, 0, len(ordered))
+	for _, cat := range ordered {
+		b := buckets[cat]
+		// Cap affected agents at 5 per category so the panel
+		// renders a compact callout, not a wall of names.
+		affected := b.affected
+		if len(affected) > 5 {
+			affected = affected[:5]
+		}
+		out = append(out, VoiceCommonFailureJSON{
+			Category:       b.category,
+			Title:          b.title,
+			Count:          b.critical + b.warning,
+			CriticalCount:  b.critical,
+			WarningCount:   b.warning,
+			AffectedAgents: affected,
+			SampleIssue:    samplePtr(b.sample),
+		})
+	}
+	return out
+}
+
+// commonFailureTitle returns a human-readable title for an
+// issue category. Used by the workspace "common failures" rollup
+// so operators see "Jitter spike on N agents" instead of the raw
+// category token.
+func commonFailureTitle(category string) string {
+	switch category {
+	case "jitter_spike":
+		return "Jitter spikes across multiple paths"
+	case "packet_loss":
+		return "Packet loss on voice streams"
+	case "burst_loss":
+		return "Burst loss (consecutive packet drops)"
+	case "latency_degradation":
+		return "Latency-only degradation (route issue)"
+	case "asymmetry":
+		return "Asymmetric forward/return voice quality"
+	case "out_of_order":
+		return "Out-of-order packets (ECMP / reordering)"
+	default:
+		return strings.Title(strings.ReplaceAll(category, "_", " "))
+	}
+}
+
+// sevRank orders severities for the common-failures sort.
+func sevRank(s string) int {
+	switch s {
+	case "critical":
+		return 3
+	case "warning":
+		return 2
+	case "info":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// samplePtr converts a probe.VoiceQualityIssue to a
+// *VoiceQualityIssueJSON for the SampleIssue field. Returning a
+// pointer keeps "no sample" possible (nil) while still satisfying
+// the JSON shape that has the field as `omitempty`.
+func samplePtr(i *probe.VoiceQualityIssue) *VoiceQualityIssueJSON {
+	if i == nil {
+		return nil
+	}
+	out := ToVoiceQualityIssueJSON(*i)
+	return &out
 }
 
 // buildReportMeta assembles the meta block. The view_mode key drives

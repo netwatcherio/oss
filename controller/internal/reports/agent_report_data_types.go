@@ -19,17 +19,45 @@ import (
 //	GET /probes/{id}/reports/voice/data
 //	GET /workspaces/{id}/reports/voice/data
 type VoiceReportDataJSON struct {
-	Meta       VoiceReportMetaJSON          `json:"meta"`
-	Summary    VoiceReportSummaryJSON       `json:"summary"`
-	Thresholds VoiceThresholdsJSON          `json:"thresholds"`
-	Metrics    VoiceReportMetricsJSON       `json:"metrics,omitempty"`
-	Quality    []VoiceReportQualityRowJSON  `json:"quality,omitempty"`
-	Pairs      []VoicePairSummaryJSON       `json:"pairs,omitempty"`
-	Timeseries *VoiceReportTimeseriesJSON   `json:"timeseries,omitempty"`
-	Traceroute *VoiceReportTracerouteJSON   `json:"traceroute,omitempty"`
-	Heatmap    []VoiceReportHeatmapCellJSON `json:"heatmap,omitempty"`
-	TopIssues  []VoiceQualityIssueJSON      `json:"top_issues,omitempty"`
-	Issues     []VoiceQualityIssueJSON      `json:"issues,omitempty"`
+	Meta           VoiceReportMetaJSON          `json:"meta"`
+	Summary        VoiceReportSummaryJSON       `json:"summary"`
+	Thresholds     VoiceThresholdsJSON          `json:"thresholds"`
+	Metrics        VoiceReportMetricsJSON       `json:"metrics,omitempty"`
+	Quality        []VoiceReportQualityRowJSON  `json:"quality,omitempty"`
+	Pairs          []VoicePairSummaryJSON       `json:"pairs,omitempty"`
+	Timeseries     *VoiceReportTimeseriesJSON   `json:"timeseries,omitempty"`
+	Traceroute     *VoiceReportTracerouteJSON   `json:"traceroute,omitempty"`
+	Heatmap        []VoiceReportHeatmapCellJSON `json:"heatmap,omitempty"`
+	TopIssues      []VoiceQualityIssueJSON      `json:"top_issues,omitempty"`
+	Issues         []VoiceQualityIssueJSON      `json:"issues,omitempty"`
+	CommonFailures []VoiceCommonFailureJSON     `json:"common_failures,omitempty"`
+}
+
+// VoiceCommonFailureJSON is one row in the workspace "common
+// failures" block. Ranks recurring issue categories across all
+// agents in the window. The panel renders the top-N as a
+// recurring-patterns callout so operators see "jitter spike on
+// 8/12 agents" without scanning the full list.
+type VoiceCommonFailureJSON struct {
+	Category       string                    `json:"category"`
+	Title          string                    `json:"title"`
+	Count          int                       `json:"count"`
+	CriticalCount  int                       `json:"critical_count"`
+	WarningCount   int                       `json:"warning_count"`
+	AffectedAgents []VoiceCommonFailureAgent `json:"affected_agents"`
+	SampleIssue    *VoiceQualityIssueJSON    `json:"sample_issue,omitempty"`
+}
+
+// VoiceCommonFailureAgent is the minimal context the panel shows
+// per affected agent in the common-failures block.
+type VoiceCommonFailureAgent struct {
+	AgentID    uint    `json:"agent_id"`
+	AgentName  string  `json:"agent_name"`
+	PairID     string  `json:"pair_id,omitempty"`
+	TargetName string  `json:"target_name,omitempty"`
+	ProbeID    uint    `json:"probe_id,omitempty"`
+	Severity   string  `json:"severity"`
+	MOSImpact  float64 `json:"mos_impact"`
 }
 
 // VoiceReportMetaJSON is the report header (brand, ID, timestamp,

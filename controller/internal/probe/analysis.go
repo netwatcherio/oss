@@ -5559,14 +5559,23 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		return nil, fmt.Errorf("failed to list probes for agent %d: %w", agentID, err)
 	}
 
-	// Separate TRAFFICSIM probes (voice-relevant) from others
+	// Separate TRAFFICSIM and AGENT probes (both are voice-relevant).
+	// AGENT probes include PING / MTR / TRAFFICSIM child expansions; when
+	// TRAFFICSIM data is missing we fall back to fetching PING-derived
+	// voice metrics so agents with no VoIP server still produce a
+	// meaningful report (rather than the empty-data fallback that
+	// rendered MOS=4.5 "excellent" with no pairs).
 	var trafficSimProbes []Probe
+	var agentProbes []Probe
 	for _, p := range probes {
 		if p.ID == 0 {
 			continue // Skip virtual probes
 		}
-		if p.Type == TypeTrafficSim {
+		switch p.Type {
+		case TypeTrafficSim:
 			trafficSimProbes = append(trafficSimProbes, p)
+		case TypeAgent, TypePing:
+			agentProbes = append(agentProbes, p)
 		}
 	}
 
@@ -5600,6 +5609,45 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 			metrics.TargetAgentName = targetIP
 		}
 		forwardMetrics[p.ID] = metrics
+	}
+
+	// Fallback: when the agent has AGENT / PING probes but no
+	// TrafficSim data (typical for agents whose target doesn't run a
+	// VoIP server), derive voice quality from the PING samples. The
+	// bidir-expansion path produces PING probes owned by this agent
+	// targeting the remote agent; we pull those and compute MOS via
+	// the E-model so the report shows real numbers instead of the
+	// empty-data fallback.
+	if len(forwardMetrics) == 0 {
+		for _, p := range agentProbes {
+			metrics, err := fetchPingVoiceMetrics(ctx, ch, []uint{agentID}, p.ID, from)
+			if err != nil || metrics == nil || metrics.SampleCount == 0 {
+				continue
+			}
+			targetName := ""
+			if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+				if ta, err := agent.GetAgentByID(ctx, db, *p.Targets[0].AgentID); err == nil {
+					targetName = ta.Name
+				}
+			}
+			targetIP := ""
+			if len(p.Targets) > 0 {
+				targetIP = p.Targets[0].Target
+			}
+			metrics.TargetAgentID = uint(0)
+			if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+				metrics.TargetAgentID = *p.Targets[0].AgentID
+			}
+			metrics.TargetAgentName = targetName
+			metrics.SourceAgentID = agentID
+			metrics.SourceAgentName = agentObj.Name
+			metrics.ProbeID = p.ID
+			metrics.ProbeType = string(p.Type)
+			if targetIP != "" {
+				metrics.TargetAgentName = targetIP
+			}
+			forwardMetrics[p.ID] = metrics
+		}
 	}
 
 	// Find return path probes (reverse AGENT probes from other agents targeting this agent)
@@ -6386,6 +6434,178 @@ WHERE id IN (%s)
 		idToInfo[id] = agentInfo{ID: id, Name: name}
 	}
 	return ipToID, idToInfo
+}
+
+// fetchPingVoiceMetrics is the PING-derived voice quality path. When
+// an agent has no TrafficSim data (no VoIP server enabled, or the
+// AGENT probe didn't expand to a TRAFFICSIM child because the target
+// doesn't run one), the engine falls back to computing MOS from the
+// PING / RTT samples via the E-model.
+//
+// This unlocks the per-agent / per-workspace voice report for agents
+// whose only cross-agent monitoring is AGENT probes. Without this
+// path, such agents rendered an empty-data fallback (MOS 4.5
+// "excellent" defaults) and the report showed no pairs / no issues,
+// even though ping RTT and jitter were plenty of signal.
+//
+// The numbers we have from each PING cycle are:
+//
+//	avg_rtt, std_dev_rtt (ns) → latency / jitter (ms)
+//	packet_loss                → loss%
+//
+// We compute MOS via the simplified E-model (G.107) as computeMos
+// does. R-Factor isn't available server-side without the agent's
+// contribution, so we derive it from MOS via the G.107 reverse
+// formula (just enough to grade the report — the operator's eye is
+// on the trend and per-issue callouts, not the R-Factor digits).
+func fetchPingVoiceMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*VoicePathMetrics, error) {
+	if len(agentIDs) == 0 {
+		return nil, nil
+	}
+	agentIDStrs := make([]string, len(agentIDs))
+	for i, id := range agentIDs {
+		agentIDStrs[i] = fmt.Sprintf("%d", id)
+	}
+	agentIDList := strings.Join(agentIDStrs, ", ")
+
+	q := fmt.Sprintf(`
+SELECT 
+    payload_raw,
+    created_at
+FROM probe_data
+WHERE type = 'PING'
+  AND probe_id = %d
+  AND agent_id IN (%s)
+  AND created_at >= %s
+ORDER BY created_at DESC
+LIMIT 2000
+`, probeID, agentIDList, chQuoteTime(from))
+
+	rows, err := ch.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var latencies, jitters []float64
+	var totalLoss float64
+	var count int
+	var maxBursts uint64
+	var maxConsLoss uint64
+
+	for rows.Next() {
+		var payloadRaw string
+		var createdAt time.Time
+		if err := rows.Scan(&payloadRaw, &createdAt); err != nil {
+			continue
+		}
+		if payloadRaw == "" {
+			continue
+		}
+		var payload struct {
+			AvgRTT             int64   `json:"avg_rtt"`
+			StdDevRTT          int64   `json:"std_dev_rtt"`
+			PacketLoss         float64 `json:"packet_loss"`
+			MaxConsecutiveLoss uint64  `json:"max_consecutive_loss,omitempty"`
+			TotalBursts        uint64  `json:"total_bursts,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
+			continue
+		}
+
+		latMs := float64(payload.AvgRTT) / 1_000_000.0
+		jitMs := float64(payload.StdDevRTT) / 1_000_000.0
+		if latMs > 0 {
+			latencies = append(latencies, latMs)
+		}
+		if jitMs > 0 {
+			jitters = append(jitters, jitMs)
+		}
+		totalLoss += payload.PacketLoss
+		if payload.MaxConsecutiveLoss > maxConsLoss {
+			maxConsLoss = payload.MaxConsecutiveLoss
+		}
+		maxBursts += payload.TotalBursts
+		count++
+	}
+
+	if count == 0 {
+		return nil, nil
+	}
+
+	avgLat := avg(latencies)
+	p95Lat := percentile(latencies, 95)
+	avgJit := avg(jitters)
+	p95Jit := percentile(jitters, 95)
+	avgLoss := totalLoss / float64(count)
+
+	// computeMos expects one-way latency; PING avg_rtt is round-trip.
+	oneWayLat := avgLat / 2.0
+	mos := computeMos(oneWayLat, avgLoss, avgJit)
+
+	return &VoicePathMetrics{
+		MosScore:           mos,
+		AvgLatency:         oneWayLat,
+		P95Latency:         p95Lat / 2.0,
+		MedianLatency:      avg(latencies) / 2.0,
+		JitterAvg:          avgJit,
+		JitterMedian:       median(jitters),
+		JitterP95:          p95Jit,
+		PacketLoss:         avgLoss,
+		SampleCount:        count,
+		MosContributors:    mosContributingFactors(oneWayLat, p95Lat/2.0, avgJit, avgLoss),
+		CongestionLevel:    congestionLevelFromMetrics(avgJit, avgLoss, oneWayLat),
+		MaxConsecutiveLoss: int(maxConsLoss),
+		TotalBursts:        int(maxBursts),
+		ProbeID:            probeID,
+	}, nil
+}
+
+// mosToRFactor is reserved for future use; currently the panel
+// derives R-Factor from MOS at render time. The server-side
+// computeMos call uses G.107 simplified E-model which doesn't
+// pre-compute R-Factor — the JSON report sends MOS and the panel
+// converts to R-Factor via the standard monotonic formula in
+// panel/src/utils/mos.ts.
+//
+// Keeping the helper here (commented out) so the inverse-mapping
+// work we did during the AGENT-probe fallback isn't lost.
+
+// func mosToRFactor(mos float64) float64 {
+// 	if mos <= 1.0 {
+// 		return 0
+// 	}
+// 	if mos >= 4.5 {
+// 		return 93.2
+// 	}
+// 	switch {
+// 	case mos >= 4.3:
+// 		return 92 + (mos-4.3)*10
+// 	case mos >= 4.0:
+// 		return 80 + (mos-4.0)*40
+// 	case mos >= 3.6:
+// 		return 70 + (mos-3.6)*25
+// 	case mos >= 3.1:
+// 		return 60 + (mos-3.1)*20
+// 	case mos >= 2.0:
+// 		return 30 + (mos-2.0)*60
+// 	default:
+// 		return 0 + mos*15
+// 	}
+// }
+
+// median returns the median of a slice. Sort-not-mutate variant.
+func median(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	cp := make([]float64, len(vals))
+	copy(cp, vals)
+	sort.Float64s(cp)
+	if len(cp)%2 == 1 {
+		return cp[len(cp)/2]
+	}
+	return (cp[len(cp)/2-1] + cp[len(cp)/2]) / 2
 }
 
 // fetchVoicePathMetrics fetches voice path metrics from ClickHouse for a given probe
