@@ -19,18 +19,19 @@ import (
 //	GET /probes/{id}/reports/voice/data
 //	GET /workspaces/{id}/reports/voice/data
 type VoiceReportDataJSON struct {
-	Meta           VoiceReportMetaJSON          `json:"meta"`
-	Summary        VoiceReportSummaryJSON       `json:"summary"`
-	Thresholds     VoiceThresholdsJSON          `json:"thresholds"`
-	Metrics        VoiceReportMetricsJSON       `json:"metrics,omitempty"`
-	Quality        []VoiceReportQualityRowJSON  `json:"quality,omitempty"`
-	Pairs          []VoicePairSummaryJSON       `json:"pairs,omitempty"`
-	Timeseries     *VoiceReportTimeseriesJSON   `json:"timeseries,omitempty"`
-	Traceroute     *VoiceReportTracerouteJSON   `json:"traceroute,omitempty"`
-	Heatmap        []VoiceReportHeatmapCellJSON `json:"heatmap,omitempty"`
-	TopIssues      []VoiceQualityIssueJSON      `json:"top_issues,omitempty"`
-	Issues         []VoiceQualityIssueJSON      `json:"issues,omitempty"`
-	CommonFailures []VoiceCommonFailureJSON     `json:"common_failures,omitempty"`
+	Meta              VoiceReportMetaJSON          `json:"meta"`
+	Summary           VoiceReportSummaryJSON       `json:"summary"`
+	Thresholds        VoiceThresholdsJSON          `json:"thresholds"`
+	Metrics           VoiceReportMetricsJSON       `json:"metrics,omitempty"`
+	Quality           []VoiceReportQualityRowJSON  `json:"quality,omitempty"`
+	Pairs             []VoicePairSummaryJSON       `json:"pairs,omitempty"`
+	Timeseries        *VoiceReportTimeseriesJSON   `json:"timeseries,omitempty"`
+	Traceroute        *VoiceReportTracerouteJSON   `json:"traceroute,omitempty"`
+	TracerouteReverse *VoiceReportTracerouteJSON   `json:"traceroute_reverse,omitempty"`
+	Heatmap           []VoiceReportHeatmapCellJSON `json:"heatmap,omitempty"`
+	TopIssues         []VoiceQualityIssueJSON      `json:"top_issues,omitempty"`
+	Issues            []VoiceQualityIssueJSON      `json:"issues,omitempty"`
+	CommonFailures    []VoiceCommonFailureJSON     `json:"common_failures,omitempty"`
 }
 
 // VoiceCommonFailureJSON is one row in the workspace "common
@@ -244,6 +245,8 @@ type VoicePathMetricsJSON struct {
 	CongestionLevel        string   `json:"congestion_level"`
 	MaxConsecutiveLoss     int      `json:"max_consecutive_loss,omitempty"`
 	TotalBursts            int      `json:"total_bursts,omitempty"`
+	TotalPackets           int      `json:"total_packets,omitempty"`
+	LostPackets            int      `json:"lost_packets,omitempty"`
 }
 
 // BaselineDeltaJSON is the per-pair baseline comparison.
@@ -464,6 +467,7 @@ func ToVoicePathMetricsJSON(p probe.VoicePathMetrics) VoicePathMetricsJSON {
 		SampleCount:            p.SampleCount,
 		MosContributingFactors: p.MosContributors, CongestionLevel: string(p.CongestionLevel),
 		MaxConsecutiveLoss: p.MaxConsecutiveLoss, TotalBursts: p.TotalBursts,
+		TotalPackets: p.TotalPackets, LostPackets: p.LostPackets,
 	}
 }
 

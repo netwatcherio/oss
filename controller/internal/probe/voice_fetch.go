@@ -110,6 +110,8 @@ WHERE type = 'TRAFFICSIM'
 	m.SampleCount = sampleCount
 	m.MaxConsecutiveLoss = int(maxConsecutiveLoss)
 	m.TotalBursts = int(totalBursts)
+	m.TotalPackets = int(totalPackets)
+	m.LostPackets = int(lostPackets)
 	m.MosContributors = mosContributingFactors(m.AvgLatency, m.P95Latency, m.JitterAvg, m.PacketLoss)
 	m.CongestionLevel = congestionLevelFromMetrics(m.JitterAvg, m.PacketLoss, m.AvgLatency)
 
@@ -170,6 +172,7 @@ LIMIT 2000
 	var latencies, jitters []float64
 	var totalLoss float64
 	var count int
+	var totalSent, totalLost int
 	var maxBursts uint64
 	var maxConsLoss uint64
 
@@ -186,6 +189,8 @@ LIMIT 2000
 			AvgRTT             int64   `json:"avg_rtt"`
 			StdDevRTT          int64   `json:"std_dev_rtt"`
 			PacketLoss         float64 `json:"packet_loss"`
+			PacketsSent        int     `json:"packets_sent,omitempty"`
+			PacketsRecv        int     `json:"packets_recv,omitempty"`
 			MaxConsecutiveLoss uint64  `json:"max_consecutive_loss,omitempty"`
 			TotalBursts        uint64  `json:"total_bursts,omitempty"`
 		}
@@ -206,6 +211,10 @@ LIMIT 2000
 			maxConsLoss = payload.MaxConsecutiveLoss
 		}
 		maxBursts += payload.TotalBursts
+		totalSent += payload.PacketsSent
+		if payload.PacketsSent > payload.PacketsRecv {
+			totalLost += payload.PacketsSent - payload.PacketsRecv
+		}
 		count++
 	}
 
@@ -237,6 +246,8 @@ LIMIT 2000
 		CongestionLevel:    congestionLevelFromMetrics(avgJit, avgLoss, oneWayLat),
 		MaxConsecutiveLoss: int(maxConsLoss),
 		TotalBursts:        int(maxBursts),
+		TotalPackets:       totalSent,
+		LostPackets:        totalLost,
 		ProbeID:            probeID,
 	}, nil
 }

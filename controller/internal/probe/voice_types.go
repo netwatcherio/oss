@@ -60,6 +60,13 @@ type VoicePathMetrics struct {
 	// in the report and consumed by the burst-loss heuristic.
 	MaxConsecutiveLoss int `json:"max_consecutive_loss,omitempty"`
 	TotalBursts        int `json:"total_bursts,omitempty"`
+
+	// Real packet accounting summed over the window (TrafficSim and
+	// PING payloads carry per-cycle counters). SampleCount is the
+	// number of CYCLES, not packets — the report's packet table needs
+	// these to avoid conflating the two.
+	TotalPackets int `json:"total_packets,omitempty"`
+	LostPackets  int `json:"lost_packets,omitempty"`
 }
 
 // VoicePairSummary is the voice-quality report view of a single
@@ -347,7 +354,7 @@ func workspaceSettingsFor(ctx context.Context, db *gorm.DB, agentID uint) []byte
 	return settings
 }
 
-// fetchMtrHopSummariesForVoice looks up the MTR hop data for the
+// FetchMtrHopSummariesForVoice looks up the MTR hop data for the
 // probe the worst-offender voice path is running over, and converts
 // it to the small `MtrHopSummary` shape the voice hop correlator
 // needs.
@@ -355,7 +362,7 @@ func workspaceSettingsFor(ctx context.Context, db *gorm.DB, agentID uint) []byte
 // Returns nil when MTR data is unavailable (no row, query failure,
 // or no enriched hop details) — the voice report degrades cleanly
 // without hop evidence rather than failing the whole report.
-func fetchMtrHopSummariesForVoice(ctx context.Context, ch *sql.DB, agentID uint, path *VoicePathMetrics, from time.Time) []MtrHopSummary {
+func FetchMtrHopSummariesForVoice(ctx context.Context, ch *sql.DB, agentID uint, path *VoicePathMetrics, from time.Time) []MtrHopSummary {
 	if path == nil || path.ProbeID == 0 {
 		return nil
 	}

@@ -72,6 +72,61 @@ const lossChart = computed(() => {
     { durationSec: 120, height: 118 }
   )
 })
+
+// ── Direction comparison (forward vs return) ───────────────────────────
+// Each direction is measured independently (client vs far-end reporter),
+// so the stats can legitimately differ — surfacing the variance is the
+// point: a clean forward next to a degraded return localizes the problem
+// to one path.
+const pair = computed(() => props.data.pairs?.[0] ?? null)
+const fwdPath = computed(() => pair.value?.forward ?? null)
+const revPath = computed(() => pair.value?.reverse ?? null)
+const hasBothDirections = computed(() => !!fwdPath.value && !!revPath.value)
+
+interface DirRow {
+  name: string
+  unit: string
+  fwd: number
+  rev: number
+  decimals: number
+  st: 'ok' | 'warn' | 'crit'
+}
+
+function varianceStatus(fwd: number, rev: number, absFloor: number): 'ok' | 'warn' | 'crit' {
+  const hi = Math.max(fwd, rev)
+  const lo = Math.min(fwd, rev)
+  const absDelta = hi - lo
+  if (absDelta < absFloor || hi === 0) return 'ok'
+  const ratio = absDelta / hi
+  if (ratio > 0.6) return 'crit'
+  if (ratio > 0.3) return 'warn'
+  return 'ok'
+}
+
+const directionRows = computed<DirRow[]>(() => {
+  const f = fwdPath.value
+  const r = revPath.value
+  if (!f || !r) return []
+  return [
+    // MOS variance floor tied to the asymmetry heuristic's spirit: small
+    // deltas are noise, > ~0.3 MOS is a perceptible quality difference.
+    { name: 'MOS', unit: '', fwd: f.mos_score, rev: r.mos_score, decimals: 2, st: varianceStatus(f.mos_score, r.mos_score, 0.3) },
+    { name: 'Avg latency (one-way)', unit: 'ms', fwd: f.avg_latency_ms, rev: r.avg_latency_ms, decimals: 1, st: varianceStatus(f.avg_latency_ms, r.avg_latency_ms, 10) },
+    { name: 'Jitter (avg)', unit: 'ms', fwd: f.jitter_avg_ms, rev: r.jitter_avg_ms, decimals: 1, st: varianceStatus(f.jitter_avg_ms, r.jitter_avg_ms, 3) },
+    { name: 'Packet loss', unit: '%', fwd: f.packet_loss_pct, rev: r.packet_loss_pct, decimals: 2, st: varianceStatus(f.packet_loss_pct, r.packet_loss_pct, 0.5) },
+  ]
+})
+
+const directionNote = computed(() => {
+  const f = fwdPath.value
+  const r = revPath.value
+  if (!f || !r) return ''
+  const flagged = directionRows.value.filter((row) => row.st !== 'ok')
+  if (flagged.length === 0) {
+    return 'Both directions are within normal variance of each other.'
+  }
+  return `Directional variance detected on ${flagged.map((row) => row.name).join(', ')} — asymmetric degradation usually points at one path (e.g. upstream saturation or a policer in one direction).`
+})
 </script>
 
 <template>
@@ -107,6 +162,34 @@ const lossChart = computed(() => {
     <div class="vr-section-note">
       Latency figures are round-trip (RTT) unless noted. Jitter is computed per RFC 3550 (interarrival jitter).
     </div>
+  </div>
+
+  <div v-if="hasBothDirections" class="vr-section">
+    <div class="vr-section-title">Direction Comparison</div>
+    <table class="vr-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th class="num">→ {{ fwdPath?.source_agent_name || 'Forward' }} → {{ fwdPath?.target_agent_name || 'target' }}</th>
+          <th class="num">← {{ revPath?.source_agent_name || 'Return' }} → {{ revPath?.target_agent_name || 'source' }}</th>
+          <th class="num">Δ</th>
+          <th>Variance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in directionRows" :key="row.name" :class="row.st === 'ok' ? '' : 'vr-row-' + row.st">
+          <td>{{ row.name }}</td>
+          <td class="num vr-mono">{{ row.fwd.toFixed(row.decimals) }}{{ row.unit }}</td>
+          <td class="num vr-mono">{{ row.rev.toFixed(row.decimals) }}{{ row.unit }}</td>
+          <td class="num vr-mono">{{ (row.fwd - row.rev >= 0 ? '+' : '') + (row.fwd - row.rev).toFixed(row.decimals) }}{{ row.unit }}</td>
+          <td>
+            <span class="vr-status-dot" :class="'vr-dot-' + row.st"></span>
+            {{ STATUS_LABEL[row.st] }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="vr-section-note">{{ directionNote }}</div>
   </div>
 
   <div class="vr-section">

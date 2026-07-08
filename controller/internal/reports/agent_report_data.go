@@ -124,7 +124,34 @@ func BuildAgentReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, opts Agen
 			Name: pairs[0].Target.Name, Host: pairs[0].Target.Host, IP: pairs[0].Target.IP,
 			AgentID: pairs[0].Target.AgentID, AgentName: pairs[0].Target.AgentName,
 		}
-		out.Traceroute = buildReportTraceroute(pairs[0].Trends, primary)
+		// Path analysis (MTR) per direction: forward from the report
+		// agent's trace, reverse from the far-end reporter's trace.
+		if fwd := pairs[0].Forward; fwd != nil {
+			out.Traceroute = buildReportTraceroute(ctx, ch, fwd.SourceAgentID, fwd, opts.From,
+				fmt.Sprintf("%s → %s", fwd.SourceAgentName, fwd.TargetAgentName))
+		}
+		if rev := pairs[0].Reverse; rev != nil {
+			revTrace := buildReportTraceroute(ctx, ch, rev.SourceAgentID, rev, opts.From,
+				fmt.Sprintf("%s → %s", rev.SourceAgentName, rev.TargetAgentName))
+			if out.Traceroute == nil {
+				out.Traceroute = revTrace
+			} else {
+				out.TracerouteReverse = revTrace
+			}
+		}
+
+		// Test profile: codec comes from the resolved thresholds
+		// (workspace/admin override or default), packet totals from
+		// the window's real counters.
+		codec := out.Thresholds.Codec
+		if codec == "" {
+			codec = "G.711"
+		}
+		out.Meta.Test = &VoiceReportTestJSON{
+			Type:        primary.ProbeType,
+			Codec:       codec,
+			PacketsSent: buildReportMetrics(primary).Packets.Sent,
+		}
 	} else if len(pairs) > 1 {
 		// Multi-pair: don't synthesize a single metrics block; the
 		// panel renders per-pair detail pages instead.
@@ -510,6 +537,15 @@ func buildReportSummary(vq *probe.VoiceQualitySummary) VoiceReportSummaryJSON {
 // buildReportMetrics translates a VoicePathMetrics into the per-pair
 // latency/jitter/packets rollup the templates render.
 func buildReportMetrics(p *probe.VoicePathMetrics) VoiceReportMetricsJSON {
+	// Real packet accounting when the payloads carried counters
+	// (TrafficSim / PING); otherwise derive from loss % over cycles
+	// so the table never claims "0 sent" while showing loss.
+	sent := p.TotalPackets
+	lost := p.LostPackets
+	if sent == 0 {
+		sent = p.SampleCount
+		lost = int(float64(sent) * p.PacketLoss / 100.0)
+	}
 	m := VoiceReportMetricsJSON{
 		Latency: VoiceStatJSON{
 			Min: p.MedianLatency, Avg: p.AvgLatency, Max: p.P95Latency, StdDev: 0, Unit: "ms",
@@ -518,9 +554,10 @@ func buildReportMetrics(p *probe.VoicePathMetrics) VoiceReportMetricsJSON {
 			Min: p.JitterMedian, Avg: p.JitterAvg, Max: p.JitterP95, StdDev: 0, Unit: "ms",
 		},
 		Packets: VoicePacketCountersJSON{
-			Sent: p.SampleCount, Received: p.SampleCount, Lost: 0,
-			LossPct: p.PacketLoss, Duplicates: 0, DupPct: p.Duplicates,
-			OutOfOrder: 0, OooPct: p.OutOfSequence,
+			Sent: sent, Received: sent - lost, Lost: lost,
+			LossPct:    p.PacketLoss,
+			Duplicates: int(float64(sent) * p.Duplicates / 100.0), DupPct: p.Duplicates,
+			OutOfOrder: int(float64(sent) * p.OutOfSequence / 100.0), OooPct: p.OutOfSequence,
 			DiscardedJitterBuffer: 0, DiscardPct: 0,
 		},
 	}
@@ -580,16 +617,42 @@ func buildReportQuality(p probe.VoicePairSummary) []VoiceReportQualityRowJSON {
 	return out
 }
 
-// buildReportTraceroute synthesizes a traceroute block from the
-// trends series + per-hop correlation when available. The trends
-// series doesn't carry per-hop data, so this is best-effort and
-// returns nil when there's no signal.
-func buildReportTraceroute(_ *probe.VoiceTrends, _ *probe.VoicePathMetrics) *VoiceReportTracerouteJSON {
-	// Traceroute data is sourced from a separate MTR probe, not from
-	// TrafficSim metrics. The endpoint at /agents/.../data could
-	// fetch it on demand, but for now we leave traceroute empty
-	// when the per-pair summary doesn't carry it.
-	return nil
+// buildReportTraceroute builds the path-analysis block from the MTR
+// hop summaries for one direction. `reporterID` is the agent whose
+// MTR trace describes the direction: the report agent for forward,
+// the far-end source agent for reverse. Returns nil when the window
+// has no MTR data so the panel skips the section cleanly.
+func buildReportTraceroute(ctx context.Context, ch *sqlDB, reporterID uint, path *probe.VoicePathMetrics, from time.Time, note string) *VoiceReportTracerouteJSON {
+	if path == nil || reporterID == 0 {
+		return nil
+	}
+	hops := probe.FetchMtrHopSummariesForVoice(ctx, ch, reporterID, path, from)
+	if len(hops) == 0 {
+		return nil
+	}
+	out := &VoiceReportTracerouteJSON{
+		Protocol: "ICMP (MTR)",
+		Note:     note,
+		Hops:     make([]VoiceReportTracerouteHopJSON, 0, len(hops)),
+	}
+	for _, h := range hops {
+		host := h.Hostname
+		if host == "" {
+			host = h.IP
+		}
+		out.Hops = append(out.Hops, VoiceReportTracerouteHopJSON{
+			Hop:   h.HopNumber,
+			Host:  host,
+			IP:    h.IP,
+			Loss:  h.LossPct,
+			Last:  h.AvgLatencyMs,
+			Avg:   h.AvgLatencyMs,
+			Best:  h.AvgLatencyMs,
+			Worst: h.AvgLatencyMs,
+			StDev: h.JitterMs,
+		})
+	}
+	return out
 }
 
 // helper functions

@@ -13,12 +13,22 @@ const props = defineProps<{
 
 const meta = computed(() => props.data.meta)
 const trace = computed(() => props.data.traceroute)
+const reverseTrace = computed(() => props.data.traceroute_reverse)
 
-const maxAvg = computed(() => {
-  const hops = trace.value?.hops ?? []
-  if (hops.length === 0) return 0
-  return Math.max(...hops.map((h) => h.avg))
+// Both directions, when present. Each direction's MTR comes from a
+// different reporter (this agent forward, the far-end agent back),
+// so they are separate traces with separate hop tables.
+const traces = computed(() => {
+  const out: { key: string; label: string; t: NonNullable<typeof trace.value> }[] = []
+  if (trace.value) out.push({ key: 'fwd', label: trace.value.note || 'Forward path', t: trace.value })
+  if (reverseTrace.value) out.push({ key: 'rev', label: reverseTrace.value.note || 'Return path', t: reverseTrace.value })
+  return out
 })
+
+function maxAvgOf(t: { hops: { avg: number }[] }): number {
+  if (t.hops.length === 0) return 0
+  return Math.max(...t.hops.map((h) => h.avg))
+}
 
 function rowStatus(loss: number): 'ok' | 'warn' | 'crit' {
   if (loss >= 5) return 'crit'
@@ -67,9 +77,14 @@ const configRows = computed(() => {
 </script>
 
 <template>
-  <div class="vr-section">
+  <div v-if="traces.length === 0" class="vr-section">
+    <div class="vr-section-title">Traceroute / MTR</div>
+    <div class="vr-section-note">No MTR trace data in this window for either direction.</div>
+  </div>
+
+  <div v-for="entry in traces" :key="entry.key" class="vr-section">
     <div class="vr-section-title">
-      Traceroute / MTR to <span class="vr-mono">{{ meta.target?.host ?? meta.target?.name ?? '—' }}</span>
+      Traceroute / MTR — <span class="vr-mono">{{ entry.label }}</span>
     </div>
     <table class="vr-table">
       <thead>
@@ -89,7 +104,7 @@ const configRows = computed(() => {
       </thead>
       <tbody>
         <tr
-          v-for="h in (trace?.hops ?? [])"
+          v-for="h in entry.t.hops"
           :key="h.hop"
           :class="rowStatus(h.loss) === 'ok' ? '' : 'vr-row-' + rowStatus(h.loss)"
         >
@@ -101,7 +116,7 @@ const configRows = computed(() => {
           <td class="num vr-mono">{{ h.loss.toFixed(1) }}%</td>
           <td>
             <span class="vr-bar-track">
-              <span class="vr-bar-fill" :style="{ width: maxAvg > 0 ? `${Math.min(100, (h.avg / maxAvg) * 100)}%` : '0%', background: barColor(h.loss) }"></span>
+              <span class="vr-bar-fill" :style="{ width: maxAvgOf(entry.t) > 0 ? `${Math.min(100, (h.avg / maxAvgOf(entry.t)) * 100)}%` : '0%', background: barColor(h.loss) }"></span>
             </span>
           </td>
           <td class="num vr-mono">{{ h.sent }}</td>
@@ -113,7 +128,6 @@ const configRows = computed(() => {
         </tr>
       </tbody>
     </table>
-    <div v-if="trace?.note" class="vr-section-note">{{ trace.note }}</div>
   </div>
 
   <div v-if="hopBarsSvg" class="vr-section">

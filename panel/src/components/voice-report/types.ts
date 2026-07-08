@@ -44,6 +44,8 @@ export interface VoicePathMetrics {
   congestion_level: CongestionLevel;
   max_consecutive_loss?: number;
   total_bursts?: number;
+  total_packets?: number;
+  lost_packets?: number;
 }
 
 export interface VoiceBucket {
@@ -301,6 +303,11 @@ export interface VoiceReportData {
     reverse_mos?: VoiceBucket[];
   };
   traceroute?: {
+    protocol: string;
+    hops: VoiceReportTracerouteHop[];
+    note?: string;
+  };
+  traceroute_reverse?: {
     protocol: string;
     hops: VoiceReportTracerouteHop[];
     note?: string;

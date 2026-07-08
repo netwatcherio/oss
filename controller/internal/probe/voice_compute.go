@@ -355,7 +355,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		mtrAgentID = worstReturn.SourceAgentID
 	}
 	if mtrPath != nil {
-		if hopSummaries := fetchMtrHopSummariesForVoice(ctx, ch, mtrAgentID, mtrPath, from); len(hopSummaries) > 0 {
+		if hopSummaries := FetchMtrHopSummariesForVoice(ctx, ch, mtrAgentID, mtrPath, from); len(hopSummaries) > 0 {
 			correlateWithRoute(issues, hopSummaries)
 			for probeID, list := range perProbeIssues {
 				correlateWithRoute(list, hopSummaries)
