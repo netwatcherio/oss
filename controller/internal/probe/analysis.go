@@ -5691,7 +5691,15 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// can show issues per destination rather than collapsed onto the
 	// worst-offender. Built off `forwardMetrics` (key = probe ID) and
 	// `reverseMetrics` (also key = probe ID, post-refactor).
-	targetByProbeID := buildTargetNameByProbeID(trafficSimProbes, agentObj.Name)
+	//
+	// buildTargetNameByProbeID batches the agent-name lookups into a
+	// single SELECT (see helper) and pre-loads the result map so
+	// detectVoiceQualityIssuesPerPair and buildVoicePairSummaries
+	// can both reuse it without N+1 queries.
+	targetByProbeID := buildTargetNameByProbeID(ctx, db, trafficSimProbes, agentObj.Name)
+	// Shared agent-id→name map for buildVoicePairSummaries below
+	// (resolveProbeTarget needs the same lookup table).
+	pairNameByAgentID := buildVoicePairAgentNameMap(ctx, db, trafficSimProbes)
 	perProbeIssues := detectVoiceQualityIssuesPerPair(forwardMetrics, reverseMetrics, baselineByProbeID, targetByProbeID, &thresholds)
 
 	// MTR hop correlation: fetch the MTR trace for the worst-offender
@@ -5786,7 +5794,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// entry per forward probe, with the matching reverse probe (if
 	// any) attached. Pair-level issues are taken from perProbeIssues;
 	// for the typical single-pair case this is just one entry.
-	pairs := buildVoicePairSummaries(forwardMetrics, reverseMetrics, perProbeIssues, baselineByProbeID, trafficSimProbes, agentObj, agentID, thresholds)
+	pairs := buildVoicePairSummaries(forwardMetrics, reverseMetrics, perProbeIssues, baselineByProbeID, trafficSimProbes, agentObj, agentID, thresholds, pairNameByAgentID)
 
 	// Pull workspace-level incidents for context. We re-use the helper
 	// from analysis.go that returns the full WorkspaceAnalysis and
@@ -5825,24 +5833,48 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 // human-readable name. Used by detectVoiceQualityIssuesPerPair to
 // populate issue titles per destination.
 //
-// Note: target agent name resolution is best-effort. When the target
-// is an arbitrary SIP endpoint (no remote agent), the probe's own
-// Target field (IP/host) is used. When both exist, the agent name
-// wins for readability.
-func buildTargetNameByProbeID(probes []Probe, fallbackSourceName string) map[uint]string {
+// Implementation note: target agent name resolution is best-effort.
+// When the target is an arbitrary SIP endpoint (no remote agent),
+// the probe's own Target field (IP/host) is used. When both exist,
+// the agent name wins for readability.
+//
+// One round-trip to the agents table per call (batched WHERE id IN
+// query) rather than one per probe — agents with dozens of probes
+// were hitting the legacy N+1 pattern in earlier revisions and
+// saturating the GORM pool.
+func buildTargetNameByProbeID(ctx context.Context, db *gorm.DB, probes []Probe, fallbackSourceName string) map[uint]string {
 	out := make(map[uint]string, len(probes))
+	if len(probes) == 0 {
+		return out
+	}
+
+	// Collect the agent IDs we need to resolve. Skip the DB call
+	// entirely when no probe points at a known agent (typical for
+	// single-target or SIP-endpoint-only agents).
+	want := make(map[uint]struct{}, len(probes))
+	for _, p := range probes {
+		if p.ID == 0 || p.Targets == nil || len(p.Targets) == 0 {
+			continue
+		}
+		t := p.Targets[0]
+		if t.AgentID != nil && *t.AgentID != 0 {
+			want[*t.AgentID] = struct{}{}
+		}
+	}
+	nameByAgentID := batchLoadAgentNames(ctx, db, want)
+
 	for _, p := range probes {
 		if p.ID == 0 {
 			continue
 		}
-		if len(p.Targets) == 0 {
+		if p.Targets == nil || len(p.Targets) == 0 {
 			continue
 		}
 		t := p.Targets[0]
 		name := ""
 		if t.AgentID != nil && *t.AgentID != 0 {
-			if ta, err := agent.GetAgentByID(context.Background(), nil, *t.AgentID); err == nil && ta != nil {
-				name = ta.Name
+			if n, ok := nameByAgentID[*t.AgentID]; ok {
+				name = n
 			}
 		}
 		if name == "" {
@@ -5854,6 +5886,63 @@ func buildTargetNameByProbeID(probes []Probe, fallbackSourceName string) map[uin
 		out[p.ID] = name
 	}
 	return out
+}
+
+// batchLoadAgentNames fetches id→name for every agent ID in `want`
+// in a single SELECT. Returns an empty map when `db` is nil or `want`
+// is empty so callers don't have to nil-check.
+//
+// The function is intentionally tolerant of a nil DB — at the cost
+// of returning no names. The voice report still renders, just with
+// IP/host fallbacks in the target name field.
+func batchLoadAgentNames(ctx context.Context, db *gorm.DB, want map[uint]struct{}) map[uint]string {
+	out := make(map[uint]string, len(want))
+	if db == nil || len(want) == 0 {
+		return out
+	}
+	ids := make([]uint, 0, len(want))
+	for id := range want {
+		ids = append(ids, id)
+	}
+	// Stable order so the test suite (and any logs) see deterministic
+	// IN-clause arguments.
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	type row struct {
+		ID   uint
+		Name string
+	}
+	var rows []row
+	if err := db.WithContext(ctx).Table("agents").Select("id, name").Where("id IN ?", ids).Scan(&rows).Error; err != nil {
+		log.Warnf("[voice] batchLoadAgentNames query failed: %v", err)
+		return out
+	}
+	for _, r := range rows {
+		out[r.ID] = r.Name
+	}
+	return out
+}
+
+// buildVoicePairAgentNameMap is a thin wrapper that walks `probes`,
+// collects the agent IDs they reference, and batch-loads their
+// names. Used to build the shared name-by-agent-id map that
+// buildVoicePairSummaries + resolveProbeTarget share.
+//
+// Exposed as its own function (rather than inlined into
+// buildVoicePairSummaries) so the test suite can hit the batched
+// loader directly with a known probe set.
+func buildVoicePairAgentNameMap(ctx context.Context, db *gorm.DB, probes []Probe) map[uint]string {
+	want := make(map[uint]struct{}, len(probes))
+	for _, p := range probes {
+		if p.Targets == nil || len(p.Targets) == 0 {
+			continue
+		}
+		t := p.Targets[0]
+		if t.AgentID != nil && *t.AgentID != 0 {
+			want[*t.AgentID] = struct{}{}
+		}
+	}
+	return batchLoadAgentNames(ctx, db, want)
 }
 
 // buildVoicePairSummaries assembles the per-pair rollup for the
@@ -5873,6 +5962,7 @@ func buildVoicePairSummaries(
 	sourceAgent *agent.Agent,
 	sourceAgentID uint,
 	thresholds VoiceThresholds,
+	nameByAgentID map[uint]string,
 ) []VoicePairSummary {
 	out := make([]VoicePairSummary, 0, len(forwardMetrics))
 
@@ -5908,7 +5998,7 @@ func buildVoicePairSummaries(
 			Location: sourceAgent.Location,
 		}
 		// Resolve target
-		pair.Target = resolveProbeTarget(probe, sourceAgent.Name)
+		pair.Target = resolveProbeTarget(probe, nameByAgentID, sourceAgent.Name)
 
 		// Pair-level MOS: weighted fwd+rev (0.5/0.5; we keep the
 		// forward preference from the per-agent rollup but at the
@@ -5972,9 +6062,13 @@ func buildVoicePairSummaries(
 // resolveProbeTarget converts a probe's target into a TargetRef. When
 // the target is a known netwatcher agent, both host and agent info
 // are populated; otherwise only the SIP endpoint (host/IP/port).
-func resolveProbeTarget(p Probe, fallback string) TargetRef {
+//
+// `nameByAgentID` is the pre-loaded agent ID → name map produced by
+// buildTargetNameByProbeID's batched query, shared across all
+// pairs in the same call to avoid N+1 lookups.
+func resolveProbeTarget(p Probe, nameByAgentID map[uint]string, fallback string) TargetRef {
 	out := TargetRef{}
-	if len(p.Targets) == 0 {
+	if p.Targets == nil || len(p.Targets) == 0 {
 		out.Name = fallback
 		return out
 	}
@@ -5982,10 +6076,10 @@ func resolveProbeTarget(p Probe, fallback string) TargetRef {
 	out.Host = t.Target
 	if t.AgentID != nil && *t.AgentID != 0 {
 		out.AgentID = *t.AgentID
-		if ta, err := agent.GetAgentByID(context.Background(), nil, *t.AgentID); err == nil && ta != nil {
-			out.AgentName = ta.Name
+		if n, ok := nameByAgentID[*t.AgentID]; ok {
+			out.AgentName = n
 			if out.Name == "" {
-				out.Name = ta.Name
+				out.Name = n
 			}
 		}
 	}
