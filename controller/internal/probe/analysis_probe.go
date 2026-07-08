@@ -599,7 +599,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 		MtrProbeID:        mtrProbeID,
 		TrafficSimProbeID: probeID,
 		ReporterID:        p.AgentID,
-		IncludeTrafficSim: p.Type == TypeAgent,
+		IncludeTrafficSim: p.Type == TypeAgent || p.Type == TypeTrafficSim,
 	}, from, agentIPToID, agentByID)
 
 	log.Debugf("[Analysis] Probe %d (type=%s): forward samples=%d, avgLat=%.1f, loss=%.2f%%",
@@ -645,7 +645,7 @@ func ComputeProbeAnalysis(ctx context.Context, ch *sql.DB, pg *gorm.DB, workspac
 			MtrProbeID:        revProbeID,
 			TrafficSimProbeID: probeID, // reverse TrafficSim always reports under the client's probe ID
 			ReporterID:        targetAgentID,
-			IncludeTrafficSim: p.Type == TypeAgent,
+			IncludeTrafficSim: p.Type == TypeAgent || p.Type == TypeTrafficSim,
 		}, from, agentIPToID, agentByID)
 
 		hasReverseData := rev.Metrics.SampleCount > 0 || (rev.Path != nil && rev.Path.TraceCount > 0)
@@ -729,17 +729,32 @@ func analyzeProbeDirection(ctx context.Context, ch *sql.DB, in directionInput, f
 		log.Debugf("[Analysis] Probe %d reporter %d: TrafficSim samples=%d, avgRTT=%.1f, loss=%.2f%%",
 			in.TrafficSimProbeID, in.ReporterID, tsMetrics.SampleCount, tsMetrics.AvgLatency, tsMetrics.PacketLoss)
 		if tsMetrics.SampleCount > 0 {
-			// If PING data was empty, use TrafficSim as primary (not blended)
+			// If PING data was empty, use TrafficSim as primary. Take
+			// the WHOLE struct — the old field-by-field copy dropped
+			// median/p99 latency and the jitter percentiles, which is
+			// why the detailed analysis modal showed "—" for those
+			// unless the page happened to have local TrafficSim rows
+			// to patch from.
 			if metrics.SampleCount == 0 {
-				metrics.AvgLatency = tsMetrics.AvgLatency
-				metrics.P95Latency = tsMetrics.P95Latency
-				metrics.PacketLoss = tsMetrics.PacketLoss
-				metrics.JitterAvg = tsMetrics.JitterAvg
-				metrics.SampleCount = tsMetrics.SampleCount
+				metrics = tsMetrics
 			} else {
-				// Blend: use worse of PING/TrafficSim loss
+				// Blend: use worse of PING/TrafficSim loss, and fill
+				// the percentile fields PING can't provide (per-cycle
+				// medians/p95s only exist in TrafficSim payloads).
 				if tsMetrics.PacketLoss > metrics.PacketLoss {
 					metrics.PacketLoss = tsMetrics.PacketLoss
+				}
+				if metrics.MedianLatency == 0 {
+					metrics.MedianLatency = tsMetrics.MedianLatency
+				}
+				if metrics.P99Latency == 0 {
+					metrics.P99Latency = tsMetrics.P99Latency
+				}
+				if metrics.JitterMedian == 0 {
+					metrics.JitterMedian = tsMetrics.JitterMedian
+				}
+				if metrics.JitterP95 == 0 {
+					metrics.JitterP95 = tsMetrics.JitterP95
 				}
 			}
 		}
