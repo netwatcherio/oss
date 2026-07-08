@@ -1,16 +1,14 @@
 <script lang="ts" setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ProbeDataService } from '@/services/apiService'
-import type { WorkspaceAnalysis, WorkspaceHealthMesh, DetectedIncident } from './types'
+import type { WorkspaceAnalysis, DetectedIncident } from './types'
 import { gradeColors, statusColors, severityIcons } from './types'
-import HealthChordDiagram from './HealthChordDiagram.vue'
 
 const props = defineProps<{
   workspaceId: number | string
 }>()
 
 const analysis = ref<WorkspaceAnalysis | null>(null)
-const mesh = ref<WorkspaceHealthMesh | null>(null)
 const loading = ref(true)
 const error = ref('')
 const expandedIncidents = ref<Set<string>>(new Set())
@@ -24,13 +22,6 @@ async function fetchAnalysis() {
     error.value = e?.message || 'Failed to fetch analysis'
   } finally {
     loading.value = false
-  }
-  // Mesh is supplementary — failures leave the chord section empty
-  // without breaking the analysis view.
-  try {
-    mesh.value = await ProbeDataService.healthMesh(props.workspaceId, { lookback: 60 })
-  } catch {
-    mesh.value = null
   }
 }
 
@@ -209,15 +200,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Agent Health Mesh (chord diagram) -->
-      <div class="mesh-section">
-        <h6 class="section-title">
-          <i class="bi bi-diagram-3 me-1"></i>
-          Agent Health Mesh
-        </h6>
-        <HealthChordDiagram :mesh="mesh" />
-      </div>
-
       <div class="text-muted small mt-3 text-end timestamp">
         <i class="bi bi-clock me-1"></i>
         {{ new Date(analysis.generated_at).toLocaleTimeString() }} · Auto-refreshes every 60s
@@ -229,10 +211,6 @@ onUnmounted(() => {
 <style scoped>
 .ai-status {
   padding: 0;
-}
-
-.mesh-section {
-  margin-top: 1.25rem;
 }
 
 /* Status Banner - Theme Aware */

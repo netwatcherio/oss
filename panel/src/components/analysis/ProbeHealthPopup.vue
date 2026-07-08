@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted } from 'vue'
 import { ProbeDataService } from '@/services/apiService'
-import type { ProbeAnalysis } from './types'
+import type { ProbeAnalysis, HealthVector } from './types'
 import { gradeColors } from './types'
 import type { TrafficSimResult } from '@/types'
 
@@ -43,7 +43,10 @@ const error = ref('')
 const isVisible = ref(false)
 
 async function fetchAnalysis() {
-  if (props.trafficSimData) return // derived from data, no API call needed
+  // Always fetch: even when local TrafficSim rows drive the metric
+  // display, the health score/grade must come from the backend's
+  // computeHealthVector — the popup previously scored client-side
+  // with a different curve and disagreed with the detailed modal.
   loading.value = true
   try {
     analysis.value = await ProbeDataService.probeAnalysis(props.workspaceId, props.probeId, { lookback: 60 })
@@ -169,18 +172,24 @@ function buildView(args: {
   target: string
   summary: ReturnType<typeof buildSummary>
   api?: ProbeAnalysis
+  // Authoritative health from the analysis API. When present it
+  // overrides the client-derived score so the popup always matches
+  // the detailed analysis view.
+  apiHealth?: HealthVector
 }): DirectionView | null {
   if (args.source === 'traffic') {
     if (!args.summary) return null
+    const useApi = !!args.apiHealth && args.apiHealth.grade !== '' && args.apiHealth.grade !== 'unknown'
+    const grade = useApi ? args.apiHealth!.grade : args.summary.healthGrade
     return {
       source: 'traffic',
       agentName: args.agentName,
       target: args.target,
-      grade: args.summary.healthGrade,
-      healthScore: args.summary.healthOverall,
-      healthColorText: (gradeColors[args.summary.healthGrade] || gradeColors.unknown).text,
-      healthColorBg: (gradeColors[args.summary.healthGrade] || gradeColors.unknown).bg,
-      healthColorBorder: (gradeColors[args.summary.healthGrade] || gradeColors.unknown).border,
+      grade,
+      healthScore: useApi ? Math.round(args.apiHealth!.overall_health) : args.summary.healthOverall,
+      healthColorText: (gradeColors[grade] || gradeColors.unknown).text,
+      healthColorBg: (gradeColors[grade] || gradeColors.unknown).bg,
+      healthColorBorder: (gradeColors[grade] || gradeColors.unknown).border,
       sampleCount: args.summary.sampleCount,
       avgLatency: args.summary.avgLatency,
       medianLatency: args.summary.medianLatency,
@@ -190,8 +199,8 @@ function buildView(args: {
       p95Jitter: args.summary.p95Jitter,
       packetLoss: args.summary.avgLoss,
       mos: args.summary.avgMos,
-      healthLatencyScore: args.summary.healthLatencyScore,
-      healthLossScore: args.summary.healthLossScore,
+      healthLatencyScore: useApi ? args.apiHealth!.latency_score : args.summary.healthLatencyScore,
+      healthLossScore: useApi ? args.apiHealth!.packet_loss_score : args.summary.healthLossScore,
       healthJitterScore: args.summary.healthJitterScore,
     }
   }
@@ -229,6 +238,7 @@ const forwardView = computed<DirectionView | null>(() => {
       agentName: props.agentName || 'Source',
       target: props.target || 'Target',
       summary: forwardSummary.value,
+      apiHealth: analysis.value?.health,
     })
   }
   if (analysis.value) {
@@ -250,6 +260,7 @@ const reverseView = computed<DirectionView | null>(() => {
       agentName: props.reverseAgentName || props.agentName || 'Source',
       target: props.reverseTarget || props.target || 'Target',
       summary: reverseSummary.value,
+      apiHealth: analysis.value?.reverse?.health,
     })
   }
   if (analysis.value?.reverse) {
@@ -271,7 +282,7 @@ const apiFindings = computed(() => analysis.value?.findings || [])
 
 function showPopup() {
   isVisible.value = true
-  if (!forwardView.value && !analysis.value && !loading.value) {
+  if (!analysis.value && !loading.value) {
     fetchAnalysis()
   }
 }
@@ -298,7 +309,7 @@ function healthBarWidth(score: number) {
 }
 
 onMounted(() => {
-  if (props.trigger === 'hover' && !forwardView.value) {
+  if (props.trigger === 'hover' && !analysis.value) {
     fetchAnalysis()
   }
 })
