@@ -64,8 +64,10 @@ const meanMos = computed(() => {
 // matches the single-pair template.
 function pairAsReportData(pair: VoicePairSummary): VoiceReportData {
   // Re-use the parent's meta for header continuity, but the
-  // metrics/timeseries come from the pair's forward path.
-  const forward = pair.forward
+  // metrics/timeseries come from the pair's primary path — forward
+  // when present, reverse for target-only pairs where the only data
+  // is the path toward this agent.
+  const forward = pair.forward ?? pair.reverse
   return {
     ...props.data,
     meta: {

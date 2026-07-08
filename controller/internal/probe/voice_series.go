@@ -118,17 +118,19 @@ func fetchVoicePathSeries(ctx context.Context, ch *sql.DB, agentID uint, probes 
 	return forward
 }
 
-// fetchVoicePathSeriesSplit pulls per-direction MOS series. Forward
-// rows are reported by the agent itself; reverse rows are reported by
-// a remote source agent for a probe whose target is `agentID`.
+// fetchVoicePathSeriesSplit pulls per-direction MOS series from the
+// TRAFFICSIM rows in `probe_data`. Forward rows are reported by the
+// agent itself; reverse rows are reported by the far-end agent under
+// the same probe ID (bidirectional AGENT probes attribute the return
+// stream to the client's probe ID with the server's agent_id).
 //
 // Used by buildVoiceTrends to populate VoiceTrends.Forward and
 // VoiceTrends.Return independently. Returns empty slices (not errors)
 // when no data is available so callers can degrade gracefully.
 //
-// Direction is inferred from the row's `target_agent_id` column:
-// rows where `target_agent_id = agentID` are reverse (a remote agent
-// is reporting about our agent); the rest are forward.
+// Direction is inferred from the row's reporting `agent_id`: rows
+// reported by `agentID` itself are forward; rows another agent
+// reported on our probe IDs are the return direction.
 func fetchVoicePathSeriesSplit(ctx context.Context, ch *sql.DB, agentID uint, probes []Probe, from, to time.Time, bucketMinutes int) (forward, reverse []VoiceBucket) {
 	if len(probes) == 0 {
 		return nil, nil
@@ -149,21 +151,23 @@ func fetchVoicePathSeriesSplit(ctx context.Context, ch *sql.DB, agentID uint, pr
 	}
 
 	q := fmt.Sprintf(`
-SELECT 
+SELECT
     toStartOfInterval(created_at, INTERVAL %d MINUTE) as bucket,
-    target_agent_id,
-    avg(mos_score) as mos_avg,
-    avg(average_rtt)/2.0 as lat_avg,
-    avg(jitter_avg) as jit_avg,
-    avg(loss_pct) as loss_avg
-FROM traffic_metrics
-WHERE agent_id = %d
+    agent_id,
+    avgIf(
+        greatest(JSONExtractFloat(payload_raw, 'MOS'), JSONExtractFloat(payload_raw, 'mos')),
+        greatest(JSONExtractFloat(payload_raw, 'MOS'), JSONExtractFloat(payload_raw, 'mos')) > 0) as mos_avg,
+    avg(JSONExtractFloat(payload_raw, 'averageRTT'))/2.0 as lat_avg,
+    avg(JSONExtractFloat(payload_raw, 'jitterAvg')) as jit_avg,
+    avg(JSONExtractFloat(payload_raw, 'lossPercentage')) as loss_avg
+FROM probe_data
+WHERE type = 'TRAFFICSIM'
   AND probe_id IN (%s)
   AND created_at >= %s
   AND created_at <= %s
-GROUP BY bucket, target_agent_id
+GROUP BY bucket, agent_id
 ORDER BY bucket ASC
-`, bucketMinutes, agentID, strings.Join(pidList, ","), chQuoteTime(from), chQuoteTime(to))
+`, bucketMinutes, strings.Join(pidList, ","), chQuoteTime(from), chQuoteTime(to))
 
 	rows, err := ch.QueryContext(ctx, q)
 	if err != nil {
@@ -177,33 +181,36 @@ ORDER BY bucket ASC
 
 	for rows.Next() {
 		var (
-			bucket    time.Time
-			targetAID uint64
-			mos       sql.NullFloat64
-			lat       sql.NullFloat64
-			jit       sql.NullFloat64
-			loss      sql.NullFloat64
+			bucket      time.Time
+			reporterAID uint64
+			mos         sql.NullFloat64
+			lat         sql.NullFloat64
+			jit         sql.NullFloat64
+			loss        sql.NullFloat64
 		)
-		if err := rows.Scan(&bucket, &targetAID, &mos, &lat, &jit, &loss); err != nil {
+		if err := rows.Scan(&bucket, &reporterAID, &mos, &lat, &jit, &loss); err != nil {
 			continue
 		}
-		if !mos.Valid {
-			continue
+		mosVal := mos.Float64
+		if !mos.Valid || mosVal <= 0 {
+			// Non-VoIP-mode cycles carry no MOS — derive it from the
+			// bucket's latency/loss/jitter via the E-model.
+			mosVal = computeMos(lat.Float64, loss.Float64, jit.Float64)
 		}
 		b := VoiceBucket{
 			Timestamp: bucket.UTC().Format("2006-01-02T15:04:05Z"),
-			Forward:   mos.Float64,
-			Return:    mos.Float64,
+			Forward:   mosVal,
+			Return:    mosVal,
 			LatencyMs: lat.Float64,
 			JitterMs:  jit.Float64,
 			LossPct:   loss.Float64,
 		}
-		if uint(targetAID) == agentID {
-			// Remote agent is reporting on a probe whose target is
-			// us — that's the return direction.
-			reverseByBucket[b.Timestamp] = b
-		} else {
+		if uint(reporterAID) == agentID {
 			forwardByBucket[b.Timestamp] = b
+		} else {
+			// The far-end agent reported on our probe — that's the
+			// return direction of the bidirectional session.
+			reverseByBucket[b.Timestamp] = b
 		}
 	}
 

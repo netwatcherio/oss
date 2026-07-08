@@ -4798,7 +4798,7 @@ func congestionLevelFromMetrics(jitter, loss, avgLat float64) CongestionLevel {
 // `detectVoiceQualityIssuesPerPair` directly so that the per-pair
 // issue list is preserved (rather than collapsed onto the
 // worst-offender).
-func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics, targetAgentName string, thresholds *VoiceThresholds) []VoiceQualityIssue {
+func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByProbeID, reverseBaselineByProbeID map[uint]*VoicePathMetrics, targetAgentName string, thresholds *VoiceThresholds) []VoiceQualityIssue {
 	t := VoiceDefaultThresholds
 	if thresholds != nil {
 		t = *thresholds
@@ -4808,7 +4808,7 @@ func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByP
 	t = EffectiveThresholds(t)
 
 	baselineFwd := baselineFor(forward, baselineByProbeID)
-	baselineRet := baselineFor(returnPath, baselineByProbeID)
+	baselineRet := baselineFor(returnPath, reverseBaselineByProbeID)
 
 	var issues []VoiceQualityIssue
 	if forward != nil {
@@ -4851,7 +4851,7 @@ func detectVoiceQualityIssues(forward, returnPath *VoicePathMetrics, baselineByP
 // The function is the new canonical entry point — the single-pair
 // version above is now a thin wrapper that calls
 // detectVoiceQualityIssuesForDirection per direction.
-func detectVoiceQualityIssuesPerPair(forwardMap, reverseMap map[uint]*VoicePathMetrics, baselineByProbeID map[uint]*VoicePathMetrics, targetByProbeID map[uint]string, thresholds *VoiceThresholds) map[uint][]VoiceQualityIssue {
+func detectVoiceQualityIssuesPerPair(forwardMap, reverseMap, baselineByProbeID, reverseBaselineByProbeID map[uint]*VoicePathMetrics, targetByProbeID map[uint]string, thresholds *VoiceThresholds) map[uint][]VoiceQualityIssue {
 	t := VoiceDefaultThresholds
 	if thresholds != nil {
 		t = *thresholds
@@ -4876,7 +4876,7 @@ func detectVoiceQualityIssuesPerPair(forwardMap, reverseMap map[uint]*VoicePathM
 		}
 		rev.Direction = VoicePathReturn
 		targetName := targetNameFor(probeID, targetByProbeID, rev)
-		base := baselineFor(rev, baselineByProbeID)
+		base := baselineFor(rev, reverseBaselineByProbeID)
 		// Asymmetry detection pairs the return path with its matching
 		// forward path on the same probe, when one exists.
 		if fwd, ok := forwardMap[probeID]; ok && fwd != nil {
@@ -5611,43 +5611,97 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		forwardMetrics[p.ID] = metrics
 	}
 
-	// Fallback: when the agent has AGENT / PING probes but no
-	// TrafficSim data (typical for agents whose target doesn't run a
-	// VoIP server), derive voice quality from the PING samples. The
-	// bidir-expansion path produces PING probes owned by this agent
-	// targeting the remote agent; we pull those and compute MOS via
-	// the E-model so the report shows real numbers instead of the
-	// empty-data fallback.
-	if len(forwardMetrics) == 0 {
-		for _, p := range agentProbes {
-			metrics, err := fetchPingVoiceMetrics(ctx, ch, []uint{agentID}, p.ID, from)
-			if err != nil || metrics == nil || metrics.SampleCount == 0 {
-				continue
-			}
-			targetName := ""
-			if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
-				if ta, err := agent.GetAgentByID(ctx, db, *p.Targets[0].AgentID); err == nil {
-					targetName = ta.Name
-				}
-			}
-			targetIP := ""
-			if len(p.Targets) > 0 {
-				targetIP = p.Targets[0].Target
-			}
-			metrics.TargetAgentID = uint(0)
-			if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
-				metrics.TargetAgentID = *p.Targets[0].AgentID
-			}
-			metrics.TargetAgentName = targetName
-			metrics.SourceAgentID = agentID
-			metrics.SourceAgentName = agentObj.Name
-			metrics.ProbeID = p.ID
-			metrics.ProbeType = string(p.Type)
-			if targetIP != "" {
-				metrics.TargetAgentName = targetIP
-			}
-			forwardMetrics[p.ID] = metrics
+	// Same-probe bidirectional reverse: for a bidirectional AGENT
+	// probe the far-end server reports the return stream under the
+	// client's probe ID with its own agent_id. Fetching those rows
+	// gives the pair its true return direction (and lets asymmetry
+	// detection compare both views of the same session).
+	reverseMetrics := make(map[uint]*VoicePathMetrics)
+	for _, p := range trafficSimProbes {
+		if len(p.Targets) == 0 || p.Targets[0].AgentID == nil {
+			continue // arbitrary SIP endpoint — nothing reports back
 		}
+		remoteID := *p.Targets[0].AgentID
+		if remoteID == 0 || remoteID == agentID {
+			continue
+		}
+		metrics, err := fetchVoicePathMetrics(ctx, ch, []uint{remoteID}, p.ID, from)
+		if err != nil || metrics == nil || metrics.SampleCount == 0 {
+			continue
+		}
+		remoteName := ""
+		if fwd, ok := forwardMetrics[p.ID]; ok && fwd != nil {
+			remoteName = fwd.TargetAgentName
+		}
+		if remoteName == "" {
+			if ra, err := agent.GetAgentByID(ctx, db, remoteID); err == nil {
+				remoteName = ra.Name
+			}
+		}
+		metrics.SourceAgentID = remoteID
+		metrics.SourceAgentName = remoteName
+		metrics.TargetAgentID = agentID
+		metrics.TargetAgentName = agentObj.Name
+		metrics.ProbeID = p.ID
+		metrics.ProbeType = string(p.Type)
+		metrics.Direction = VoicePathReturn
+		reverseMetrics[p.ID] = metrics
+	}
+
+	// PING fallback, per target: derive voice quality from PING
+	// samples only for targets with no TRAFFICSIM voice data in
+	// either direction — i.e. the target has no AGENT/TrafficSim
+	// coverage and is monitored by MTR + PING alone (or the AGENT
+	// probe's TrafficSim child produced nothing). AGENT-probe data
+	// always wins over PING for the same probe / target.
+	coveredTargets := make(map[uint]bool)
+	for _, m := range forwardMetrics {
+		if m.TargetAgentID != 0 {
+			coveredTargets[m.TargetAgentID] = true
+		}
+	}
+	for _, m := range reverseMetrics {
+		if m.SourceAgentID != 0 {
+			coveredTargets[m.SourceAgentID] = true
+		}
+	}
+	for _, p := range agentProbes {
+		if _, ok := forwardMetrics[p.ID]; ok {
+			continue // TrafficSim data already covers this probe
+		}
+		if _, ok := reverseMetrics[p.ID]; ok {
+			continue // session has return-direction TrafficSim data
+		}
+		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil && coveredTargets[*p.Targets[0].AgentID] {
+			continue // another probe covers this target with sim data
+		}
+		metrics, err := fetchPingVoiceMetrics(ctx, ch, []uint{agentID}, p.ID, from)
+		if err != nil || metrics == nil || metrics.SampleCount == 0 {
+			continue
+		}
+		targetName := ""
+		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+			if ta, err := agent.GetAgentByID(ctx, db, *p.Targets[0].AgentID); err == nil {
+				targetName = ta.Name
+			}
+		}
+		targetIP := ""
+		if len(p.Targets) > 0 {
+			targetIP = p.Targets[0].Target
+		}
+		metrics.TargetAgentID = uint(0)
+		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil {
+			metrics.TargetAgentID = *p.Targets[0].AgentID
+		}
+		metrics.TargetAgentName = targetName
+		metrics.SourceAgentID = agentID
+		metrics.SourceAgentName = agentObj.Name
+		metrics.ProbeID = p.ID
+		metrics.ProbeType = string(p.Type)
+		if targetIP != "" {
+			metrics.TargetAgentName = targetIP
+		}
+		forwardMetrics[p.ID] = metrics
 	}
 
 	// Find return path probes (reverse AGENT probes from other agents targeting this agent)
@@ -5656,14 +5710,11 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		log.Warnf("[voice] failed to find reverse agent probes for agent %d: %v", agentID, err)
 	}
 
-	// Build reverse probe metrics map keyed by probe ID. Pair matching
-	// for the per-pair summary uses probe ID (the same probe handles
-	// both directions when the agent pair is bidirectional).
-	reverseMetrics := make(map[uint]*VoicePathMetrics)
-	// reverseBySourceAgent keeps the legacy key (source agent ID) for
-	// the worst-offender selection, which has historically operated on
-	// "remote source agent" rather than probe.
-	reverseBySourceAgent := make(map[uint]*VoicePathMetrics)
+	// Merge in metrics from reverse AGENT probes (owned by other
+	// agents, targeting this one), keyed by their probe ID. These are
+	// the remote agents' own measurements toward this agent — the only
+	// voice data for target-only agents, and extra return-path signal
+	// otherwise.
 	for _, rap := range reverseAgentProbes {
 		if rap.ID == 0 {
 			continue
@@ -5676,8 +5727,16 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		for _, t := range rap.Targets {
 			if t.AgentID != nil && *t.AgentID == agentID {
 				metrics, err := fetchVoicePathMetrics(ctx, ch, []uint{sourceAgentID}, rap.ID, from)
-				if err != nil || metrics == nil {
-					continue
+				if err != nil || metrics == nil || metrics.SampleCount == 0 {
+					// AGENT probes whose target doesn't run a TrafficSim
+					// server only produce PING samples. Fall back to the
+					// PING-derived path so target-only agents (e.g. a fax
+					// server that never originates probes) still get
+					// return-path voice data.
+					metrics, err = fetchPingVoiceMetrics(ctx, ch, []uint{sourceAgentID}, rap.ID, from)
+					if err != nil || metrics == nil || metrics.SampleCount == 0 {
+						continue
+					}
 				}
 				metrics.TargetAgentID = agentID
 				metrics.TargetAgentName = agentObj.Name
@@ -5687,9 +5746,6 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 				metrics.ProbeType = string(rap.Type)
 				metrics.Direction = VoicePathReturn
 				reverseMetrics[rap.ID] = metrics
-				if _, exists := reverseBySourceAgent[sourceAgentID]; !exists {
-					reverseBySourceAgent[sourceAgentID] = metrics
-				}
 			}
 		}
 	}
@@ -5704,7 +5760,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 			worstForward = m
 		}
 	}
-	for _, m := range reverseBySourceAgent {
+	for _, m := range reverseMetrics {
 		if worstReturn == nil || m.MosScore < worstReturn.MosScore {
 			worstReturn = m
 		}
@@ -5721,6 +5777,19 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 			baselineByProbeID[p.ID] = bm
 		}
 	}
+	// Probes that fell back to PING-derived metrics (owned AGENT/PING
+	// probes) aren't covered by the loop above — fetch their baselines
+	// with the same TrafficSim-then-PING order used for the
+	// current-window metrics.
+	fillVoiceBaselines(ctx, ch, baselineByProbeID, forwardMetrics, baselineFrom)
+	// Reverse baselines live in their own map: forward and reverse
+	// share the probe ID on bidirectional probes, and comparing a
+	// return path against the forward baseline would mask exactly the
+	// asymmetric degradation the report exists to catch.
+	// fillVoiceBaselines keys the fetch off each metric's
+	// SourceAgentID, which for reverse metrics is the far-end reporter.
+	reverseBaselineByProbeID := make(map[uint]*VoicePathMetrics)
+	fillVoiceBaselines(ctx, ch, reverseBaselineByProbeID, reverseMetrics, baselineFrom)
 
 	// Determine target agent name for issue detection
 	targetName := ""
@@ -5732,7 +5801,7 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 
 	// Detect voice quality issues (now with per-probe baselines and
 	// configurable thresholds).
-	issues := detectVoiceQualityIssues(worstForward, worstReturn, baselineByProbeID, targetName, &thresholds)
+	issues := detectVoiceQualityIssues(worstForward, worstReturn, baselineByProbeID, reverseBaselineByProbeID, targetName, &thresholds)
 
 	// Per-probe / per-pair detection. Runs the same suite against every
 	// probe in the agent's metric maps, so the multi-target voice report
@@ -5744,18 +5813,32 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// single SELECT (see helper) and pre-loads the result map so
 	// detectVoiceQualityIssuesPerPair and buildVoicePairSummaries
 	// can both reuse it without N+1 queries.
-	targetByProbeID := buildTargetNameByProbeID(ctx, db, trafficSimProbes, agentObj.Name)
+	// AGENT/PING probes participate too (the PING-fallback metrics are
+	// keyed by their probe IDs); without them in the lookup tables the
+	// fallback pairs silently drop out of buildVoicePairSummaries.
+	voiceProbes := make([]Probe, 0, len(trafficSimProbes)+len(agentProbes))
+	voiceProbes = append(voiceProbes, trafficSimProbes...)
+	voiceProbes = append(voiceProbes, agentProbes...)
+	targetByProbeID := buildTargetNameByProbeID(ctx, db, voiceProbes, agentObj.Name)
 	// Shared agent-id→name map for buildVoicePairSummaries below
 	// (resolveProbeTarget needs the same lookup table).
-	pairNameByAgentID := buildVoicePairAgentNameMap(ctx, db, trafficSimProbes)
-	perProbeIssues := detectVoiceQualityIssuesPerPair(forwardMetrics, reverseMetrics, baselineByProbeID, targetByProbeID, &thresholds)
+	pairNameByAgentID := buildVoicePairAgentNameMap(ctx, db, voiceProbes)
+	perProbeIssues := detectVoiceQualityIssuesPerPair(forwardMetrics, reverseMetrics, baselineByProbeID, reverseBaselineByProbeID, targetByProbeID, &thresholds)
 
 	// MTR hop correlation: fetch the MTR trace for the worst-offender
 	// forward probe and tag issues with the most-degraded hop in the
 	// same time window. Failure here is non-fatal — the report just
 	// doesn't get the hop evidence line.
-	if worstForward != nil {
-		if hopSummaries := fetchMtrHopSummariesForVoice(ctx, ch, agentID, worstForward, from); len(hopSummaries) > 0 {
+	mtrPath := worstForward
+	mtrAgentID := agentID
+	if mtrPath == nil && worstReturn != nil {
+		// Target-only agents have no forward probe; correlate against
+		// the remote agent's MTR trace toward us instead.
+		mtrPath = worstReturn
+		mtrAgentID = worstReturn.SourceAgentID
+	}
+	if mtrPath != nil {
+		if hopSummaries := fetchMtrHopSummariesForVoice(ctx, ch, mtrAgentID, mtrPath, from); len(hopSummaries) > 0 {
 			correlateWithRoute(issues, hopSummaries)
 			for probeID, list := range perProbeIssues {
 				correlateWithRoute(list, hopSummaries)
@@ -5842,15 +5925,21 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// entry per forward probe, with the matching reverse probe (if
 	// any) attached. Pair-level issues are taken from perProbeIssues;
 	// for the typical single-pair case this is just one entry.
-	pairs := buildVoicePairSummaries(forwardMetrics, reverseMetrics, perProbeIssues, baselineByProbeID, trafficSimProbes, agentObj, agentID, thresholds, pairNameByAgentID)
+	pairs := buildVoicePairSummaries(forwardMetrics, reverseMetrics, perProbeIssues, baselineByProbeID, reverseBaselineByProbeID, voiceProbes, agentObj, agentID, thresholds, pairNameByAgentID)
 
 	// Pull workspace-level incidents for context. We re-use the helper
 	// from analysis.go that returns the full WorkspaceAnalysis and
 	// filter down to incidents touching this agent.
 	workspaceContext := buildWorkspaceIncidentContext(ctx, db, ch, agentID, agentObj.Name, from)
 
-	// Time series for the MOS timeline chart.
-	trends := buildVoiceTrends(ctx, ch, agentID, trafficSimProbes, from, to, thresholds)
+	// Time series for the MOS timeline chart. Reverse AGENT probes are
+	// included so target-only agents get a Return series — the series
+	// split classifies rows by reporting agent, so remote agents' rows
+	// land in the Return direction either way.
+	trendProbes := make([]Probe, 0, len(trafficSimProbes)+len(reverseAgentProbes))
+	trendProbes = append(trendProbes, trafficSimProbes...)
+	trendProbes = append(trendProbes, reverseAgentProbes...)
+	trends := buildVoiceTrends(ctx, ch, agentID, trendProbes, from, to, thresholds)
 
 	return &VoiceQualitySummary{
 		AgentID:            agentID,
@@ -6006,6 +6095,7 @@ func buildVoicePairSummaries(
 	reverseMetrics map[uint]*VoicePathMetrics,
 	perProbeIssues map[uint][]VoiceQualityIssue,
 	baselineByProbeID map[uint]*VoicePathMetrics,
+	reverseBaselineByProbeID map[uint]*VoicePathMetrics,
 	probes []Probe,
 	sourceAgent *agent.Agent,
 	sourceAgentID uint,
@@ -6048,53 +6138,56 @@ func buildVoicePairSummaries(
 		// Resolve target
 		pair.Target = resolveProbeTarget(probe, nameByAgentID, sourceAgent.Name)
 
-		// Pair-level MOS: weighted fwd+rev (0.5/0.5; we keep the
-		// forward preference from the per-agent rollup but at the
-		// pair level it matters less).
-		var mos, weight float64
-		if fwd != nil && fwd.SampleCount > 0 {
-			mos += fwd.MosScore
-			weight++
-		}
-		if pair.Reverse != nil && pair.Reverse.SampleCount > 0 {
-			mos += pair.Reverse.MosScore
-			weight++
-		}
-		if weight > 0 {
-			pair.OverallMos = mos / weight
-		}
-		pair.OverallGrade = voiceGradeFromMos(pair.OverallMos)
+		finalizeVoicePair(&pair, baselineByProbeID, reverseBaselineByProbeID)
+		out = append(out, pair)
+	}
 
-		// Per-pair baseline delta (forward direction is the typical
-		// primary; pair-level uses forward when available, falls back
-		// to reverse).
-		basePath := fwd
-		if pair.Reverse != nil && basePath == nil {
-			basePath = pair.Reverse
+	// Remote agents already represented by a forward pair — used to
+	// avoid duplicating them as reverse-only pairs below (their return
+	// direction is already attached to the forward pair via the
+	// same-probe bidirectional rows, and the remote agent's own probe
+	// shows up in that agent's report).
+	coveredRemotes := make(map[uint]bool, len(forwardMetrics))
+	for _, fwd := range forwardMetrics {
+		if fwd != nil && fwd.TargetAgentID != 0 {
+			coveredRemotes[fwd.TargetAgentID] = true
 		}
-		if basePath != nil {
-			if base, ok := baselineByProbeID[basePath.ProbeID]; ok && base != nil {
-				pair.Baseline = &BaselineDelta{
-					From:            time.Now().UTC().Add(-7 * 24 * time.Hour),
-					To:              time.Now().UTC(),
-					MosDelta:        basePath.MosScore - base.MosScore,
-					LatencyDeltaMs:  basePath.AvgLatency - base.AvgLatency,
-					JitterDeltaMs:   basePath.JitterAvg - base.JitterAvg,
-					LossDeltaPct:    basePath.PacketLoss - base.PacketLoss,
-					SampleCount:     basePath.SampleCount,
-					BaselineSamples: base.SampleCount,
-				}
-				switch {
-				case pair.Baseline.MosDelta > 0.1:
-					pair.Baseline.Trend = "improving"
-				case pair.Baseline.MosDelta < -0.1:
-					pair.Baseline.Trend = "worsening"
-				default:
-					pair.Baseline.Trend = "stable"
-				}
-			}
-		}
+	}
 
+	// Reverse-only pairs: probes owned by a remote agent targeting this
+	// agent, with no matching forward probe. For a target-only agent
+	// (e.g. a fax server that never originates probes) these are the
+	// only voice data — the path TO the agent is the agent's view.
+	for probeID, rev := range reverseMetrics {
+		if rev == nil {
+			continue
+		}
+		if fwd, ok := forwardMetrics[probeID]; ok && fwd != nil {
+			continue // already attached to a forward pair above
+		}
+		if rev.SourceAgentID != 0 && coveredRemotes[rev.SourceAgentID] {
+			continue // remote agent already covered by a forward pair
+		}
+		pair := VoicePairSummary{
+			ID:         fmt.Sprintf("pair-%d-%d", sourceAgentID, probeID),
+			Reverse:    rev,
+			Issues:     perProbeIssues[probeID],
+			Thresholds: thresholds,
+		}
+		pair.Agent = AgentRef{
+			ID:       sourceAgent.ID,
+			Name:     sourceAgent.Name,
+			IP:       sourceAgent.PublicIPOverride,
+			Location: sourceAgent.Location,
+		}
+		// The remote end is the probe's owner — the agent measuring
+		// the path toward us.
+		pair.Target = TargetRef{
+			Name:      rev.SourceAgentName,
+			AgentID:   rev.SourceAgentID,
+			AgentName: rev.SourceAgentName,
+		}
+		finalizeVoicePair(&pair, baselineByProbeID, reverseBaselineByProbeID)
 		out = append(out, pair)
 	}
 
@@ -6105,6 +6198,84 @@ func buildVoicePairSummaries(
 	})
 
 	return out
+}
+
+// finalizeVoicePair computes the pair-level MOS/grade and the 7-day
+// baseline delta. Pair-level MOS is the unweighted average of the
+// directions that have samples (we keep the forward preference in the
+// per-agent rollup; at the pair level it matters less). The baseline
+// uses the forward path when available, falling back to reverse —
+// each direction against its own baseline map, since forward and
+// reverse share a probe ID on bidirectional probes.
+func finalizeVoicePair(pair *VoicePairSummary, baselineByProbeID, reverseBaselineByProbeID map[uint]*VoicePathMetrics) {
+	var mos, weight float64
+	if pair.Forward != nil && pair.Forward.SampleCount > 0 {
+		mos += pair.Forward.MosScore
+		weight++
+	}
+	if pair.Reverse != nil && pair.Reverse.SampleCount > 0 {
+		mos += pair.Reverse.MosScore
+		weight++
+	}
+	if weight > 0 {
+		pair.OverallMos = mos / weight
+	}
+	pair.OverallGrade = voiceGradeFromMos(pair.OverallMos)
+
+	basePath := pair.Forward
+	baselines := baselineByProbeID
+	if basePath == nil {
+		basePath = pair.Reverse
+		baselines = reverseBaselineByProbeID
+	}
+	if basePath == nil {
+		return
+	}
+	base, ok := baselines[basePath.ProbeID]
+	if !ok || base == nil {
+		return
+	}
+	pair.Baseline = &BaselineDelta{
+		From:            time.Now().UTC().Add(-7 * 24 * time.Hour),
+		To:              time.Now().UTC(),
+		MosDelta:        basePath.MosScore - base.MosScore,
+		LatencyDeltaMs:  basePath.AvgLatency - base.AvgLatency,
+		JitterDeltaMs:   basePath.JitterAvg - base.JitterAvg,
+		LossDeltaPct:    basePath.PacketLoss - base.PacketLoss,
+		SampleCount:     basePath.SampleCount,
+		BaselineSamples: base.SampleCount,
+	}
+	switch {
+	case pair.Baseline.MosDelta > 0.1:
+		pair.Baseline.Trend = "improving"
+	case pair.Baseline.MosDelta < -0.1:
+		pair.Baseline.Trend = "worsening"
+	default:
+		pair.Baseline.Trend = "stable"
+	}
+}
+
+// fillVoiceBaselines fetches 7-day-baseline metrics for any probe
+// present in `current` but missing from `baselines`. Tries the
+// TrafficSim rollup first and falls back to the PING-derived path,
+// mirroring the fetch order used for the current-window metrics, so
+// the baseline compares like with like.
+func fillVoiceBaselines(ctx context.Context, ch *sql.DB, baselines map[uint]*VoicePathMetrics, current map[uint]*VoicePathMetrics, baselineFrom time.Time) {
+	for probeID, m := range current {
+		if m == nil {
+			continue
+		}
+		if _, ok := baselines[probeID]; ok {
+			continue
+		}
+		bm, err := fetchVoicePathMetrics(ctx, ch, []uint{m.SourceAgentID}, probeID, baselineFrom)
+		if err != nil || bm == nil || bm.SampleCount == 0 {
+			bm, err = fetchPingVoiceMetrics(ctx, ch, []uint{m.SourceAgentID}, probeID, baselineFrom)
+		}
+		if err == nil && bm != nil && bm.SampleCount > 0 {
+			baselines[probeID] = bm
+		}
+	}
 }
 
 // resolveProbeTarget converts a probe's target into a TargetRef. When
@@ -6608,7 +6779,17 @@ func median(vals []float64) float64 {
 	return (cp[len(cp)/2-1] + cp[len(cp)/2]) / 2
 }
 
-// fetchVoicePathMetrics fetches voice path metrics from ClickHouse for a given probe
+// fetchVoicePathMetrics fetches voice path metrics for a given probe
+// from the TRAFFICSIM rows in `probe_data`. The agent reports each
+// cycle's stats as a JSON payload (RTT/jitter in ms; MOS/RFactor only
+// in VoIP mode, under capitalized "MOS"/"RFactor" keys — aggregated
+// read-path rows use lowercase "mos"), so the rollup extracts fields
+// server-side with JSONExtract.
+//
+// Bidirectional attribution: forward and reverse rows share the probe
+// ID and differ only by agent_id — the client (probe owner) reports
+// forward rows, the far-end server reports reverse rows under the
+// client's probe ID. Callers pick the direction via `agentIDs`.
 func fetchVoicePathMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, probeID uint, from time.Time) (*VoicePathMetrics, error) {
 	if len(agentIDs) == 0 {
 		return nil, nil
@@ -6619,35 +6800,36 @@ func fetchVoicePathMetrics(ctx context.Context, ch *sql.DB, agentIDs []uint, pro
 	}
 	agentIDList := strings.Join(agentIDStrs, ", ")
 
+	// The agent emits "outOfOrder" (raw cycles) while the aggregated
+	// read path emits "outOfSequence" — extract both. Same for
+	// "MOS"/"mos". Loss is recomputed from packet counters when
+	// present so long windows aren't skewed by uneven cycle sizes.
 	q := fmt.Sprintf(`
-SELECT 
-    avg_rtt, median_rtt, p95_rtt, p99_rtt,
-    jitter_avg, jitter_median, jitter_p95,
-    loss_pct, out_of_seq_pct, duplicate_pct,
-    mos_score, sample_count,
-    max_consecutive_loss, total_bursts
-FROM (
-    SELECT 
-        avg(average_rtt) as avg_rtt,
-        avg(median_rtt) as median_rtt,
-        avg(p95_rtt) as p95_rtt,
-        avg(p99_rtt) as p99_rtt,
-        avg(jitter_avg) as jitter_avg,
-        avg(jitter_median) as jitter_median,
-        avg(jitter_p95) as jitter_p95,
-        avg(loss_pct) as loss_pct,
-        avg(out_of_seq_pct) as out_of_seq_pct,
-        avg(duplicate_pct) as duplicate_pct,
-        avg(mos_score) as mos_score,
-        count(*) as sample_count,
-        max(max_consecutive_loss) as max_consecutive_loss,
-        sum(total_bursts) as total_bursts
-    FROM traffic_metrics
-    WHERE agent_id IN (%s)
-      AND probe_id = %d
-      AND created_at >= %s
-    GROUP BY agent_id
-) subq
+SELECT
+    avg(JSONExtractFloat(payload_raw, 'averageRTT'))    as avg_rtt,
+    avg(JSONExtractFloat(payload_raw, 'medianRTT'))     as median_rtt,
+    avg(JSONExtractFloat(payload_raw, 'p95RTT'))        as p95_rtt,
+    avg(JSONExtractFloat(payload_raw, 'jitterAvg'))     as jitter_avg,
+    avg(JSONExtractFloat(payload_raw, 'jitterMedian'))  as jitter_median,
+    avg(JSONExtractFloat(payload_raw, 'jitterP95'))     as jitter_p95,
+    sum(JSONExtractUInt(payload_raw, 'lostPackets'))    as lost_packets,
+    sum(JSONExtractUInt(payload_raw, 'totalPackets'))   as total_packets,
+    avg(JSONExtractFloat(payload_raw, 'lossPercentage')) as loss_pct_avg,
+    avg(greatest(
+        JSONExtractFloat(payload_raw, 'outOfOrderPercent'),
+        JSONExtractFloat(payload_raw, 'outOfSequencePercent'))) as out_of_seq_pct,
+    avg(JSONExtractFloat(payload_raw, 'duplicatePercent')) as duplicate_pct,
+    avgIf(
+        greatest(JSONExtractFloat(payload_raw, 'MOS'), JSONExtractFloat(payload_raw, 'mos')),
+        greatest(JSONExtractFloat(payload_raw, 'MOS'), JSONExtractFloat(payload_raw, 'mos')) > 0) as mos_score,
+    count(*) as sample_count,
+    max(JSONExtractUInt(payload_raw, 'maxConsecutiveLoss')) as max_consecutive_loss,
+    sum(JSONExtractUInt(payload_raw, 'totalBursts'))    as total_bursts
+FROM probe_data
+WHERE type = 'TRAFFICSIM'
+  AND agent_id IN (%s)
+  AND probe_id = %d
+  AND created_at >= %s
 `, agentIDList, probeID, chQuoteTime(from))
 
 	rows, err := ch.QueryContext(ctx, q)
@@ -6661,12 +6843,17 @@ FROM (
 	}
 
 	var m VoicePathMetrics
-	var avgRtt, medianRtt, p95Rtt, p99Rtt, jitterAvg, jitterMedian, jitterP95, lossPct, outOfSeqPct, duplicatePct, mosScore float64
+	var avgRtt, medianRtt, p95Rtt, jitterAvg, jitterMedian, jitterP95, lossPctAvg, outOfSeqPct, duplicatePct float64
+	var mosScore sql.NullFloat64
+	var lostPackets, totalPackets uint64
 	var sampleCount int
 	var maxConsecutiveLoss, totalBursts uint64
 
-	if err := rows.Scan(&avgRtt, &medianRtt, &p95Rtt, &p99Rtt, &jitterAvg, &jitterMedian, &jitterP95, &lossPct, &outOfSeqPct, &duplicatePct, &mosScore, &sampleCount, &maxConsecutiveLoss, &totalBursts); err != nil {
+	if err := rows.Scan(&avgRtt, &medianRtt, &p95Rtt, &jitterAvg, &jitterMedian, &jitterP95, &lostPackets, &totalPackets, &lossPctAvg, &outOfSeqPct, &duplicatePct, &mosScore, &sampleCount, &maxConsecutiveLoss, &totalBursts); err != nil {
 		return nil, err
+	}
+	if sampleCount == 0 {
+		return nil, nil
 	}
 
 	// Convert RTT to one-way latency estimate (divide by 2)
@@ -6676,10 +6863,20 @@ FROM (
 	m.JitterAvg = jitterAvg
 	m.JitterMedian = jitterMedian
 	m.JitterP95 = jitterP95
-	m.PacketLoss = lossPct
+	if totalPackets > 0 {
+		m.PacketLoss = float64(lostPackets) / float64(totalPackets) * 100.0
+	} else {
+		m.PacketLoss = lossPctAvg
+	}
 	m.OutOfSequence = outOfSeqPct
 	m.Duplicates = duplicatePct
-	m.MosScore = mosScore
+	if mosScore.Valid && mosScore.Float64 > 0 {
+		m.MosScore = mosScore.Float64
+	} else {
+		// Non-VoIP-mode cycles don't carry MOS — derive it via the
+		// E-model, same as the PING path does.
+		m.MosScore = computeMos(m.AvgLatency, m.PacketLoss, m.JitterAvg)
+	}
 	m.SampleCount = sampleCount
 	m.MaxConsecutiveLoss = int(maxConsecutiveLoss)
 	m.TotalBursts = int(totalBursts)

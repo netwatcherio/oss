@@ -30,7 +30,7 @@ func TestDetectVoiceQualityIssuesPerPairMultiProbe(t *testing.T) {
 	baseline := map[uint]*VoicePathMetrics{}
 
 	thresholds := VoiceDefaultThresholds
-	out := detectVoiceQualityIssuesPerPair(forward, map[uint]*VoicePathMetrics{}, baseline, targets, &thresholds)
+	out := detectVoiceQualityIssuesPerPair(forward, map[uint]*VoicePathMetrics{}, baseline, map[uint]*VoicePathMetrics{}, targets, &thresholds)
 
 	if issues, ok := out[100]; !ok || len(issues) != 0 {
 		t.Errorf("clean probe should produce no issues, got %d", len(issues))
@@ -76,7 +76,7 @@ func TestDetectVoiceQualityIssuesPerPairAsymmetry(t *testing.T) {
 	}
 	targets := map[uint]string{50: "asymmetric-target"}
 	thresholds := VoiceDefaultThresholds
-	out := detectVoiceQualityIssuesPerPair(forward, reverse, map[uint]*VoicePathMetrics{}, targets, &thresholds)
+	out := detectVoiceQualityIssuesPerPair(forward, reverse, map[uint]*VoicePathMetrics{}, map[uint]*VoicePathMetrics{}, targets, &thresholds)
 
 	issues, ok := out[50]
 	if !ok {

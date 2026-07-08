@@ -83,7 +83,8 @@ func BuildAgentReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, opts Agen
 	if opts.ProbeID != 0 {
 		filtered := pairs[:0]
 		for _, p := range pairs {
-			if p.Forward != nil && p.Forward.ProbeID == opts.ProbeID {
+			if (p.Forward != nil && p.Forward.ProbeID == opts.ProbeID) ||
+				(p.Reverse != nil && p.Reverse.ProbeID == opts.ProbeID) {
 				filtered = append(filtered, p)
 			}
 		}
@@ -98,11 +99,20 @@ func BuildAgentReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, opts Agen
 	out.Pairs = pairsJSON
 
 	// When there's exactly one pair (typical), synthesize the
-	// metrics / timeseries / quality fields from that pair's forward
-	// path. Multi-pair case keeps the per-pair breakdown but
-	// doesn't fill single-target-only fields.
-	if len(pairs) == 1 && pairs[0].Forward != nil {
-		out.Metrics = buildReportMetrics(pairs[0].Forward)
+	// metrics / timeseries / quality fields from that pair's primary
+	// path — forward when the agent originates probes, reverse for
+	// target-only agents whose only data is the path toward them.
+	// Multi-pair case keeps the per-pair breakdown but doesn't fill
+	// single-target-only fields.
+	var primary *probe.VoicePathMetrics
+	if len(pairs) == 1 {
+		primary = pairs[0].Forward
+		if primary == nil {
+			primary = pairs[0].Reverse
+		}
+	}
+	if primary != nil {
+		out.Metrics = buildReportMetrics(primary)
 		out.Timeseries = buildReportTimeseries(pairs[0].Trends)
 		out.Quality = buildReportQuality(pairs[0])
 		out.Meta.ViewMode = "probe" // per-probe metadata
@@ -114,7 +124,7 @@ func BuildAgentReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, opts Agen
 			Name: pairs[0].Target.Name, Host: pairs[0].Target.Host, IP: pairs[0].Target.IP,
 			AgentID: pairs[0].Target.AgentID, AgentName: pairs[0].Target.AgentName,
 		}
-		out.Traceroute = buildReportTraceroute(pairs[0].Trends, pairs[0].Forward)
+		out.Traceroute = buildReportTraceroute(pairs[0].Trends, primary)
 	} else if len(pairs) > 1 {
 		// Multi-pair: don't synthesize a single metrics block; the
 		// panel renders per-pair detail pages instead.
@@ -192,7 +202,9 @@ func BuildWorkspaceReportData(ctx context.Context, db *gorm.DB, ch *sqlDB, works
 		}
 		if vq.ReturnPath != nil {
 			revMos = vq.ReturnPath.MosScore
-			if vq.ReturnPath.MosScore < vq.ForwardPath.MosScore {
+			// ForwardPath is nil for target-only agents (reverse-only
+			// pairs); the return grade is the overall grade then.
+			if vq.ForwardPath == nil || vq.ReturnPath.MosScore < vq.ForwardPath.MosScore {
 				revGrade = vq.OverallGrade
 			} else {
 				revGrade = fwdGrade

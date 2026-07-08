@@ -252,7 +252,7 @@ func TestHasPeriodicTroughsPattern(t *testing.T) {
 // TestDetectVoiceQualityIssuesEmptyInput ensures no panic on nil
 // inputs.
 func TestDetectVoiceQualityIssuesEmptyInput(t *testing.T) {
-	issues := detectVoiceQualityIssues(nil, nil, nil, "test", nil)
+	issues := detectVoiceQualityIssues(nil, nil, nil, nil, "test", nil)
 	if len(issues) != 0 {
 		t.Errorf("expected no issues for nil paths, got %+v", issues)
 	}
@@ -271,7 +271,7 @@ func TestDetectVoiceQualityIssuesWithAsymmetryPerMetric(t *testing.T) {
 		Direction: VoicePathReturn, ProbeID: 1, MosScore: 2.5,
 		AvgLatency: 200, JitterAvg: 8, PacketLoss: 0.2,
 	}
-	issues := detectVoiceQualityIssues(fwd, ret, nil, "test", &VoiceDefaultThresholds)
+	issues := detectVoiceQualityIssues(fwd, ret, nil, nil, "test", &VoiceDefaultThresholds)
 
 	var asymCount, totalAsym int
 	for _, iss := range issues {
