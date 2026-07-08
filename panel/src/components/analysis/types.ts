@@ -117,6 +117,41 @@ export interface WorkspaceAnalysis {
     generated_at: string
 }
 
+// ── Agent Health Mesh (chord diagram) ──
+// Mirrors controller/internal/probe/analysis_mesh.go
+
+export interface AgentMeshNode {
+    agent_id: number
+    agent_name: string
+    location?: string
+    is_online: boolean
+    health: HealthVector
+    link_count: number
+}
+
+export interface AgentMeshLink {
+    source_agent_id: number
+    source_agent_name: string
+    target_agent_id: number
+    target_agent_name: string
+    health: HealthVector
+    metrics: {
+        avg_latency: number
+        packet_loss: number
+        jitter_avg: number
+        sample_count: number
+    }
+    probe_types: string[]
+}
+
+export interface WorkspaceHealthMesh {
+    workspace_id: number
+    nodes: AgentMeshNode[]
+    links: AgentMeshLink[]
+    overall_health: HealthVector
+    generated_at: string
+}
+
 // Status color mapping using Bootstrap CSS variables
 export const statusColors: Record<string, { bg: string; text: string; icon: string }> = {
     healthy: { bg: 'rgba(var(--bs-success-rgb), 0.15)', text: 'var(--bs-success)', icon: 'bi-check-circle-fill' },

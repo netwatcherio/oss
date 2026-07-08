@@ -535,6 +535,19 @@ export const ProbeDataService = {
     },
 
     /**
+     * Pairwise agent↔agent health mesh (chord diagram data).
+     * GET /workspaces/{id}/analysis/mesh
+     */
+    async healthMesh(workspaceId: number | string, params?: { lookback?: number }) {
+        const q = new URLSearchParams();
+        if (params?.lookback) q.set("lookback", String(params.lookback));
+        const { data } = await request.get<any>(
+            `/workspaces/${workspaceId}/analysis/mesh${q.toString() ? `?${q}` : ""}`
+        );
+        return data;
+    },
+
+    /**
      * Detailed probe analysis with bidirectional comparison.
      * GET /workspaces/{id}/analysis/probes/{probeId}
      */

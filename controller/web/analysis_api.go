@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
+	"netwatcher-controller/internal/agent"
 	"netwatcher-controller/internal/geoip"
 	"netwatcher-controller/internal/probe"
 )
@@ -82,6 +83,73 @@ func panelAnalysis(api fiber.Router, pg *gorm.DB, ch *sql.DB, geoStore *geoip.St
 
 		c.Set("Content-Type", "application/json")
 		return c.Send(jsonBytes)
+	})
+
+	// ------------------------------------------
+	// GET /workspaces/:id/analysis/agents/:agentId
+	// Full agent detail: bidirectional analysis of every probe the
+	// agent owns, return-path probes from other agents targeting it,
+	// voice quality summary, and the all-probes health score.
+	// Query: lookback=<minutes, default 60>
+	// ------------------------------------------
+	api.Get("/workspaces/:id/analysis/agents/:agentId", func(c *fiber.Ctx) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[analysis] agent PANIC: %v", r)
+				_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+			}
+		}()
+
+		wID := uintParam(c, "id")
+		agentID := uintParam(c, "agentId")
+		lookback := intOrDefault(c.Query("lookback"), 60)
+
+		// The agent must belong to the workspace in the path.
+		a, err := agent.GetAgentByID(c.UserContext(), pg, agentID)
+		if err != nil || a == nil || a.WorkspaceID != wID {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "agent not found in workspace"})
+		}
+
+		analysis, err := probe.ComputePerAgentAnalysis(c.UserContext(), pg, ch, agentID, lookback)
+		if err != nil {
+			log.Printf("[analysis] workspace=%d agent=%d error: %v", wID, agentID, err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		jsonBytes, err := json.Marshal(analysis)
+		if err != nil {
+			log.Printf("[analysis] agent JSON marshal error: %v", err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "json serialization failed"})
+		}
+
+		c.Set("Content-Type", "application/json")
+		return c.Send(jsonBytes)
+	})
+
+	// ------------------------------------------
+	// GET /workspaces/:id/analysis/mesh
+	// Pairwise agent↔agent health mesh for the workspace — one node
+	// per agent, one directed link per agent pair with probes between
+	// them. Shaped for the health chord diagram.
+	// Query: lookback=<minutes, default 60>
+	// ------------------------------------------
+	api.Get("/workspaces/:id/analysis/mesh", func(c *fiber.Ctx) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[analysis] mesh PANIC: %v", r)
+				_ = c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+			}
+		}()
+
+		wID := uintParam(c, "id")
+		lookback := intOrDefault(c.Query("lookback"), 60)
+
+		mesh, err := probe.ComputeWorkspaceHealthMesh(c.UserContext(), ch, pg, wID, lookback)
+		if err != nil {
+			log.Printf("[analysis] mesh workspace=%d error: %v", wID, err)
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(mesh)
 	})
 
 	// ------------------------------------------

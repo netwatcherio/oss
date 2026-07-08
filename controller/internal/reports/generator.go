@@ -1354,17 +1354,30 @@ func (g *Generator) fetchAgentStatuses(ctx context.Context, workspaceID uint) ([
 		return nil, err
 	}
 
+	// Real per-agent health from the workspace analysis (all probes,
+	// both directions) — the report previously hardcoded 100 here.
+	healthByAgent := make(map[uint]float64, len(agents))
+	if wa, err := probe.ComputeWorkspaceAnalysis(ctx, g.ch, g.db, workspaceID, 60); err == nil && wa != nil {
+		for _, s := range wa.Agents {
+			healthByAgent[s.AgentID] = s.Health.OverallHealth
+		}
+	}
+
 	statuses := make([]AgentStatus, len(agents))
 	for i, a := range agents {
 		status := "online"
 		if a.LastSeen.Before(time.Now().UTC().Add(-5 * time.Minute)) {
 			status = "offline"
 		}
+		score := 100.0
+		if h, ok := healthByAgent[a.ID]; ok {
+			score = h
+		}
 		statuses[i] = AgentStatus{
 			Name:        a.Name,
 			IP:          a.IPAddress,
 			Status:      status,
-			HealthScore: 100,
+			HealthScore: score,
 			LastSeen:    a.LastSeen,
 		}
 	}
