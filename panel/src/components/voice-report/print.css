@@ -33,6 +33,35 @@
   box-sizing: border-box;
 }
 
+/* The report is a print artifact: always light, regardless of the
+ * app's dark/light theme. Bootstrap's dark theme colors headings,
+ * paragraphs and table text through element-level rules
+ * (--bs-heading-color, --bs-body-color …) that beat the inherited
+ * .vr-root color and rendered near-white text on the white pages.
+ * Force inheritance so every element takes its color from the report
+ * palette, and pin form controls/scrollbars to the light scheme. */
+.vr-root {
+  color-scheme: light;
+}
+
+.vr-root h1,
+.vr-root h2,
+.vr-root h3,
+.vr-root h4,
+.vr-root h5,
+.vr-root h6,
+.vr-root p,
+.vr-root li,
+.vr-root table,
+.vr-root th,
+.vr-root td {
+  color: inherit;
+}
+
+.vr-root a {
+  color: var(--nw-primary);
+}
+
 .vr-mono {
   font-family: "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace;
 }

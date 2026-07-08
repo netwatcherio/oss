@@ -115,8 +115,19 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 	// client's probe ID with its own agent_id. Fetching those rows
 	// gives the pair its true return direction (and lets asymmetry
 	// detection compare both views of the same session).
+	//
+	// Iterate ALL agent-targeted probes, not just the TrafficSim
+	// children: an AGENT probe whose target runs no TrafficSim server
+	// only expands MTR/PING children, but a global target still
+	// reports return-path rows under the same probe ID.
+	reverseCandidates := make([]Probe, 0, len(trafficSimProbes)+len(agentProbes))
+	reverseCandidates = append(reverseCandidates, trafficSimProbes...)
+	reverseCandidates = append(reverseCandidates, agentProbes...)
 	reverseMetrics := make(map[uint]*VoicePathMetrics)
-	for _, p := range trafficSimProbes {
+	for _, p := range reverseCandidates {
+		if _, done := reverseMetrics[p.ID]; done {
+			continue // sibling expansions share the probe ID
+		}
 		if len(p.Targets) == 0 || p.Targets[0].AgentID == nil {
 			continue // arbitrary SIP endpoint — nothing reports back
 		}
@@ -153,32 +164,26 @@ func ComputeAgentVoiceQuality(ctx context.Context, db *gorm.DB, ch *sql.DB, agen
 		reverseMetrics[p.ID] = metrics
 	}
 
-	// Derived-metrics fallback, per target: compute voice quality
-	// from PING (preferred) or MTR samples only for probes/targets
-	// with no TRAFFICSIM voice data in either direction — i.e. the
-	// target has no working TrafficSim stream and is effectively
-	// monitored by MTR + PING alone. AGENT/TrafficSim data always
-	// wins over derived metrics for the same probe / target.
+	// Derived-metrics fallback, per FORWARD direction: compute voice
+	// quality from PING (preferred) or MTR samples for probes whose
+	// forward direction has no TRAFFICSIM data. Coverage is judged
+	// per direction — reverse-only TrafficSim data must NOT suppress
+	// the forward fallback, or a pair whose far end reports fine
+	// while our own sim stream is absent renders return-path-only.
+	// AGENT/TrafficSim data still wins over derived metrics for the
+	// same direction of the same probe / target.
 	coveredTargets := make(map[uint]bool)
 	for _, m := range forwardMetrics {
 		if m.TargetAgentID != 0 {
 			coveredTargets[m.TargetAgentID] = true
 		}
 	}
-	for _, m := range reverseMetrics {
-		if m.SourceAgentID != 0 {
-			coveredTargets[m.SourceAgentID] = true
-		}
-	}
 	for _, p := range agentProbes {
 		if _, ok := forwardMetrics[p.ID]; ok {
-			continue // TrafficSim data already covers this probe
-		}
-		if _, ok := reverseMetrics[p.ID]; ok {
-			continue // session has return-direction TrafficSim data
+			continue // TrafficSim data already covers this probe's forward path
 		}
 		if len(p.Targets) > 0 && p.Targets[0].AgentID != nil && coveredTargets[*p.Targets[0].AgentID] {
-			continue // another probe covers this target with sim data
+			continue // another probe covers this target's forward path with sim data
 		}
 		metrics, err := fetchFallbackVoiceMetrics(ctx, ch, []uint{agentID}, p.ID, from)
 		if err != nil || metrics == nil || metrics.SampleCount == 0 {
